@@ -1,5 +1,6 @@
 function render() {
   renderMetrics();
+  renderSavKpis();
   renderCases();
   renderCaseDetail();
   renderPilotageAlerts();
@@ -38,6 +39,95 @@ function renderMetrics() {
   if (equipmentMetric) equipmentMetric.textContent = `${Math.round(equipmentDayLoad(today) * 100)}%`;
   const legacyMetric = $("#metric-load");
   if (legacyMetric) legacyMetric.textContent = `${Math.round(dayLoad(today) * 100)}%`;
+}
+
+function renderSavKpis() {
+  const target = $("#sav-kpi-grid");
+  if (!target) return;
+  target.innerHTML = buildSavKpis()
+    .map((kpi) => `
+      <article class="sav-kpi-card ${kpi.level || "neutral"}">
+        <span>${escapeHtml(kpi.label)}</span>
+        <strong>${escapeHtml(kpi.value)}</strong>
+        <small>${escapeHtml(kpi.detail)}</small>
+      </article>
+    `)
+    .join("");
+}
+
+function buildSavKpis(now = new Date()) {
+  const activeCases = state.cases.filter((item) => !item.flags.delivered);
+  const today = todayKey(now);
+  const appointmentsToday = activeCases.filter((item) => item.appointment?.start && todayKey(item.appointment.start) === today).length;
+  const lateReceptions = activeCases.filter((item) => {
+    if (!item.appointment?.start || item.flags.received) return false;
+    return diffMinutes(new Date(item.appointment.start), now) > RECEPTION_GRACE_HOURS * 60;
+  }).length;
+  const workshopVehicles = activeCases.filter((item) => item.flags.received && !item.flags.delivered).length;
+  const workInProgress = activeCases.filter((item) => item.flags.workStarted && !item.flags.workCompleted).length;
+  const qualityQueue = activeCases.filter((item) => item.flags.workCompleted && !item.flags.qualityApproved).length;
+  const deliveryRiskCases = activeCases.filter((item) => {
+    if (!item.appointment?.delivery || item.flags.delivered || item.flags.qualityApproved) return false;
+    return diffMinutes(now, new Date(item.appointment.delivery)) <= DELIVERY_ALERT_HOURS * 60;
+  });
+  const overdueDeliveries = deliveryRiskCases.filter((item) => new Date(item.appointment.delivery) < now).length;
+  const agreementReady = activeCases.filter((item) => item.flags.expertApproved && item.flags.clientApproved).length;
+  const agreementRate = activeCases.length ? Math.round((agreementReady / activeCases.length) * 100) : 100;
+  const scheduledCases = activeCases.filter((item) => item.appointment?.start && item.appointment?.delivery);
+  const averageLeadHours = scheduledCases.length
+    ? scheduledCases.reduce((sum, item) => sum + diffMinutes(item.appointment.start, item.appointment.delivery) / 60, 0) / scheduledCases.length
+    : 0;
+
+  return [
+    {
+      label: "RDV aujourd'hui",
+      value: String(appointmentsToday),
+      detail: "Dépôts planifiés",
+      level: appointmentsToday ? "info" : "neutral",
+    },
+    {
+      label: "Réceptions en retard",
+      value: String(lateReceptions),
+      detail: `Tolérance ${formatLocalizedDecimal(RECEPTION_GRACE_HOURS)} h`,
+      level: lateReceptions ? "danger" : "success",
+    },
+    {
+      label: "Véhicules atelier",
+      value: String(workshopVehicles),
+      detail: "Reçus non livrés",
+      level: workshopVehicles ? "info" : "neutral",
+    },
+    {
+      label: "Travaux en cours",
+      value: String(workInProgress),
+      detail: "Démarrés non clôturés",
+      level: workInProgress ? "info" : "neutral",
+    },
+    {
+      label: "Qualité à traiter",
+      value: String(qualityQueue),
+      detail: "Travaux terminés",
+      level: qualityQueue ? "warn" : "success",
+    },
+    {
+      label: "Livraisons à risque",
+      value: String(deliveryRiskCases.length),
+      detail: overdueDeliveries ? `${overdueDeliveries} dépassée(s)` : `Dans ${DELIVERY_ALERT_HOURS} h`,
+      level: overdueDeliveries ? "danger" : deliveryRiskCases.length ? "warn" : "success",
+    },
+    {
+      label: "Accords complets",
+      value: `${agreementRate}%`,
+      detail: `${agreementReady}/${activeCases.length} dossiers actifs`,
+      level: agreementRate >= 80 ? "success" : agreementRate >= 50 ? "warn" : "danger",
+    },
+    {
+      label: "Délai moyen estimé",
+      value: `${formatLocalizedDecimal(averageLeadHours)} h`,
+      detail: "RDV dépôt → livraison",
+      level: averageLeadHours > 48 ? "warn" : "neutral",
+    },
+  ];
 }
 
 
@@ -2164,4 +2254,3 @@ function renderQualityChecklist(root, item) {
 function qualityChecklistCount(item) {
   return DEFAULT_QUALITY_CHECKS.filter((label) => item.qualityChecklist[label]).length;
 }
-

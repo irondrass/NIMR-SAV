@@ -1,3 +1,9 @@
+# v22.04 - KPI SAV dans le pilotage
+
+- Ajout d'un bloc KPI SAV dans l'onglet Pilotage : RDV du jour, réceptions en retard, véhicules atelier, travaux en cours, qualité à traiter, livraisons à risque, accords complets et délai moyen estimé.
+- Restauration de la zone d'alertes SAV dans Pilotage, au-dessus du Kanban.
+- Cache PWA incrémenté en v22.04.
+
 # v22.03 - Anticipation pièces neuves verrouillée par capacité réelle
 
 - La préparation anticipée des pièces neuves est annulée si le peintre ou la zone de préparation sont occupés pendant la fenêtre de démarrage de la tôlerie.

@@ -11,11 +11,11 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css?v=22.03" />
+    <link rel="stylesheet" href="styles.css?v=22.04" />
 
     <script>
-      window.NIMR_BUILD = "v22.03";
-      window.NIMR_CACHE_NAME = "nimr-carrosserie-v22.03-prep-anticipee-capacite";
+      window.NIMR_BUILD = "v22.04";
+      window.NIMR_CACHE_NAME = "nimr-carrosserie-v22.04-kpi-sav";
       if ("caches" in window) {
         caches.keys().then(function(keys) {
           return Promise.all(keys.filter(function(key) {
@@ -234,8 +234,18 @@
             <div class="panel-heading">
               <div>
                 <h1>Pilotage production</h1>
-                <p>Statuts dossiers et charge atelier</p>
+                <p>KPI SAV, alertes opérationnelles et statuts dossiers</p>
               </div>
+            </div>
+            <div class="sav-kpi-grid" id="sav-kpi-grid" aria-label="KPI SAV"></div>
+            <div class="pilotage-alert-block">
+              <div class="section-heading compact-heading">
+                <div>
+                  <h2>Alertes SAV</h2>
+                  <span>Réceptions, livraisons et qualité à traiter.</span>
+                </div>
+              </div>
+              <div class="pilotage-alerts" id="pilotage-alerts"></div>
             </div>
             <div class="kanban-board" id="kanban-board"></div>
           </section>
@@ -781,20 +791,20 @@
     </div>
 
     <script src="vendor/pdf.min.js" defer></script>
-    <script src="js/utils.js?v=22.03" defer></script>
-    <script src="js/state.js?v=22.03" defer></script>
-    <script src="js/ui-cases.js?v=22.03" defer></script>
-    <script src="js/estimate-import.js?v=22.03" defer></script>
-    <script src="js/ui-planning.js?v=22.03" defer></script>
-    <script src="js/photos.js?v=22.03" defer></script>
-    <script src="js/storage.js?v=22.03" defer></script>
-    <script src="js/planning.js?v=22.03" defer></script>
-    <script src="js/exports.js?v=22.03" defer></script>
-    <script src="js/business-rules-v2187.js?v=22.03" defer></script>
+    <script src="js/utils.js?v=22.04" defer></script>
+    <script src="js/state.js?v=22.04" defer></script>
+    <script src="js/ui-cases.js?v=22.04" defer></script>
+    <script src="js/estimate-import.js?v=22.04" defer></script>
+    <script src="js/ui-planning.js?v=22.04" defer></script>
+    <script src="js/photos.js?v=22.04" defer></script>
+    <script src="js/storage.js?v=22.04" defer></script>
+    <script src="js/planning.js?v=22.04" defer></script>
+    <script src="js/exports.js?v=22.04" defer></script>
+    <script src="js/business-rules-v2187.js?v=22.04" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
-    <script src="js/supabase-config.js?v=22.03" defer></script>
-    <script src="js/supabase-client.js?v=22.03" defer></script>
-    <script src="js/supabase-sync.js?v=22.03" defer></script>
-    <script src="app.js?v=22.03" defer></script>
+    <script src="js/supabase-config.js?v=22.04" defer></script>
+    <script src="js/supabase-client.js?v=22.04" defer></script>
+    <script src="js/supabase-sync.js?v=22.04" defer></script>
+    <script src="app.js?v=22.04" defer></script>
   </body>
 </html>

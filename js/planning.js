@@ -184,7 +184,12 @@ function schedulePipelineWithAnticipatedNewParts(item, startAfter, bookings, spl
       "anticipated-new-part"
     );
     const startsAtVehicleStart = Math.abs(new Date(trialStep.start).getTime() - startCursor.getTime()) < 1000;
-    if (!startsAtVehicleStart) return scheduleSequentialPipeline(item, startAfter, bookings);
+    const capacityBusyDuringBodyStart = findConflict(
+      { segments: [{ start: bodyStep.start, end: bodyStep.end }] },
+      trialStep.resourceIds,
+      bookings
+    );
+    if (!startsAtVehicleStart || capacityBusyDuringBodyStart) return scheduleSequentialPipeline(item, startAfter, bookings);
     anticipatedPrepStep = trialStep;
     tempBookings.splice(0, tempBookings.length, ...trialBookings);
     steps.push(anticipatedPrepStep);

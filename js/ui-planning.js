@@ -1,0 +1,371 @@
+function renderPlanning() {
+  const date = parseDateKey(state.planningDate);
+  $("#planning-day-label").textContent = longDate(date);
+  const alert = $("#day-alert");
+  const holiday = getHoliday(date);
+  const intervals = getDayIntervals(date);
+  if (holiday || !intervals.length) {
+    alert.hidden = false;
+    alert.textContent = holiday ? `Jour férié: ${holiday.label}` : "Jour fermé";
+  } else {
+    alert.hidden = true;
+  }
+
+  const resources = orderPlanningResources(state.resources.filter(isDisplayPlanningResource));
+  const dailyColorMap = buildDailyVehicleColorMap(todayKey(date));
+  const taskNumberMap = buildDailyPlanningTaskNumberMap(date, resources);
+  const gantt = $("#gantt");
+  const dayStart = atTime(date, "08:00");
+  const dayEnd = atTime(date, "17:00");
+  const total = diffMinutes(dayStart, dayEnd);
+  gantt.innerHTML = `
+    <div class="gantt-grid">
+      <div class="gantt-header">
+        <div class="gantt-corner">Ressource</div>
+        <div class="time-scale">
+          ${renderTicks(total)}
+          ${renderPauseBands(date, total)}
+        </div>
+      </div>
+      ${resources
+        .map(
+          (resource) => `
+            <div class="gantt-row">
+              <div class="resource-label">
+                <strong>${escapeHtml(resource.name)}</strong>
+                <span>${ROLE_LABELS[resource.role]} · ${escapeHtml(resource.location || "Atelier")}${resource.fastLane ? " · Fast Lane" : ""}</span>
+              </div>
+              <div class="timeline">
+                ${renderTicks(total, false)}
+                ${renderPauseBands(date, total)}
+                ${renderResourceBookings(resource, date, dayStart, dayEnd, total, dailyColorMap, taskNumberMap)}
+              </div>
+            </div>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+  renderDailyLaborSummary(date, taskNumberMap);
+}
+
+function getBookingLaborOperations(caseItem, key) {
+  const lines = [];
+  (caseItem?.claims || []).forEach((claim) => {
+    if (claim.includeInPlanning === false) return;
+    (claim.estimate?.originalLines || []).forEach((line) => {
+      const allocations = Array.isArray(line.allocations) ? line.allocations : [];
+      const matching = allocations.filter((allocation) => allocation.phase === key && Number(allocation.laborHours || 0) > 0);
+      if (!matching.length) return;
+      lines.push(`${line.operation || line.rawText || 'Opération devis'} (${formatLocalizedDecimal(matching.reduce((sum, allocation) => sum + Number(allocation.laborHours || 0), 0))} h)`);
+    });
+  });
+  if (key === 'finish' && Number(caseItem?.durations?.finish || 0) > 0) lines.push(`Finition + lavage (50% peinture : ${formatLocalizedDecimal(caseItem.durations.finish)} h)`);
+  if (key === 'quality' && Number(caseItem?.durations?.quality || 0) > 0) lines.push(`Contrôle qualité forfaitaire (${formatLocalizedDecimal(caseItem.durations.quality)} h)`);
+  return lines;
+}
+
+function renderDailyLaborSummary(date, taskNumberMap) {
+  const target = document.getElementById('daily-labor-summary');
+  if (!target) return;
+  const day = todayKey(date);
+  const rows = [];
+  state.bookings.forEach((booking) => {
+    if (booking.type === 'leave') return;
+    const caseItem = state.cases.find((item) => item.id === booking.caseId);
+    const hasSegmentOnDay = (booking.segments || []).some((segment) => todayKey(new Date(segment.start)) === day || todayKey(new Date(segment.end)) === day);
+    if (!caseItem || !hasSegmentOnDay) return;
+    const ops = getBookingLaborOperations(caseItem, booking.key);
+    rows.push({ booking, caseItem, ops });
+  });
+  if (!rows.length) {
+    target.innerHTML = '<div class="empty-inline">Aucune main-d’œuvre planifiée sur cette journée.</div>';
+    return;
+  }
+  target.innerHTML = `
+    <div class="daily-labor-head"><strong>Détail main-d’œuvre du jour</strong><span>Chaque étape affiche les lignes devis incluses, plus rappel pièces/finition/contrôle.</span></div>
+    <div class="daily-labor-list">
+      ${rows.map(({ booking, caseItem, ops }, index) => `
+        <article class="daily-labor-card">
+          <strong>${index + 1}. ${escapeHtml(caseItem.clientName || 'Client')} · ${escapeHtml(getDurationLabel(booking.key) || booking.title || 'Étape')}</strong>
+          <small>${escapeHtml(caseItem.vehicle || '')}${caseItem.plate ? ` · ${escapeHtml(caseItem.plate)}` : ''}</small>
+          ${ops.length ? `<ul>${ops.map((op) => `<li>${escapeHtml(op)}</li>`).join('')}</ul>` : '<p class="muted">Aucune ligne MO détaillée rattachée à cette étape.</p>'}
+        </article>
+      `).join('')}
+    </div>
+  `;
+}
+
+function renderTicks(total, withLabels = true) {
+  const ticks = [];
+  for (let hour = 8; hour <= 17; hour += 1) {
+    const left = ((hour - 8) * 60 * 100) / total;
+    ticks.push(`<div class="tick" style="left:${left}%">${withLabels ? `<span>${String(hour).padStart(2, "0")}:00</span>` : ""}</div>`);
+  }
+  return ticks.join("");
+}
+
+function renderPauseBands(date, total) {
+  const dayStart = atTime(date, "08:00");
+  const intervals = getDayIntervals(date);
+  if (!intervals.length) return `<div class="pause-band" style="left:0;width:100%"></div>`;
+  const bands = [];
+  let cursor = dayStart;
+  const dayEnd = atTime(date, "17:00");
+  intervals.forEach((interval) => {
+    if (cursor < interval.start) {
+      bands.push(renderBand(cursor, interval.start, dayStart, total));
+    }
+    cursor = interval.end;
+  });
+  if (cursor < dayEnd) bands.push(renderBand(cursor, dayEnd, dayStart, total));
+  return bands.join("");
+}
+
+function renderBand(start, end, dayStart, total) {
+  const left = Math.max(0, (diffMinutes(dayStart, start) * 100) / total);
+  const width = Math.max(0, (diffMinutes(start, end) * 100) / total);
+  return `<div class="pause-band" style="left:${left}%;width:${width}%"></div>`;
+}
+
+function renderResourceBookings(resource, date, dayStart, dayEnd, total, dailyColorMap = null, taskNumberMap = null) {
+  const day = todayKey(date);
+  const items = [];
+  state.bookings.forEach((booking) => {
+    if (!isBookingVisibleForResource(booking, resource.id)) return;
+    booking.segments.forEach((segment) => {
+      const start = new Date(segment.start);
+      const end = new Date(segment.end);
+      if (todayKey(start) !== day && todayKey(end) !== day) return;
+      const clippedStart = maxDate(start, dayStart);
+      const clippedEnd = minDate(end, dayEnd);
+      if (clippedEnd <= clippedStart) return;
+      const left = (diffMinutes(dayStart, clippedStart) * 100) / total;
+      const width = Math.max(2, (diffMinutes(clippedStart, clippedEnd) * 100) / total);
+      const caseItem = state.cases.find((item) => item.id === booking.caseId);
+      const isLeave = booking.type === "leave";
+      const model = isLeave ? "Indisponible" : shortVehicleModel(caseItem?.vehicle || caseItem?.model || "Véhicule");
+      const plate = isLeave ? "" : (caseItem?.plate || caseItem?.registration || "");
+      const vehicleLine = isLeave ? (booking.title || "Congé / absence") : `${model}${plate ? ` · ${plate}` : ""}`;
+      const stage = isLeave ? "Congé / absence" : (booking.planningMode === "anticipated-new-part" ? (booking.title || "Pièces neuves anticipées") : (getDurationLabel(booking.key) || booking.title || "Étape planning"));
+      const timeLine = `${formatTime(clippedStart)}-${formatTime(clippedEnd)}`;
+      const equipmentPrefix = isEquipmentResource(resource) ? `${ROLE_LABELS[resource.role] || "Équipement"} · ` : "";
+      const taskNumber = taskNumberMap?.get(getPlanningTaskNumberKey(booking, segment)) || "";
+      const shortStage = stage.replace("Tôlerie + démontage", "Tôlerie").replace("Peinture + vernis", "Peinture").replace("Contrôle qualité", "Contrôle");
+      const laborOps = isLeave ? [] : getBookingLaborOperations(caseItem, booking.key);
+      const bookingTitle = `${taskNumber ? `Tâche n°${taskNumber} - ` : ""}${vehicleLine} - ${stage} - ${timeLine}${laborOps.length ? `\nMO: ${laborOps.join(' · ')}` : ''}`;
+      const maxTextLength = Math.max(vehicleLine.length, `${equipmentPrefix}${shortStage}`.length);
+      const availableChars = Math.max(6, Math.floor(width * 1.35));
+      const numberOnly = Boolean(taskNumber) && !isLeave && (width < 14 || maxTextLength > availableChars);
+      const compactClass = `${booking.planningMode === "anticipated-new-part" ? " anticipated-new-part-booking" : ""}${numberOnly ? " number-only-booking" : width < 8 ? " compact-booking" : ""}`;
+      const color = getBookingPlanningColor(booking, dailyColorMap);
+      items.push(`
+        <div class="booking ${isLeave ? 'leave-booking' : ''}${compactClass}" style="left:${left}%;width:${width}%;background:${color}" title="${escapeAttr(bookingTitle)}" aria-label="${escapeAttr(bookingTitle)}">
+          ${taskNumber ? `<span class="booking-number">${escapeHtml(String(taskNumber))}</span>` : ""}
+          ${numberOnly ? "" : `<span class="booking-time">${escapeHtml(timeLine)}</span><strong>${escapeHtml(vehicleLine)}</strong><span class="booking-stage">${escapeHtml(equipmentPrefix)}${escapeHtml(width < 8 ? shortStage : stage)}</span>`}
+        </div>
+      `);
+    });
+  });
+  return items.join("");
+}
+
+
+function buildDailyPlanningTaskNumberMap(date, resources) {
+  const day = todayKey(date);
+  const dayStart = atTime(date, "08:00");
+  const dayEnd = atTime(date, "17:00");
+  const rows = [];
+  state.bookings.forEach((booking) => {
+    if (booking.type === "leave") return;
+    const primaryResource = resources.find((resource) => isBookingVisibleForResource(booking, resource.id));
+    if (!primaryResource) return;
+    booking.segments.forEach((segment) => {
+      const start = new Date(segment.start);
+      const end = new Date(segment.end);
+      if (todayKey(start) !== day && todayKey(end) !== day) return;
+      const clippedStart = maxDate(start, dayStart);
+      const clippedEnd = minDate(end, dayEnd);
+      if (clippedEnd <= clippedStart) return;
+      rows.push({ booking, segment, start: clippedStart, end: clippedEnd, resourceName: primaryResource.name || "" });
+    });
+  });
+  rows.sort((a, b) => a.start - b.start || a.end - b.end || String(a.resourceName).localeCompare(String(b.resourceName)) || String(a.booking.title || "").localeCompare(String(b.booking.title || "")));
+  const map = new Map();
+  rows.forEach((row, index) => map.set(getPlanningTaskNumberKey(row.booking, row.segment), index + 1));
+  return map;
+}
+
+function getPlanningTaskNumberKey(booking, segment) {
+  return `${booking.id || booking.caseId || "booking"}|${segment?.start || booking.start || ""}|${segment?.end || booking.end || ""}|${booking.key || ""}`;
+}
+
+function renderResources() {
+  const target = $("#resource-list");
+  target.innerHTML = state.resources
+    .map(
+      (resource) => `
+        <article class="resource-card">
+          <div class="resource-edit-grid">
+            <label>
+              Nom
+              <input data-resource-field="name" data-resource-id="${resource.id}" value="${escapeAttr(resource.name)}" />
+            </label>
+            <label>
+              Rôle
+              <select data-resource-field="role" data-resource-id="${resource.id}">
+                ${Object.entries(ROLE_LABELS)
+                  .map(([value, label]) => `<option value="${value}" ${resource.role === value ? "selected" : ""}>${label}</option>`)
+                  .join("")}
+              </select>
+            </label>
+            <label>
+              Emplacement
+              <input data-resource-field="location" data-resource-id="${resource.id}" value="${escapeAttr(resource.location || "")}" />
+            </label>
+            <span class="case-meta">
+              ${resource.fastLane ? `<span class="tag ok">Fast Lane</span>` : ""}
+              ${resource.active === false ? `<span class="tag warn">Inactive</span>` : ""}
+            </span>
+          </div>
+          <div class="resource-actions">
+            <button class="ghost-button" type="button" data-toggle-fastlane="${resource.id}">
+              ${resource.fastLane ? "Standard" : "Fast Lane"}
+            </button>
+            <button class="ghost-button" type="button" data-toggle-resource="${resource.id}">
+              ${resource.active === false ? "Activer" : "Désactiver"}
+            </button>
+          </div>
+        </article>
+      `,
+    )
+    .join("");
+  $$("[data-resource-field]", target).forEach((input) => {
+    input.addEventListener("change", () => {
+      const resource = getResource(input.dataset.resourceId);
+      resource[input.dataset.resourceField] = input.value;
+      saveState();
+      render();
+    });
+  });
+  $$("[data-toggle-resource]", target).forEach((button) => {
+    button.addEventListener("click", () => {
+      const resource = getResource(button.dataset.toggleResource);
+      resource.active = resource.active === false;
+      saveState();
+      render();
+    });
+  });
+  $$("[data-toggle-fastlane]", target).forEach((button) => {
+    button.addEventListener("click", () => {
+      const resource = getResource(button.dataset.toggleFastlane);
+      resource.fastLane = !resource.fastLane;
+      saveState();
+      render();
+    });
+  });
+}
+
+function renderFastLaneSettings() {
+  const form = $("#fastlane-form");
+  if (!form) return;
+  form.elements.fastLaneEnabled.checked = Boolean(state.settings.fastLaneEnabled);
+  form.elements.fastLaneMaxHours.value = formatLocalizedDecimal(state.settings.fastLaneMaxHours);
+}
+
+function renderWorkHoursSettings() {
+  const target = $("#work-hours-list");
+  if (!target) return;
+  target.innerHTML = DAY_LABELS.map(
+    (label, day) => `
+      <label class="work-hour-row">
+        <span>${label}</span>
+        <input data-work-day="${day}" value="${formatWorkIntervals(state.workHours[day] || [])}" placeholder="08:00-12:00,13:00-17:00 ou fermé" />
+      </label>
+    `,
+  ).join("");
+}
+
+function formatWorkIntervals(intervals) {
+  return intervals.map(([start, end]) => `${start}-${end}`).join(",");
+}
+
+function parseWorkIntervals(value) {
+  const cleaned = String(value || "").trim();
+  if (!cleaned || cleaned.toLowerCase() === "fermé" || cleaned.toLowerCase() === "ferme") return [];
+  return cleaned.split(",").map((part) => {
+    const [start, end] = part.trim().split("-").map((item) => item.trim());
+    if (!isValidTime(start) || !isValidTime(end) || atTime(new Date(), start) >= atTime(new Date(), end)) {
+      throw new Error("Format horaire invalide. Exemple attendu: 08:00-12:00,13:00-17:00");
+    }
+    return [start, end];
+  });
+}
+
+function isValidTime(value) {
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+}
+
+function renderHolidays() {
+  const target = $("#holiday-list");
+  target.innerHTML = state.holidays
+    .slice()
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map(
+      (holiday) => `
+        <article class="holiday-card">
+          <div>
+            <strong>${formatDate(holiday.date)}</strong>
+            <span class="muted">${escapeHtml(holiday.label)}</span>
+          </div>
+          <button class="ghost-button" type="button" data-remove-holiday="${holiday.date}">Retirer</button>
+        </article>
+      `,
+    )
+    .join("");
+  $$("[data-remove-holiday]", target).forEach((button) => {
+    button.addEventListener("click", () => {
+      state.holidays = state.holidays.filter((holiday) => holiday.date !== button.dataset.removeHoliday);
+      saveState();
+      render();
+    });
+  });
+}
+
+function getActiveCase() {
+  return state.cases.find((item) => item.id === activeCaseId) || state.cases[0] || null;
+}
+
+
+function renderResourceLeaves() {
+  const form = $("#resource-leave-form");
+  const list = $("#resource-leave-list");
+  if (!form || !list) return;
+  const select = form.elements.resourceId;
+  const selected = select.value;
+  const humans = orderPlanningResources(state.resources.filter(isHumanPlanningResource));
+  select.innerHTML = humans.map((resource) => `<option value="${escapeAttr(resource.id)}">${escapeHtml(resource.name)} · ${escapeHtml(ROLE_LABELS[resource.role] || resource.role)}</option>`).join("");
+  if (selected && humans.some((resource) => resource.id === selected)) select.value = selected;
+  const leaves = state.bookings
+    .filter((booking) => booking.type === "leave")
+    .slice()
+    .sort((a, b) => new Date(a.start) - new Date(b.start));
+  list.innerHTML = leaves.length
+    ? leaves.map((leave) => {
+        const resource = getResource(leave.resourceIds?.[0]);
+        return `<article class="holiday-card">
+          <div><strong>${escapeHtml(resource?.name || "Ressource")}</strong><span class="muted">${escapeHtml(leave.title || "Congé")} · ${formatDateTime(leave.start)} → ${formatDateTime(leave.end)}</span></div>
+          <button class="ghost-button" type="button" data-remove-leave="${escapeAttr(leave.id)}">Retirer</button>
+        </article>`;
+      }).join("")
+    : `<div class="empty-inline">Aucun congé ou absence planifié.</div>`;
+  $$('[data-remove-leave]', list).forEach((button) => {
+    button.addEventListener('click', () => {
+      state.bookings = state.bookings.filter((booking) => booking.id !== button.dataset.removeLeave);
+      saveState();
+      renderPlanning();
+      renderResourceLeaves();
+      renderMetrics();
+    });
+  });
+}

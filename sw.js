@@ -1,4 +1,4 @@
-const CACHE_NAME = "nimr-carrosserie-v22.04-kpi-sav";
+const CACHE_NAME = "nimr-carrosserie-v22.05-persistance-fermeture";
 const ASSETS = [
   "./",
   "./index.html",

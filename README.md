@@ -1,3 +1,10 @@
+# v22.05 - Persistance renforcée après fermeture
+
+- La sauvegarde locale priorise maintenant la sauvegarde la plus récente au redémarrage, au lieu de restaurer parfois un ancien snapshot plus volumineux.
+- La sauvegarde d'urgence de fermeture écrit aussi les métadonnées et un point de restauration.
+- Ajout d'une sauvegarde périodique toutes les 10 secondes pour limiter la perte de modifications si l'onglet GitHub Pages est fermé brutalement.
+- Cache PWA incrémenté en v22.05.
+
 # v22.04 - KPI SAV dans le pilotage
 
 - Ajout d'un bloc KPI SAV dans l'onglet Pilotage : RDV du jour, réceptions en retard, véhicules atelier, travaux en cours, qualité à traiter, livraisons à risque, accords complets et délai moyen estimé.

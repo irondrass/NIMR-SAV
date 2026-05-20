@@ -15,7 +15,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v22.01";
+const APP_VERSION = "v22.05";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const WORKSHOP_NAME = "NIMR Carrosserie";
@@ -436,7 +436,8 @@ function scoreStoredStateCandidate(candidate) {
   const bookings = Array.isArray(candidate.state?.bookings) ? candidate.state.bookings.length : 0;
   const resources = Array.isArray(candidate.state?.resources) ? candidate.state.resources.length : 0;
   const timestamp = candidate.updatedAt ? new Date(candidate.updatedAt).getTime() || 0 : 0;
-  return nonDemoCases * 1000000 + bookings * 5000 + resources * 100 + Math.floor(timestamp / 1000000000);
+  const richness = nonDemoCases * 1000000 + bookings * 5000 + resources * 100;
+  return timestamp > 0 ? timestamp * 1000 + Math.min(richness, 999) : richness;
 }
 
 function loadState() {
@@ -934,11 +935,13 @@ function clearCasePlanning(item, reason = "Planning atelier annulé") {
 }
 
 function buildAutosaveEnvelope() {
+  const savedAt = new Date().toISOString();
+  state.updatedAt = savedAt;
   return {
     app: BACKUP_APP_ID,
     appVersion: APP_VERSION,
     formatVersion: BACKUP_FORMAT_VERSION,
-    savedAt: new Date().toISOString(),
+    savedAt,
     state,
   };
 }
@@ -982,6 +985,8 @@ function forceEmergencyAutosave() {
     const envelope = buildAutosaveEnvelope();
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     localStorage.setItem(STORAGE_MIRROR_KEY, JSON.stringify(envelope));
+    localStorage.setItem(STORAGE_META_KEY, JSON.stringify({ savedAt: envelope.savedAt, appVersion: APP_VERSION, casesCount: state.cases.length }));
+    writeStateSnapshot(envelope);
     if (typeof sessionStorage !== "undefined") sessionStorage.setItem(SESSION_EMERGENCY_KEY, JSON.stringify(envelope));
   } catch (error) {
     console.warn("Sauvegarde d'urgence impossible", error);

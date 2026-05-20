@@ -1285,6 +1285,53 @@ select:focus {
   padding: 18px;
 }
 
+.sav-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.sav-kpi-card {
+  display: grid;
+  gap: 8px;
+  min-height: 118px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-left: 4px solid #8aa4b2;
+  border-radius: var(--radius);
+  background: #fff;
+  box-shadow: var(--shadow-sm);
+}
+
+.sav-kpi-card span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.sav-kpi-card strong {
+  color: var(--ink);
+  font-size: clamp(1.65rem, 3vw, 2.35rem);
+  line-height: 1;
+}
+
+.sav-kpi-card small {
+  color: var(--muted);
+  font-size: 0.83rem;
+  line-height: 1.35;
+}
+
+.sav-kpi-card.success { border-left-color: #1f7a54; }
+.sav-kpi-card.info { border-left-color: #2563eb; }
+.sav-kpi-card.warn { border-left-color: #d97706; }
+.sav-kpi-card.danger { border-left-color: #b54040; }
+
+.pilotage-alert-block {
+  margin-top: 18px;
+}
+
 .kanban-board {
   display: grid;
   grid-template-columns: repeat(6, minmax(190px, 1fr));
@@ -1627,6 +1674,7 @@ select:focus {
 
 @media (max-width: 1100px) {
   .dashboard-strip,
+  .sav-kpi-grid,
   .detail-grid,
   .settings-grid,
   .proposal-grid,
@@ -1658,6 +1706,7 @@ select:focus {
   }
 
   .dashboard-strip,
+  .sav-kpi-grid,
   .workbench,
   .detail-grid,
   .settings-grid,

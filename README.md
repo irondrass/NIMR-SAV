@@ -1,3 +1,9 @@
+# v22.03 - Anticipation pièces neuves verrouillée par capacité réelle
+
+- La préparation anticipée des pièces neuves est annulée si le peintre ou la zone de préparation sont occupés pendant la fenêtre de démarrage de la tôlerie.
+- Correction de cohérence PWA : `index.html`, `app.js` et `sw.js` pointent tous vers la version v22.03 et le nettoyage conserve le `CACHE_NAME` réel.
+- Cache PWA incrémenté en v22.03.
+
 # v22.02 - Préparation anticipée conditionnelle des pièces neuves
 
 - Suppression de toute étape séparée de peinture anticipée.

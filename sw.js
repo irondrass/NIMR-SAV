@@ -1,4 +1,4 @@
-const CACHE_NAME = "nimr-carrosserie-v22.02-prep-anticipee-capacite";
+const CACHE_NAME = "nimr-carrosserie-v22.03-prep-anticipee-capacite";
 const ASSETS = [
   "./",
   "./index.html",
@@ -87,4 +87,3 @@ self.addEventListener("message", (event) => {
   if (event.data?.type === "SKIP_WAITING") self.skipWaiting();
   if (event.data?.type === "CHECK_UPDATE") precache().then(() => event.source?.postMessage({ type: "CACHE_REFRESHED", cacheName: CACHE_NAME })).catch(() => null);
 });
-

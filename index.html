@@ -1,0 +1,800 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#11415f" />
+    <meta name="description" content="Application PWA de gestion des dossiers carrosserie, accords, photos, rendez-vous et planning atelier." />
+    <title>NIMR Carrosserie</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" href="assets/icon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css?v=22.02" />
+
+    <script>
+      window.NIMR_BUILD = "v22.02";
+      if ("caches" in window) {
+        caches.keys().then(function(keys) {
+          return Promise.all(keys.filter(function(key) {
+            return key.startsWith("nimr-carrosserie-") && key !== "nimr-carrosserie-" + window.NIMR_BUILD + "-flux-concessionnaire";
+          }).map(function(key) { return caches.delete(key); }));
+        }).catch(function() {});
+      }
+    </script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Aller au contenu principal</a>
+    <noscript>Cette application nécessite JavaScript pour fonctionner.</noscript>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <img src="assets/icon.svg" alt="" class="brand-mark" />
+          <div>
+            <strong>NIMR Carrosserie</strong>
+            <span>Atelier & Planning</span>
+          </div>
+        </div>
+        <nav class="sidebar-nav" aria-label="Navigation principale">
+          <button class="nav-button active" type="button" data-tab="dossiers" aria-current="page">
+            <svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /></svg>
+            Dossiers
+          </button>
+          <button class="nav-button" type="button" data-tab="pilotage">
+            <svg viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+            Tableau de bord
+          </button>
+          <button class="nav-button" type="button" data-tab="planning">
+            <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            Planning
+          </button>
+          <button class="nav-button" type="button" data-tab="atelier">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            Paramètres
+          </button>
+        </nav>
+      </aside>
+
+      <main id="main-content" tabindex="-1">
+        <section class="dashboard-strip" aria-label="Indicateurs">
+          <article class="metric">
+            <span>Dossiers actifs</span>
+            <strong id="metric-active">0</strong>
+          </article>
+          <article class="metric">
+            <span>Accords en attente</span>
+            <strong id="metric-waiting">0</strong>
+          </article>
+          <article class="metric">
+            <span>Livraisons planifiées</span>
+            <strong id="metric-deliveries">0</strong>
+          </article>
+          <article class="metric metric-split">
+            <span>Carrosserie</span>
+            <div class="metric-lines">
+              <strong><small>Humain</small><b id="metric-load-body-human">0%</b></strong>
+              <strong><small>Matériel</small><b id="metric-load-body-equipment">0%</b></strong>
+            </div>
+          </article>
+          <article class="metric metric-split">
+            <span>Service rapide</span>
+            <div class="metric-lines">
+              <strong><small>Humain</small><b id="metric-load-fast-human">0%</b></strong>
+              <strong><small>Matériel</small><b id="metric-load-fast-equipment">0%</b></strong>
+            </div>
+          </article>
+          <article class="metric metric-split">
+            <span>Grands travaux</span>
+            <div class="metric-lines">
+              <strong><small>Humain</small><b id="metric-load-heavy-human">0%</b></strong>
+              <strong><small>Matériel</small><b id="metric-load-heavy-equipment">0%</b></strong>
+            </div>
+          </article>
+        </section>
+
+        <section class="view active" id="view-dossiers">
+          <div class="workbench">
+            <aside class="panel panel-list">
+              <div class="panel-heading">
+                <div>
+                  <h1>Créer / rechercher un dossier</h1>
+                  <p id="case-count">0 dossier</p>
+                </div>
+                <button class="icon-button" type="button" id="new-case-shortcut" title="Nouveau dossier" aria-label="Nouveau dossier">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+                </button>
+              </div>
+
+              <form class="quick-form" id="case-form">
+                <label>
+                  Client <span style="color: #d00000;">*</span>
+                  <input name="clientName" autocomplete="name" placeholder="Nom et prénom ou import devis" />
+                </label>
+                <label>
+                  Téléphone
+                  <input name="phone" inputmode="tel" placeholder="+216 ..." />
+                </label>
+                <label>
+                  Véhicule <span style="color: #d00000;">*</span>
+                  <input name="vehicle" placeholder="Marque, modèle" />
+                </label>
+                <label>
+                  Immatriculation <span style="color: #d00000;">*</span>
+                  <input name="plate" placeholder="Ex. 123 TU 4567" />
+                </label>
+                <label>
+                  Kilométrage
+                  <input name="mileage" inputmode="numeric" placeholder="Ex. 138000" />
+                </label>
+                <label>
+                  Couleur
+                  <input name="color" placeholder="Couleur" />
+                </label>
+                <label>
+                  VIN <span style="color: #d00000;">*</span>
+                  <input name="vin" placeholder="Numéro de châssis" />
+                </label>
+                <label>
+                  OR NAV
+                  <input name="orNavNumber" placeholder="Ex. OR-NAV-2026-001" />
+                </label>
+
+                <label>
+                  Type d'ordre
+                  <select name="orderType">
+                    <option value="assurance">Sinistre assurance / expert</option>
+                    <option value="client">Carrosserie client</option>
+                    <option value="vidange">Vidange / entretien rapide</option>
+                    <option value="mechanical_client">Réparation mécanique client</option>
+                    <option value="electrical_client">Réparation électrique client</option>
+                  </select>
+                </label>
+                <label>
+                  Libellé OR
+                  <input name="orderTitle" placeholder="Ex. Vidange, réparation mécanique..." />
+                </label>
+                <label class="file-button quick-import-button">
+                  <input type="file" id="quick-estimate-file-input" name="estimateFile" accept=".pdf,.xlsx,.csv,text/csv,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M17 8 12 3 7 8" /><path d="M12 3v12" /></svg>
+                  Importer devis à la création
+                </label>
+                <span class="muted" id="quick-estimate-import-status">Optionnel : le devis remplit client, véhicule, OR et main-d'œuvre.</span>
+                <label class="file-button quick-import-button">
+                  <input type="file" id="quick-vehicle-file-input" accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M17 8 12 3 7 8" /><path d="M12 3v12" /></svg>
+                  Importer base véhicules
+                </label>
+                <span class="muted" id="quick-vehicle-import-status">Chargement de la base véhicules...</span>
+                <div class="vin-result-list" id="quick-vin-results"></div>
+                <button class="primary-button" type="submit">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+                  Créer dossier
+                </button>
+              </form>
+
+              <div class="case-list-tools" aria-label="Filtres dossiers">
+                <div class="search-wrap">
+                  <input id="case-search" type="search" placeholder="Rechercher un dossier" aria-label="Rechercher un dossier" />
+                </div>
+                <label>
+                  Statut
+                  <select id="case-status-filter" aria-label="Filtrer par statut">
+                    <option value="all">Tous les statuts</option>
+                    <option value="estimate">Fiche dossier</option>
+                    <option value="approvals">Accords</option>
+                    <option value="appointment">RDV à fixer</option>
+                    <option value="appointmentScheduled">RDV fixé</option>
+                    <option value="noShow">Client absent</option>
+                    <option value="awaitingVehicle">En attente réception</option>
+                    <option value="vehicleReceived">Véhicule reçu</option>
+                    <option value="workScheduled">Travaux planifiés</option>
+                    <option value="work">En travaux</option>
+                    <option value="quality">Contrôle qualité</option>
+                    <option value="delivered">Livré</option>
+                  </select>
+                </label>
+                <label>
+                  Type de dossier
+                  <select id="case-type-filter" aria-label="Filtrer par type de dossier">
+                    <option value="all">Tous les types</option>
+                    <option value="assurance">Sinistre assurance / expert</option>
+                    <option value="client">Carrosserie client</option>
+                    <option value="vidange">Vidange / entretien rapide</option>
+                    <option value="mechanical_client">Réparation mécanique client</option>
+                    <option value="electrical_client">Réparation électrique client</option>
+                    <option value="garantie">Garantie</option>
+                  </select>
+                </label>
+                <label>
+                  Tri
+                  <select id="case-sort" aria-label="Trier les dossiers">
+                    <option value="recent">Plus récents</option>
+                    <option value="oldest">Plus anciens</option>
+                    <option value="client">Client A-Z</option>
+                    <option value="appointment">Prochain RDV</option>
+                  </select>
+                </label>
+              </div>
+              <div class="case-list" id="case-list" aria-live="polite"></div>
+            </aside>
+
+            <section class="panel case-detail" id="case-detail">
+              <div class="empty-state">
+                <strong>Aucun dossier sélectionné</strong>
+                <span>Créez ou choisissez un dossier pour commencer.</span>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="view-pilotage">
+          <section class="panel kanban-panel">
+            <div class="panel-heading">
+              <div>
+                <h1>Pilotage production</h1>
+                <p>Statuts dossiers et charge atelier</p>
+              </div>
+            </div>
+            <div class="kanban-board" id="kanban-board"></div>
+          </section>
+        </section>
+
+        <section class="view" id="view-planning">
+          <section class="panel planning-panel">
+            <div class="planning-toolbar">
+              <div>
+                <h1>Planning atelier</h1>
+                <p id="planning-day-label"></p>
+              </div>
+              <div class="toolbar-actions">
+                <button class="ghost-button" type="button" id="print-day-gantt">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18M3 12h18M3 19h18M7 5v14M13 5v14M19 5v14" /></svg>
+                  Imprimer Gantt
+                </button>
+                <button class="ghost-button" type="button" id="print-day-planning">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v8H6z" /></svg>
+                  Imprimer tableau
+                </button>
+                <button class="icon-button" type="button" id="prev-day" title="Jour précédent" aria-label="Jour précédent">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg>
+                </button>
+                <button class="ghost-button" type="button" id="today-button">Aujourd'hui</button>
+                <button class="icon-button" type="button" id="next-day" title="Jour suivant" aria-label="Jour suivant">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
+                </button>
+              </div>
+            </div>
+            <div id="day-alert" class="day-alert" hidden></div>
+            <div class="gantt" id="gantt"></div>
+            <div class="daily-labor-summary" id="daily-labor-summary"></div>
+          </section>
+        </section>
+
+        <section class="view" id="view-atelier">
+          <div class="settings-grid">
+            <section class="panel">
+              <div class="panel-heading">
+                <div>
+                  <h1>Ressources</h1>
+                  <p>Techniciens, mécanique, électrique, cabine et contrôle</p>
+                </div>
+              </div>
+              <form class="resource-form" id="resource-form">
+                <input name="name" required placeholder="Nom ressource" />
+                <select name="role" required>
+                  <option value="tolier">Tôlier</option>
+                  <option value="mecanicien">Mécanicien</option>
+                  <option value="electricien">Électricien</option>
+                  <option value="peintre">Peintre</option>
+                  <option value="zone_preparation">Zone de préparation</option>
+                  <option value="cabine">Cabine peinture</option>
+                  <option value="pont_vidange">Pont vidange</option>
+                  <option value="pont_mecanique">Pont grands travaux mécaniques</option>
+                  <option value="controle">Contrôle qualité</option>
+                </select>
+                <input name="location" placeholder="Emplacement" />
+                <label class="check-card">
+                  <input type="checkbox" name="fastLane" />
+                  <span>Fast Lane</span>
+                </label>
+                <button class="primary-button" type="submit">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+                  Ajouter
+                </button>
+              </form>
+              <div class="resource-list" id="resource-list"></div>
+              <form class="fastlane-form" id="fastlane-form">
+                <label class="check-card">
+                  <input type="checkbox" name="fastLaneEnabled" />
+                  <span>Activer la Fast Lane</span>
+                </label>
+                <label>
+                  Limite intervention rapide
+                  <input name="fastLaneMaxHours" type="text" inputmode="decimal" placeholder="Ex. 4 ou 4,5" />
+                </label>
+              </form>
+            </section>
+
+            <section class="panel">
+              <div class="panel-heading">
+                <div>
+                  <h1>Calendrier</h1>
+                  <p>Lun-ven 08:00-12:00 / 13:00-17:00</p>
+                </div>
+              </div>
+              <div class="calendar-summary">
+                <span>Samedi 08:00-13:00</span>
+                <span>Dimanche fermé</span>
+                <span>Pause 12:00-13:00</span>
+              </div>
+              <div class="work-hours-list" id="work-hours-list"></div>
+              <form class="holiday-form" id="holiday-form">
+                <input name="date" type="date" required />
+                <input name="label" required placeholder="Nom du jour férié" />
+                <button class="primary-button" type="submit">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+                  Ajouter
+                </button>
+              </form>
+              <div class="holiday-list" id="holiday-list"></div>
+              <div class="section-heading compact-heading"><div><h2>Congés / absences ressources</h2><span>Bloque uniquement la personne concernée dans le planning.</span></div></div>
+              <form class="holiday-form" id="resource-leave-form">
+                <select name="resourceId" required></select>
+                <input name="start" type="datetime-local" required />
+                <input name="end" type="datetime-local" required />
+                <input name="label" placeholder="Motif: congé, formation, absence" />
+                <button class="primary-button" type="submit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>Ajouter congé</button>
+              </form>
+              <div class="holiday-list" id="resource-leave-list"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-heading">
+                <div>
+                  <h1>Sauvegarde</h1>
+                  <p>Exporter ou restaurer les données atelier</p>
+                </div>
+              </div>
+              <div class="backup-actions">
+                <button class="primary-button" type="button" id="export-backup">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M7 10l5 5 5-5" /><path d="M12 15V3" /></svg>
+                  Exporter sauvegarde
+                </button>
+                <label class="file-button">
+                  <input type="file" id="import-backup" accept=".json,application/json" />
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M17 8 12 3 7 8" /><path d="M12 3v12" /></svg>
+                  Importer sauvegarde
+                </label>
+              </div>
+              <p class="muted backup-warning">Attention : la sauvegarde contient des données clients, photos, véhicules, téléphones, VIN, immatriculations et historique. Conservez ce fichier dans un emplacement sécurisé.</p>
+              <p class="muted backup-status" id="backup-status">Inclut dossiers, planning, paramètres, historique et photos.</p>
+              <div class="autosave-control-panel">
+                <div>
+                  <h2>Contrôle sauvegarde automatique</h2>
+                  <p>Vérifie la sauvegarde principale, le miroir local, les points de restauration et le dernier état cloud.</p>
+                </div>
+                <div class="backup-actions">
+                  <button class="ghost-button" type="button" id="control-autosave">Contrôler maintenant</button>
+                  <button class="ghost-button" type="button" id="export-safety-snapshot">Télécharger copie de sécurité</button>
+                  <button class="ghost-button" type="button" id="restore-auto-snapshot">Restaurer dernier point automatique</button>
+                </div>
+                <p class="muted backup-status" id="autosave-control-status">Contrôle non exécuté.</p>
+              </div>
+            </section>
+
+            <section class="panel supabase-panel">
+              <div class="panel-heading">
+                <div>
+                  <h1>Cloud Supabase</h1>
+                  <p>Sauvegarde, restauration et réglages atelier sécurisés sans perdre les données locales</p>
+                </div>
+              </div>
+              <form class="supabase-login-form" id="supabase-login-form">
+                <label>
+                  Email utilisateur
+                  <input name="email" type="email" autocomplete="username" placeholder="email créé dans Supabase" />
+                </label>
+                <label>
+                  Mot de passe
+                  <input name="password" type="password" autocomplete="current-password" placeholder="Mot de passe Supabase" />
+                </label>
+                <button class="primary-button" type="submit">Connexion Supabase</button>
+              </form>
+              <div class="backup-actions supabase-actions">
+                <button class="ghost-button" type="button" id="supabase-test">Tester connexion</button>
+                <button class="primary-button" type="button" id="supabase-save">Sauvegarder local → Supabase</button>
+                <button class="ghost-button" type="button" id="supabase-restore">Restaurer Supabase → local</button>
+                <button class="ghost-button" type="button" id="supabase-signout">Déconnexion</button>
+              </div>
+              <p class="muted backup-warning">Avant chaque sauvegarde ou restauration cloud, l'application télécharge automatiquement une copie JSON locale de sécurité.</p>
+              <p class="muted backup-status" id="supabase-status">Initialisation Supabase...</p>
+              <p class="muted" id="supabase-details">Exécutez supabase-schema.sql v21.27 si le test indique que cloud_backups ou app_settings manque.</p>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+    <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="true"></div>
+
+    <template id="case-detail-template">
+      <div class="case-header">
+        <div>
+          <span class="eyebrow">Dossier</span>
+          <h1 data-field="title"></h1>
+          <p data-field="subtitle"></p>
+        </div>
+        <div class="case-actions">
+          <button class="ghost-button" type="button" id="print-repair-order">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9V2h12v7" /><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" /><path d="M6 14h12v8H6z" /></svg>
+            Générer PDF OR
+          </button>
+          <button class="ghost-button" type="button" id="print-technician-work-orders">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 11h6" /><path d="M9 15h6" /><path d="M8 3h8l2 2v16H6V5z" /></svg>
+            Ordres techniciens
+          </button>
+          <span class="status-pill" data-field="status"></span>
+        </div>
+      </div>
+
+      <nav class="case-subnav" aria-label="Phases du dossier">
+        <button class="case-subtab active" type="button" data-case-tab="claims">👤 Infos & Devis</button>
+        <button class="case-subtab" type="button" data-case-tab="photos">📷 Photos</button>
+        <button class="case-subtab" type="button" data-case-tab="planning">📅 RDV & Planning</button>
+        <button class="case-subtab" type="button" data-case-tab="atelier">🛠️ Atelier & Compléments</button>
+        <button class="case-subtab" type="button" data-case-tab="livraison">✅ Livraison & Clôture</button>
+      </nav>
+
+      <section class="case-panel active" data-case-panel="claims">
+        <section class="detail-section summary-panel">
+          <div class="section-heading">
+            <div>
+              <h2>Résumé du dossier</h2>
+              <span>Vue simplifiée : statut, prochaine action et informations essentielles.</span>
+            </div>
+            <span data-field="created"></span>
+          </div>
+          <div class="summary-grid">
+            <article class="summary-card next-action-card">
+              <span>Prochaine action recommandée</span>
+              <strong data-field="summary-next-action"></strong>
+              <p data-field="summary-next-description"></p>
+              <button class="primary-button" type="button" data-next-action-tab>Continuer le dossier</button>
+            </article>
+            <article class="summary-card">
+              <span>Client</span>
+              <strong data-field="summary-client"></strong>
+              <p data-field="summary-phone"></p>
+            </article>
+            <article class="summary-card">
+              <span>Véhicule</span>
+              <strong data-field="summary-vehicle"></strong>
+              <p data-field="summary-vehicle-extra"></p>
+            </article>
+            <article class="summary-card">
+              <span>Planning</span>
+              <strong data-field="summary-planning"></strong>
+              <p data-field="summary-delivery"></p>
+            </article>
+            <article class="summary-card summary-order-card">
+              <span>Ordre</span>
+              <strong data-field="summary-order-type"></strong>
+              <p data-field="summary-order-extra"></p>
+            </article>
+          </div>
+          <div class="workflow compact-workflow" data-field="workflow"></div>
+          <div class="validation-alert" data-field="validation-alert" hidden></div>
+          <div class="summary-checks">
+            <span class="tag" data-field="summary-photos"></span>
+            <span class="tag" data-field="summary-expert"></span>
+            <span class="tag" data-field="summary-quality"></span>
+          </div>
+        </section>
+      
+        <section class="detail-section full-width">
+          <div class="section-heading">
+            <h2>Réception du véhicule</h2>
+            <span>Ce véhicule est déjà associé au dossier.</span>
+          </div>
+          <div class="reception-intro">
+            <p>Vérifiez les informations puis confirmez la réception à l’atelier.</p>
+            <button class="primary-button" type="button" data-action-flag="received">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg>
+              Confirmer réception véhicule
+            </button>
+          </div>
+          <div class="vehicle-identity-card" data-field="vehicle-identity"></div>
+          <div class="arrival-state">
+            <h3>État à l’arrivée</h3>
+            <p class="muted" data-field="arrival-notes"></p>
+            <label class="wide">Renseignements état à l’arrivée
+              <textarea data-input="arrivalNotes" rows="4" placeholder="Rayures, chocs visibles, accessoires manquants, niveau carburant, observations client..."></textarea>
+            </label>
+          </div>
+          <div class="reception-actions">
+            <button class="ghost-button" type="button" data-open-case-tab="photos">Ajouter photos avant réparation</button>
+          </div>
+          <details class="manual-edit-box">
+            <summary>Modifier infos véhicule</summary>
+            <p class="muted">Modification véhicule : à utiliser uniquement en cas d’erreur sur le dossier.</p>
+            <div class="form-grid">
+              <label>Client<input data-input="clientName" placeholder="Nom et prénom" /></label>
+              <label>Téléphone<input data-input="phone" inputmode="tel" placeholder="+216 ..." /></label>
+              <label>Immatriculation<input data-input="plate" placeholder="Ex. 6486TU169" /></label>
+              <label>Véhicule<input data-input="vehicle" placeholder="Marque, modèle" /></label>
+              <label>Couleur<input data-input="color" placeholder="Couleur" /></label>
+              <label>Kilométrage<input data-input="mileage" inputmode="numeric" placeholder="Ex. 138000" /></label>
+              <label>VIN<input data-input="vin" placeholder="Numéro de châssis" /></label>
+              <label>Assurance<input data-input="insurance" placeholder="Compagnie d'assurance" /></label>
+              <label>Numéro OR NAV<input data-input="orNavNumber" placeholder="Numéro OR NAV" /></label>
+              <label class="wide">Notes dégâts / observations<textarea data-input="damageNotes" rows="3" placeholder="Description courte"></textarea></label>
+            </div>
+          </details>
+        </section>
+      
+        <div class="detail-grid">
+          <section class="detail-section">
+            <div class="section-heading">
+              <h2>Expert assurance</h2>
+              <span data-field="expert-state"></span>
+            </div>
+            <div class="form-grid">
+              <label class="wide">Compagnie d’assurance<input data-input="insurance" placeholder="Ex. STAR, COMAR, GAT, BIAT Assurances…" /></label>
+              <label>Nom expert<input data-input="expertName" placeholder="Nom de l'expert" /></label>
+              <label>Téléphone expert<input data-input="expertPhone" inputmode="tel" placeholder="+216 ..." /></label>
+              <label class="wide">Email expert<input data-input="expertEmail" type="email" placeholder="expert@email.com" /></label>
+            </div>
+            <div class="approval-row">
+              <button class="primary-button" type="button" data-action-flag="expertApproved">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg>
+                Valider accord expert
+              </button>
+              <label class="check-card">
+                <input type="checkbox" data-toggle="clientApproved" />
+                <span>Accord client reçu</span>
+              </label>
+            </div>
+          </section>
+          <section class="detail-section">
+            <div class="section-heading">
+              <h2>Récapitulatif main-d’œuvre</h2>
+              <span data-field="expert-estimate-total"></span>
+            </div>
+            <div class="expert-estimate" data-field="expert-estimate"></div>
+          </section>
+          <section class="detail-section wide estimate-import-card">
+            <div class="section-heading">
+              <div>
+                <h2>Devis par ordre de réparation</h2>
+                <span>Ajoutez les devis correspondant à chaque ordre.</span>
+              </div>
+            </div>
+            <p class="muted">Les devis sont importés dans les ordres de réparation. Cet onglet sert uniquement aux accords et au récapitulatif.</p>
+            <div class="estimate-import-preview" data-field="estimate-import-preview"></div>
+          </section>
+        </div>
+      
+        <section class="detail-section full-width">
+          <div class="section-heading">
+            <div>
+              <h2>Ordres de réparation & devis</h2>
+              <span>Sinistres assurance et demandes client partagent un seul planning véhicule, avec règles d’accord différentes.</span>
+            </div>
+          </div>
+          <form class="claim-form" id="claim-form">
+            <div class="form-grid">
+              <label>Libellé intervention<input name="title" placeholder="Ex. Choc arrière, vidange, réparation électrique" required /></label>
+              <label>Zone / système<input name="vehicleArea" placeholder="Ex. aile AV droite, moteur, faisceau, freins" /></label>
+              <label>Type
+                <select name="type">
+                  <option value="client">Client - carrosserie</option>
+                  <option value="vidange">Client - vidange</option>
+                  <option value="mechanical_client">Client - réparation mécanique</option>
+                  <option value="electrical_client">Client - réparation électrique</option>
+                  <option value="garantie">Garantie</option>
+                </select>
+              </label>
+              <label>Statut
+                <select name="status">
+                  <option value="draft">Brouillon</option>
+                  <option value="expert_pending">En attente expert</option>
+                  <option value="client_pending">En attente client</option>
+                  <option value="approved">Accepté</option>
+                </select>
+              </label>
+              <label>N° devis<input name="estimateNumber" placeholder="DV-SRV-..." /></label>
+              <label>N° OR<input name="orNumber" placeholder="OR-SRV-..." /></label>
+            </div>
+            <div class="approval-row">
+              <label class="check-card"><input type="checkbox" name="expertApproved" /><span>Accord expert</span></label>
+              <label class="check-card"><input type="checkbox" name="clientApproved" /><span>Accord client</span></label>
+              <label class="check-card"><input type="checkbox" name="includeInPlanning" checked /><span>Inclure dans planning global</span></label>
+              <button class="primary-button" type="submit">Ajouter ordre de réparation</button>
+            </div>
+          </form>
+          <p class="muted">Importez chaque devis dans son ordre de réparation. Assurance : accord expert + client. Demande client : devis client validé uniquement. Le planning additionne les interventions incluses.</p>
+          <div class="claim-list" data-field="claims"></div>
+        </section>
+      </section>
+
+      <section class="case-panel" data-case-panel="photos" hidden>
+        <section class="detail-section full-width">
+          <div class="section-heading">
+            <h2>Photos dossier</h2>
+            <label class="photo-category-picker">Catégorie
+              <select id="photo-category">
+                <option value="before">Avant réparation</option>
+                <option value="supplement">Complément avant accord</option>
+                <option value="during">En cours</option>
+                <option value="after">Après réparation</option>
+              </select>
+            </label>
+            <label class="file-button">
+              <input type="file" id="photo-input" accept="image/*" multiple />
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h3l2-2h6l2 2h3v12H4z" /><circle cx="12" cy="13" r="3" /></svg>
+              Ajouter
+            </label>
+          </div>
+          <div class="photo-grid" data-field="photos"></div>
+        </section>
+      </section>
+
+      <section class="case-panel" data-case-panel="planning" hidden>
+        <section class="detail-section full-width">
+          <div class="section-heading">
+            <h2>Durées estimées</h2>
+            <span>Total atelier: <strong data-field="total-duration"></strong></span>
+          </div>
+          <div class="duration-grid" data-field="durations"></div>
+        </section>
+        <section class="detail-section full-width">
+          <div class="section-heading">
+            <h2>Prise / report de rendez-vous</h2>
+            <button class="primary-button" type="button" id="generate-proposals">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36" /><path d="M21 3v6h-6" /></svg>
+              Calculer RDV
+            </button>
+          </div>
+          <div class="appointment-actions">
+            <button class="ghost-button" type="button" id="mark-no-show">Client absent / RDV manqué</button>
+            <button class="ghost-button" type="button" id="reschedule-appointment">Reporter le RDV</button>
+          </div>
+          <div class="proposal-grid" data-field="proposals"></div>
+        </section>
+      </section>
+
+      <section class="case-panel" data-case-panel="atelier" hidden>
+        <section class="detail-section full-width">
+          <div class="section-heading">
+            <h2>Réception véhicule &amp; travaux atelier</h2>
+            <span data-field="delivery-estimate"></span>
+          </div>
+          <div class="approval-row">
+            <button class="primary-button" type="button" data-action-flag="received">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg>
+              Confirmer véhicule reçu
+            </button>
+            <button class="primary-button" type="button" data-action-flag="workStarted">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg>
+              Démarrer travaux
+            </button>
+            <button class="primary-button" type="button" data-action-flag="workCompleted">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg>
+              Terminer travaux
+            </button>
+          </div>
+          <div class="assignment-list" data-field="assignments"></div>
+        </section>
+        <section class="detail-section full-width">
+          <div class="section-heading">
+            <div>
+              <h2>Réparations complémentaires</h2>
+              <span>Ajouter un complément sans écraser le devis initial : photos, accord, MO et impact planning.</span>
+            </div>
+            <button class="ghost-button" type="button" id="print-supplement-orders">Imprimer compléments</button>
+          </div>
+          <form class="supplement-form" id="supplement-form">
+            <div class="form-grid">
+              <label>Titre du complément<input name="title" placeholder="Ex. Renfort arrière découvert au démontage" required /></label>
+              <label>Zone véhicule<input name="vehicleArea" placeholder="Ex. arrière gauche, jupe AR, malle" /></label>
+              <label>Statut
+                <select name="status">
+                  <option value="draft">Brouillon</option>
+                  <option value="expert_pending">En attente expert</option>
+                  <option value="client_pending">En attente client</option>
+                  <option value="approved">Accepté</option>
+                </select>
+              </label>
+              <label>Étape MO
+                <select name="phase">
+                  <option value="body">Tôlerie + démontage</option>
+                  <option value="mechanical">Réparation mécanique</option>
+                  <option value="electrical">Réparation électrique</option>
+                  <option value="prep">Préparation</option>
+                  <option value="paint">Peinture + vernis</option>
+                  <option value="reassembly">Remontage</option>
+                  <option value="finish">Finition + lavage</option>
+                </select>
+              </label>
+              <label class="wide">Motif / dommage découvert<textarea name="reason" rows="3" placeholder="Détail du dommage découvert pendant démontage ou réparation" required></textarea></label>
+              <label class="wide">Ligne main-d’œuvre complémentaire<input name="operation" placeholder="Ex. D/P renfort arrière complémentaire" /></label>
+              <label>Heures MO<input name="laborHours" type="text" inputmode="decimal" placeholder="Ex. 1,5" /></label>
+              <label class="wide">Pièces complémentaires<textarea name="parts" rows="3" placeholder="Une pièce par ligne. Exemple : Renfort pare-chocs arrière x1"></textarea></label>
+            </div>
+            <div class="approval-row">
+              <label class="check-card"><input type="checkbox" name="expertApproved" /><span>Accord expert reçu</span></label>
+              <label class="check-card"><input type="checkbox" name="clientApproved" /><span>Accord client reçu</span></label>
+              <button class="primary-button" type="submit">Ajouter complément</button>
+            </div>
+          </form>
+          <p class="muted">Astuce : ajoutez les photos justificatives dans l’onglet Photos avec la catégorie “Complément avant accord”.</p>
+          <div class="supplement-list" data-field="supplements"></div>
+        </section>
+      </section>
+
+      <section class="case-panel" data-case-panel="livraison" hidden>
+        <section class="detail-section full-width">
+          <div class="section-heading">
+            <h2>Contrôle qualité, livraison &amp; clôture</h2>
+          </div>
+          <div class="approval-row">
+            <label class="check-card"><input type="checkbox" data-toggle="qualityApproved" /><span>Contrôle qualité validé</span></label>
+            <label class="check-card"><input type="checkbox" data-toggle="delivered" /><span>Livraison effectuée</span></label>
+            <label class="check-card"><input type="checkbox" data-toggle="invoiced" /><span>Dossier Facturé &amp; Clôturé</span></label>
+          </div>
+          <div class="quality-checklist" data-field="quality-checklist"></div>
+        </section>
+        <section class="detail-section full-width">
+          <div class="section-heading">
+            <h2>Dossier Windows complet</h2>
+            <div class="case-actions">
+              <button class="primary-button" type="button" id="export-case-folder">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M7 10l5 5 5-5" /><path d="M12 15V3" /></svg>
+                Exporter dossier ZIP
+              </button>
+              <button class="ghost-button" type="button" id="export-client-folder">Exporter dossier client</button>
+              <button class="ghost-button danger-button" type="button" id="delete-case">Supprimer dossier</button>
+            </div>
+          </div>
+          <p class="muted" data-field="dossier-export-summary"></p>
+        </section>
+        <section class="detail-section full-width">
+          <div class="section-heading">
+            <h2>Historique du dossier</h2>
+            <span data-field="history-count"></span>
+          </div>
+          <div class="history-list" data-field="history"></div>
+        </section>
+      </section>
+    </template>
+
+    <div id="custom-modal-overlay" class="custom-modal-overlay" hidden>
+      <div class="custom-modal-content">
+        <h3 id="custom-modal-title">Confirmation</h3>
+        <div id="custom-modal-body"></div>
+        <div class="custom-modal-actions">
+          <button type="button" id="custom-modal-cancel" class="ghost-button">Annuler</button>
+          <button type="button" id="custom-modal-confirm" class="primary-button danger">Continuer</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="vendor/pdf.min.js" defer></script>
+    <script src="js/utils.js?v=22.02" defer></script>
+    <script src="js/state.js?v=22.02" defer></script>
+    <script src="js/ui-cases.js?v=22.02" defer></script>
+    <script src="js/estimate-import.js?v=22.02" defer></script>
+    <script src="js/ui-planning.js?v=22.02" defer></script>
+    <script src="js/photos.js?v=22.02" defer></script>
+    <script src="js/storage.js?v=22.02" defer></script>
+    <script src="js/planning.js?v=22.02" defer></script>
+    <script src="js/exports.js?v=22.02" defer></script>
+    <script src="js/business-rules-v2187.js?v=22.02" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
+    <script src="js/supabase-config.js?v=22.02" defer></script>
+    <script src="js/supabase-client.js?v=22.02" defer></script>
+    <script src="js/supabase-sync.js?v=22.02" defer></script>
+    <script src="app.js?v=22.02" defer></script>
+  </body>
+</html>
+

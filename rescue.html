@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>NIMR Carrosserie - Secours données</title>
+  <style>
+    :root { font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #0f172a; background: #eef4f8; }
+    body { margin: 0; padding: 32px; }
+    main { max-width: 900px; margin: 0 auto; background: white; border-radius: 24px; padding: 28px; box-shadow: 0 16px 40px rgba(15, 23, 42, 0.12); }
+    h1 { margin-top: 0; font-size: 28px; }
+    h2 { margin-top: 28px; font-size: 20px; }
+    p, li { line-height: 1.55; color: #334155; }
+    .actions { display: flex; flex-wrap: wrap; gap: 12px; margin: 22px 0; }
+    button, a.button { border: 0; border-radius: 14px; padding: 12px 16px; font-weight: 700; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; color: white; background: #0f4c6e; }
+    button.secondary, a.secondary { background: #64748b; }
+    button.danger { background: #b45309; }
+    button:disabled { opacity: .55; cursor: not-allowed; }
+    #status { white-space: pre-wrap; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 14px; padding: 14px; min-height: 90px; }
+    .ok { color: #047857; font-weight: 700; }
+    .warn { color: #b45309; font-weight: 700; }
+    .error { color: #b91c1c; font-weight: 700; }
+    code { background: #f1f5f9; padding: 2px 6px; border-radius: 6px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Secours données - NIMR Carrosserie</h1>
+  <p>Cette page sert à sauver les données locales de <code>localhost:3000</code> sans ouvrir DevTools. Elle ne supprime ni les dossiers, ni les photos, ni IndexedDB.</p>
+
+  <div class="actions">
+    <button id="export-btn">1. Télécharger une sauvegarde</button>
+    <button id="cache-btn" class="danger">2. Réparer le cache sans supprimer les données</button>
+    <a class="button secondary" href="./index.html">3. Retour à l'application</a>
+  </div>
+
+  <h2>État</h2>
+  <div id="status">Chargement...</div>
+
+  <h2>Mode d'emploi recommandé</h2>
+  <ol>
+    <li>Clique d'abord sur <strong>Télécharger une sauvegarde</strong>.</li>
+    <li>Vérifie qu'un fichier <code>nimr-carrosserie-sauvetage-....json</code> est bien téléchargé.</li>
+    <li>Clique ensuite sur <strong>Réparer le cache sans supprimer les données</strong>.</li>
+    <li>Retourne à l'application et recharge la page.</li>
+    <li>Si les données n'apparaissent pas, utilise l'import sauvegarde de l'application avec le fichier JSON téléchargé.</li>
+  </ol>
+</main>
+
+<script>
+(function () {
+  const STORAGE_KEY = "nimr-carrosserie-v1";
+  const DB_NAME = "nimr-carrosserie-db";
+  const PHOTO_STORE = "photos";
+  const BACKUP_APP_ID = "nimr-carrosserie";
+  const BACKUP_FORMAT_VERSION = 2;
+  const status = document.getElementById("status");
+  const exportBtn = document.getElementById("export-btn");
+  const cacheBtn = document.getElementById("cache-btn");
+
+  function log(message, cls) {
+    const line = document.createElement("div");
+    line.textContent = message;
+    if (cls) line.className = cls;
+    status.appendChild(line);
+  }
+
+  function resetStatus(message) {
+    status.textContent = "";
+    log(message);
+  }
+
+  function todayKey() {
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  function blobToDataUrl(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error || new Error("Lecture photo impossible"));
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  function openDb() {
+    return new Promise((resolve, reject) => {
+      if (!window.indexedDB) return resolve(null);
+      const request = indexedDB.open(DB_NAME, 1);
+      request.onerror = () => resolve(null);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains(PHOTO_STORE)) db.createObjectStore(PHOTO_STORE, { keyPath: "id" });
+      };
+      request.onsuccess = () => resolve(request.result);
+    });
+  }
+
+  async function readAllPhotos() {
+    const db = await openDb();
+    if (!db || !db.objectStoreNames.contains(PHOTO_STORE)) return [];
+    return new Promise((resolve) => {
+      const tx = db.transaction(PHOTO_STORE, "readonly");
+      const store = tx.objectStore(PHOTO_STORE);
+      const request = store.getAll();
+      request.onerror = () => resolve([]);
+      request.onsuccess = async () => {
+        const rows = Array.isArray(request.result) ? request.result : [];
+        const photos = [];
+        for (const photo of rows) {
+          try {
+            photos.push({
+              id: photo.id,
+              caseId: photo.caseId,
+              name: photo.name,
+              type: photo.type,
+              size: photo.size,
+              createdAt: photo.createdAt,
+              dataUrl: photo.blob ? await blobToDataUrl(photo.blob) : photo.dataUrl || null,
+            });
+          } catch (error) {
+            photos.push({ id: photo.id, caseId: photo.caseId, name: photo.name, error: "Photo non exportée" });
+          }
+        }
+        resolve(photos);
+      };
+    });
+  }
+
+  function downloadJson(payload, filename) {
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function readState() {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return { state: { cases: [], resources: [], bookings: [], holidays: [] }, rawState: null, parseError: null };
+    try {
+      return { state: JSON.parse(raw), rawState: raw, parseError: null };
+    } catch (error) {
+      return { state: { cases: [], resources: [], bookings: [], holidays: [] }, rawState: raw, parseError: String(error && error.message || error) };
+    }
+  }
+
+  async function exportBackup() {
+    exportBtn.disabled = true;
+    resetStatus("Préparation de la sauvegarde...");
+    try {
+      const { state, rawState, parseError } = readState();
+      const photos = await readAllPhotos();
+      const localStorageSnapshot = {};
+      for (let i = 0; i < localStorage.length; i += 1) {
+        const key = localStorage.key(i);
+        localStorageSnapshot[key] = localStorage.getItem(key);
+      }
+      const payload = {
+        app: BACKUP_APP_ID,
+        version: BACKUP_FORMAT_VERSION,
+        appVersion: "rescue-page-v21.7",
+        workshopName: "NIMR Carrosserie",
+        exportedAt: new Date().toISOString(),
+        warning: "Sauvegarde de secours: contient donnees clients, telephones, VIN, immatriculations, historique et photos.",
+        state,
+        photos,
+        rescue: {
+          origin: location.origin,
+          storageKey: STORAGE_KEY,
+          rawState,
+          parseError,
+          localStorageSnapshot,
+        },
+      };
+      downloadJson(payload, `nimr-carrosserie-sauvetage-${todayKey()}.json`);
+      log(`Sauvegarde téléchargée: ${(state.cases || []).length} dossier(s), ${photos.length} photo(s).`, "ok");
+      if (parseError) log("Attention: l'état principal était partiellement illisible, mais une copie brute a été incluse dans le fichier.", "warn");
+    } catch (error) {
+      console.error(error);
+      log("Export impossible: " + (error && error.message ? error.message : error), "error");
+    } finally {
+      exportBtn.disabled = false;
+    }
+  }
+
+  async function repairCacheOnly() {
+    cacheBtn.disabled = true;
+    resetStatus("Réparation du cache en cours... Les données locales ne sont pas supprimées.");
+    try {
+      if (navigator.serviceWorker) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        for (const reg of regs) await reg.unregister();
+        log(`${regs.length} service worker(s) désactivé(s).`, "ok");
+      } else {
+        log("Service worker non disponible dans ce navigateur.", "warn");
+      }
+      if (window.caches) {
+        const keys = await caches.keys();
+        for (const key of keys) await caches.delete(key);
+        log(`${keys.length} cache(s) supprimé(s).`, "ok");
+      } else {
+        log("CacheStorage non disponible dans ce navigateur.", "warn");
+      }
+      log("Terminé. Tu peux retourner à l'application et recharger la page.", "ok");
+    } catch (error) {
+      console.error(error);
+      log("Réparation cache impossible: " + (error && error.message ? error.message : error), "error");
+    } finally {
+      cacheBtn.disabled = false;
+    }
+  }
+
+  async function inspect() {
+    resetStatus("Analyse du stockage local...");
+    const { state, parseError } = readState();
+    const photos = await readAllPhotos();
+    log(`Origine: ${location.origin}`);
+    log(`Dossiers trouvés: ${(state.cases || []).length}`);
+    log(`Photos trouvées: ${photos.length}`);
+    if (parseError) log("Attention: JSON localStorage illisible: " + parseError, "warn");
+    log("Avant toute réparation, télécharge une sauvegarde.", "warn");
+  }
+
+  exportBtn.addEventListener("click", exportBackup);
+  cacheBtn.addEventListener("click", repairCacheOnly);
+  inspect();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+{
+  "name": "NIMR Carrosserie",
+  "short_name": "NIMR",
+  "description": "Gestion atelier carrosserie, devis, rendez-vous et planning Gantt.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#eaf0f3",
+  "theme_color": "#11415f",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "assets/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

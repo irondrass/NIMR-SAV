@@ -1,0 +1,1119 @@
+const $ = (selector, root = document) => root.querySelector(selector);
+const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+
+const STORAGE_KEY = "nimr-carrosserie-v1";
+const STORAGE_MIRROR_KEY = `${STORAGE_KEY}:mirror`;
+const STORAGE_SNAPSHOTS_KEY = `${STORAGE_KEY}:snapshots`;
+const STORAGE_META_KEY = `${STORAGE_KEY}:meta`;
+const SESSION_EMERGENCY_KEY = `${STORAGE_KEY}:session-emergency`;
+const AUTOSAVE_SNAPSHOT_LIMIT = 8;
+const AUTOSAVE_CLOUD_DEBOUNCE_MS = 45000;
+const DB_NAME = "nimr-carrosserie-db";
+const DB_VERSION = 2;
+const PHOTO_STORE = "photos";
+const DOCUMENT_STORE = "documents";
+const VEHICLE_DATA_URL = "data/vehicles.json";
+const STEP_MINUTES = 15;
+const FAST_LANE_DEFAULT_HOURS = 4;
+const APP_VERSION = "v22.01";
+const BACKUP_APP_ID = "nimr-carrosserie";
+const BACKUP_FORMAT_VERSION = 2;
+const WORKSHOP_NAME = "NIMR Carrosserie";
+const MAX_ESTIMATE_IMPORT_SIZE = 10 * 1024 * 1024;
+const ESTIMATE_IMPORT_EXTENSIONS = ["pdf", "xlsx", "csv"];
+const MAX_PHOTO_SIZE = 8 * 1024 * 1024;
+const MAX_BACKUP_IMPORT_SIZE = 50 * 1024 * 1024;
+const MAX_PHOTO_EDGE = 1600;
+const PHOTO_JPEG_QUALITY = 0.82;
+const ALLOWED_PHOTO_TYPES = ["image/jpeg", "image/png", "image/webp"];
+const MAX_PLANNING_SEARCH_DAYS = 90;
+const MAX_PLANNING_ITERATIONS = 10000;
+const RECEPTION_GRACE_HOURS = 2;
+const DELIVERY_ALERT_HOURS = 4;
+const MAX_STEP_DURATION_HOURS = 80;
+
+const DEFAULT_WORK_HOURS = {
+  0: [],
+  1: [
+    ["08:00", "12:00"],
+    ["13:00", "17:00"],
+  ],
+  2: [
+    ["08:00", "12:00"],
+    ["13:00", "17:00"],
+  ],
+  3: [
+    ["08:00", "12:00"],
+    ["13:00", "17:00"],
+  ],
+  4: [
+    ["08:00", "12:00"],
+    ["13:00", "17:00"],
+  ],
+  5: [
+    ["08:00", "12:00"],
+    ["13:00", "17:00"],
+  ],
+  6: [["08:00", "13:00"]],
+};
+
+const DEFAULT_DURATIONS = {
+  body: 6,
+  oilService: 0,
+  mechanical: 0,
+  electrical: 0,
+  prep: 4,
+  paint: 3,
+  reassembly: 4,
+  finish: 2,
+  quality: 0.25,
+};
+
+const DURATIONS = [
+  ["body", "Tôlerie + démontage"],
+  ["oilService", "Vidange / entretien rapide"],
+  ["mechanical", "Réparation mécanique"],
+  ["electrical", "Réparation électrique"],
+  ["prep", "Préparation"],
+  ["paint", "Peinture + vernis"],
+  ["reassembly", "Remontage"],
+  ["finish", "Finition + lavage"],
+  ["quality", "Contrôle qualité"],
+];
+
+const DEFAULT_QUALITY_CHECKS = [
+  "Alignement carrosserie",
+  "Teinte et vernis",
+  "Remontage accessoires",
+  "Nettoyage intérieur/extérieur",
+  "Essai final et validation client",
+];
+
+const PHOTO_CATEGORIES = {
+  before: "Avant réparation",
+  during: "En cours",
+  after: "Après réparation",
+  supplement: "Complément avant accord",
+};
+
+
+const CLAIM_STATUS_LABELS = {
+  draft: "Brouillon",
+  expert_pending: "En attente expert",
+  client_pending: "En attente client",
+  approved: "Accepté",
+  refused: "Refusé",
+  planned: "Planifié",
+  done: "Terminé",
+};
+
+const ACTION_LABELS = {
+  claim: "Créer le premier ordre de réparation",
+  expertApproved: "Valider l'accord expert",
+  clientApproved: "Confirmer l'accord client",
+  appointment: "Fixer le RDV de dépôt",
+  received: "Confirmer la réception véhicule",
+  workStarted: "Démarrer les travaux",
+  workCompleted: "Terminer les travaux",
+  qualityApproved: "Valider le contrôle qualité",
+  delivered: "Livrer le véhicule",
+  invoiced: "Facturer le dossier",
+};
+
+const FLAG_HISTORY_EVENTS = {
+  expertApproved: { on: ["expert.approved", "Accord expert validé"] },
+  clientApproved: {
+    on: ["client.approved", "Accord client reçu"],
+    off: ["client.revoked", "Accord client retiré"],
+  },
+  received: { on: ["vehicle.received", "Véhicule reçu à l'atelier"] },
+  workStarted: { on: ["work.started", "Travaux démarrés"], off: ["work.paused", "Travaux remis en attente"] },
+  workCompleted: { on: ["work.completed", "Travaux terminés"], off: ["work.reopened", "Travaux rouverts"] },
+  qualityApproved: {
+    on: ["quality.approved", "Contrôle qualité validé"],
+    off: ["quality.revoked", "Contrôle qualité annulé"],
+  },
+  delivered: {
+    on: ["vehicle.delivered", "Livraison effectuée"],
+    off: ["vehicle.delivery.revoked", "Livraison annulée"],
+  },
+  invoiced: {
+    on: ["case.invoiced", "Dossier facturé et clôturé"],
+    off: ["case.invoice.revoked", "Facturation annulée"],
+  },
+};
+
+const WORKFLOW = [
+  ["created", "Fiche dossier"],
+  ["photos", "Photos avant réparation"],
+  ["expert", "Expert assigné"],
+  ["expertApproved", "Accord expert"],
+  ["clientApproved", "Accord client"],
+  ["appointment", "RDV fixé"],
+  ["vehiclePending", "En attente réception"],
+  ["received", "Véhicule reçu"],
+  ["assigned", "Travaux planifiés"],
+  ["workStarted", "Travaux en cours"],
+  ["workCompleted", "Travaux terminés"],
+  ["qualityApproved", "Contrôle qualité"],
+  ["delivered", "Livraison"],
+  ["invoiced", "Dossier facturé"],
+];
+
+const STEP_TEMPLATES = [
+  {
+    key: "body",
+    title: "Tôlerie + démontage",
+    role: "tolier",
+    color: "#1d6b75",
+  },
+  {
+    key: "oilService",
+    title: "Vidange / entretien rapide",
+    role: "mecanicien",
+    equipmentRole: "pont_vidange",
+    color: "#4c7f54",
+  },
+  {
+    key: "mechanical",
+    title: "Réparation mécanique",
+    role: "mecanicien",
+    equipmentRole: "pont_mecanique",
+    color: "#5f6f35",
+  },
+  {
+    key: "prep",
+    title: "Préparation avant peinture",
+    role: "peintre",
+    equipmentRole: "zone_preparation",
+    color: "#806045",
+  },
+  {
+    key: "paint",
+    title: "Peinture + vernis",
+    role: "peintre",
+    equipmentRole: "cabine",
+    color: "#b54040",
+  },
+  {
+    key: "electrical",
+    title: "Réparation électrique",
+    role: "electricien",
+    color: "#6f4d9a",
+  },
+  {
+    key: "reassembly",
+    title: "Remontage",
+    role: "tolier",
+    color: "#11415f",
+  },
+  {
+    key: "finish",
+    title: "Finition + lavage",
+    role: "peintre",
+    color: "#c96336",
+  },
+  {
+    key: "quality",
+    title: "Contrôle qualité",
+    role: "controle",
+    color: "#1f7a54",
+  },
+];
+
+const ROLE_LABELS = {
+  tolier: "Tôlier",
+  mecanicien: "Mécanicien",
+  electricien: "Électricien",
+  peintre: "Peintre",
+  zone_preparation: "Zone de préparation",
+  cabine: "Cabine peinture",
+  pont_vidange: "Pont vidange",
+  pont_mecanique: "Pont grands travaux mécaniques",
+  controle: "Contrôle qualité",
+};
+
+
+const SERVICE_TYPE_OPTIONS = [
+  ["auto", "Automatique"],
+  ["tolerie", "Tôlerie"],
+  ["mecanique", "Mécanique"],
+  ["electrique", "Électrique"],
+  ["peinture", "Peinture"],
+];
+
+const SERVICE_TYPE_CONFIG = {
+  auto: { label: "Automatique" },
+  tolerie: { label: "Tôlerie", role: "tolier", title: "Tôlerie / carrosserie" },
+  mecanique: { label: "Mécanique", role: "mecanicien", title: "Réparation mécanique", equipmentRole: "pont_mecanique" },
+  electrique: { label: "Électrique", role: "electricien", title: "Réparation électrique", equipmentRole: null },
+  peinture: { label: "Peinture", role: "peintre", title: "Peinture / préparation" },
+};
+
+const ESTIMATE_PLANNING_KEYS = ["body", "oilService", "mechanical", "electrical", "prep", "paint", "reassembly", "finish"];
+const ESTIMATE_ALLOWED_KEYS = [...ESTIMATE_PLANNING_KEYS, "quality"];
+
+const statusLabels = {
+  estimate: "Fiche dossier",
+  approvals: "Accords",
+  appointment: "RDV à fixer",
+  appointmentScheduled: "RDV fixé",
+  noShow: "Client absent",
+  awaitingVehicle: "En attente réception véhicule",
+  vehicleReceived: "Véhicule reçu",
+  workScheduled: "Travaux planifiés",
+  work: "En travaux",
+  quality: "Contrôle qualité",
+  delivered: "Livré",
+  invoiced: "Clôturé & Facturé",
+};
+
+const DAY_LABELS = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"];
+let vehicleRecords = [];
+let vehicleDatabaseLoaded = false;
+
+let photoDbPromise = null;
+const photoObjectUrls = new Map();
+const legacyPhotoPayloads = new Map();
+
+let state = loadState();
+let activeTab = "dossiers";
+let activeCaseId = state.cases[0]?.id ?? null;
+let activeCaseDetailTab = "resume";
+let generatedProposals = {};
+let estimateImportPreviews = {};
+
+function notifyUser(message, variant = "info") {
+  const text = Array.isArray(message) ? message.join("\n") : String(message || "");
+  if (!text) return;
+  const region = $("#toast-region");
+  if (!region) {
+    console.warn(text);
+    return;
+  }
+  const toast = document.createElement("div");
+  toast.className = `toast toast-${variant}`;
+  toast.setAttribute("role", variant === "error" ? "alert" : "status");
+  toast.textContent = text;
+  region.appendChild(toast);
+  window.setTimeout(() => {
+    toast.classList.add("toast-leaving");
+    window.setTimeout(() => toast.remove(), 220);
+  }, variant === "error" ? 6500 : 4200);
+}
+
+
+function uid(prefix) {
+  return `${prefix}-${Math.random().toString(36).slice(2, 9)}-${Date.now().toString(36)}`;
+}
+
+function createDefaultState() {
+  const today = new Date();
+  const tomorrow = addDays(today, 1);
+  const demoCaseId = uid("case");
+  const stateSeed = {
+    cases: [
+      {
+        id: demoCaseId,
+        clientName: "Client démonstration",
+        phone: "+216 00 000 000",
+        vehicle: "Peugeot 208",
+        plate: "123 TU 4567",
+        color: "Blanc",
+        vin: "VF3DEMO2026",
+        insurance: "Assurance exemple",
+        orNavNumber: "OR-NAV-2026-001",
+        damageNotes: "Aile avant droite, pare-chocs et peinture.",
+        expertName: "Expert assigné",
+        expertPhone: "+216 00 111 222",
+        expertEmail: "expert@example.com",
+        expertEstimate: {
+          reference: "",
+          confirmed: false,
+          confirmedAt: "",
+          lines: [],
+        },
+        claims: [],
+        createdAt: today.toISOString(),
+        history: [makeHistoryEntry("case.created", "Dossier de démonstration créé", today.toISOString())],
+        photos: [],
+        durations: { ...DEFAULT_DURATIONS },
+        flags: {
+          expertApproved: false,
+          clientApproved: false,
+          received: false,
+          workStarted: false,
+          workCompleted: false,
+          qualityApproved: false,
+          delivered: false,
+        },
+        appointmentStatus: "none",
+        qualityChecklist: createEmptyQualityChecklist(),
+        appointment: null,
+      },
+    ],
+    resources: [
+      { id: "tolier-1", name: "Tôlier 1", role: "tolier", location: "Poste tôlerie A", active: true },
+      { id: "tolier-2", name: "Tôlier 2", role: "tolier", location: "Poste tôlerie B", active: true, fastLane: true },
+      { id: "mecanicien-1", name: "Mécanicien 1", role: "mecanicien", location: "Poste mécanique", active: true },
+      { id: "electricien-1", name: "Électricien 1", role: "electricien", location: "Poste électrique", active: true },
+      { id: "peintre-1", name: "Peintre 1", role: "peintre", location: "Zone peinture", active: true },
+      { id: "peintre-2", name: "Peintre 2", role: "peintre", location: "Préparation", active: true, fastLane: true },
+      { id: "zone-preparation-1", name: "Zone de préparation", role: "zone_preparation", location: "Zone préparation 1", active: true },
+      { id: "cabine-1", name: "Cabine peinture", role: "cabine", location: "Cabine 1", active: true },
+      { id: "controle-1", name: "Chef atelier", role: "controle", location: "Contrôle final", active: true },
+      { id: "pont-vidange-1", name: "Pont vidange 1", role: "pont_vidange", location: "Service rapide", active: true },
+      { id: "pont-vidange-2", name: "Pont vidange 2", role: "pont_vidange", location: "Service rapide", active: true },
+      { id: "pont-vidange-3", name: "Pont vidange 3", role: "pont_vidange", location: "Service rapide", active: true },
+      { id: "pont-mecanique-1", name: "Pont mécanique 1", role: "pont_mecanique", location: "Grands travaux", active: true },
+      { id: "pont-mecanique-2", name: "Pont mécanique 2", role: "pont_mecanique", location: "Grands travaux", active: true },
+      { id: "pont-mecanique-3", name: "Pont mécanique 3", role: "pont_mecanique", location: "Grands travaux", active: true },
+    ],
+    bookings: [],
+    holidays: [
+      { date: `${today.getFullYear()}-01-01`, label: "Nouvel an" },
+      { date: `${today.getFullYear()}-03-20`, label: "Indépendance" },
+      { date: `${today.getFullYear()}-04-09`, label: "Martyrs" },
+      { date: `${today.getFullYear()}-05-01`, label: "Travail" },
+    ],
+    planningDate: todayKey(tomorrow),
+    settings: {
+      fastLaneEnabled: true,
+      fastLaneMaxHours: FAST_LANE_DEFAULT_HOURS,
+      planningLogicVersion: 0,
+    },
+    workHours: cloneWorkHours(DEFAULT_WORK_HOURS),
+    ui: {
+      caseStatusFilter: "all",
+      caseTypeFilter: "all",
+      caseSort: "recent",
+    },
+  };
+  return stateSeed;
+}
+
+function parseStoredStateCandidate(raw, source) {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    const stateCandidate = parsed?.state && Array.isArray(parsed.state.cases) ? parsed.state : parsed;
+    if (!stateCandidate || !Array.isArray(stateCandidate.cases)) return null;
+    return {
+      source,
+      state: normalizeState(stateCandidate),
+      updatedAt: parsed?.savedAt || parsed?.updatedAt || parsed?.exportedAt || parsed?.state?.updatedAt || "",
+      casesCount: stateCandidate.cases.length,
+    };
+  } catch (error) {
+    console.warn(`Sauvegarde locale illisible (${source})`, error);
+    return null;
+  }
+}
+
+function getLocalStateCandidates() {
+  const candidates = [];
+  candidates.push(parseStoredStateCandidate(localStorage.getItem(STORAGE_KEY), "principal"));
+  candidates.push(parseStoredStateCandidate(localStorage.getItem(STORAGE_MIRROR_KEY), "miroir"));
+  if (typeof sessionStorage !== "undefined") {
+    candidates.push(parseStoredStateCandidate(sessionStorage.getItem(SESSION_EMERGENCY_KEY), "session"));
+  }
+  try {
+    const snapshots = JSON.parse(localStorage.getItem(STORAGE_SNAPSHOTS_KEY) || "[]");
+    if (Array.isArray(snapshots)) {
+      snapshots.forEach((snapshot, index) => {
+        const candidate = parseStoredStateCandidate(JSON.stringify(snapshot), `snapshot ${index + 1}`);
+        if (candidate) candidates.push(candidate);
+      });
+    }
+  } catch (error) {
+    console.warn("Snapshots locales illisibles", error);
+  }
+  return candidates.filter(Boolean);
+}
+
+function scoreStoredStateCandidate(candidate) {
+  const nonDemoCases = (candidate.state?.cases || []).filter((item) => item.clientName !== "Client démonstration").length;
+  const bookings = Array.isArray(candidate.state?.bookings) ? candidate.state.bookings.length : 0;
+  const resources = Array.isArray(candidate.state?.resources) ? candidate.state.resources.length : 0;
+  const timestamp = candidate.updatedAt ? new Date(candidate.updatedAt).getTime() || 0 : 0;
+  return nonDemoCases * 1000000 + bookings * 5000 + resources * 100 + Math.floor(timestamp / 1000000000);
+}
+
+function loadState() {
+  const candidates = getLocalStateCandidates();
+  if (candidates.length) {
+    candidates.sort((left, right) => scoreStoredStateCandidate(right) - scoreStoredStateCandidate(left));
+    const chosen = candidates[0];
+    if (chosen.source !== "principal") {
+      console.warn(`Restauration automatique depuis sauvegarde ${chosen.source}.`);
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(chosen.state));
+      } catch (error) {
+        console.warn("Impossible de réécrire la sauvegarde principale", error);
+      }
+    }
+    return chosen.state;
+  }
+  return createDefaultState();
+}
+
+function normalizeState(raw) {
+  raw = raw && typeof raw === "object" ? raw : {};
+  const seed = createDefaultState();
+  const resources = Array.isArray(raw.resources) ? raw.resources.map(normalizeResource) : seed.resources;
+  seed.resources.forEach((defaultResource) => {
+    if (!resources.some((resource) => resource.id === defaultResource.id) && !resources.some((resource) => resource.role === defaultResource.role && !["pont_vidange", "pont_mecanique"].includes(defaultResource.role))) {
+      resources.push(normalizeResource(defaultResource));
+    }
+  });
+  ensureMinimumEquipmentResources(resources, seed.resources, "pont_vidange", 3);
+  ensureMinimumEquipmentResources(resources, seed.resources, "pont_mecanique", 3);
+  return {
+    cases: Array.isArray(raw.cases) ? raw.cases.map(normalizeCase) : seed.cases,
+    resources,
+    bookings: normalizeBookings(raw.bookings, resources),
+    holidays: Array.isArray(raw.holidays) ? raw.holidays : seed.holidays,
+    planningDate: raw.planningDate || todayKey(new Date()),
+    settings: {
+      ...seed.settings,
+      ...(raw.settings || {}),
+    },
+    workHours: normalizeWorkHours(raw.workHours || seed.workHours),
+    ui: normalizeUiPreferences(raw.ui || seed.ui),
+  };
+}
+
+
+function ensureMinimumEquipmentResources(resources, defaults, role, minimum) {
+  const current = resources.filter((resource) => resource.role === role);
+  defaults.filter((resource) => resource.role === role).forEach((defaultResource) => {
+    if (current.length >= minimum) return;
+    if (!resources.some((resource) => resource.id === defaultResource.id)) {
+      const normalized = normalizeResource(defaultResource);
+      resources.push(normalized);
+      current.push(normalized);
+    }
+  });
+}
+
+function normalizeUiPreferences(ui = {}) {
+  const allowedSorts = new Set(["recent", "oldest", "client", "appointment"]);
+  const allowedStatuses = new Set(["all", ...Object.keys(statusLabels)]);
+  const allowedTypes = new Set(["all", "assurance", "client", "vidange", "mechanical_client", "electrical_client", "garantie"]);
+  return {
+    caseStatusFilter: allowedStatuses.has(ui.caseStatusFilter) ? ui.caseStatusFilter : "all",
+    caseTypeFilter: allowedTypes.has(ui.caseTypeFilter) ? ui.caseTypeFilter : "all",
+    caseSort: allowedSorts.has(ui.caseSort) ? ui.caseSort : "recent",
+  };
+}
+
+
+function normalizeStepServiceTypes(value = {}) {
+  const normalized = {};
+  const allowed = new Set(SERVICE_TYPE_OPTIONS.map(([key]) => key));
+  DURATIONS.forEach(([key]) => {
+    const raw = value?.[key] || "auto";
+    normalized[key] = allowed.has(raw) ? raw : "auto";
+  });
+  return normalized;
+}
+
+function normalizeStepPreferredResources(value = {}) {
+  const normalized = {};
+  DURATIONS.forEach(([key]) => {
+    const raw = value?.[key] || "";
+    normalized[key] = typeof raw === "string" ? raw : "";
+  });
+  return normalized;
+}
+
+function normalizeDurations(durations = {}) {
+  const normalized = { ...DEFAULT_DURATIONS };
+  DURATIONS.forEach(([key]) => {
+    const value = parseLocalizedDecimal(durations[key] ?? normalized[key]);
+    normalized[key] = Math.min(MAX_STEP_DURATION_HOURS, Math.max(0, roundHours(value)));
+  });
+  normalized.quality = 0.25;
+  return normalized;
+}
+
+function normalizeBookings(bookings, resources) {
+  const resourceIds = new Set((resources || []).map((resource) => resource.id));
+  return Array.isArray(bookings)
+    ? bookings.map((booking) => normalizeBooking(booking, resourceIds)).filter(Boolean)
+    : [];
+}
+
+function normalizeBooking(booking, resourceIds) {
+  if (!booking || typeof booking !== "object") return null;
+  const ids = Array.isArray(booking.resourceIds)
+    ? booking.resourceIds.filter((id) => !resourceIds.size || resourceIds.has(id))
+    : [];
+  const segments = Array.isArray(booking.segments)
+    ? booking.segments
+        .map((segment) => ({
+          start: segment?.start || booking.start,
+          end: segment?.end || booking.end,
+        }))
+        .filter((segment) => isValidDateValue(segment.start) && isValidDateValue(segment.end) && new Date(segment.start) < new Date(segment.end))
+    : [];
+  const type = booking.type || "work";
+  const caseId = booking.caseId || (type === "leave" ? "__leave__" : "");
+  if (!caseId || !ids.length || !segments.length) return null;
+  return {
+    id: booking.id || uid(type === "leave" ? "leave" : "booking"),
+    caseId,
+    type,
+    title: booking.title || (type === "leave" ? "Congé / absence" : "Travail atelier"),
+    key: booking.key || (type === "leave" ? "leave" : "body"),
+    start: booking.start || segments[0].start,
+    end: booking.end || segments.at(-1).end,
+    delivery: booking.delivery || "",
+    resourceIds: ids,
+    primaryResourceId: booking.primaryResourceId || ids[0] || null,
+    segments,
+    color: booking.color || (type === "leave" ? "#6b7280" : "#11415f"),
+    temporary: Boolean(booking.temporary),
+  };
+}
+
+function isValidDateValue(value) {
+  return value && !Number.isNaN(new Date(value).getTime());
+}
+
+function normalizeResource(resource) {
+  return {
+    id: resource.id || uid("resource"),
+    name: resource.name || "Ressource",
+    role: resource.role || "tolier",
+    location: resource.location || "",
+    active: resource.active !== false,
+    fastLane: Boolean(resource.fastLane),
+  };
+}
+
+function normalizeCase(item) {
+  item = item && typeof item === "object" ? item : {};
+  return {
+    id: item.id || uid("case"),
+    clientName: item.clientName || "Client",
+    phone: item.phone || "",
+    vehicle: item.vehicle || "",
+    plate: item.plate || "",
+    color: item.color || "",
+    planningColor: isValidVehiclePlanningColor(item.planningColor) ? item.planningColor : "",
+    mileage: item.mileage || item.kilometrage || item.kilométrage || "",
+    vin: item.vin || "",
+    insurance: item.insurance || "",
+    orNavNumber: item.orNavNumber || item.claimNumber || "",
+    damageNotes: item.damageNotes || "",
+    arrivalNotes: item.arrivalNotes || item.receptionNotes || "",
+    expertName: item.expertName || "",
+    expertPhone: item.expertPhone || "",
+    expertEmail: item.expertEmail || "",
+    expertEstimate: normalizeExpertEstimate(item.expertEstimate),
+    createdAt: item.createdAt || new Date().toISOString(),
+    history: normalizeHistory(item.history, item.createdAt),
+    photos: Array.isArray(item.photos) ? item.photos.map(normalizePhotoMeta) : [],
+    durations: normalizeDurations(item.durations),
+    stepServiceTypes: normalizeStepServiceTypes(item.stepServiceTypes),
+    stepPreferredResources: normalizeStepPreferredResources(item.stepPreferredResources),
+    flags: {
+      expertApproved: false,
+      clientApproved: false,
+      received: false,
+      workStarted: false,
+      workCompleted: false,
+      qualityApproved: false,
+      delivered: false,
+      invoiced: false,
+      ...(item.flags || {}),
+    },
+    appointmentStatus: item.appointmentStatus || (item.appointment ? "scheduled" : "none"),
+    qualityChecklist: normalizeQualityChecklist(item.qualityChecklist),
+    appointment: item.appointment || null,
+    claims: normalizeRepairClaims(item.claims, item),
+    supplements: normalizeRepairSupplements(item.supplements),
+  };
+}
+
+function normalizeRepairClaims(claims = [], item = {}) {
+  const source = Array.isArray(claims) ? claims : [];
+  const normalized = source
+    .map((claim, index) => normalizeRepairClaim(claim, index))
+    .filter((claim) => claim && !isEmptyLegacyAutoClaim(claim, item));
+  return normalized.map((claim, index) => ({ ...claim, number: claim.number || `SIN-${String(index + 1).padStart(3, "0")}` }));
+}
+
+function isEmptyLegacyAutoClaim(claim, item = {}) {
+  const noEstimate = !claim.estimateNumber && !claim.orNumber && !(claim.estimate?.lines || []).length && !(claim.estimate?.originalLines || []).length;
+  const noApprovals = !claim.expertApproved && !claim.clientApproved;
+  const defaultTitle = !claim.title || claim.title === "Sinistre principal" || claim.title === item.damageNotes || claim.title === item.expertEstimate?.reference;
+  return claim.number === "SIN-001" && defaultTitle && noEstimate && noApprovals;
+}
+
+function hasRepairClaims(item) {
+  return normalizeRepairClaims(item?.claims || [], item).length > 0;
+}
+
+
+function isClientOnlyRepairClaim(claim) {
+  return ["client", "vidange", "mechanical_client", "electrical_client"].includes(claim?.type);
+}
+
+function getClaimTypeLabel(type) {
+  const labels = {
+    assurance: "Assurance / expert",
+    client: "Client - carrosserie",
+    vidange: "Client - vidange",
+    mechanical_client: "Client - mécanique",
+    electrical_client: "Client - électrique",
+    garantie: "Garantie",
+  };
+  return labels[type] || type || "Assurance / expert";
+}
+
+function isInsuranceRepairClaim(claim) {
+  return !isClientOnlyRepairClaim(claim);
+}
+
+function getClientQualityHours(totalProductiveHours) {
+  return Number(totalProductiveHours || 0) <= FAST_LANE_DEFAULT_HOURS ? 0.25 : 1;
+}
+
+function normalizeRepairClaim(claim, index = 0) {
+  claim = claim && typeof claim === "object" ? claim : {};
+  const createdAt = claim.createdAt || new Date().toISOString();
+  return {
+    id: claim.id || uid("claim"),
+    number: claim.number || `SIN-${String(index + 1).padStart(3, "0")}`,
+    title: claim.title || claim.label || `Sinistre ${index + 1}`,
+    vehicleArea: claim.vehicleArea || claim.area || "",
+    type: claim.type || "assurance",
+    status: normalizeClaimStatus(claim.status),
+    includeInPlanning: claim.includeInPlanning !== false,
+    expertApproved: Boolean(claim.expertApproved),
+    clientApproved: Boolean(claim.clientApproved),
+    estimateNumber: claim.estimateNumber || claim.estimate?.reference || "",
+    orNumber: claim.orNumber || "",
+    amount: Math.max(0, parseLocalizedDecimal(claim.amount || 0) || 0),
+    estimate: normalizeExpertEstimate(claim.estimate),
+    createdAt,
+    updatedAt: claim.updatedAt || createdAt,
+  };
+}
+
+function normalizeClaimStatus(status) {
+  const allowed = new Set(Object.keys(CLAIM_STATUS_LABELS));
+  return allowed.has(status) ? status : "draft";
+}
+
+function getClaimLabel(claim) {
+  return [claim.number, claim.title, claim.vehicleArea].filter(Boolean).join(" - ");
+}
+
+function recomputeCaseDurationsFromClaims(item) {
+  const claims = normalizeRepairClaims(item.claims, item);
+  const hasClaimLabor = claims.some((claim) => claim.includeInPlanning !== false && claim.estimate?.lines?.some((line) => Number(line.laborHours || 0) > 0));
+  if (!hasClaimLabor) return false;
+  const totals = Object.fromEntries(ESTIMATE_ALLOWED_KEYS.map((key) => [key, 0]));
+  const includedClaims = claims.filter((claim) => claim.includeInPlanning !== false);
+  includedClaims.forEach((claim) => {
+    (claim.estimate?.lines || []).forEach((line) => {
+      if (!(line.phase in totals)) return;
+      totals[line.phase] = roundHours(Number(totals[line.phase] || 0) + Number(line.laborHours || 0));
+    });
+  });
+  const hasInsuranceClaim = includedClaims.some((claim) => isInsuranceRepairClaim(claim));
+  const productiveTotal = ["body", "oilService", "mechanical", "electrical", "prep", "paint", "reassembly"].reduce((sum, key) => sum + Number(totals[key] || 0), 0);
+  if (hasInsuranceClaim) {
+    totals.finish = roundHours(Number(totals.paint || 0) * 0.5);
+    totals.quality = 0.25;
+  } else {
+    totals.finish = 0;
+    totals.quality = productiveTotal > 0 ? 0.25 : 0;
+  }
+  DURATIONS.forEach(([key]) => {
+    item.durations[key] = roundHours(totals[key] || 0);
+  });
+  item.claims = claims;
+  return true;
+}
+
+function normalizeRepairSupplements(supplements = []) {
+  return Array.isArray(supplements) ? supplements.map(normalizeRepairSupplement).filter(Boolean) : [];
+}
+
+function normalizeRepairSupplement(supplement) {
+  supplement = supplement && typeof supplement === "object" ? supplement : {};
+  const createdAt = supplement.createdAt || new Date().toISOString();
+  return {
+    id: supplement.id || uid("supplement"),
+    number: supplement.number || "",
+    title: supplement.title || "Réparation complémentaire",
+    reason: supplement.reason || "",
+    vehicleArea: supplement.vehicleArea || "",
+    status: normalizeSupplementStatus(supplement.status),
+    expertApproved: Boolean(supplement.expertApproved),
+    clientApproved: Boolean(supplement.clientApproved),
+    integrated: Boolean(supplement.integrated),
+    integratedAt: supplement.integratedAt || "",
+    createdAt,
+    updatedAt: supplement.updatedAt || createdAt,
+    parts: Array.isArray(supplement.parts) ? supplement.parts.map((part) => ({
+      id: part.id || uid("supplement-part"),
+      designation: part.designation || part.name || "Pièce complémentaire",
+      quantity: Math.max(0, parseLocalizedDecimal(part.quantity ?? 1) || 0),
+      notes: part.notes || "",
+    })) : [],
+    laborLines: Array.isArray(supplement.laborLines) ? supplement.laborLines.map(normalizeRepairSupplementLine).filter(Boolean) : [],
+  };
+}
+
+function normalizeSupplementStatus(status) {
+  const allowed = new Set(["draft", "expert_pending", "client_pending", "approved", "refused", "planned", "done"]);
+  return allowed.has(status) ? status : "draft";
+}
+
+function normalizeRepairSupplementLine(line) {
+  line = line && typeof line === "object" ? line : {};
+  const phase = DURATIONS.some(([key]) => key === line.phase) ? line.phase : "body";
+  const hours = parseLocalizedDecimal(line.laborHours ?? line.hours ?? 0);
+  if (!line.operation && !hours) return null;
+  return {
+    id: line.id || uid("supplement-line"),
+    phase,
+    operation: line.operation || getDurationLabel(phase) || "Opération complémentaire",
+    laborHours: Math.min(MAX_STEP_DURATION_HOURS, Math.max(0, roundHours(hours))),
+  };
+}
+
+const SUPPLEMENT_STATUS_LABELS = {
+  draft: "Brouillon",
+  expert_pending: "En attente expert",
+  client_pending: "En attente client",
+  approved: "Accepté",
+  refused: "Refusé",
+  planned: "Intégré au planning",
+  done: "Terminé",
+};
+
+function normalizeExpertEstimate(estimate) {
+  estimate = estimate && typeof estimate === "object" ? estimate : {};
+  return {
+    reference: estimate.reference || "",
+    confirmed: Boolean(estimate.confirmed),
+    confirmedAt: estimate.confirmedAt || "",
+    lines: Array.isArray(estimate.lines) ? estimate.lines.map(normalizeExpertEstimateLine).filter(Boolean) : [],
+    originalLines: Array.isArray(estimate.originalLines) ? estimate.originalLines.map(normalizeExpertEstimateOriginalLine).filter(Boolean) : [],
+    parts: Array.isArray(estimate.parts) ? estimate.parts.map(normalizeExpertEstimatePart).filter(Boolean) : [],
+    sourceFile: normalizeEstimateSourceFile(estimate.sourceFile),
+  };
+}
+
+function normalizeExpertEstimatePart(part) {
+  part = part && typeof part === "object" ? part : {};
+  const designation = String(part.designation || part.name || part.rawText || "").trim();
+  if (!designation) return null;
+  return {
+    id: part.id || uid("estimate-part"),
+    designation,
+    quantity: Math.max(0, parseLocalizedDecimal(part.quantity ?? 1) || 0),
+    unitPrice: Math.max(0, parseLocalizedDecimal(part.unitPrice ?? 0) || 0),
+    amount: Math.max(0, parseLocalizedDecimal(part.amount ?? 0) || 0),
+    rawText: part.rawText || designation,
+  };
+}
+
+function normalizeEstimateSourceFile(sourceFile) {
+  if (!sourceFile || typeof sourceFile !== "object") return null;
+  return {
+    id: sourceFile.id || uid("estimate-doc"),
+    name: sourceFile.name || "devis-original.pdf",
+    type: sourceFile.type || "application/octet-stream",
+    size: Number(sourceFile.size || 0),
+    category: sourceFile.category || "estimate_original",
+    createdAt: sourceFile.createdAt || new Date().toISOString(),
+  };
+}
+
+function normalizeExpertEstimateLine(line) {
+  line = line && typeof line === "object" ? line : {};
+  const phase = DURATIONS.some(([key]) => key === line.phase) ? line.phase : "body";
+  const laborHours = parseLocalizedDecimal(line.laborHours ?? line.hours ?? line.quantity ?? 0);
+  return {
+    id: line.id || uid("estimate-line"),
+    phase,
+    operation: line.operation || "",
+    laborHours: roundHours(laborHours),
+  };
+}
+
+function normalizeExpertEstimateOriginalLine(line) {
+  line = line && typeof line === "object" ? line : {};
+  const laborHours = parseLocalizedDecimal(line.laborHours ?? line.hours ?? line.quantity ?? 0);
+  const allocations = Array.isArray(line.allocations)
+    ? line.allocations.map((allocation) => ({
+        phase: DURATIONS.some(([key]) => key === allocation.phase) ? allocation.phase : "body",
+        operation: allocation.operation || line.operation || "",
+        laborHours: roundHours(parseLocalizedDecimal(allocation.laborHours ?? allocation.hours ?? 0)),
+      })).filter((allocation) => allocation.laborHours > 0)
+    : [];
+  const normalizedPieceKind = ["new", "repair"].includes(line.pieceKind) ? line.pieceKind : "";
+  const normalizedPaintFaces = ["outside", "two_sides"].includes(line.paintFaces) ? line.paintFaces : "";
+  return {
+    id: line.id || uid("estimate-original-line"),
+    operation: line.operation || line.text || "",
+    laborHours: roundHours(laborHours),
+    rawText: line.rawText || line.text || line.operation || "",
+    allocations,
+    selectedPhases: Array.isArray(line.selectedPhases) ? line.selectedPhases.filter((phase) => DURATIONS.some(([key]) => key === phase)) : undefined,
+    pieceKind: normalizedPieceKind,
+    paintFaces: normalizedPaintFaces,
+    paintGroup: line.paintGroup || "",
+  };
+}
+
+function normalizeHistory(history, fallbackDate) {
+  const normalized = Array.isArray(history)
+    ? history
+        .map((entry) => ({
+          id: entry.id || uid("history"),
+          at: entry.at || fallbackDate || new Date().toISOString(),
+          type: entry.type || "note",
+          label: entry.label || "Action dossier",
+          details: entry.details || "",
+          user: entry.user || "Atelier",
+        }))
+        .filter((entry) => entry.label)
+    : [];
+
+  if (!normalized.length) {
+    normalized.push(makeHistoryEntry("case.created", "Dossier créé", fallbackDate || new Date().toISOString()));
+  }
+
+  return normalized.sort((a, b) => new Date(b.at) - new Date(a.at));
+}
+
+function makeHistoryEntry(type, label, at = new Date().toISOString(), details = "") {
+  return {
+    id: uid("history"),
+    at,
+    type,
+    label,
+    details,
+    user: "Atelier",
+  };
+}
+
+function addHistory(item, type, label, details = "") {
+  if (!item) return;
+  item.history = Array.isArray(item.history) ? item.history : normalizeHistory([], item.createdAt);
+  item.history.unshift(makeHistoryEntry(type, label, new Date().toISOString(), details));
+  item.history = item.history.slice(0, 200);
+}
+
+function recordFlagHistory(item, flag, checked) {
+  const event = FLAG_HISTORY_EVENTS[flag]?.[checked ? "on" : "off"];
+  if (event) addHistory(item, event[0], event[1]);
+}
+
+function clearCasePlanning(item, reason = "Planning atelier annulé") {
+  const hadPlanning = Boolean(item.appointment) || state.bookings.some((booking) => booking.caseId === item.id);
+  state.bookings = state.bookings.filter((booking) => booking.caseId !== item.id);
+  item.appointment = null;
+  item.flags.received = false;
+  item.flags.workStarted = false;
+  item.flags.workCompleted = false;
+  item.flags.qualityApproved = false;
+  item.flags.delivered = false;
+  item.appointmentStatus = "none";
+  item.qualityChecklist = createEmptyQualityChecklist();
+  generatedProposals[item.id] = null;
+  if (hadPlanning) addHistory(item, "planning.cleared", reason);
+}
+
+function buildAutosaveEnvelope() {
+  return {
+    app: BACKUP_APP_ID,
+    appVersion: APP_VERSION,
+    formatVersion: BACKUP_FORMAT_VERSION,
+    savedAt: new Date().toISOString(),
+    state,
+  };
+}
+
+function writeStateSnapshot(envelope) {
+  try {
+    const snapshots = JSON.parse(localStorage.getItem(STORAGE_SNAPSHOTS_KEY) || "[]");
+    const nextSnapshots = Array.isArray(snapshots) ? snapshots : [];
+    const previous = nextSnapshots[0];
+    const previousCases = JSON.stringify(previous?.state?.cases || []);
+    const currentCases = JSON.stringify(envelope.state?.cases || []);
+    if (previousCases !== currentCases || nextSnapshots.length === 0) {
+      nextSnapshots.unshift(envelope);
+      localStorage.setItem(STORAGE_SNAPSHOTS_KEY, JSON.stringify(nextSnapshots.slice(0, AUTOSAVE_SNAPSHOT_LIMIT)));
+    }
+  } catch (error) {
+    console.warn("Impossible d'écrire les snapshots de sécurité", error);
+  }
+}
+
+function saveState(options = {}) {
+  try {
+    const envelope = buildAutosaveEnvelope();
+    const stateJson = JSON.stringify(state);
+    localStorage.setItem(STORAGE_KEY, stateJson);
+    localStorage.setItem(STORAGE_MIRROR_KEY, JSON.stringify(envelope));
+    localStorage.setItem(STORAGE_META_KEY, JSON.stringify({ savedAt: envelope.savedAt, appVersion: APP_VERSION, casesCount: state.cases.length }));
+    if (typeof sessionStorage !== "undefined") sessionStorage.setItem(SESSION_EMERGENCY_KEY, JSON.stringify(envelope));
+    if (!options.skipSnapshot) writeStateSnapshot(envelope);
+    if (!options.skipCloud && typeof scheduleAutoSupabaseBackup === "function") {
+      scheduleAutoSupabaseBackup("local-save");
+    }
+  } catch (error) {
+    console.error("Impossible d'enregistrer les données locales", error);
+    notifyUser("Le stockage local est saturé. Exportez une sauvegarde JSON depuis Atelier > Sauvegarde.", "error");
+  }
+}
+
+function forceEmergencyAutosave() {
+  try {
+    const envelope = buildAutosaveEnvelope();
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    localStorage.setItem(STORAGE_MIRROR_KEY, JSON.stringify(envelope));
+    if (typeof sessionStorage !== "undefined") sessionStorage.setItem(SESSION_EMERGENCY_KEY, JSON.stringify(envelope));
+  } catch (error) {
+    console.warn("Sauvegarde d'urgence impossible", error);
+  }
+}
+
+function normalizePhotoMeta(photo) {
+  const { dataUrl, ...meta } = photo || {};
+  const id = meta.id || uid("photo");
+  if (dataUrl) legacyPhotoPayloads.set(id, dataUrl);
+  return {
+    id,
+    name: meta.name || "Photo sinistre",
+    type: meta.type || "",
+    size: Number(meta.size || 0),
+    category: normalizePhotoCategory(meta.category),
+    createdAt: meta.createdAt || new Date().toISOString(),
+  };
+}
+
+function normalizePhotoCategory(category) {
+  return PHOTO_CATEGORIES[category] ? category : "before";
+}
+
+function getPhotoCategoryLabel(category) {
+  return PHOTO_CATEGORIES[normalizePhotoCategory(category)];
+}
+
+function createEmptyQualityChecklist() {
+  return DEFAULT_QUALITY_CHECKS.reduce((checks, label) => {
+    checks[label] = false;
+    return checks;
+  }, {});
+}
+
+function normalizeQualityChecklist(checklist = {}) {
+  return DEFAULT_QUALITY_CHECKS.reduce((checks, label) => {
+    checks[label] = Boolean(checklist[label]);
+    return checks;
+  }, {});
+}
+
+function cloneWorkHours(workHours) {
+  return Object.fromEntries(Object.entries(workHours).map(([day, intervals]) => [day, intervals.map((interval) => [...interval])]));
+}
+
+function normalizeWorkHours(workHours) {
+  const normalized = cloneWorkHours(DEFAULT_WORK_HOURS);
+  Object.entries(workHours || {}).forEach(([day, intervals]) => {
+    const parsed = Array.isArray(intervals)
+      ? intervals
+          .filter((interval) => Array.isArray(interval) && interval.length === 2)
+          .map(([start, end]) => [String(start), String(end)])
+      : [];
+    if (Number.isInteger(Number(day)) && Number(day) >= 0 && Number(day) <= 6) {
+      normalized[day] = parsed;
+    }
+  });
+  return normalized;
+}
+
+function showConfirmModal(htmlMessage) {
+  return new Promise((resolve) => {
+    const overlay = document.getElementById("custom-modal-overlay");
+    const body = document.getElementById("custom-modal-body");
+    const cancelBtn = document.getElementById("custom-modal-cancel");
+    const confirmBtn = document.getElementById("custom-modal-confirm");
+    
+    if (!overlay || !body || !cancelBtn || !confirmBtn) {
+      resolve(confirm(htmlMessage.replace(/<br>/g, '\n')));
+      return;
+    }
+
+    body.innerHTML = htmlMessage;
+    overlay.hidden = false;
+
+    const cleanup = () => {
+      overlay.hidden = true;
+      cancelBtn.removeEventListener("click", onCancel);
+      confirmBtn.removeEventListener("click", onConfirm);
+    };
+
+    const onCancel = () => {
+      cleanup();
+      resolve(false);
+    };
+
+    const onConfirm = () => {
+      cleanup();
+      resolve(true);
+    };
+
+    cancelBtn.addEventListener("click", onCancel);
+    confirmBtn.addEventListener("click", onConfirm);
+  });
+}
+
+function showPromptModal(htmlMessage, expectedText) {
+  return new Promise((resolve) => {
+    const overlay = document.getElementById("custom-modal-overlay");
+    const body = document.getElementById("custom-modal-body");
+    const cancelBtn = document.getElementById("custom-modal-cancel");
+    const confirmBtn = document.getElementById("custom-modal-confirm");
+    
+    if (!overlay || !body || !cancelBtn || !confirmBtn) {
+      resolve(prompt(htmlMessage.replace(/<br>/g, '\n')) === expectedText);
+      return;
+    }
+
+    body.innerHTML = `${htmlMessage}<br><br><input type="text" id="prompt-input" style="width: 100%; padding: 8px; border: 1px solid #cfe0e8; border-radius: 8px;" placeholder="${expectedText}" autocomplete="off" />`;
+    overlay.hidden = false;
+    
+    const input = document.getElementById("prompt-input");
+    input.focus();
+
+    const cleanup = () => {
+      overlay.hidden = true;
+      cancelBtn.removeEventListener("click", onCancel);
+      confirmBtn.removeEventListener("click", onConfirm);
+    };
+
+    const onCancel = () => {
+      cleanup();
+      resolve(false);
+    };
+
+    const onConfirm = () => {
+      cleanup();
+      resolve(input.value.trim().toUpperCase() === expectedText.toUpperCase());
+    };
+
+    cancelBtn.addEventListener("click", onCancel);
+    confirmBtn.addEventListener("click", onConfirm);
+  });
+}

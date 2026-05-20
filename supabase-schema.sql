@@ -1,0 +1,412 @@
+-- NIMR Carrosserie v21.27 - Schema Supabase complet
+-- A executer dans Supabase > SQL Editor > New query > Run.
+-- Cette version garde cloud_backups comme sauvegarde complete et remplit aussi
+-- les tables metier visibles dans Table Editor: clients, vehicles, repair_orders, app_settings, etc.
+
+create extension if not exists "pgcrypto";
+
+-- Correctif v21.10 : l'ancien script pouvait creer order_number en UNIQUE.
+-- En carrosserie, un ancien import ou une reprise peut contenir un numero OR en double.
+-- On garde local_id comme cle de synchronisation et on rend order_number non bloquant.
+alter table public.repair_orders drop constraint if exists repair_orders_order_number_key;
+drop index if exists public.repair_orders_order_number_key;
+create index if not exists repair_orders_order_number_idx on public.repair_orders(order_number);
+
+
+create table if not exists public.cloud_backups (
+  id uuid primary key default gen_random_uuid(),
+  backup_key text not null unique,
+  app_version text,
+  state jsonb not null,
+  photos jsonb not null default '[]'::jsonb,
+  cases_count integer not null default 0,
+  photos_count integer not null default 0,
+  updated_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.app_settings (
+  id uuid primary key default gen_random_uuid(),
+  setting_key text not null unique,
+  value jsonb not null default '{}'::jsonb,
+  description text,
+  updated_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.clients (
+  id uuid primary key default gen_random_uuid(),
+  local_id text,
+  full_name text not null,
+  phone text,
+  email text,
+  address text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.vehicles (
+  id uuid primary key default gen_random_uuid(),
+  local_id text,
+  client_id uuid references public.clients(id) on delete set null,
+  vin text,
+  registration text,
+  brand text,
+  model text,
+  mileage integer,
+  color text,
+  energy text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.repair_orders (
+  id uuid primary key default gen_random_uuid(),
+  local_id text,
+  order_number text,
+  client_id uuid references public.clients(id) on delete set null,
+  vehicle_id uuid references public.vehicles(id) on delete set null,
+  status text not null default 'new',
+  expert_agreement boolean default false,
+  client_agreement boolean default false,
+  reception_planned_at timestamptz,
+  reception_done_at timestamptz,
+  delivery_planned_at timestamptz,
+  delivery_done_at timestamptz,
+  estimated_amount numeric(12,2),
+  customer_balance numeric(12,2),
+  notes text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.repair_steps (
+  id uuid primary key default gen_random_uuid(),
+  local_id text,
+  repair_order_id uuid not null references public.repair_orders(id) on delete cascade,
+  step_key text not null,
+  label text not null,
+  status text not null default 'todo',
+  planned_hours numeric(8,2) default 0,
+  actual_hours numeric(8,2) default 0,
+  started_at timestamptz,
+  completed_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.planning_resources (
+  id uuid primary key default gen_random_uuid(),
+  local_id text,
+  name text not null,
+  type text not null,
+  capacity numeric(8,2) default 1,
+  active boolean not null default true,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.planning_slots (
+  id uuid primary key default gen_random_uuid(),
+  local_id text,
+  repair_order_id uuid references public.repair_orders(id) on delete cascade,
+  resource_id uuid references public.planning_resources(id) on delete set null,
+  title text,
+  start_at timestamptz not null,
+  end_at timestamptz not null,
+  status text default 'planned',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.photos (
+  id uuid primary key default gen_random_uuid(),
+  local_id text,
+  repair_order_id uuid references public.repair_orders(id) on delete cascade,
+  step_key text,
+  storage_bucket text not null default 'repair-photos',
+  storage_path text not null,
+  filename text,
+  mime_type text,
+  size_bytes bigint,
+  created_at timestamptz not null default now()
+);
+
+
+
+create table if not exists public.repair_claims (
+  id uuid primary key default gen_random_uuid(),
+  local_id text unique,
+  repair_order_id uuid references public.repair_orders(id) on delete cascade,
+  claim_id uuid references public.repair_claims(id) on delete set null,
+  number text,
+  title text not null default 'Sinistre',
+  vehicle_area text,
+  type text default 'assurance',
+  status text not null default 'draft',
+  include_in_planning boolean default true,
+  expert_approved boolean default false,
+  client_approved boolean default false,
+  estimate_number text,
+  or_number text,
+  amount numeric(12,2),
+  source_file jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.repair_claim_labor_lines (
+  id uuid primary key default gen_random_uuid(),
+  local_id text unique,
+  claim_id uuid references public.repair_claims(id) on delete cascade,
+  phase text,
+  operation text,
+  labor_hours numeric(8,2) default 0,
+  raw_text text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.repair_supplements (
+  id uuid primary key default gen_random_uuid(),
+  local_id text unique,
+  repair_order_id uuid references public.repair_orders(id) on delete cascade,
+  claim_id uuid references public.repair_claims(id) on delete set null,
+  number text,
+  title text not null default 'Réparation complémentaire',
+  reason text,
+  vehicle_area text,
+  status text not null default 'draft',
+  expert_approved boolean default false,
+  client_approved boolean default false,
+  integrated boolean default false,
+  integrated_at timestamptz,
+  parts jsonb default '[]'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.repair_supplement_lines (
+  id uuid primary key default gen_random_uuid(),
+  local_id text unique,
+  supplement_id uuid references public.repair_supplements(id) on delete cascade,
+  phase text,
+  operation text,
+  labor_hours numeric(8,2) default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.audit_logs (
+  id uuid primary key default gen_random_uuid(),
+  local_id text,
+  repair_order_id uuid references public.repair_orders(id) on delete cascade,
+  action text not null,
+  entity_type text,
+  entity_id uuid,
+  before_data jsonb,
+  after_data jsonb,
+  created_at timestamptz not null default now()
+);
+
+-- Mise a niveau si les tables existaient deja avec un ancien script.
+alter table public.clients add column if not exists local_id text;
+alter table public.vehicles add column if not exists local_id text;
+alter table public.repair_orders add column if not exists local_id text;
+alter table public.repair_steps add column if not exists local_id text;
+alter table public.planning_resources add column if not exists local_id text;
+alter table public.planning_slots add column if not exists local_id text;
+alter table public.photos add column if not exists local_id text;
+alter table public.repair_claims add column if not exists local_id text;
+alter table public.repair_claims add column if not exists include_in_planning boolean default true;
+alter table public.repair_claims add column if not exists source_file jsonb;
+alter table public.repair_claim_labor_lines add column if not exists local_id text;
+alter table public.repair_supplements add column if not exists local_id text;
+alter table public.repair_supplements add column if not exists claim_id uuid references public.repair_claims(id) on delete set null;
+alter table public.repair_supplement_lines add column if not exists local_id text;
+alter table public.audit_logs add column if not exists local_id text;
+alter table public.planning_slots add column if not exists updated_at timestamptz not null default now();
+
+
+-- Correctif v21.27 : eviter les doublons crees par les anciennes versions.
+-- Le numero OR devient la cle stable de synchronisation quand il existe.
+-- Exemple: OR-NAV-2026-001 -> case-or:or-nav-2026-001
+with ranked_orders as (
+  select id,
+         row_number() over (
+           partition by order_number
+           order by updated_at desc nulls last, created_at desc nulls last, id desc
+         ) rn
+  from public.repair_orders
+  where coalesce(trim(order_number), '') <> ''
+)
+delete from public.repair_orders ro
+using ranked_orders r
+where ro.id = r.id and r.rn > 1;
+
+update public.repair_orders
+set local_id = 'case-or:' || trim(both '-' from lower(regexp_replace(trim(order_number), '[^a-zA-Z0-9]+', '-', 'g')))
+where coalesce(trim(order_number), '') <> '';
+
+-- Recalage des clients et vehicules rattaches au dossier conserve.
+update public.clients c
+set local_id = 'client:' || ro.local_id,
+    updated_at = now()
+from public.repair_orders ro
+where ro.client_id = c.id
+  and ro.local_id is not null
+  and ro.local_id like 'case-or:%';
+
+update public.vehicles v
+set local_id = 'vehicle:' || ro.local_id,
+    updated_at = now()
+from public.repair_orders ro
+where ro.vehicle_id = v.id
+  and ro.local_id is not null
+  and ro.local_id like 'case-or:%';
+
+-- Nettoyage des clients/vehicules orphelins generes par les essais precedents.
+delete from public.clients c
+where not exists (select 1 from public.repair_orders ro where ro.client_id = c.id);
+
+delete from public.vehicles v
+where not exists (select 1 from public.repair_orders ro where ro.vehicle_id = v.id);
+
+-- Nettoyage et recalage des etapes liees aux dossiers conserves.
+with ranked_steps as (
+  select id,
+         row_number() over (
+           partition by repair_order_id, step_key
+           order by updated_at desc nulls last, created_at desc nulls last, id desc
+         ) rn
+  from public.repair_steps
+  where repair_order_id is not null and step_key is not null
+)
+delete from public.repair_steps rs
+using ranked_steps r
+where rs.id = r.id and r.rn > 1;
+
+update public.repair_steps rs
+set local_id = ro.local_id || ':' || rs.step_key,
+    updated_at = now()
+from public.repair_orders ro
+where rs.repair_order_id = ro.id
+  and ro.local_id is not null
+  and ro.local_id like 'case-or:%';
+
+-- Nettoyage de securite avant creation des index uniques local_id.
+-- Si une ancienne sauvegarde a cree des doublons avec le meme local_id, on garde la ligne la plus recente.
+with ranked as (select id, row_number() over (partition by local_id order by updated_at desc nulls last, created_at desc nulls last, id desc) rn from public.clients where local_id is not null) delete from public.clients c using ranked r where c.id=r.id and r.rn>1;
+with ranked as (select id, row_number() over (partition by local_id order by updated_at desc nulls last, created_at desc nulls last, id desc) rn from public.vehicles where local_id is not null) delete from public.vehicles c using ranked r where c.id=r.id and r.rn>1;
+with ranked as (select id, row_number() over (partition by local_id order by updated_at desc nulls last, created_at desc nulls last, id desc) rn from public.repair_orders where local_id is not null) delete from public.repair_orders c using ranked r where c.id=r.id and r.rn>1;
+with ranked as (select id, row_number() over (partition by local_id order by updated_at desc nulls last, created_at desc nulls last, id desc) rn from public.repair_steps where local_id is not null) delete from public.repair_steps c using ranked r where c.id=r.id and r.rn>1;
+with ranked as (select id, row_number() over (partition by local_id order by created_at desc nulls last, id desc) rn from public.planning_resources where local_id is not null) delete from public.planning_resources c using ranked r where c.id=r.id and r.rn>1;
+with ranked as (select id, row_number() over (partition by local_id order by updated_at desc nulls last, created_at desc nulls last, id desc) rn from public.planning_slots where local_id is not null) delete from public.planning_slots c using ranked r where c.id=r.id and r.rn>1;
+with ranked as (select id, row_number() over (partition by local_id order by created_at desc nulls last, id desc) rn from public.photos where local_id is not null) delete from public.photos c using ranked r where c.id=r.id and r.rn>1;
+with ranked as (select id, row_number() over (partition by local_id order by updated_at desc nulls last, created_at desc nulls last, id desc) rn from public.repair_claims where local_id is not null) delete from public.repair_claims c using ranked r where c.id=r.id and r.rn>1;
+with ranked as (select id, row_number() over (partition by local_id order by updated_at desc nulls last, created_at desc nulls last, id desc) rn from public.repair_claim_labor_lines where local_id is not null) delete from public.repair_claim_labor_lines c using ranked r where c.id=r.id and r.rn>1;
+with ranked as (select id, row_number() over (partition by local_id order by updated_at desc nulls last, created_at desc nulls last, id desc) rn from public.repair_supplements where local_id is not null) delete from public.repair_supplements c using ranked r where c.id=r.id and r.rn>1;
+with ranked as (select id, row_number() over (partition by local_id order by updated_at desc nulls last, created_at desc nulls last, id desc) rn from public.repair_supplement_lines where local_id is not null) delete from public.repair_supplement_lines c using ranked r where c.id=r.id and r.rn>1;
+with ranked as (select id, row_number() over (partition by local_id order by created_at desc nulls last, id desc) rn from public.audit_logs where local_id is not null) delete from public.audit_logs c using ranked r where c.id=r.id and r.rn>1;
+
+-- Correctif v21.11: PostgREST/Supabase a besoin d'un index unique NON partiel pour ON CONFLICT(local_id).
+-- Les anciens index partiels sont donc supprimes puis recrees en index uniques simples.
+drop index if exists public.clients_local_id_uidx;
+drop index if exists public.vehicles_local_id_uidx;
+drop index if exists public.repair_orders_local_id_uidx;
+drop index if exists public.repair_steps_local_id_uidx;
+drop index if exists public.planning_resources_local_id_uidx;
+drop index if exists public.planning_slots_local_id_uidx;
+drop index if exists public.photos_local_id_uidx;
+drop index if exists public.audit_logs_local_id_uidx;
+drop index if exists public.repair_claims_local_id_uidx;
+drop index if exists public.repair_claim_labor_lines_local_id_uidx;
+drop index if exists public.repair_supplements_local_id_uidx;
+drop index if exists public.repair_supplement_lines_local_id_uidx;
+
+create unique index clients_local_id_uidx on public.clients(local_id);
+create unique index vehicles_local_id_uidx on public.vehicles(local_id);
+create unique index repair_orders_local_id_uidx on public.repair_orders(local_id);
+create unique index repair_steps_local_id_uidx on public.repair_steps(local_id);
+create unique index planning_resources_local_id_uidx on public.planning_resources(local_id);
+create unique index planning_slots_local_id_uidx on public.planning_slots(local_id);
+create unique index photos_local_id_uidx on public.photos(local_id);
+create unique index repair_claims_local_id_uidx on public.repair_claims(local_id);
+create unique index repair_claim_labor_lines_local_id_uidx on public.repair_claim_labor_lines(local_id);
+create unique index repair_supplements_local_id_uidx on public.repair_supplements(local_id);
+create unique index repair_supplement_lines_local_id_uidx on public.repair_supplement_lines(local_id);
+create unique index audit_logs_local_id_uidx on public.audit_logs(local_id);
+
+alter table public.cloud_backups enable row level security;
+alter table public.app_settings enable row level security;
+alter table public.clients enable row level security;
+alter table public.vehicles enable row level security;
+alter table public.repair_orders enable row level security;
+alter table public.repair_steps enable row level security;
+alter table public.planning_resources enable row level security;
+alter table public.planning_slots enable row level security;
+alter table public.photos enable row level security;
+alter table public.repair_claims enable row level security;
+alter table public.repair_claim_labor_lines enable row level security;
+alter table public.repair_supplements enable row level security;
+alter table public.repair_supplement_lines enable row level security;
+alter table public.audit_logs enable row level security;
+
+-- Policies simples pour demarrer: tout utilisateur connecte peut lire/ecrire.
+do $$
+declare
+  t text;
+  p text;
+begin
+  foreach t in array array['cloud_backups','app_settings','clients','vehicles','repair_orders','repair_steps','planning_resources','planning_slots','photos','repair_claims','repair_claim_labor_lines','repair_supplements','repair_supplement_lines','audit_logs']
+  loop
+    p := t || ' select authenticated';
+    if not exists (select 1 from pg_policies where schemaname='public' and tablename=t and policyname=p) then
+      execute format('create policy %I on public.%I for select to authenticated using (true)', p, t);
+    end if;
+
+    p := t || ' insert authenticated';
+    if not exists (select 1 from pg_policies where schemaname='public' and tablename=t and policyname=p) then
+      execute format('create policy %I on public.%I for insert to authenticated with check (true)', p, t);
+    end if;
+
+    p := t || ' update authenticated';
+    if not exists (select 1 from pg_policies where schemaname='public' and tablename=t and policyname=p) then
+      execute format('create policy %I on public.%I for update to authenticated using (true) with check (true)', p, t);
+    end if;
+
+    p := t || ' delete authenticated';
+    if not exists (select 1 from pg_policies where schemaname='public' and tablename=t and policyname=p) then
+      execute format('create policy %I on public.%I for delete to authenticated using (true)', p, t);
+    end if;
+  end loop;
+end $$;
+
+-- Bucket photos: a creer aussi dans Storage si besoin.
+insert into storage.buckets (id, name, public)
+values ('repair-photos', 'repair-photos', false)
+on conflict (id) do nothing;
+
+do $$
+begin
+  if not exists (select 1 from pg_policies where schemaname='storage' and tablename='objects' and policyname='repair photos read authenticated') then
+    create policy "repair photos read authenticated"
+    on storage.objects for select to authenticated using (bucket_id = 'repair-photos');
+  end if;
+  if not exists (select 1 from pg_policies where schemaname='storage' and tablename='objects' and policyname='repair photos insert authenticated') then
+    create policy "repair photos insert authenticated"
+    on storage.objects for insert to authenticated with check (bucket_id = 'repair-photos');
+  end if;
+  if not exists (select 1 from pg_policies where schemaname='storage' and tablename='objects' and policyname='repair photos update authenticated') then
+    create policy "repair photos update authenticated"
+    on storage.objects for update to authenticated using (bucket_id = 'repair-photos') with check (bucket_id = 'repair-photos');
+  end if;
+  if not exists (select 1 from pg_policies where schemaname='storage' and tablename='objects' and policyname='repair photos delete authenticated') then
+    create policy "repair photos delete authenticated"
+    on storage.objects for delete to authenticated using (bucket_id = 'repair-photos');
+  end if;
+end $$;
+
+-- Force PostgREST/Supabase API schema cache refresh after new tables.
+NOTIFY pgrst, 'reload schema';

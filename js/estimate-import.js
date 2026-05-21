@@ -71,7 +71,7 @@ async function handleClaimEstimateImportFile(event, item, claimId, root) {
   if (!item) return;
   const claim = (item.claims || []).find((candidate) => candidate.id === claimId);
   if (!claim) {
-    notifyUser("Sinistre introuvable.", "error");
+    notifyUser("Ordre de travail introuvable.", "error");
     return;
   }
   if (!file) return;
@@ -91,12 +91,12 @@ async function handleClaimEstimateImportFile(event, item, claimId, root) {
       claimType: claim.type || "assurance",
     });
     if (!parsed.laborLines.length) {
-      throw new Error("Aucune ligne de main-d'œuvre détectée pour ce sinistre.");
+      throw new Error("Aucune ligne de main-d'œuvre détectée pour cet ordre.");
     }
     const preview = prepareEstimateImportPreview(parsed, item);
     preview.sourceFile = {
       id: uid("estimate-doc"),
-      name: file.name || "devis-sinistre.pdf",
+      name: file.name || "devis-ordre.pdf",
       type: file.type || "application/octet-stream",
       size: file.size || 0,
       category: "claim_estimate_original",
@@ -107,8 +107,8 @@ async function handleClaimEstimateImportFile(event, item, claimId, root) {
     notifyUser(`Devis importé dans ${claim.number || claim.title}. Planning global recalculé.`, "success");
     renderCaseDetail();
   } catch (error) {
-    console.error("Import devis sinistre impossible", error);
-    notifyUser(error.message || "Import devis sinistre impossible.", "error");
+    console.error("Import devis ordre impossible", error);
+    notifyUser(error.message || "Import devis ordre impossible.", "error");
   }
 }
 
@@ -415,8 +415,8 @@ async function applyEstimateImportToCase(item, preview) {
   if (!mainClaim) {
     mainClaim = normalizeRepairClaim({
       id: uid("claim"),
-      number: "SIN-001",
-      title: preview.info?.vehicleArea || preview.info?.estimateNumber || "Sinistre principal",
+      number: "OT-001",
+      title: preview.info?.vehicleArea || preview.info?.estimateNumber || "Intervention principale",
       vehicleArea: preview.info?.vehicleArea || "",
       estimateNumber: cleanParsedEstimateNumber(preview.info?.estimateNumber) || "",
       orNumber: item.orNavNumber || "",
@@ -424,7 +424,7 @@ async function applyEstimateImportToCase(item, preview) {
       includeInPlanning: true,
     }, 0);
     item.claims.push(mainClaim);
-    addHistory(item, "claim.created", "Sinistre créé automatiquement", getClaimLabel(mainClaim));
+    addHistory(item, "claim.created", "Ordre créé automatiquement", getClaimLabel(mainClaim));
   }
   await applyEstimateImportToClaim(item, mainClaim, preview, { silent: true, keepGlobalHistory: true });
   recomputeCaseDurationsFromClaims(item);
@@ -557,7 +557,7 @@ function buildAppliedEstimateLines(preview) {
     .map((key) => ({
       id: uid("estimate-line"),
       phase: key,
-      operation: `Import devis validé - ${getDurationLabel(key)}`,
+      operation: `Import devis - ${getDurationLabel(key)}`,
       laborHours: roundPlanningHours(preview.durations[key]),
     }));
 }
@@ -1168,4 +1168,3 @@ function readCellValue(cell, sharedStrings) {
 function columnIndex(letters) {
   return [...letters].reduce((sum, letter) => sum * 26 + letter.charCodeAt(0) - 64, 0) - 1;
 }
-

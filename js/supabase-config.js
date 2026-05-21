@@ -1,4 +1,4 @@
-// Configuration Supabase NIMR Carrosserie.
+// Configuration Supabase NIMR SAV.
 // La clé ci-dessous est la clé publique anon fournie par Supabase.
 // Ne jamais placer la clé service_role dans cette application navigateur.
 window.NIMR_SUPABASE_CONFIG = {

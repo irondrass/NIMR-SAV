@@ -102,6 +102,7 @@
   }
 
   function shouldKeepOriginalLaborLine(line) {
+    if (line?.manual) return roundPlanningHours(Number(line?.laborHours ?? line?.hours ?? 0)) > 0;
     const operation = line?.operation || line?.rawText || line?.text || '';
     const normalized = normalizeEstimateOperationText(operation);
     const code = String(line?.code || lineCode(line?.rawText || line?.text || operation) || '').trim().toUpperCase();

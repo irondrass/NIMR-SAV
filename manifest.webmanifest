@@ -1,7 +1,7 @@
 {
-  "name": "NIMR Carrosserie",
-  "short_name": "NIMR",
-  "description": "Gestion atelier carrosserie, devis, rendez-vous et planning Gantt.",
+  "name": "NIMR SAV",
+  "short_name": "NIMR SAV",
+  "description": "Pilotage SAV, ordres de travail, rendez-vous et planning atelier global.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

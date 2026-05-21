@@ -7,7 +7,7 @@ const STORAGE_SNAPSHOTS_KEY = `${STORAGE_KEY}:snapshots`;
 const STORAGE_META_KEY = `${STORAGE_KEY}:meta`;
 const SESSION_EMERGENCY_KEY = `${STORAGE_KEY}:session-emergency`;
 const AUTOSAVE_SNAPSHOT_LIMIT = 8;
-const AUTOSAVE_CLOUD_DEBOUNCE_MS = 45000;
+const AUTOSAVE_CLOUD_DEBOUNCE_MS = 5000;
 const DB_NAME = "nimr-carrosserie-db";
 const DB_VERSION = 2;
 const PHOTO_STORE = "photos";
@@ -15,10 +15,10 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v22.06";
+const APP_VERSION = "v22.07";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
-const WORKSHOP_NAME = "NIMR Carrosserie";
+const WORKSHOP_NAME = "NIMR SAV";
 const MAX_ESTIMATE_IMPORT_SIZE = 10 * 1024 * 1024;
 const ESTIMATE_IMPORT_EXTENSIONS = ["pdf", "xlsx", "csv"];
 const MAX_PHOTO_SIZE = 8 * 1024 * 1024;
@@ -108,7 +108,7 @@ const CLAIM_STATUS_LABELS = {
 };
 
 const ACTION_LABELS = {
-  claim: "Créer le premier ordre de réparation",
+  claim: "Créer le premier ordre de travail",
   expertApproved: "Valider l'accord expert",
   clientApproved: "Confirmer l'accord client",
   appointment: "Fixer le RDV de dépôt",
@@ -663,14 +663,14 @@ function normalizeRepairClaims(claims = [], item = {}) {
   const normalized = source
     .map((claim, index) => normalizeRepairClaim(claim, index))
     .filter((claim) => claim && !isEmptyLegacyAutoClaim(claim, item));
-  return normalized.map((claim, index) => ({ ...claim, number: claim.number || `SIN-${String(index + 1).padStart(3, "0")}` }));
+  return normalized.map((claim, index) => ({ ...claim, number: claim.number || `OT-${String(index + 1).padStart(3, "0")}` }));
 }
 
 function isEmptyLegacyAutoClaim(claim, item = {}) {
   const noEstimate = !claim.estimateNumber && !claim.orNumber && !(claim.estimate?.lines || []).length && !(claim.estimate?.originalLines || []).length;
   const noApprovals = !claim.expertApproved && !claim.clientApproved;
-  const defaultTitle = !claim.title || claim.title === "Sinistre principal" || claim.title === item.damageNotes || claim.title === item.expertEstimate?.reference;
-  return claim.number === "SIN-001" && defaultTitle && noEstimate && noApprovals;
+  const defaultTitle = !claim.title || claim.title === "Sinistre principal" || claim.title === "Intervention principale" || claim.title === item.damageNotes || claim.title === item.expertEstimate?.reference;
+  return ["SIN-001", "OT-001"].includes(claim.number) && defaultTitle && noEstimate && noApprovals;
 }
 
 function hasRepairClaims(item) {
@@ -679,19 +679,20 @@ function hasRepairClaims(item) {
 
 
 function isClientOnlyRepairClaim(claim) {
-  return ["client", "vidange", "mechanical_client", "electrical_client"].includes(claim?.type);
+  return ["client", "vidange", "mechanical_client", "electrical_client", "diagnostic", "garantie"].includes(claim?.type);
 }
 
 function getClaimTypeLabel(type) {
   const labels = {
     assurance: "Assurance / expert",
-    client: "Client - carrosserie",
-    vidange: "Client - vidange",
-    mechanical_client: "Client - mécanique",
-    electrical_client: "Client - électrique",
-    garantie: "Garantie",
+    client: "Service carrosserie client",
+    vidange: "Service rapide / entretien",
+    mechanical_client: "Service mécanique",
+    electrical_client: "Service électrique",
+    diagnostic: "Diagnostic",
+    garantie: "Garantie constructeur",
   };
-  return labels[type] || type || "Assurance / expert";
+  return labels[type] || type || "Intervention SAV";
 }
 
 function isInsuranceRepairClaim(claim) {
@@ -707,8 +708,8 @@ function normalizeRepairClaim(claim, index = 0) {
   const createdAt = claim.createdAt || new Date().toISOString();
   return {
     id: claim.id || uid("claim"),
-    number: claim.number || `SIN-${String(index + 1).padStart(3, "0")}`,
-    title: claim.title || claim.label || `Sinistre ${index + 1}`,
+    number: claim.number || `OT-${String(index + 1).padStart(3, "0")}`,
+    title: claim.title || claim.label || `Intervention ${index + 1}`,
     vehicleArea: claim.vehicleArea || claim.area || "",
     type: claim.type || "assurance",
     status: normalizeClaimStatus(claim.status),
@@ -735,12 +736,12 @@ function getClaimLabel(claim) {
 
 function recomputeCaseDurationsFromClaims(item) {
   const claims = normalizeRepairClaims(item.claims, item);
-  const hasClaimLabor = claims.some((claim) => claim.includeInPlanning !== false && claim.estimate?.lines?.some((line) => Number(line.laborHours || 0) > 0));
+  const hasClaimLabor = claims.some((claim) => claim.includeInPlanning !== false && getClaimPlanningLaborLines(claim).some((line) => Number(line.laborHours || 0) > 0));
   if (!hasClaimLabor) return false;
   const totals = Object.fromEntries(ESTIMATE_ALLOWED_KEYS.map((key) => [key, 0]));
   const includedClaims = claims.filter((claim) => claim.includeInPlanning !== false);
   includedClaims.forEach((claim) => {
-    (claim.estimate?.lines || []).forEach((line) => {
+    getClaimPlanningLaborLines(claim).forEach((line) => {
       if (!(line.phase in totals)) return;
       totals[line.phase] = roundHours(Number(totals[line.phase] || 0) + Number(line.laborHours || 0));
     });
@@ -759,6 +760,23 @@ function recomputeCaseDurationsFromClaims(item) {
   });
   item.claims = claims;
   return true;
+}
+
+function getClaimPlanningLaborLines(claim) {
+  const applied = claim?.estimate?.lines || [];
+  if (applied.length) return applied;
+  return (claim?.estimate?.originalLines || []).flatMap((line) => {
+    if (Array.isArray(line.allocations) && line.allocations.length) {
+      return line.allocations.map((allocation) => ({
+        id: allocation.id || line.id,
+        phase: allocation.phase,
+        operation: allocation.operation || line.operation,
+        laborHours: allocation.laborHours,
+      }));
+    }
+    const phase = line.phase || line.selectedPhases?.[0] || "body";
+    return [{ id: line.id, phase, operation: line.operation || line.rawText || "", laborHours: line.laborHours }];
+  });
 }
 
 function normalizeRepairSupplements(supplements = []) {
@@ -884,6 +902,8 @@ function normalizeExpertEstimateOriginalLine(line) {
   const normalizedPaintFaces = ["outside", "two_sides"].includes(line.paintFaces) ? line.paintFaces : "";
   return {
     id: line.id || uid("estimate-original-line"),
+    code: line.code || "",
+    manual: Boolean(line.manual),
     operation: line.operation || line.text || "",
     laborHours: roundHours(laborHours),
     rawText: line.rawText || line.text || line.operation || "",
@@ -1019,7 +1039,7 @@ function normalizePhotoMeta(photo) {
   if (dataUrl) legacyPhotoPayloads.set(id, dataUrl);
   return {
     id,
-    name: meta.name || "Photo sinistre",
+    name: meta.name || "Photo dossier",
     type: meta.type || "",
     size: Number(meta.size || 0),
     category: normalizePhotoCategory(meta.category),

@@ -1,3 +1,11 @@
+# v22.07 - NIMR SAV global et synchronisation multi-PC
+
+- Renommage métier de l'application en NIMR SAV : le planning couvre service rapide, carrosserie, mécanique, électrique, diagnostic et garantie.
+- Ajout de la saisie manuelle de main-d’œuvre dans chaque ordre de travail, avec ajout/suppression de lignes et recalcul immédiat des durées planning.
+- Les ordres client, vidange, mécanique, électrique, diagnostic et garantie ne demandent plus d’accord expert assurance ; seul l’ordre assurance conserve le flux expert + client.
+- Synchronisation Supabase renforcée : sauvegarde cloud plus rapide, écoute Realtime de `cloud_backups` et polling de secours pour propager les changements entre plusieurs PC connectés.
+- Cache PWA incrémenté en v22.07.
+
 # v22.06 - Pilotage dynamique des tâches atelier
 
 - Ajout d'actions sur chaque tâche du planning validé : démarrer, terminer maintenant, mettre en pause avec cause et replanifier une tâche non démarrée.

@@ -1,4 +1,4 @@
--- NIMR Carrosserie v21.27 - Schema Supabase complet
+-- NIMR SAV v22.07 - Schema Supabase complet
 -- A executer dans Supabase > SQL Editor > New query > Run.
 -- Cette version garde cloud_backups comme sauvegarde complete et remplit aussi
 -- les tables metier visibles dans Table Editor: clients, vehicles, repair_orders, app_settings, etc.
@@ -6,7 +6,7 @@
 create extension if not exists "pgcrypto";
 
 -- Correctif v21.10 : l'ancien script pouvait creer order_number en UNIQUE.
--- En carrosserie, un ancien import ou une reprise peut contenir un numero OR en double.
+-- En atelier SAV, un ancien import ou une reprise peut contenir un numero OR en double.
 -- On garde local_id comme cle de synchronisation et on rend order_number non bloquant.
 alter table public.repair_orders drop constraint if exists repair_orders_order_number_key;
 drop index if exists public.repair_orders_order_number_key;
@@ -141,7 +141,7 @@ create table if not exists public.repair_claims (
   repair_order_id uuid references public.repair_orders(id) on delete cascade,
   claim_id uuid references public.repair_claims(id) on delete set null,
   number text,
-  title text not null default 'Sinistre',
+  title text not null default 'Ordre',
   vehicle_area text,
   type text default 'assurance',
   status text not null default 'draft',
@@ -409,4 +409,15 @@ begin
 end $$;
 
 -- Force PostgREST/Supabase API schema cache refresh after new tables.
+alter table public.cloud_backups replica identity full;
+do $$
+begin
+  begin
+    alter publication supabase_realtime add table public.cloud_backups;
+  exception
+    when duplicate_object then null;
+    when undefined_object then null;
+  end;
+end $$;
+
 NOTIFY pgrst, 'reload schema';

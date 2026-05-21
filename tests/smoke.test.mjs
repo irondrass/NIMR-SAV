@@ -102,7 +102,7 @@ assert.deepEqual(validBackup.photos, [], 'les photos de sauvegarde doivent être
 
 assert.throws(
   () => context.validateBackupPayload({ app: 'autre-application', version: 2, state: { cases: [] } }),
-  /ne provient pas de NIMR Carrosserie/,
+  /ne provient pas de NIMR SAV/,
   'un JSON externe ne doit pas être accepté comme sauvegarde',
 );
 assert.throws(
@@ -506,6 +506,21 @@ const clientFastCase = context.normalizeCase({
 context.recomputeCaseDurationsFromClaims(clientFastCase);
 assert.equal(clientFastCase.durations.finish, 0, 'les ordres client hors sinistre ne doivent pas ajouter finition/lavage');
 assert.equal(clientFastCase.durations.quality, 0.25, 'les réparations rapides client doivent garder 15 min de contrôle qualité');
+
+const manualLaborLine = context.buildManualClaimLaborLine({ phase: 'mechanical', operation: 'Diagnostic freinage', laborHours: '1,5' });
+const manualLaborCase = context.normalizeCase({
+  clientName: 'MO manuelle',
+  claims: [{
+    type: 'mechanical_client',
+    includeInPlanning: true,
+    expertApproved: true,
+    clientApproved: true,
+    estimate: { originalLines: [manualLaborLine] },
+  }],
+});
+context.recomputeCaseDurationsFromClaims(manualLaborCase);
+assert.equal(manualLaborCase.durations.mechanical, 1.5, 'la main-d’œuvre manuelle d’un ordre doit alimenter les durées planning');
+assert.equal(context.isClientOnlyRepairClaim({ type: 'garantie' }), true, 'un ordre garantie ne doit pas demander un expert assurance');
 
 const clientLongCase = context.normalizeCase({
   clientName: 'Client long',

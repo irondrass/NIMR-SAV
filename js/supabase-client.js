@@ -61,7 +61,7 @@ async function refreshSupabasePanel() {
   const user = await getSupabaseUser();
   if (user) {
     setSupabaseStatus(`Connecté : ${user.email || user.id}`, "ok");
-    setSupabaseDetails("Vous pouvez sauvegarder ou restaurer les données cloud.");
+    setSupabaseDetails("Synchronisation multi-PC active : les modifications sont sauvegardées et reçues depuis Supabase.");
   } else {
     setSupabaseStatus("Supabase configuré, utilisateur non connecté.", "warn");
     setSupabaseDetails("Connectez-vous avec l'utilisateur créé dans Authentication > Users.");

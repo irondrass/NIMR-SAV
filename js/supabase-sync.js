@@ -22,13 +22,16 @@ async function signInSupabaseFromForm(event) {
   }
   form.elements.password.value = "";
   await refreshSupabasePanel();
+  startSupabaseLiveSync();
+  await pullLatestSupabaseBackup("connexion");
   scheduleAutoSupabaseBackup("connexion");
-  notifyUser("Connexion Supabase réussie. Sauvegarde automatique cloud activée.", "success");
+  notifyUser("Connexion Supabase réussie. Synchronisation atelier multi-PC activée.", "success");
 }
 
 async function signOutSupabase() {
   const client = getSupabaseClient();
   if (!client) return;
+  stopSupabaseLiveSync();
   await client.auth.signOut();
   await refreshSupabasePanel();
   notifyUser("Déconnecté de Supabase.", "success");
@@ -61,7 +64,7 @@ async function testSupabaseConnection() {
   if (orderCheck.error) {
     console.warn("Tables métier Supabase indisponibles", orderCheck.error);
     setSupabaseStatus("Connexion OK, mais tables métier absentes.", "warn");
-    setSupabaseDetails("La sauvegarde JSON fonctionne, mais repair_orders est inaccessible. Exécutez supabase-schema.sql v21.82.");
+    setSupabaseDetails("La sauvegarde JSON fonctionne, mais repair_orders est inaccessible. Exécutez supabase-schema.sql v22.07.");
     return;
   }
 
@@ -69,7 +72,7 @@ async function testSupabaseConnection() {
   if (settingsCheck.error) {
     console.warn("Table app_settings indisponible", settingsCheck.error);
     setSupabaseStatus("Connexion OK, mais réglages structurés absents.", "warn");
-    setSupabaseDetails("Exécutez supabase-schema.sql v21.82 pour créer app_settings, puis relancez le test.");
+    setSupabaseDetails("Exécutez supabase-schema.sql v22.07 pour créer app_settings et activer la synchronisation live, puis relancez le test.");
     return;
   }
 
@@ -77,7 +80,7 @@ async function testSupabaseConnection() {
   if (claimCheck.error) {
     console.warn("Table repair_claims indisponible", claimCheck.error);
     setSupabaseStatus("Connexion OK, cache Supabase à rafraîchir.", "warn");
-    setSupabaseDetails("La table vient probablement d’être créée. Exécutez le SQL v21.82 qui contient NOTIFY pgrst, 'reload schema', puis patientez 30 secondes et relancez le contrôle.");
+    setSupabaseDetails("La table vient probablement d’être créée. Exécutez le SQL v22.07, puis patientez 30 secondes et relancez le contrôle.");
     return;
   }
 
@@ -233,7 +236,7 @@ async function upsertAndMap(client, table, rows) {
   if (error) {
     const duplicateOrderNumber = table === "repair_orders" && String(error.message || "").includes("repair_orders_order_number_key");
     if (duplicateOrderNumber) {
-      throw new Error("repair_orders: contrainte unique restante sur order_number. Dans Supabase > SQL Editor, executez le supabase-schema.sql v21.82, puis relancez la sauvegarde.");
+      throw new Error("repair_orders: contrainte unique restante sur order_number. Dans Supabase > SQL Editor, executez le supabase-schema.sql v22.07, puis relancez la sauvegarde.");
     }
     throw new Error(`${table}: ${error.message}`);
   }
@@ -398,7 +401,7 @@ async function syncBusinessTablesToSupabase(payload, user) {
       claimRows.push({
         local_id: claimLocalId,
         repair_order_id: orderId,
-        number: claim.number || `SIN-${String(index + 1).padStart(3, '0')}`,
+        number: claim.number || `OT-${String(index + 1).padStart(3, '0')}`,
         title: claim.title || null,
         vehicle_area: claim.vehicleArea || null,
         type: claim.type || 'assurance',
@@ -597,6 +600,7 @@ async function saveLocalToSupabase() {
     const tableName = getSupabaseConfig().backupTable || "cloud_backups";
     const backupKey = getSupabaseConfig().backupKey || "nimr-carrosserie-main";
     setSupabaseStatus("Envoi sauvegarde complète vers Supabase...");
+    const updatedAt = new Date().toISOString();
     const { error } = await client.from(tableName).upsert(
       {
         backup_key: backupKey,
@@ -606,17 +610,18 @@ async function saveLocalToSupabase() {
         cases_count: payload.state.cases.length,
         photos_count: payload.photos.length,
         updated_by: user.id,
-        updated_at: new Date().toISOString(),
+        updated_at: updatedAt,
       },
       { onConflict: "backup_key" },
     );
     if (error) throw error;
+    lastKnownCloudUpdatedAt = new Date(updatedAt).getTime();
 
     setSupabaseStatus("Remplissage des tables métier...");
     const stats = await syncBusinessTablesToSupabase(payload, user);
 
     setSupabaseStatus("Sauvegarde Supabase terminée.", "ok");
-    setSupabaseDetails(`${stats.repairOrders} dossier(s), ${stats.clients} client(s), ${stats.vehicles} véhicule(s), ${stats.repairSteps} étape(s), ${stats.resources} ressource(s), ${stats.holidays} jour(s) férié(s), ${stats.workHoursDays} jour(s) horaire(s), ${stats.planningSlots} créneau(x), ${stats.claims || 0} sinistre(s), ${stats.supplements || 0} complément(s), ${stats.photos} photo(s) synchronisé(s). Réglages enregistrés dans app_settings.`);
+    setSupabaseDetails(`${stats.repairOrders} dossier(s), ${stats.clients} client(s), ${stats.vehicles} véhicule(s), ${stats.repairSteps} étape(s), ${stats.resources} ressource(s), ${stats.holidays} jour(s) férié(s), ${stats.workHoursDays} jour(s) horaire(s), ${stats.planningSlots} créneau(x), ${stats.claims || 0} ordre(s), ${stats.supplements || 0} complément(s), ${stats.photos} photo(s) synchronisé(s). Réglages enregistrés dans app_settings.`);
     notifyUser("Sauvegarde envoyée vers Supabase, réglages atelier inclus.", "success");
   } catch (error) {
     console.error("Sauvegarde Supabase impossible", error);
@@ -671,7 +676,8 @@ async function restoreLocalFromSupabase() {
     generatedProposals = {};
     await clearPhotoStore();
     const restoredPhotos = await restorePhotoRecords(Array.isArray(data.photos) ? data.photos : []);
-    saveState();
+    lastKnownCloudUpdatedAt = new Date(data.updated_at || 0).getTime() || lastKnownCloudUpdatedAt;
+    saveState({ skipCloud: true });
     render();
     setSupabaseStatus("Restauration Supabase terminée.", "ok");
     setSupabaseDetails(`${state.cases.length} dossier(s), ${restoredPhotos} photo(s) restauré(s). Réglages structurés ${settingsRestored ? "restaurés depuis app_settings" : "restaurés depuis cloud_backups"}. Dernière sauvegarde cloud : ${data.updated_at || "date inconnue"}.`);
@@ -686,13 +692,19 @@ async function restoreLocalFromSupabase() {
 let autoSupabaseBackupTimer = null;
 let autoSupabaseBackupRunning = false;
 let lastAutoSupabaseBackupAt = 0;
+let lastKnownCloudUpdatedAt = 0;
+let supabaseLiveSyncChannel = null;
+let supabaseLivePullTimer = null;
+let applyingRemoteSupabaseState = false;
+const SUPABASE_LIVE_PULL_INTERVAL_MS = 15000;
 
 function shouldAutoBackupToSupabase() {
-  return Boolean(getSupabaseClient && getSupabaseClient() && navigator.onLine !== false);
+  return Boolean(!applyingRemoteSupabaseState && getSupabaseClient && getSupabaseClient() && navigator.onLine !== false);
 }
 
 function scheduleAutoSupabaseBackup(reason = "autosave") {
   if (!shouldAutoBackupToSupabase()) return;
+  if (applyingRemoteSupabaseState) return;
   window.clearTimeout(autoSupabaseBackupTimer);
   autoSupabaseBackupTimer = window.setTimeout(() => autoBackupToSupabase(reason), AUTOSAVE_CLOUD_DEBOUNCE_MS);
 }
@@ -700,7 +712,7 @@ function scheduleAutoSupabaseBackup(reason = "autosave") {
 async function autoBackupToSupabase(reason = "autosave") {
   if (autoSupabaseBackupRunning || !shouldAutoBackupToSupabase()) return;
   const now = Date.now();
-  if (now - lastAutoSupabaseBackupAt < 120000) return;
+  if (now - lastAutoSupabaseBackupAt < 15000) return;
   autoSupabaseBackupRunning = true;
   try {
     const client = getSupabaseClient();
@@ -709,6 +721,7 @@ async function autoBackupToSupabase(reason = "autosave") {
     const payload = await buildCloudBackupPayload();
     const tableName = getSupabaseConfig().backupTable || "cloud_backups";
     const backupKey = getSupabaseConfig().backupKey || "nimr-carrosserie-main";
+    const updatedAt = new Date().toISOString();
     const { error } = await client.from(tableName).upsert(
       {
         backup_key: backupKey,
@@ -718,13 +731,14 @@ async function autoBackupToSupabase(reason = "autosave") {
         cases_count: payload.state.cases.length,
         photos_count: payload.photos.length,
         updated_by: user.id,
-        updated_at: new Date().toISOString(),
+        updated_at: updatedAt,
       },
       { onConflict: "backup_key" },
     );
     if (error) throw error;
     const stats = await syncBusinessTablesToSupabase(payload, user);
     lastAutoSupabaseBackupAt = Date.now();
+    lastKnownCloudUpdatedAt = new Date(updatedAt).getTime();
     localStorage.setItem(`${STORAGE_KEY}:last-cloud-autosave`, new Date().toISOString());
     localStorage.removeItem(`${STORAGE_KEY}:last-cloud-autosave-error`);
     if (typeof setSupabaseDetails === "function") {
@@ -739,6 +753,111 @@ async function autoBackupToSupabase(reason = "autosave") {
   }
 }
 
+async function fetchLatestCloudBackup(client = getSupabaseClient()) {
+  if (!client) return null;
+  const tableName = getSupabaseConfig().backupTable || "cloud_backups";
+  const backupKey = getSupabaseConfig().backupKey || "nimr-carrosserie-main";
+  const { data, error } = await client
+    .from(tableName)
+    .select("state, photos, app_version, updated_at, updated_by, cases_count, photos_count")
+    .eq("backup_key", backupKey)
+    .maybeSingle();
+  if (error) throw error;
+  return data || null;
+}
+
+function getTimestampMs(value) {
+  const time = value ? new Date(value).getTime() : 0;
+  return Number.isFinite(time) ? time : 0;
+}
+
+function shouldApplyRemoteBackup(data) {
+  if (!data?.state) return false;
+  const remoteCloudTime = getTimestampMs(data.updated_at);
+  const remoteStateTime = getTimestampMs(data.state.updatedAt || data.state.savedAt);
+  const localStateTime = getTimestampMs(state?.updatedAt);
+  if (remoteCloudTime && remoteCloudTime <= lastKnownCloudUpdatedAt) return false;
+  if (remoteStateTime && localStateTime && localStateTime > remoteStateTime + 2000) {
+    scheduleAutoSupabaseBackup("local-newer-than-cloud");
+    return false;
+  }
+  return true;
+}
+
+async function applyRemoteSupabaseBackup(data, reason = "cloud") {
+  if (!shouldApplyRemoteBackup(data)) return false;
+  applyingRemoteSupabaseState = true;
+  try {
+    const previousActiveCaseId = activeCaseId;
+    const previousTab = activeCaseDetailTab;
+    state = normalizeState(data.state);
+    if (previousActiveCaseId && state.cases.some((item) => item.id === previousActiveCaseId)) activeCaseId = previousActiveCaseId;
+    else activeCaseId = state.cases[0]?.id ?? null;
+    activeCaseDetailTab = previousTab || "resume";
+    generatedProposals = {};
+    if (Array.isArray(data.photos)) {
+      await clearPhotoStore();
+      await restorePhotoRecords(data.photos);
+    }
+    lastKnownCloudUpdatedAt = getTimestampMs(data.updated_at) || Date.now();
+    saveState({ skipCloud: true });
+    render();
+    setSupabaseStatus("Synchronisation atelier à jour.", "ok");
+    setSupabaseDetails(`Dernière mise à jour reçue (${reason}) : ${new Date(lastKnownCloudUpdatedAt).toLocaleTimeString()}`);
+    notifyUser("Mise à jour reçue depuis un autre poste.", "info");
+    return true;
+  } catch (error) {
+    console.warn("Application de la sauvegarde cloud impossible", error);
+    setSupabaseDetails(`Synchronisation entrante impossible : ${error.message || error}`);
+    return false;
+  } finally {
+    applyingRemoteSupabaseState = false;
+  }
+}
+
+async function pullLatestSupabaseBackup(reason = "poll") {
+  const client = getSupabaseClient();
+  const user = await getSupabaseUser();
+  if (!client || !user || navigator.onLine === false) return false;
+  try {
+    const data = await fetchLatestCloudBackup(client);
+    return await applyRemoteSupabaseBackup(data, reason);
+  } catch (error) {
+    console.warn("Lecture cloud live impossible", error);
+    return false;
+  }
+}
+
+function startSupabaseLiveSync() {
+  const client = getSupabaseClient();
+  if (!client || supabaseLiveSyncChannel) return;
+  const tableName = getSupabaseConfig().backupTable || "cloud_backups";
+  const backupKey = getSupabaseConfig().backupKey || "nimr-carrosserie-main";
+  try {
+    supabaseLiveSyncChannel = client
+      .channel(`nimr-sav-live-${backupKey}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: tableName, filter: `backup_key=eq.${backupKey}` }, () => {
+        window.setTimeout(() => pullLatestSupabaseBackup("realtime"), 500);
+      })
+      .subscribe();
+  } catch (error) {
+    console.warn("Realtime Supabase indisponible, polling actif", error);
+    supabaseLiveSyncChannel = null;
+  }
+  window.clearInterval(supabaseLivePullTimer);
+  supabaseLivePullTimer = window.setInterval(() => pullLatestSupabaseBackup("poll"), SUPABASE_LIVE_PULL_INTERVAL_MS);
+}
+
+function stopSupabaseLiveSync() {
+  const client = getSupabaseClient();
+  if (client && supabaseLiveSyncChannel) {
+    try { client.removeChannel(supabaseLiveSyncChannel); } catch (error) { console.warn("Arrêt realtime Supabase impossible", error); }
+  }
+  supabaseLiveSyncChannel = null;
+  window.clearInterval(supabaseLivePullTimer);
+  supabaseLivePullTimer = null;
+}
+
 function bindSupabaseActions() {
   const form = $("#supabase-login-form");
   form?.addEventListener("submit", signInSupabaseFromForm);
@@ -747,4 +866,6 @@ function bindSupabaseActions() {
   $("#supabase-save")?.addEventListener("click", saveLocalToSupabase);
   $("#supabase-restore")?.addEventListener("click", restoreLocalFromSupabase);
   refreshSupabasePanel();
+  startSupabaseLiveSync();
+  pullLatestSupabaseBackup("initialisation");
 }

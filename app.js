@@ -155,7 +155,7 @@ function bindCaseCreation() {
 
     const firstClaim = normalizeRepairClaim({
       id: uid("claim"),
-      number: "SIN-001",
+      number: "OT-001",
       title: orderTitle,
       type: orderType,
       status: isClientOnlyRepairClaim({ type: orderType }) ? "client_pending" : "expert_pending",
@@ -344,6 +344,7 @@ function inferOrderTypeFromEstimate(parsed) {
   const operations = (parsed?.laborLines || []).map((line) => normalizeEstimateOperationText(line.operation || line.text || "")).join(" ");
   if (!operations) return "client";
   if (/\bVIDANGE\b|\bENTRETIEN\b|\bSERVICE\s+RAPIDE\b/.test(operations)) return "vidange";
+  if (/\bDIAGNOSTIC\b|\bCONTROLE\b|\bRECHERCHE\s+PANNE\b/.test(operations)) return "diagnostic";
   if (/\bELECTRIQUE\b|\bELECTRICITE\b|\bDIAGNOSTIC\b|\bBATTERIE\b|\bAIRBAG\b|\bFAISCEAU\b|\bCAPTEUR\b|\bALTERNATEUR\b|\bDEMARREUR\b/.test(operations)) return "electrical_client";
   if (/\bMECANIQUE\b|\bMECAN\b|\bFREIN\b|\bSUSPENSION\b|\bEMBRAYAGE\b|\bMOTEUR\b|\bDISTRIBUTION\b|\bBOITE\b/.test(operations)) return "mechanical_client";
   return "client";
@@ -590,7 +591,7 @@ function registerServiceWorker() {
   });
   window.addEventListener("load", async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=22.06", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=22.07", { updateViaCache: "none" });
       registration.update?.();
       if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
       registration.addEventListener("updatefound", () => {

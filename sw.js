@@ -1,4 +1,4 @@
-const CACHE_NAME = "nimr-sav-v22.07-global-atelier-sync";
+const CACHE_NAME = "nimr-sav-v22.08-real-workflow";
 const ASSETS = [
   "./",
   "./index.html",

@@ -1,4 +1,4 @@
--- NIMR SAV v22.07 - Schema Supabase complet
+-- NIMR SAV v22.08 - Schema Supabase complet
 -- A executer dans Supabase > SQL Editor > New query > Run.
 -- Cette version garde cloud_backups comme sauvegarde complete et remplit aussi
 -- les tables metier visibles dans Table Editor: clients, vehicles, repair_orders, app_settings, etc.

@@ -117,17 +117,20 @@ function bindCaseCreation() {
       form.elements.clientName?.focus();
       return;
     }
-    if (!candidate.vehicle) {
-      notifyUser("Le modèle du véhicule est obligatoire.", "error");
+    if (!candidate.vehicle && !candidate.plate && !candidate.vin) {
+      notifyUser("Renseignez au moins le véhicule, l'immatriculation ou le VIN.", "error");
       form.elements.vehicle?.focus();
       return;
     }
     if (!candidate.plate && !candidate.vin) {
-      notifyUser("Une immatriculation ou un numéro de châssis (VIN) est obligatoire.", "error");
-      form.elements.plate?.focus();
-      return;
+      notifyUser("Dossier créé sans identité véhicule complète : complétez l'immatriculation ou le VIN avant de calculer le planning.", "warn");
     }
-
+    if (!candidate.vehicle) {
+      candidate.vehicle = "Véhicule à compléter";
+    }
+    if (!candidate.plate && !candidate.vin && hasEstimateFile) {
+      notifyUser("Le devis a été importé, mais aucun VIN ou immatriculation n'a été détecté.", "warn");
+    }
     const duplicate = findDuplicateCase(candidate);
     if (duplicate) {
       const isStrictDuplicate = duplicate.clientName === candidate.clientName && (duplicate.plate === candidate.plate || duplicate.vin === candidate.vin) && !duplicate.flags?.delivered;
@@ -591,7 +594,7 @@ function registerServiceWorker() {
   });
   window.addEventListener("load", async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=22.07", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=22.08", { updateViaCache: "none" });
       registration.update?.();
       if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
       registration.addEventListener("updatefound", () => {

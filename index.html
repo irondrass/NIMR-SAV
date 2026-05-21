@@ -4,22 +4,22 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#11415f" />
-    <meta name="description" content="Application PWA de gestion des dossiers carrosserie, accords, photos, rendez-vous et planning atelier." />
-    <title>NIMR Carrosserie</title>
+    <meta name="description" content="Application PWA de pilotage SAV, ordres de travail, rendez-vous et planning atelier global." />
+    <title>NIMR SAV</title>
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="icon" href="assets/icon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css?v=22.06" />
+    <link rel="stylesheet" href="styles.css?v=22.07" />
 
     <script>
-      window.NIMR_BUILD = "v22.06";
-      window.NIMR_CACHE_NAME = "nimr-carrosserie-v22.06-pause-reliquat";
+      window.NIMR_BUILD = "v22.07";
+      window.NIMR_CACHE_NAME = "nimr-sav-v22.07-global-atelier-sync";
       if ("caches" in window) {
         caches.keys().then(function(keys) {
           return Promise.all(keys.filter(function(key) {
-            return key.startsWith("nimr-carrosserie-") && key !== window.NIMR_CACHE_NAME;
+            return (key.startsWith("nimr-carrosserie-") || key.startsWith("nimr-sav-")) && key !== window.NIMR_CACHE_NAME;
           }).map(function(key) { return caches.delete(key); }));
         }).catch(function() {});
       }
@@ -33,8 +33,8 @@
         <div class="brand">
           <img src="assets/icon.svg" alt="" class="brand-mark" />
           <div>
-            <strong>NIMR Carrosserie</strong>
-            <span>Atelier & Planning</span>
+            <strong>NIMR SAV</strong>
+            <span>Planning atelier global</span>
           </div>
         </div>
         <nav class="sidebar-nav" aria-label="Navigation principale">
@@ -72,7 +72,7 @@
             <strong id="metric-deliveries">0</strong>
           </article>
           <article class="metric metric-split">
-            <span>Carrosserie</span>
+            <span>Service carrosserie</span>
             <div class="metric-lines">
               <strong><small>Humain</small><b id="metric-load-body-human">0%</b></strong>
               <strong><small>Matériel</small><b id="metric-load-body-equipment">0%</b></strong>
@@ -144,11 +144,13 @@
                 <label>
                   Type d'ordre
                   <select name="orderType">
-                    <option value="assurance">Sinistre assurance / expert</option>
-                    <option value="client">Carrosserie client</option>
+                    <option value="assurance">Assurance / expert</option>
+                    <option value="client">Service carrosserie client</option>
                     <option value="vidange">Vidange / entretien rapide</option>
                     <option value="mechanical_client">Réparation mécanique client</option>
                     <option value="electrical_client">Réparation électrique client</option>
+                    <option value="diagnostic">Diagnostic</option>
+                    <option value="garantie">Garantie constructeur</option>
                   </select>
                 </label>
                 <label>
@@ -199,11 +201,12 @@
                   Type de dossier
                   <select id="case-type-filter" aria-label="Filtrer par type de dossier">
                     <option value="all">Tous les types</option>
-                    <option value="assurance">Sinistre assurance / expert</option>
-                    <option value="client">Carrosserie client</option>
+                    <option value="assurance">Assurance / expert</option>
+                    <option value="client">Service carrosserie client</option>
                     <option value="vidange">Vidange / entretien rapide</option>
                     <option value="mechanical_client">Réparation mécanique client</option>
                     <option value="electrical_client">Réparation électrique client</option>
+                    <option value="diagnostic">Diagnostic</option>
                     <option value="garantie">Garantie</option>
                   </select>
                 </label>
@@ -420,7 +423,7 @@
               </div>
               <p class="muted backup-warning">Avant chaque sauvegarde ou restauration cloud, l'application télécharge automatiquement une copie JSON locale de sécurité.</p>
               <p class="muted backup-status" id="supabase-status">Initialisation Supabase...</p>
-              <p class="muted" id="supabase-details">Exécutez supabase-schema.sql v21.27 si le test indique que cloud_backups ou app_settings manque.</p>
+              <p class="muted" id="supabase-details">Exécutez supabase-schema.sql v22.07 si le test indique que cloud_backups, Realtime ou app_settings manque.</p>
             </section>
           </div>
         </section>
@@ -589,7 +592,7 @@
           <div class="section-heading">
             <div>
               <h2>Ordres de réparation & devis</h2>
-              <span>Sinistres assurance et demandes client partagent un seul planning véhicule, avec règles d’accord différentes.</span>
+              <span>Assurance, service rapide, mécanique, électrique, diagnostic et carrosserie partagent le même planning atelier.</span>
             </div>
           </div>
           <form class="claim-form" id="claim-form">
@@ -598,10 +601,12 @@
               <label>Zone / système<input name="vehicleArea" placeholder="Ex. aile AV droite, moteur, faisceau, freins" /></label>
               <label>Type
                 <select name="type">
-                  <option value="client">Client - carrosserie</option>
+                  <option value="assurance">Assurance / expert</option>
+                  <option value="client">Service carrosserie client</option>
                   <option value="vidange">Client - vidange</option>
                   <option value="mechanical_client">Client - réparation mécanique</option>
                   <option value="electrical_client">Client - réparation électrique</option>
+                  <option value="diagnostic">Diagnostic</option>
                   <option value="garantie">Garantie</option>
                 </select>
               </label>
@@ -623,7 +628,7 @@
               <button class="primary-button" type="submit">Ajouter ordre de réparation</button>
             </div>
           </form>
-          <p class="muted">Importez chaque devis dans son ordre de réparation. Assurance : accord expert + client. Demande client : devis client validé uniquement. Le planning additionne les interventions incluses.</p>
+          <p class="muted">Importez un devis ou saisissez directement la main-d’œuvre dans chaque ordre. Assurance : accord expert + client. Service rapide, mécanique, électrique, diagnostic et garantie : validation client/interne sans expert.</p>
           <div class="claim-list" data-field="claims"></div>
         </section>
       </section>
@@ -791,20 +796,20 @@
     </div>
 
     <script src="vendor/pdf.min.js" defer></script>
-    <script src="js/utils.js?v=22.06" defer></script>
-    <script src="js/state.js?v=22.06" defer></script>
-    <script src="js/ui-cases.js?v=22.06" defer></script>
-    <script src="js/estimate-import.js?v=22.06" defer></script>
-    <script src="js/ui-planning.js?v=22.06" defer></script>
-    <script src="js/photos.js?v=22.06" defer></script>
-    <script src="js/storage.js?v=22.06" defer></script>
-    <script src="js/planning.js?v=22.06" defer></script>
-    <script src="js/exports.js?v=22.06" defer></script>
-    <script src="js/business-rules-v2187.js?v=22.06" defer></script>
+    <script src="js/utils.js?v=22.07" defer></script>
+    <script src="js/state.js?v=22.07" defer></script>
+    <script src="js/ui-cases.js?v=22.07" defer></script>
+    <script src="js/estimate-import.js?v=22.07" defer></script>
+    <script src="js/ui-planning.js?v=22.07" defer></script>
+    <script src="js/photos.js?v=22.07" defer></script>
+    <script src="js/storage.js?v=22.07" defer></script>
+    <script src="js/planning.js?v=22.07" defer></script>
+    <script src="js/exports.js?v=22.07" defer></script>
+    <script src="js/business-rules-v2187.js?v=22.07" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
-    <script src="js/supabase-config.js?v=22.06" defer></script>
-    <script src="js/supabase-client.js?v=22.06" defer></script>
-    <script src="js/supabase-sync.js?v=22.06" defer></script>
-    <script src="app.js?v=22.06" defer></script>
+    <script src="js/supabase-config.js?v=22.07" defer></script>
+    <script src="js/supabase-client.js?v=22.07" defer></script>
+    <script src="js/supabase-sync.js?v=22.07" defer></script>
+    <script src="app.js?v=22.07" defer></script>
   </body>
 </html>

@@ -304,7 +304,7 @@ function renderClaims(root, item) {
       <strong>Planning global véhicule</strong>
       <span>${formatLocalizedDecimal(planningTotal)} h planifiées sur ${includedClaims} intervention(s) incluse(s).</span>
     </div>
-    ${item.claims.length ? item.claims.map((claim, index) => renderClaimCard(claim, index)).join("") : `<div class="empty-inline"><strong>Aucune intervention créée.</strong><br>Créez un ordre de réparation assurance ou client, puis importez son devis.</div>`}
+    ${item.claims.length ? item.claims.map((claim, index) => renderClaimCard(claim, index)).join("") : `<div class="empty-inline"><strong>Aucune intervention créée.</strong><br>Créez un ordre de travail SAV, puis importez un devis ou saisissez sa main-d’œuvre.</div>`}
   `;
 
   $$('[data-claim-import]', target).forEach((input) => {
@@ -344,6 +344,12 @@ function renderClaims(root, item) {
   $$('[data-claim-delete]', target).forEach((button) => {
     button.addEventListener('click', () => deleteClaim(item, button.dataset.claimDelete));
   });
+  $$('[data-claim-labor-form]', target).forEach((form) => {
+    form.addEventListener('submit', (event) => handleClaimLaborSubmit(event, item));
+  });
+  $$('[data-remove-claim-labor-line]', target).forEach((button) => {
+    button.addEventListener('click', () => removeClaimLaborLine(item, button.dataset.claimId, button.dataset.removeClaimLaborLine));
+  });
 }
 
 
@@ -351,18 +357,18 @@ function validateClaimFieldChange(item, claim, field, nextValue) {
   const issues = [];
   const clientOnly = isClientOnlyRepairClaim(claim);
   if (field === 'expertApproved' && nextValue && !clientOnly) {
-    if (!hasBeforeRepairPhoto(item)) issues.push('Ajouter au moins une photo Avant réparation avant de valider l’accord expert du sinistre.');
-    if (!claimHasLaborEstimate(claim)) issues.push('Importer ou saisir un devis avec main-d’œuvre avant de valider l’accord expert du sinistre.');
+    if (!hasBeforeRepairPhoto(item)) issues.push('Ajouter au moins une photo Avant réparation avant de valider l’accord expert de l’ordre assurance.');
+    if (!claimHasLaborEstimate(claim)) issues.push('Importer ou saisir de la main-d’œuvre avant de valider l’accord expert de l’ordre assurance.');
   }
   if (field === 'clientApproved' && nextValue) {
-    if (!clientOnly && !claim.expertApproved) issues.push('Valider l’accord expert du sinistre avant l’accord client.');
+    if (!clientOnly && !claim.expertApproved) issues.push('Valider l’accord expert de l’ordre assurance avant l’accord client.');
     if (!clientOnly && claim.type !== 'client' && !String(item.insurance || '').trim()) issues.push('Renseigner la compagnie d’assurance avant l’accord client.');
-    if (!claimHasLaborEstimate(claim)) issues.push('Importer ou saisir un devis avec main-d’œuvre avant l’accord client.');
+    if (!claimHasLaborEstimate(claim)) issues.push('Importer ou saisir la main-d’œuvre de l’ordre avant l’accord client/interne.');
   }
   if (field === 'status' && ['approved', 'planned', 'done'].includes(nextValue)) {
-    if (!clientOnly && !claim.expertApproved) issues.push('Le statut Accepté/Planifié/Terminé exige l’accord expert pour les sinistres assurance.');
-    if (!claim.clientApproved) issues.push('Le statut Accepté/Planifié/Terminé exige le devis validé par le client.');
-    if (!claimHasLaborEstimate(claim)) issues.push('Le statut Accepté/Planifié/Terminé exige un devis avec main-d’œuvre.');
+    if (!clientOnly && !claim.expertApproved) issues.push('Le statut Accepté/Planifié/Terminé exige l’accord expert pour les ordres assurance.');
+    if (!claim.clientApproved) issues.push('Le statut Accepté/Planifié/Terminé exige une validation client/interne.');
+    if (!claimHasLaborEstimate(claim)) issues.push('Le statut Accepté/Planifié/Terminé exige de la main-d’œuvre.');
   }
   return issues;
 }
@@ -409,7 +415,8 @@ function hasAfterRepairPhoto(item) {
 }
 
 function claimHasLaborEstimate(claim) {
-  return (claim?.estimate?.lines || []).some((line) => Number(line.laborHours || 0) > 0);
+  const lines = typeof getClaimPlanningLaborLines === "function" ? getClaimPlanningLaborLines(claim) : (claim?.estimate?.lines || []);
+  return lines.some((line) => Number(line.laborHours || 0) > 0);
 }
 
 function refreshCaseApprovalFlagsFromClaims(item) {
@@ -430,9 +437,14 @@ function renderClaimCard(claim, index) {
   const partsLines = claim.estimate?.parts || [];
   const totalSourceLines = originalLines.length ? originalLines : estimateLines;
   const total = totalSourceLines.reduce((sum, line) => sum + Number(line.laborHours || 0), 0);
-  const lineRows = originalLines.length ? originalLines.map((line) => `
-    <li><strong>${escapeHtml(line.operation || line.rawText || 'Ligne devis')}</strong><span>${formatLocalizedDecimal(line.laborHours || 0)} h</span></li>
-  `).join('') : `<li class="muted">Aucun devis importé pour cet ordre de réparation.</li>`;
+  const defaultPhase = getDefaultClaimLaborPhase(claim.type);
+  const lineRows = totalSourceLines.length ? totalSourceLines.map((line) => `
+    <li>
+      <strong>${escapeHtml(line.operation || line.rawText || 'Ligne main-d’œuvre')}</strong>
+      <span>${formatLocalizedDecimal(line.laborHours || 0)} h</span>
+      ${line.id ? `<button class="icon-button claim-line-action" type="button" title="Supprimer cette ligne MO" aria-label="Supprimer cette ligne MO" data-claim-id="${escapeAttr(claim.id)}" data-remove-claim-labor-line="${escapeAttr(line.id)}">×</button>` : ''}
+    </li>
+  `).join('') : `<li class="muted">Aucune main-d’œuvre saisie ou importée pour cet ordre.</li>`;
   const partRows = partsLines.length ? partsLines.slice(0, 20).map((part) => `
     <li><strong>${escapeHtml(part.designation || 'Article devis')}</strong><span>Qté ${formatLocalizedDecimal(part.quantity || 0)}${part.amount ? ` · ${formatLocalizedDecimal(part.amount)}` : ''}</span></li>
   `).join('') : `<li class="muted">Aucune pièce/article importé.</li>`;
@@ -440,7 +452,7 @@ function renderClaimCard(claim, index) {
     <article class="claim-card">
       <div class="claim-card-head">
         <div>
-          <strong>${escapeHtml(claim.number || `SIN-${index + 1}`)} · ${escapeHtml(claim.title || 'Ordre')}</strong>
+          <strong>${escapeHtml(claim.number || `OT-${index + 1}`)} · ${escapeHtml(claim.title || 'Ordre')}</strong>
           <span>${escapeHtml(claim.vehicleArea || 'Zone non précisée')} · ${escapeHtml(getClaimTypeLabel(claim.type))} · ${escapeHtml(CLAIM_STATUS_LABELS[claim.status] || claim.status)}</span>
         </div>
         <label class="file-button compact-file-button">
@@ -465,8 +477,22 @@ function renderClaimCard(claim, index) {
         <button class="ghost-button danger-button" type="button" data-claim-delete="${escapeHtml(claim.id)}">Supprimer</button>
       </div>
       <details class="claim-lines" ${originalLines.length ? 'open' : ''}>
-        <summary>Lignes main-d'œuvre de l'ordre (${originalLines.length})</summary>
+        <summary>Lignes main-d'œuvre de l'ordre (${totalSourceLines.length})</summary>
         <ul>${lineRows}</ul>
+        <form class="claim-labor-form" data-claim-labor-form data-claim-id="${escapeAttr(claim.id)}">
+          <label>Étape
+            <select name="phase">
+              ${DURATIONS.filter(([key]) => key !== 'quality').map(([key, label]) => `<option value="${key}" ${key === defaultPhase ? 'selected' : ''}>${label}</option>`).join('')}
+            </select>
+          </label>
+          <label class="wide">Opération
+            <input name="operation" placeholder="Ex. Diagnostic freinage, vidange, remplacement serrure..." />
+          </label>
+          <label>Heures
+            <input name="laborHours" type="text" inputmode="decimal" placeholder="Ex. 1,5" />
+          </label>
+          <button type="submit" class="primary-button">Ajouter MO</button>
+        </form>
       </details>
       <details class="claim-lines" ${partsLines.length ? '' : ''}>
         <summary>Pièces / articles du devis (${partsLines.length})</summary>
@@ -474,6 +500,104 @@ function renderClaimCard(claim, index) {
       </details>
     </article>
   `;
+}
+
+function getDefaultClaimLaborPhase(type) {
+  if (type === "vidange") return "oilService";
+  if (type === "mechanical_client" || type === "diagnostic") return "mechanical";
+  if (type === "electrical_client") return "electrical";
+  return "body";
+}
+
+function getManualLaborCodeForPhase(phase) {
+  return ["oilService", "mechanical", "electrical"].includes(phase) ? "MO-MEC" : "MO-TOL";
+}
+
+function buildManualClaimLaborLine({ phase, operation, laborHours }) {
+  const safePhase = DURATIONS.some(([key]) => key === phase) ? phase : "body";
+  const parsedHours = parseLocalizedDecimal(laborHours);
+  const hours = Math.min(MAX_STEP_DURATION_HOURS, Math.max(0, roundHours(parsedHours)));
+  const label = operation || getDurationLabel(safePhase) || "Main-d'œuvre";
+  return {
+    id: uid("estimate-original-line"),
+    code: getManualLaborCodeForPhase(safePhase),
+    manual: true,
+    operation: label,
+    rawText: `${label} ${formatLocalizedDecimal(hours)} h`,
+    laborHours: hours,
+    selectedPhases: [safePhase],
+    allocations: [{ phase: safePhase, operation: label, laborHours: hours }],
+  };
+}
+
+function refreshClaimEstimateFromManualLines(claim) {
+  claim.estimate = normalizeExpertEstimate(claim.estimate);
+  if (typeof syncClaimEstimateLinesFromOriginal === "function") {
+    syncClaimEstimateLinesFromOriginal(claim);
+  } else {
+    claim.estimate.lines = (claim.estimate.originalLines || []).flatMap((line) => {
+      const allocations = line.allocations?.length ? line.allocations : [{ phase: line.selectedPhases?.[0] || "body", operation: line.operation, laborHours: line.laborHours }];
+      return allocations.map((allocation) => normalizeExpertEstimateLine({
+        phase: allocation.phase,
+        operation: allocation.operation || line.operation,
+        laborHours: allocation.laborHours,
+      })).filter(Boolean);
+    });
+  }
+}
+
+function handleClaimLaborSubmit(event, item) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const claim = item.claims.find((candidate) => candidate.id === form.dataset.claimId);
+  if (!claim) return;
+  const data = new FormData(form);
+  const phase = data.get("phase") || getDefaultClaimLaborPhase(claim.type);
+  const operation = normalizeTextInputValue(data.get("operation"));
+  const laborHours = parseLocalizedDecimal(data.get("laborHours"));
+  if (!operation) {
+    notifyUser("Renseignez l'opération main-d'œuvre.", "error");
+    form.elements.operation?.focus();
+    return;
+  }
+  if (!laborHours || laborHours <= 0) {
+    notifyUser("Renseignez une quantité d'heures valide.", "error");
+    form.elements.laborHours?.focus();
+    return;
+  }
+
+  claim.estimate = normalizeExpertEstimate(claim.estimate);
+  claim.estimate.originalLines.push(buildManualClaimLaborLine({ phase, operation, laborHours }));
+  claim.estimate.confirmed = false;
+  claim.estimate.confirmedAt = "";
+  claim.updatedAt = new Date().toISOString();
+  refreshClaimEstimateFromManualLines(claim);
+  recomputeCaseDurationsFromClaims(item);
+  clearPlanningIfNeeded(item, "Planning annulé après ajout manuel de main-d'œuvre. Recalculez un RDV.");
+  refreshCaseApprovalFlagsFromClaims(item);
+  addHistory(item, "claim.labor.added", "Main-d'œuvre ajoutée à l'ordre", `${getClaimLabel(claim)} - ${operation}: ${formatLocalizedDecimal(laborHours)} h`);
+  saveState();
+  renderCaseDetail();
+}
+
+async function removeClaimLaborLine(item, claimId, lineId) {
+  const claim = item.claims.find((candidate) => candidate.id === claimId);
+  if (!claim?.estimate) return;
+  const sourceLine = [...(claim.estimate.originalLines || []), ...(claim.estimate.lines || [])].find((line) => line.id === lineId);
+  const confirmed = await showConfirmModal(`Supprimer la ligne main-d'œuvre ${escapeHtml(sourceLine?.operation || "")} ?`);
+  if (!confirmed) return;
+  claim.estimate.originalLines = (claim.estimate.originalLines || []).filter((line) => line.id !== lineId);
+  claim.estimate.lines = (claim.estimate.lines || []).filter((line) => line.id !== lineId);
+  claim.estimate.confirmed = false;
+  claim.estimate.confirmedAt = "";
+  claim.updatedAt = new Date().toISOString();
+  if (claim.estimate.originalLines.length) refreshClaimEstimateFromManualLines(claim);
+  recomputeCaseDurationsFromClaims(item);
+  clearPlanningIfNeeded(item, "Planning annulé après suppression de main-d'œuvre. Recalculez un RDV.");
+  refreshCaseApprovalFlagsFromClaims(item);
+  addHistory(item, "claim.labor.removed", "Main-d'œuvre supprimée de l'ordre", getClaimLabel(claim));
+  saveState();
+  renderCaseDetail();
 }
 
 function handleClaimSubmit(event, item) {
@@ -492,7 +616,7 @@ function handleClaimSubmit(event, item) {
     : normalizeRepairClaims(rawClaims, item).length;
   const payload = {
     id: reusableClaim?.id || uid('claim'),
-    number: reusableClaim?.number || `SIN-${String(baseIndex + 1).padStart(3, '0')}`,
+    number: reusableClaim?.number || `OT-${String(baseIndex + 1).padStart(3, '0')}`,
     title,
     vehicleArea: normalizeTextInputValue(data.get('vehicleArea')),
     type: data.get('type') || 'assurance',
@@ -525,7 +649,7 @@ function normalizeAndRenumberClaims(claims, item) {
   const normalized = normalizeRepairClaims(claims, item);
   return normalized.map((claim, index) => ({
     ...claim,
-    number: `SIN-${String(index + 1).padStart(3, '0')}`,
+    number: `OT-${String(index + 1).padStart(3, '0')}`,
     updatedAt: claim.updatedAt || new Date().toISOString(),
   }));
 }
@@ -543,6 +667,7 @@ function isReusableEmptyClaim(claim, item = {}) {
     '',
     'Sinistre principal',
     'Sinistre 1',
+    'Intervention 1',
     item.damageNotes || '',
     item.expertEstimate?.reference || '',
   ]);
@@ -600,7 +725,7 @@ function renderSupplements(root, item) {
               </div>
             </div>
             <p>${escapeHtml(supplement.reason || 'Aucun motif renseigné.')}</p>
-            <p class="muted">Sinistre : ${escapeHtml(getSupplementClaimLabel(item, supplement))} · Zone : ${escapeHtml(supplement.vehicleArea || '-')} · Expert : ${supplement.expertApproved ? 'OK' : 'en attente'} · Client : ${supplement.clientApproved ? 'OK' : 'en attente'}${supplement.integratedAt ? ` · intégré le ${formatDateTime(supplement.integratedAt)}` : ''}</p>
+            <p class="muted">Ordre lié : ${escapeHtml(getSupplementClaimLabel(item, supplement))} · Zone : ${escapeHtml(supplement.vehicleArea || '-')} · Expert : ${supplement.expertApproved ? 'OK' : 'en attente'} · Client : ${supplement.clientApproved ? 'OK' : 'en attente'}${supplement.integratedAt ? ` · intégré le ${formatDateTime(supplement.integratedAt)}` : ''}</p>
             <div class="supplement-columns">
               <div><h3>Pièces complémentaires</h3><ul>${partRows}</ul></div>
               <div><h3>Main-d’œuvre complémentaire</h3><ul>${laborRows}</ul></div>
@@ -1329,7 +1454,7 @@ function getBusinessRuleIssues(item, action) {
 
   if (action === "expertApproved") {
     const expertClaims = workflowClaims.filter((claim) => !isClientOnlyRepairClaim(claim));
-    if (expertClaims.some((claim) => !claimHasLaborEstimate(claim))) issues.push("Importer ou saisir un devis avec main-d’œuvre sur chaque ordre assurance inclus.");
+    if (expertClaims.some((claim) => !claimHasLaborEstimate(claim))) issues.push("Importer ou saisir la main-d’œuvre sur chaque ordre assurance inclus.");
     if (expertClaims.length && !hasBeforeRepairPhoto(item)) issues.push("Ajouter au moins une photo Avant réparation.");
   }
 
@@ -1337,11 +1462,11 @@ function getBusinessRuleIssues(item, action) {
   if (action === "clientApproved") {
     if (workflowClaims.some((claim) => !isClientOnlyRepairClaim(claim) && !claim.expertApproved)) issues.push("Valider d'abord l'accord expert sur les ordres assurance inclus.");
     if (workflowClaims.some((claim) => !isClientOnlyRepairClaim(claim) && claim.type !== 'client' && !String(item.insurance || '').trim())) issues.push("Renseigner la compagnie d’assurance avant l’accord client.");
-    if (workflowClaims.some((claim) => !claimHasLaborEstimate(claim))) issues.push("Importer ou saisir un devis avec main-d’œuvre avant l’accord client.");
+    if (workflowClaims.some((claim) => !claimHasLaborEstimate(claim))) issues.push("Importer ou saisir la main-d’œuvre avant l’accord client/interne.");
   }
 
   if (action === "appointment") {
-    if (workflowClaims.some((claim) => !claimHasLaborEstimate(claim))) issues.push("Importer ou saisir un devis avec main-d’œuvre sur chaque ordre inclus.");
+    if (workflowClaims.some((claim) => !claimHasLaborEstimate(claim))) issues.push("Importer ou saisir la main-d’œuvre sur chaque ordre inclus.");
     if (!hasVehicleIdentity(item)) issues.push("Renseigner une immatriculation ou un VIN.");
     if (totalDurationHours(item) <= 0) issues.push("Renseigner au moins une durée atelier.");
     const missingRoles = missingSchedulingRoles(item);
@@ -1564,14 +1689,14 @@ function getEffectiveServiceHelp(item, key) {
 
 function getStepPlanningHint(key) {
   const hints = {
-    body: "Travaux carrosserie avant peinture : démontage, dressage, tôlerie.",
+    body: "Travaux tôlerie/carrosserie avant peinture : démontage, dressage, tôlerie.",
     oilService: "Service rapide : mécanicien + pont vidange.",
     mechanical: "Réparation mécanique : mécanicien + pont mécanique. Modifiable vers électrique si besoin.",
-    electrical: "Diagnostic / électricité : électricien. Pour sinistre : airbags, batterie, haute tension.",
+    electrical: "Diagnostic / électricité : électricien, faisceau, airbags, batterie, haute tension.",
     prep: "Préparation avant peinture : peintre + zone de préparation.",
     paint: "Peinture et vernis : peintre + cabine peinture.",
     reassembly: "Remontage après peinture : tôlier par défaut, modifiable selon l’opération.",
-    finish: "Finition/lavage : uniquement pour les dossiers carrosserie/sinistre.",
+    finish: "Finition/lavage : uniquement quand le flux SAV l’exige.",
     quality: "Contrôle final : chef atelier / contrôle qualité.",
   };
   return hints[key] || "Étape atelier";

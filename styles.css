@@ -2646,6 +2646,40 @@ a:focus-visible {
   font-size: 0.72rem;
   line-height: 1.1;
 }
+.claim-labor-form {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.8fr) minmax(220px, 1.5fr) minmax(100px, 0.5fr) auto;
+  gap: 8px;
+  align-items: end;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed #d7e5ee;
+}
+.claim-labor-form label {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  font-size: 0.76rem;
+  color: #53697a;
+  font-weight: 800;
+}
+.claim-labor-form input,
+.claim-labor-form select {
+  min-height: 34px;
+  border-radius: 8px;
+}
+.claim-line-action {
+  width: 26px;
+  height: 26px;
+  min-height: 26px;
+  padding: 0;
+  margin-left: 6px;
+}
+@media (max-width: 860px) {
+  .claim-labor-form {
+    grid-template-columns: 1fr;
+  }
+}
 .validated-plan-footer {
   display: flex;
   justify-content: flex-end;

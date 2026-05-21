@@ -30,7 +30,7 @@ function validateBackupPayload(payload) {
   }
 
   if (payload.app !== BACKUP_APP_ID) {
-    throw new Error("Fichier refusé: il ne provient pas de NIMR Carrosserie.");
+    throw new Error("Fichier refusé: il ne provient pas de NIMR SAV.");
   }
   if (!Number.isFinite(payload.version)) {
     throw new Error("Fichier refusé: version de sauvegarde manquante ou invalide.");
@@ -575,4 +575,3 @@ function syncCaseInputs(root, item) {
     if (field in item) input.value = item[field] || "";
   });
 }
-

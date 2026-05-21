@@ -70,7 +70,7 @@ async function exportCaseFolderZip(item, { clientOnly = false } = {}) {
       ? [
           { path: `${folder}/00_Dossier_global/`, data: new Uint8Array(), type: "application/x-directory" },
           { path: `${folder}/00_Dossier_global/00_Devis_original_importe/`, data: new Uint8Array(), type: "application/x-directory" },
-          { path: `${folder}/Sinistres/`, data: new Uint8Array(), type: "application/x-directory" },
+          { path: `${folder}/Ordres_SAV/`, data: new Uint8Array(), type: "application/x-directory" },
         ]
       : [
           { path: `${folder}/Photos/Avant_reparation/`, data: new Uint8Array(), type: "application/x-directory" },
@@ -100,11 +100,11 @@ async function exportCaseFolderZip(item, { clientOnly = false } = {}) {
     }
 
     for (const claim of item.claims || []) {
-      const claimFolder = `${folder}/Sinistres/${sanitizeFilename(`${claim.number || 'SIN'}_${claim.title || 'Sinistre'}`)}`;
+      const claimFolder = `${folder}/Ordres_SAV/${sanitizeFilename(`${claim.number || 'OT'}_${claim.title || 'Ordre'}`)}`;
       files.push({ path: `${claimFolder}/`, data: new Uint8Array(), type: "application/x-directory" });
       files.push({ path: `${claimFolder}/Devis/`, data: new Uint8Array(), type: "application/x-directory" });
       files.push({ path: `${claimFolder}/Photos/`, data: new Uint8Array(), type: "application/x-directory" });
-      files.push({ path: `${claimFolder}/01_Fiche_sinistre.pdf`, data: createSimplePdf(buildClaimPdfLines(item, claim)), type: "application/pdf" });
+      files.push({ path: `${claimFolder}/01_Fiche_ordre.pdf`, data: createSimplePdf(buildClaimPdfLines(item, claim)), type: "application/pdf" });
       const claimSource = claim.estimate?.sourceFile;
       if (claimSource?.id && typeof getDocumentRecord === "function") {
         const record = await getDocumentRecord(claimSource.id).catch(() => null);
@@ -162,7 +162,7 @@ function buildClaimPdfLines(item, claim) {
   const appliedLines = claim.estimate?.lines || [];
   return [
     WORKSHOP_NAME,
-    `FICHE SINISTRE - ${claim.number || ''}`,
+    `FICHE ORDRE SAV - ${claim.number || ''}`,
     `Dossier: ${item.clientName || ''}`,
     `Véhicule: ${item.vehicle || ''} - ${item.plate || ''}`,
     `VIN: ${item.vin || ''}`,
@@ -233,7 +233,7 @@ function buildCommonPdfHeader(item, title) {
 function getAllClaimEstimateLines(item) {
   const rows = [];
   (item.claims || []).forEach((claim) => {
-    const claimLabel = `${claim.number || ''} ${claim.title || 'Sinistre'}`.trim();
+    const claimLabel = `${claim.number || ''} ${claim.title || 'Ordre'}`.trim();
     const sourceLines = (claim.estimate?.originalLines || []).length ? claim.estimate.originalLines : (claim.estimate?.lines || []);
     sourceLines.forEach((line) => {
       if (line.allocations?.length) {
@@ -328,12 +328,12 @@ function buildClaimEstimatePdfTextLines(item) {
   const rows = getAllClaimEstimateLines(item);
   return rows.length
     ? rows.map((line) => `${line.claimLabel} - ${getDurationLabel(line.phase) || line.phase || '-'} - ${line.operation}: ${formatLocalizedDecimal(line.assignedHours)} h`)
-    : ['Aucune ligne main-d’œuvre importée dans les sinistres.'];
+    : ['Aucune ligne main-d’œuvre importée ou saisie dans les ordres.'];
 }
 
 function buildEstimatePdfLines(item) {
   return [
-    ...buildCommonPdfHeader(item, "DEVIS INITIAL / FICHE SINISTRE"),
+    ...buildCommonPdfHeader(item, "FICHE DOSSIER SAV"),
     `Assurance: ${item.insurance || ""}`,
     `Numéro OR NAV: ${item.orNavNumber || ""}`,
     "",
@@ -349,11 +349,11 @@ function buildEstimatePdfLines(item) {
 function buildConfirmedExpertEstimatePdfLines(item) {
   const totals = expertEstimateTotalsByPhase(item);
   return [
-    ...buildCommonPdfHeader(item, "DEVIS DE RÉPARATION - TOUS SINISTRES"),
-    `Nombre de sinistres: ${(item.claims || []).length}`,
+    ...buildCommonPdfHeader(item, "MAIN-D’ŒUVRE VALIDÉE - ORDRES SAV"),
+    `Nombre d'ordres: ${(item.claims || []).length}`,
     `Total MO importée: ${formatLocalizedDecimal(getAllClaimEstimateTotalHours(item))} h`,
     "",
-    "Lignes main d'œuvre importées par sinistre:",
+    "Lignes main d'œuvre par ordre:",
     ...buildClaimEstimatePdfTextLines(item),
     "",
     "Totaux planning par étape:",
@@ -633,8 +633,8 @@ function printRepairOrder(item) {
         <header>
           <div>
             <h1>${title}</h1>
-            <p class="muted">NIMR Carrosserie</p>
-            <p>OR / sinistre: ${escapeHtml(getClaimReferenceSummary(item, 'or'))}</p>
+            <p class="muted">NIMR SAV</p>
+            <p>OR / ordre: ${escapeHtml(getClaimReferenceSummary(item, 'or'))}</p>
             <p>Devis: ${escapeHtml(getClaimReferenceSummary(item, 'devis'))}</p>
           </div>
           <div>
@@ -667,8 +667,8 @@ function printRepairOrder(item) {
           <p><strong>Référence:</strong> ${escapeHtml(item.expertEstimate?.reference || "-")}</p>
           <p><strong>État:</strong> ${item.expertEstimate?.confirmed ? "Confirmé" : "Non confirmé"}</p>
           <table>
-            <thead><tr><th>Sinistre</th><th>Étape</th><th>Opération</th><th>Main d'œuvre</th></tr></thead>
-            <tbody>${expertEstimateRows || `<tr><td colspan="4">Aucune ligne MO importée dans les sinistres.</td></tr>`}</tbody>
+            <thead><tr><th>Ordre</th><th>Étape</th><th>Opération</th><th>Main d'œuvre</th></tr></thead>
+            <tbody>${expertEstimateRows || `<tr><td colspan="4">Aucune ligne MO importée ou saisie dans les ordres.</td></tr>`}</tbody>
           </table>
           <p><strong>Total MO devis importés:</strong> ${formatLocalizedDecimal(getAllClaimEstimateTotalHours(item))} h</p>
         </section>
@@ -875,7 +875,7 @@ function printDailyPlanningGantt(dateKey = state.planningDate) {
       <header>
         <div>
           <h1>${escapeHtml(title)}</h1>
-          <p class="muted">NIMR Carrosserie</p>
+          <p class="muted">NIMR SAV</p>
           <p><strong>Journée :</strong> ${escapeHtml(longDate(date))}</p>
           <p><strong>Horaires :</strong> ${escapeHtml(intervalText)}</p>
         </div>
@@ -1108,7 +1108,7 @@ function printDailyPlanning(dateKey = state.planningDate) {
         <header>
           <div>
             <h1>Planning atelier journalier</h1>
-            <p class="muted">NIMR Carrosserie</p>
+            <p class="muted">NIMR SAV</p>
             <p><strong>Journée :</strong> ${escapeHtml(longDate(date))}</p>
             <p><strong>Horaires :</strong> ${escapeHtml(intervalText)}</p>
           </div>
@@ -1161,13 +1161,13 @@ function printSupplementWorkOrders(item, supplementId = null) {
         <header>
           <div>
             <h1>Ordre de travail complémentaire</h1>
-            <p class="muted">NIMR Carrosserie</p>
+            <p class="muted">NIMR SAV</p>
             <p><strong>Complément :</strong> ${escapeHtml(supplement.number || '-')} - ${escapeHtml(supplement.title || '')}</p>
             <p><strong>Statut :</strong> ${escapeHtml(SUPPLEMENT_STATUS_LABELS[supplement.status] || supplement.status)}</p>
           </div>
           <div class="right">
             <p><strong>Date :</strong> ${formatDate(new Date())}</p>
-            <p><strong>OR / sinistre :</strong> ${escapeHtml(getClaimReferenceSummary(item, 'or'))}</p>
+            <p><strong>OR / ordre :</strong> ${escapeHtml(getClaimReferenceSummary(item, 'or'))}</p>
             <p><strong>Devis :</strong> ${escapeHtml(getClaimReferenceSummary(item, 'devis'))}</p>
           </div>
         </header>
@@ -1278,13 +1278,13 @@ function printTechnicianWorkOrders(item) {
         <header>
           <div>
             <h1>Ordre de travail technicien</h1>
-            <p class="muted">NIMR Carrosserie</p>
+            <p class="muted">NIMR SAV</p>
             <p><strong>Technicien / ressource :</strong> ${escapeHtml(resource.name)}</p>
             <p><strong>Poste :</strong> ${escapeHtml(resource.location || resource.role || "-")}</p>
           </div>
           <div class="right">
             <p><strong>Date :</strong> ${formatDate(new Date())}</p>
-            <p><strong>OR / sinistre :</strong> ${escapeHtml(getClaimReferenceSummary(item, 'or'))}</p>
+            <p><strong>OR / ordre :</strong> ${escapeHtml(getClaimReferenceSummary(item, 'or'))}</p>
             <p><strong>Devis :</strong> ${escapeHtml(getClaimReferenceSummary(item, 'devis'))}</p>
           </div>
         </header>
@@ -1400,7 +1400,7 @@ function buildTechnicianEstimateRows(item, taskPhases) {
         : (taskPhases.has(line.phase) ? [{ phase: line.phase, laborHours: line.laborHours }] : []);
       if (!allocations.length) return null;
       return {
-        operation: `${claim.number || ''} ${claim.title || 'Sinistre'} - ${line.operation || line.rawText || 'Opération devis'}`.trim(),
+        operation: `${claim.number || ''} ${claim.title || 'Ordre'} - ${line.operation || line.rawText || 'Opération devis'}`.trim(),
         rawText: line.rawText || line.operation || '',
         laborHours: Number(line.laborHours || allocations.reduce((sum, allocation) => sum + Number(allocation.laborHours || 0), 0)),
         assignedHours: roundHours(allocations.reduce((sum, allocation) => sum + Number(allocation.laborHours || 0), 0)),

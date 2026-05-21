@@ -1,4 +1,4 @@
-const CACHE_NAME = "nimr-carrosserie-v22.06-pause-reliquat";
+const CACHE_NAME = "nimr-sav-v22.07-global-atelier-sync";
 const ASSETS = [
   "./",
   "./index.html",

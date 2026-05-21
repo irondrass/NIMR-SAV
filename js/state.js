@@ -15,7 +15,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v22.05";
+const APP_VERSION = "v22.06";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const WORKSHOP_NAME = "NIMR Carrosserie";
@@ -572,8 +572,28 @@ function normalizeBooking(booking, resourceIds) {
     delivery: booking.delivery || "",
     resourceIds: ids,
     primaryResourceId: booking.primaryResourceId || ids[0] || null,
+    equipmentResourceIds: Array.isArray(booking.equipmentResourceIds)
+      ? booking.equipmentResourceIds.filter((id) => ids.includes(id))
+      : ids.slice(1),
     segments,
+    plannedStart: booking.plannedStart || booking.start || segments[0].start,
+    plannedEnd: booking.plannedEnd || booking.end || segments.at(-1).end,
+    plannedSegments: Array.isArray(booking.plannedSegments) && booking.plannedSegments.length ? booking.plannedSegments : segments,
+    plannedMinutes: Number(booking.plannedMinutes || 0) || segments.reduce((sum, segment) => sum + diffMinutes(new Date(segment.start), new Date(segment.end)), 0),
+    status: ["planned", "started", "paused", "completed", "temporary"].includes(booking.status) ? booking.status : (booking.temporary ? "temporary" : "planned"),
+    actualStart: booking.actualStart || booking.startedAt || "",
+    actualEnd: booking.actualEnd || booking.completedAt || "",
+    startedAt: booking.startedAt || booking.actualStart || "",
+    completedAt: booking.completedAt || "",
+    pausedAt: booking.pausedAt || "",
+    pauseReason: booking.pauseReason || "",
+    remainingMinutes: Number(booking.remainingMinutes || 0) || 0,
+    parentBookingId: booking.parentBookingId || "",
+    remainingFromPaused: Boolean(booking.remainingFromPaused),
+    rescheduledAt: booking.rescheduledAt || "",
     color: booking.color || (type === "leave" ? "#6b7280" : "#11415f"),
+    planningMode: booking.planningMode || "standard",
+    details: booking.details || "",
     temporary: Boolean(booking.temporary),
   };
 }

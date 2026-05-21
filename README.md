@@ -1,3 +1,10 @@
+# v22.06 - Pilotage dynamique des tâches atelier
+
+- Ajout d'actions sur chaque tâche du planning validé : démarrer, terminer maintenant, mettre en pause avec cause et replanifier une tâche non démarrée.
+- Une tâche terminée avant l'heure libère ses segments futurs dans le Gantt ; une pause conserve la partie réalisée et crée un reliquat planifié selon les disponibilités atelier.
+- Le planning global affiche les statuts Planifiée / En cours / En pause / Terminée, et les états sont conservés dans la sauvegarde locale.
+- Cache PWA incrémenté en v22.06.
+
 # v22.05 - Persistance renforcée après fermeture
 
 - La sauvegarde locale priorise maintenant la sauvegarde la plus récente au redémarrage, au lieu de restaurer parfois un ancien snapshot plus volumineux.

@@ -1561,6 +1561,17 @@ select:focus {
   border: 1px solid rgba(255, 255, 255, 0.28);
   outline: 1px solid rgba(0, 0, 0, 0.08);
 }
+.booking.task-status-started {
+  outline: 2px solid #0ea5e9;
+}
+.booking.task-status-paused {
+  opacity: 0.72;
+  outline: 2px dashed #f97316;
+}
+.booking.task-status-completed {
+  opacity: 0.62;
+  outline: 2px solid #22c55e;
+}
 
 .booking strong,
 .booking span {
@@ -2561,7 +2572,7 @@ a:focus-visible {
 }
 .validated-plan-row {
   display: grid;
-  grid-template-columns: 1.25fr .9fr .9fr 1fr 1fr .55fr;
+  grid-template-columns: 1.25fr .85fr .85fr .9fr .9fr .5fr 1fr;
   gap: 8px;
   align-items: center;
   padding: 9px 10px;
@@ -2584,6 +2595,56 @@ a:focus-visible {
 }
 .validated-plan-row b {
   color: #0f5d42;
+}
+.validated-plan-row strong {
+  display: grid;
+  gap: 3px;
+}
+.validated-plan-row strong em {
+  color: #607587;
+  font-size: 0.74rem;
+  font-style: normal;
+  font-weight: 700;
+}
+.task-status-pill,
+.task-remainder-badge {
+  width: fit-content;
+  border-radius: 999px;
+  padding: 2px 7px;
+  background: #eef6fb;
+  color: #24546c;
+  font-size: 0.68rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+.task-status-started .task-status-pill {
+  background: #e0f2fe;
+  color: #075985;
+}
+.task-status-paused .task-status-pill {
+  background: #fff7ed;
+  color: #9a3412;
+}
+.task-status-completed .task-status-pill {
+  background: #dcfce7;
+  color: #166534;
+}
+.task-remainder-badge {
+  background: #f3e8ff;
+  color: #6b21a8;
+}
+.validated-plan-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-start;
+}
+.tiny-button {
+  min-height: 28px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  font-size: 0.72rem;
+  line-height: 1.1;
 }
 .validated-plan-footer {
   display: flex;

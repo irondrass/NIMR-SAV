@@ -11,11 +11,11 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css?v=22.08" />
+    <link rel="stylesheet" href="styles.css?v=22.09" />
 
     <script>
-      window.NIMR_BUILD = "v22.08";
-      window.NIMR_CACHE_NAME = "nimr-sav-v22.08-real-workflow";
+      window.NIMR_BUILD = "v22.09";
+      window.NIMR_CACHE_NAME = "nimr-sav-v22.09-production-qa";
       if ("caches" in window) {
         caches.keys().then(function(keys) {
           return Promise.all(keys.filter(function(key) {
@@ -352,7 +352,7 @@
                 </button>
               </form>
               <div class="holiday-list" id="holiday-list"></div>
-              <div class="section-heading compact-heading"><div><h2>Congés / absences ressources</h2><span>Bloque uniquement la personne concernée dans le planning.</span></div></div>
+              <div class="section-heading compact-heading"><div><h2>Congés / absences ressources</h2><span>Bloque la personne concernée. Si une tâche existe déjà, replanifiez-la ou mettez-la en pause avant d'ajouter l'absence.</span></div></div>
               <form class="holiday-form" id="resource-leave-form">
                 <select name="resourceId" required></select>
                 <input name="start" type="datetime-local" required />
@@ -423,7 +423,7 @@
               </div>
               <p class="muted backup-warning">Avant chaque sauvegarde ou restauration cloud, l'application télécharge automatiquement une copie JSON locale de sécurité.</p>
               <p class="muted backup-status" id="supabase-status">Initialisation Supabase...</p>
-              <p class="muted" id="supabase-details">Exécutez supabase-schema.sql v22.08 si le test indique que cloud_backups, Realtime ou app_settings manque.</p>
+              <p class="muted" id="supabase-details">Exécutez supabase-schema.sql v22.09 si le test indique que cloud_backups, Realtime ou app_settings manque.</p>
             </section>
           </div>
         </section>
@@ -796,20 +796,20 @@
     </div>
 
     <script src="vendor/pdf.min.js" defer></script>
-    <script src="js/utils.js?v=22.08" defer></script>
-    <script src="js/state.js?v=22.08" defer></script>
-    <script src="js/ui-cases.js?v=22.08" defer></script>
-    <script src="js/estimate-import.js?v=22.08" defer></script>
-    <script src="js/ui-planning.js?v=22.08" defer></script>
-    <script src="js/photos.js?v=22.08" defer></script>
-    <script src="js/storage.js?v=22.08" defer></script>
-    <script src="js/planning.js?v=22.08" defer></script>
-    <script src="js/exports.js?v=22.08" defer></script>
-    <script src="js/business-rules-v2187.js?v=22.08" defer></script>
+    <script src="js/utils.js?v=22.09" defer></script>
+    <script src="js/state.js?v=22.09" defer></script>
+    <script src="js/ui-cases.js?v=22.09" defer></script>
+    <script src="js/estimate-import.js?v=22.09" defer></script>
+    <script src="js/ui-planning.js?v=22.09" defer></script>
+    <script src="js/photos.js?v=22.09" defer></script>
+    <script src="js/storage.js?v=22.09" defer></script>
+    <script src="js/planning.js?v=22.09" defer></script>
+    <script src="js/exports.js?v=22.09" defer></script>
+    <script src="js/business-rules-v2187.js?v=22.09" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
-    <script src="js/supabase-config.js?v=22.08" defer></script>
-    <script src="js/supabase-client.js?v=22.08" defer></script>
-    <script src="js/supabase-sync.js?v=22.08" defer></script>
-    <script src="app.js?v=22.08" defer></script>
+    <script src="js/supabase-config.js?v=22.09" defer></script>
+    <script src="js/supabase-client.js?v=22.09" defer></script>
+    <script src="js/supabase-sync.js?v=22.09" defer></script>
+    <script src="app.js?v=22.09" defer></script>
   </body>
 </html>

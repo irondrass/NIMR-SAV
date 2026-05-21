@@ -843,7 +843,7 @@ function schedulePlannedCasesInterleaved(plannedCases, earliestByCase, baseBooki
     const hours = Number(job.item.durations?.[template.key] || 0);
     const duration = Math.max(15, Math.round(hours * 60));
     const assignment = assignmentsByCase.get(job.item.id) || createPlanningAssignmentContext();
-    const preferredPrimaryId = getPreferredPrimaryResourceId(template, assignment, item);
+    const preferredPrimaryId = getPreferredPrimaryResourceId(template, assignment, job.item);
     const match = findBestResourceSlot(template, job.readyAt, duration, tempBookings, isFastLaneJob(job.item), preferredPrimaryId);
     if (!match) throw new Error(`Aucune disponibilité pour ${template.title}.`);
     rememberPrimaryAssignment(template, assignment, match.primary.id);

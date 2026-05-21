@@ -15,7 +15,7 @@ function render() {
 
 function renderMetrics() {
   const active = state.cases.filter((item) => !item.flags.delivered).length;
-  const waiting = state.cases.filter((item) => !item.flags.expertApproved || !item.flags.clientApproved).length;
+  const waiting = state.cases.filter((item) => getNextWorkflowAction(item) && getBusinessRuleIssues(item, getNextWorkflowAction(item)).length).length;
   const deliveries = state.cases.filter((item) => item.appointment && !item.flags.delivered).length;
   $("#metric-active").textContent = active;
   $("#metric-waiting").textContent = waiting;
@@ -331,7 +331,7 @@ function renderClaims(root, item) {
       synchronizeClaimStatus(claim, field);
       claim.updatedAt = new Date().toISOString();
 
-      const changesPlanningInput = ['includeInPlanning', 'expertApproved', 'clientApproved', 'status'].includes(field);
+      const changesPlanningInput = shouldClearPlanningAfterClaimFieldChange(field, nextValue);
       if (field === 'includeInPlanning') recomputeCaseDurationsFromClaims(item);
       if (changesPlanningInput) clearPlanningIfNeeded(item, 'Planning annulé après modification des ordres de réparation ou accords. Recalculez un RDV.');
 
@@ -350,6 +350,12 @@ function renderClaims(root, item) {
   $$('[data-remove-claim-labor-line]', target).forEach((button) => {
     button.addEventListener('click', () => removeClaimLaborLine(item, button.dataset.claimId, button.dataset.removeClaimLaborLine));
   });
+}
+
+
+function shouldClearPlanningAfterClaimFieldChange(field, nextValue) {
+  return ['includeInPlanning', 'status'].includes(field)
+    || ((field === 'expertApproved' || field === 'clientApproved') && !nextValue);
 }
 
 
@@ -438,6 +444,7 @@ function renderClaimCard(claim, index) {
   const totalSourceLines = originalLines.length ? originalLines : estimateLines;
   const total = totalSourceLines.reduce((sum, line) => sum + Number(line.laborHours || 0), 0);
   const defaultPhase = getDefaultClaimLaborPhase(claim.type);
+  const clientApprovalLabel = isClientOnlyRepairClaim(claim) ? "Validation client/interne" : "Accord client";
   const lineRows = totalSourceLines.length ? totalSourceLines.map((line) => `
     <li>
       <strong>${escapeHtml(line.operation || line.rawText || 'Ligne main-d’œuvre')}</strong>
@@ -471,7 +478,7 @@ function renderClaimCard(claim, index) {
       </div>
       <div class="approval-row">
         ${isClientOnlyRepairClaim(claim) ? `<span class="tag ok">Expert non requis</span>` : `<label class="check-card"><input type="checkbox" data-claim-id="${escapeHtml(claim.id)}" data-claim-field="expertApproved" ${claim.expertApproved ? 'checked' : ''}/><span>Accord expert</span></label>`}
-        <label class="check-card"><input type="checkbox" data-claim-id="${escapeHtml(claim.id)}" data-claim-field="clientApproved" ${claim.clientApproved ? 'checked' : ''}/><span>Accord client</span></label>
+        <label class="check-card"><input type="checkbox" data-claim-id="${escapeHtml(claim.id)}" data-claim-field="clientApproved" ${claim.clientApproved ? 'checked' : ''}/><span>${clientApprovalLabel}</span></label>
         <label class="check-card"><input type="checkbox" data-claim-id="${escapeHtml(claim.id)}" data-claim-field="includeInPlanning" ${claim.includeInPlanning !== false ? 'checked' : ''}/><span>Inclure planning</span></label>
         <span class="tag ${total > 0 ? 'ok' : 'warn'}">${formatLocalizedDecimal(total)} h MO</span>
         <button class="ghost-button danger-button" type="button" data-claim-delete="${escapeHtml(claim.id)}">Supprimer</button>
@@ -973,7 +980,7 @@ function renderCaseDetail() {
 
       if (field === "clientApproved" && !checked && (item.appointment || state.bookings.some((booking) => booking.caseId === item.id))) {
         input.checked = true;
-        const confirmed = await showConfirmModal("Retirer l'accord client supprimera le RDV et les affectations atelier de ce dossier.");
+        const confirmed = await showConfirmModal("Retirer la validation client/interne supprimera le RDV et les affectations atelier de ce dossier.");
         if (!confirmed) {
           return;
         }
@@ -993,7 +1000,7 @@ function renderCaseDetail() {
             synchronizeClaimStatus(claim, "clientApproved");
           });
           refreshCaseApprovalFlagsFromClaims(item);
-          clearCasePlanning(item, "Planning annulé après retrait de l'accord client");
+          clearCasePlanning(item, "Planning annulé après retrait de la validation client/interne");
           recordFlagHistory(item, "clientApproved", false);
         }
         saveState();
@@ -1270,7 +1277,7 @@ function getWorkflowStepsForCase(item) {
   if (!workflowClaims.length || hasInsurance) return WORKFLOW;
   return [
     ["created", "Fiche dossier"],
-    ["clientApproved", "Accord client"],
+    ["clientApproved", "Validation client/interne"],
     ["appointment", "RDV fixé"],
     ["vehiclePending", "En attente réception"],
     ["received", "Véhicule reçu"],
@@ -1431,8 +1438,8 @@ function getNextWorkflowAction(item) {
   if (!claimsToCheck.length) return "claim";
   if (claimsToCheck.some((claim) => !claimHasLaborEstimate(claim))) return "claim";
   if (claimsToCheck.some((claim) => !isClientOnlyRepairClaim(claim) && !claim.expertApproved)) return "expertApproved";
-  if (claimsToCheck.some((claim) => !claim.clientApproved)) return "clientApproved";
   if (!item.appointment) return "appointment";
+  if (claimsToCheck.some((claim) => !claim.clientApproved)) return "clientApproved";
   if (!item.flags.received) return "received";
   if (!item.flags.workStarted) return "workStarted";
   if (!item.flags.workCompleted) return "workCompleted";
@@ -1479,6 +1486,7 @@ function getBusinessRuleIssues(item, action) {
 
   if (action === "workStarted") {
     if (!item.flags.received) issues.push("Confirmer la réception physique du véhicule avant de démarrer les travaux.");
+    if (workflowClaims.some((claim) => !claim.clientApproved)) issues.push("Enregistrer la validation client/interne avant de démarrer les travaux.");
     if (!hasAssignments) issues.push("Aucune affectation atelier n'est planifiée pour ce dossier.");
   }
 
@@ -1519,7 +1527,7 @@ function getBusinessRuleWarnings(item, action) {
 
   if (action === "appointment") {
     if (workflowClaims.some((claim) => !isClientOnlyRepairClaim(claim) && !claim.expertApproved)) warnings.push("Accord expert manquant : ce RDV sera prévisionnel.");
-    if (workflowClaims.some((claim) => !claim.clientApproved)) warnings.push("Accord client manquant : ce RDV sera prévisionnel.");
+    if (workflowClaims.some((claim) => !claim.clientApproved)) warnings.push("Validation client/interne manquante : ce RDV sera prévisionnel.");
   }
 
   if (action === "received") {

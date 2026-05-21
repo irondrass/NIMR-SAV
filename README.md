@@ -1,3 +1,11 @@
+# v22.08 - Flux atelier réel et planification plus simple
+
+- Les ordres SAV peuvent maintenant réserver un créneau dès que la main-d’œuvre est connue et que les validations assurance nécessaires sont faites ; la validation client/interne reste obligatoire avant démarrage réel des travaux.
+- La création d’un dossier accepte un véhicule partiellement connu : le planning exige toujours une immatriculation ou un VIN avant calcul, mais l’accueil peut ouvrir le dossier plus vite.
+- Le vocabulaire “accord client” est clarifié en “validation client/interne” pour les flux service rapide, mécanique, électrique, diagnostic et garantie.
+- Ajout de tests de régression sur le flux réel service rapide : planification prévisionnelle, blocage du démarrage sans validation, puis démarrage après validation.
+- Cache PWA incrémenté en v22.08.
+
 # v22.07 - NIMR SAV global et synchronisation multi-PC
 
 - Renommage métier de l'application en NIMR SAV : le planning couvre service rapide, carrosserie, mécanique, électrique, diagnostic et garantie.

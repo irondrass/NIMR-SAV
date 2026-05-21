@@ -236,13 +236,18 @@ audit("Progression logique de 5 dossiers dans tous les états possibles", () => 
       context.applyWorkflowAction(dossier, "expertApproved");
     }
 
-    // 3. Accord client
-    assert.equal(context.getNextWorkflowAction(dossier), "clientApproved", "L'action suivante doit être l'accord client");
+    // 3. RDV prévisionnel possible avant validation client/interne
+    assert.equal(context.getNextWorkflowAction(dossier), "appointment", "L'action suivante doit permettre un RDV prévisionnel");
+    const issuesRdvPrevisionnel = context.getBusinessRuleIssues(dossier, "appointment");
+    assert.equal(issuesRdvPrevisionnel.length, 0, "Le RDV prévisionnel devrait être possible");
+    assert.ok(context.getBusinessRuleWarnings(dossier, "appointment").some((warning) => warning.includes("client/interne")), "Le RDV prévisionnel doit avertir sur la validation client/interne manquante");
+
+    // 4. Validation client/interne
     const issuesClient = context.getBusinessRuleIssues(dossier, "clientApproved");
-    assert.equal(issuesClient.length, 0, "L'accord client devrait être possible");
+    assert.equal(issuesClient.length, 0, "La validation client/interne devrait être possible");
     context.applyWorkflowAction(dossier, "clientApproved");
 
-    // 4. RDV
+    // 5. RDV
     assert.equal(context.getNextWorkflowAction(dossier), "appointment", "L'action suivante doit être le RDV");
     dossier.appointment = { start: "2026-05-18T08:00:00" };
     // Le RDV n'est pas une "action" via applyWorkflowAction mais un champ. 

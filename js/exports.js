@@ -173,7 +173,7 @@ function buildClaimPdfLines(item, claim) {
     `N° devis: ${claim.estimateNumber || claim.estimate?.reference || ''}`,
     `N° OR: ${claim.orNumber || ''}`,
     `Accord expert: ${claim.expertApproved ? 'Oui' : 'Non'}`,
-    `Accord client: ${claim.clientApproved ? 'Oui' : 'Non'}`,
+    `Validation client/interne: ${claim.clientApproved ? 'Oui' : 'Non'}`,
     `Inclus planning global: ${claim.includeInPlanning !== false ? 'Oui' : 'Non'}`,
     '',
     'LIGNES MAIN-D\'OEUVRE',
@@ -378,7 +378,7 @@ function buildExpertPdfLines(item) {
 function buildClientPdfLines(item) {
   return [
     ...buildCommonPdfHeader(item, "CONFIRMATION CLIENT"),
-    `Accord client: ${item.flags.clientApproved ? "Reçu" : "Non reçu"}`,
+    `Validation client/interne: ${item.flags.clientApproved ? "Reçue" : "Non reçue"}`,
     item.appointment ? `RDV fixé: ${formatDateTime(item.appointment.start)}` : "RDV non fixé",
     item.appointment ? `Livraison estimée: ${formatDateTime(item.appointment.delivery)}` : "Livraison estimée non planifiée",
   ];
@@ -1176,7 +1176,7 @@ function printSupplementWorkOrders(item, supplementId = null) {
           <div class="box"><h2>Véhicule</h2><p><strong>Modèle :</strong> ${escapeHtml(item.vehicle || '-')}</p><p><strong>Immat. :</strong> ${escapeHtml(item.plate || '-')}</p><p><strong>VIN :</strong> ${escapeHtml(item.vin || '-')}</p><p><strong>Zone :</strong> ${escapeHtml(supplement.vehicleArea || '-')}</p></div>
         </section>
         <section><h2>Motif / dommage découvert</h2><p>${escapeHtml(supplement.reason || 'Aucun motif renseigné.')}</p></section>
-        <section><h2>Accords</h2><p>Accord expert : <strong>${supplement.expertApproved ? 'Oui' : 'Non'}</strong> · Accord client : <strong>${supplement.clientApproved ? 'Oui' : 'Non'}</strong></p></section>
+        <section><h2>Accords</h2><p>Accord expert : <strong>${supplement.expertApproved ? 'Oui' : 'Non'}</strong> · Validation client/interne : <strong>${supplement.clientApproved ? 'Oui' : 'Non'}</strong></p></section>
         <section><h2>Pièces complémentaires</h2><table><thead><tr><th>N°</th><th>Désignation</th><th>Qté</th><th>Notes</th></tr></thead><tbody>${partRows}</tbody></table></section>
         <section><h2>Main-d’œuvre complémentaire</h2><table><thead><tr><th>N°</th><th>Étape</th><th>Opération</th><th>Temps</th><th>Fait</th></tr></thead><tbody>${laborRows}</tbody></table></section>
         <section><h2>Observations technicien</h2><div class="notes-box"></div></section>

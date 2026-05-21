@@ -15,7 +15,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v22.07";
+const APP_VERSION = "v22.08";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const WORKSHOP_NAME = "NIMR SAV";
@@ -110,7 +110,7 @@ const CLAIM_STATUS_LABELS = {
 const ACTION_LABELS = {
   claim: "Créer le premier ordre de travail",
   expertApproved: "Valider l'accord expert",
-  clientApproved: "Confirmer l'accord client",
+  clientApproved: "Valider client / interne",
   appointment: "Fixer le RDV de dépôt",
   received: "Confirmer la réception véhicule",
   workStarted: "Démarrer les travaux",
@@ -123,8 +123,8 @@ const ACTION_LABELS = {
 const FLAG_HISTORY_EVENTS = {
   expertApproved: { on: ["expert.approved", "Accord expert validé"] },
   clientApproved: {
-    on: ["client.approved", "Accord client reçu"],
-    off: ["client.revoked", "Accord client retiré"],
+    on: ["client.approved", "Validation client/interne enregistrée"],
+    off: ["client.revoked", "Validation client/interne retirée"],
   },
   received: { on: ["vehicle.received", "Véhicule reçu à l'atelier"] },
   workStarted: { on: ["work.started", "Travaux démarrés"], off: ["work.paused", "Travaux remis en attente"] },
@@ -148,7 +148,7 @@ const WORKFLOW = [
   ["photos", "Photos avant réparation"],
   ["expert", "Expert assigné"],
   ["expertApproved", "Accord expert"],
-  ["clientApproved", "Accord client"],
+  ["clientApproved", "Validation client/interne"],
   ["appointment", "RDV fixé"],
   ["vehiclePending", "En attente réception"],
   ["received", "Véhicule reçu"],

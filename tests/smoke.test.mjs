@@ -217,7 +217,9 @@ assert.equal(context.getNextWorkflowAction(approvalCase), 'expertApproved', 'le 
 assert.equal(context.getBusinessRuleIssues(approvalCase, 'expertApproved').length, 0, 'le bouton accord expert ne doit pas être bloqué par l’accord qu’il doit justement valider');
 context.applyWorkflowAction(approvalCase, 'expertApproved');
 assert.equal(approvalCase.claims[0].expertApproved, true, 'l’action globale doit valider l’accord expert sur l’ordre inclus');
-assert.equal(context.getNextWorkflowAction(approvalCase), 'clientApproved', 'après expert, le flux doit passer à l’accord client');
+assert.equal(context.getNextWorkflowAction(approvalCase), 'appointment', 'après expert, le flux doit permettre un RDV prévisionnel avant validation client');
+assert.equal(context.getBusinessRuleIssues(approvalCase, 'appointment').length, 0, 'le RDV prévisionnel ne doit pas être bloqué si la MO et les ressources sont prêtes');
+assert.ok(context.getBusinessRuleWarnings(approvalCase, 'appointment').some((warning) => warning.includes('client/interne')), 'le RDV prévisionnel doit avertir sur la validation client/interne manquante');
 assert.equal(context.getBusinessRuleIssues(approvalCase, 'clientApproved').length, 0, 'le bouton accord client ne doit pas être bloqué par l’accord qu’il doit valider');
 context.applyWorkflowAction(approvalCase, 'clientApproved');
 assert.equal(approvalCase.claims[0].clientApproved, true, 'l’action globale doit valider l’accord client sur l’ordre inclus');
@@ -554,6 +556,7 @@ assert.equal(context.getTabForAction('clientApproved'), 'claims', 'Continuer sur
 
 const clientWorkflowCase = context.normalizeCase({
   clientName: 'Client carrosserie',
+  plate: '901 TU 2026',
   claims: [{
     type: 'client',
     includeInPlanning: true,
@@ -564,11 +567,32 @@ const clientWorkflowCase = context.normalizeCase({
     estimate: { lines: [{ phase: 'reassembly', operation: 'REMPL SERRURE', laborHours: 1 }] },
   }],
 });
-assert.equal(context.getNextWorkflowAction(clientWorkflowCase), 'clientApproved', 'un ordre client ne doit pas repasser par accord expert');
+assert.equal(context.getNextWorkflowAction(clientWorkflowCase), 'appointment', 'un ordre client doit pouvoir réserver un RDV prévisionnel sans repasser par expert');
 assert.equal(context.getWorkflowStepsForCase(clientWorkflowCase).some(([key]) => key === 'expertApproved'), false, 'le process client doit masquer accord expert');
 assert.equal(context.getWorkflowStepsForCase(clientWorkflowCase).some(([key]) => key === 'expert'), false, 'le process client doit masquer expert assigné');
 assert.equal(context.inferOrderTypeFromEstimate({ laborLines: [{ operation: 'rempl serrure av gh', text: 'rempl serrure av gh 1 35,000 35,000' }] }), 'client', 'un remplacement carrosserie client doit proposer Carrosserie client');
 assert.equal(context.inferOrderTypeFromEstimate({ laborLines: [{ operation: 'vidange moteur', text: 'vidange moteur 1 35,000 35,000' }] }), 'vidange', 'un devis vidange doit proposer ordre vidange');
+assert.equal(context.shouldClearPlanningAfterClaimFieldChange('clientApproved', true), false, 'valider client/interne après un RDV prévisionnel ne doit pas annuler le planning');
+assert.equal(context.shouldClearPlanningAfterClaimFieldChange('clientApproved', false), true, 'retirer la validation client/interne doit annuler le planning');
+
+const fastStartCase = context.normalizeCase({
+  id: 'case-fast-start',
+  clientName: 'Service rapide réel',
+  plate: '111 TU 2222',
+  flags: { received: true },
+  appointment: { start: '2026-05-12T08:00:00.000Z', end: '2026-05-12T09:00:00.000Z', delivery: '2026-05-12T09:15:00.000Z' },
+  claims: [{
+    type: 'vidange',
+    includeInPlanning: true,
+    expertApproved: true,
+    clientApproved: false,
+    estimate: { lines: [{ phase: 'oilService', operation: 'VIDANGE MOTEUR', laborHours: 1 }] },
+  }],
+});
+vm.runInContext(`state.bookings = [{ id: 'fast-booking', caseId: 'case-fast-start', key: 'oilService', resourceIds: ['pont-1'], segments: [{ start: '2026-05-12T08:00:00.000Z', end: '2026-05-12T09:00:00.000Z' }] }];`, context);
+assert.ok(context.getBusinessRuleIssues(fastStartCase, 'workStarted').some((issue) => issue.includes('client/interne')), 'le démarrage réel doit rester bloqué sans validation client/interne');
+context.applyWorkflowAction(fastStartCase, 'clientApproved');
+assert.equal(context.getBusinessRuleIssues(fastStartCase, 'workStarted').length, 0, 'la validation client/interne doit débloquer le démarrage service rapide');
 console.log('Client workflow summary regression OK');
 
 const pausedTaskRegression = JSON.parse(vm.runInContext(`(() => {

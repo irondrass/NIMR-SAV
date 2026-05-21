@@ -1,3 +1,11 @@
+# v22.09 - Audit pré-production atelier
+
+- Les impressions Planning journalier et Gantt n'affichent plus les congés/absences comme des travaux à réaliser ; ils restent visibles dans le planning écran et continuent de bloquer la ressource.
+- Un RDV manqué ou en attente de report renvoie maintenant le bouton Continuer vers Planning/RDV, au lieu de pousser l'utilisateur vers une réception impossible.
+- L'ajout d'une absence ressource est bloqué si elle chevauche déjà une tâche atelier : l'utilisateur doit replanifier une tâche non démarrée ou mettre en pause une tâche en cours avant d'ajouter l'absence.
+- Ajout de tests de régression pour planning sans devis avec main-d’œuvre manuelle, impressions sans congés, conflit absence et report RDV.
+- Cache PWA incrémenté en v22.09.
+
 # v22.08 - Flux atelier réel et planification plus simple
 
 - Les ordres SAV peuvent maintenant réserver un créneau dès que la main-d’œuvre est connue et que les validations assurance nécessaires sont faites ; la validation client/interne reste obligatoire avant démarrage réel des travaux.

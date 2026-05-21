@@ -1438,7 +1438,7 @@ function getNextWorkflowAction(item) {
   if (!claimsToCheck.length) return "claim";
   if (claimsToCheck.some((claim) => !claimHasLaborEstimate(claim))) return "claim";
   if (claimsToCheck.some((claim) => !isClientOnlyRepairClaim(claim) && !claim.expertApproved)) return "expertApproved";
-  if (!item.appointment) return "appointment";
+  if (!item.appointment || appointmentNeedsReschedule(item)) return "appointment";
   if (claimsToCheck.some((claim) => !claim.clientApproved)) return "clientApproved";
   if (!item.flags.received) return "received";
   if (!item.flags.workStarted) return "workStarted";
@@ -1447,6 +1447,10 @@ function getNextWorkflowAction(item) {
   if (!item.flags.delivered) return "delivered";
   if (!item.flags.invoiced) return "invoiced";
   return null;
+}
+
+function appointmentNeedsReschedule(item) {
+  return ["no_show", "reschedule_pending"].includes(item?.appointmentStatus);
 }
 
 function getBusinessRuleIssues(item, action) {
@@ -1481,7 +1485,7 @@ function getBusinessRuleIssues(item, action) {
   }
 
   if (action === "received") {
-    if (item.appointmentStatus === "no_show") issues.push("Ce RDV est marqué absent: reporter le RDV avant réception.");
+    if (appointmentNeedsReschedule(item)) issues.push("Reporter le RDV avant réception.");
   }
 
   if (action === "workStarted") {
@@ -2403,10 +2407,16 @@ function normalizeAppointmentOptions(value) {
 function renderAssignments(root, item) {
   const target = $("[data-field='assignments']", root);
   const delivery = $("[data-field='delivery-estimate']", root);
-  delivery.textContent = item.appointment ? `Livraison estimée: ${formatDateTime(item.appointment.delivery)}` : "Livraison non planifiée";
+  if (appointmentNeedsReschedule(item)) {
+    delivery.textContent = item.appointmentStatus === "no_show" ? "RDV manqué : report nécessaire" : "Report RDV en attente";
+  } else {
+    delivery.textContent = item.appointment ? `Livraison estimée: ${formatDateTime(item.appointment.delivery)}` : "Livraison non planifiée";
+  }
   const assignments = state.bookings.filter((booking) => booking.caseId === item.id);
   if (!assignments.length) {
-    target.innerHTML = `<div class="empty-inline">Aucun travail affecté.</div>`;
+    target.innerHTML = appointmentNeedsReschedule(item)
+      ? `<div class="empty-inline">RDV à reporter. Utilisez Calculer RDV puis choisissez une nouvelle date disponible.</div>`
+      : `<div class="empty-inline">Aucun travail affecté.</div>`;
     return;
   }
   target.innerHTML = assignments

@@ -522,6 +522,17 @@ const manualLaborCase = context.normalizeCase({
 });
 context.recomputeCaseDurationsFromClaims(manualLaborCase);
 assert.equal(manualLaborCase.durations.mechanical, 1.5, 'la main-d’œuvre manuelle d’un ordre doit alimenter les durées planning');
+vm.runInContext(`state = normalizeState({
+  cases: [],
+  resources: [
+    { id: 'mec-manual', name: 'Mécanicien manuel', role: 'mecanicien', active: true },
+    { id: 'pont-manual', name: 'Pont mécanique manuel', role: 'pont_mecanique', active: true },
+    { id: 'quality-manual', name: 'Contrôle manuel', role: 'controle', active: true }
+  ],
+  bookings: []
+});`, context);
+const manualPlanningProposal = context.generateSingleProposal(manualLaborCase, new Date('2026-05-19T08:00:00.000Z'));
+assert.ok(manualPlanningProposal.steps.some((step) => step.key === 'mechanical'), 'un ordre sans devis mais avec MO manuelle doit pouvoir réserver le planning mécanique');
 assert.equal(context.isClientOnlyRepairClaim({ type: 'garantie' }), true, 'un ordre garantie ne doit pas demander un expert assurance');
 
 const clientLongCase = context.normalizeCase({
@@ -594,6 +605,88 @@ assert.ok(context.getBusinessRuleIssues(fastStartCase, 'workStarted').some((issu
 context.applyWorkflowAction(fastStartCase, 'clientApproved');
 assert.equal(context.getBusinessRuleIssues(fastStartCase, 'workStarted').length, 0, 'la validation client/interne doit débloquer le démarrage service rapide');
 console.log('Client workflow summary regression OK');
+
+const noShowAppointmentCase = context.normalizeCase({
+  id: 'case-no-show',
+  clientName: 'Absent RDV',
+  plate: '909 TU 2026',
+  appointmentStatus: 'no_show',
+  appointment: { start: '2026-05-20T08:00:00.000Z', end: '2026-05-20T10:00:00.000Z', delivery: '2026-05-20T10:30:00.000Z' },
+  claims: [{
+    type: 'mechanical_client',
+    includeInPlanning: true,
+    expertApproved: true,
+    clientApproved: true,
+    estimate: { lines: [{ phase: 'mechanical', operation: 'Diagnostic', laborHours: 1 }] },
+  }],
+});
+assert.equal(context.getNextWorkflowAction(noShowAppointmentCase), 'appointment', 'un client absent doit retourner vers le report RDV, pas vers la réception');
+assert.ok(context.getBusinessRuleIssues(noShowAppointmentCase, 'received').some((issue) => issue.includes('Reporter le RDV')), 'la réception doit rester bloquée tant que le RDV absent n’est pas reporté');
+
+const printPlanningRegression = JSON.parse(vm.runInContext(`(() => {
+  const writes = [];
+  window.open = () => ({ document: { write(html) { writes.push(html); }, close() {} } });
+  state = normalizeState({
+    resources: [
+      { id: 'tech-print', name: 'Technicien impression', role: 'mecanicien', active: true },
+      { id: 'pont-print', name: 'Pont impression', role: 'pont_mecanique', active: true }
+    ],
+    cases: [{ id: 'case-print', clientName: 'Client imprimé', vehicle: 'DFM S50', plate: '123 TU 4567' }],
+    bookings: [
+      {
+        id: 'work-print',
+        caseId: 'case-print',
+        key: 'mechanical',
+        title: 'Travail mécanique',
+        resourceIds: ['tech-print', 'pont-print'],
+        primaryResourceId: 'tech-print',
+        segments: [{ start: '2026-05-20T08:00:00.000Z', end: '2026-05-20T09:00:00.000Z' }],
+        start: '2026-05-20T08:00:00.000Z',
+        end: '2026-05-20T09:00:00.000Z'
+      },
+      {
+        id: 'leave-print',
+        type: 'leave',
+        caseId: '__leave__',
+        key: 'leave',
+        title: 'Congé technicien',
+        resourceIds: ['tech-print'],
+        primaryResourceId: 'tech-print',
+        segments: [{ start: '2026-05-20T10:00:00.000Z', end: '2026-05-20T11:00:00.000Z' }],
+        start: '2026-05-20T10:00:00.000Z',
+        end: '2026-05-20T11:00:00.000Z'
+      }
+    ]
+  });
+  printDailyPlanning('2026-05-20');
+  const daily = writes.join('');
+  writes.length = 0;
+  printDailyPlanningGantt('2026-05-20');
+  return JSON.stringify({ daily, gantt: writes.join('') });
+})()`, context));
+assert.ok(printPlanningRegression.daily.includes('Travail mécanique'), 'l’impression journalière doit conserver les tâches atelier');
+assert.equal(printPlanningRegression.daily.includes('Congé technicien'), false, 'l’impression journalière ne doit pas afficher les congés comme travail');
+assert.equal(printPlanningRegression.gantt.includes('Congé technicien'), false, 'l’impression Gantt ne doit pas afficher les congés comme tâches production');
+
+const leaveConflictRegression = JSON.parse(vm.runInContext(`(() => {
+  state = normalizeState({
+    resources: [{ id: 'tech-leave', name: 'Technicien absence', role: 'mecanicien', active: true }],
+    cases: [{ id: 'case-leave', clientName: 'Conflit absence' }],
+    bookings: [{
+      id: 'work-leave',
+      caseId: 'case-leave',
+      key: 'mechanical',
+      title: 'Diagnostic planifié',
+      resourceIds: ['tech-leave'],
+      primaryResourceId: 'tech-leave',
+      segments: [{ start: '2026-05-20T08:00:00.000Z', end: '2026-05-20T09:00:00.000Z' }],
+      start: '2026-05-20T08:00:00.000Z',
+      end: '2026-05-20T09:00:00.000Z'
+    }]
+  });
+  return JSON.stringify(getResourceLeaveConflicts('tech-leave', new Date('2026-05-20T08:30:00.000Z'), new Date('2026-05-20T10:00:00.000Z')).map((booking) => booking.id));
+})()`, context));
+assert.deepEqual(leaveConflictRegression, ['work-leave'], 'une absence ne doit pas être posée silencieusement sur une tâche déjà réservée');
 
 const pausedTaskRegression = JSON.parse(vm.runInContext(`(() => {
   const now = new Date();

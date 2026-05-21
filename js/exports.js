@@ -6,6 +6,16 @@ function renderDossierExport(root, item) {
   target.textContent = `Prépare un dossier ZIP compatible Windows avec ${photoCount} photo${photoCount > 1 ? "s" : ""}, ${bookingCount} affectation${bookingCount > 1 ? "s" : ""} planning et les PDF de suivi du dossier.`;
 }
 
+function isPrintableWorkBooking(booking) {
+  return Boolean(
+    booking
+      && booking.type !== "leave"
+      && booking.caseId
+      && booking.caseId !== "__leave__"
+      && booking.temporary !== true
+  );
+}
+
 async function markAppointmentNoShow(item) {
   if (!item.appointment) {
     notifyUser("Aucun RDV fixé pour ce dossier.");
@@ -761,8 +771,10 @@ function printDailyPlanningGantt(dateKey = state.planningDate) {
   const bookingsForResource = (resource) => {
     const rows = [];
     state.bookings.forEach((booking) => {
+      if (!isPrintableWorkBooking(booking)) return;
       if (!isBookingVisibleForResource(booking, resource.id)) return;
-      const item = caseById.get(booking.caseId) || {};
+      const item = caseById.get(booking.caseId);
+      if (!item) return;
       (booking.segments || []).forEach((segment) => {
         const segmentStart = new Date(segment.start);
         const segmentEnd = new Date(segment.end);
@@ -983,8 +995,10 @@ function printDailyPlanning(dateKey = state.planningDate) {
   const rowsByResource = activeResources.map((resource) => {
     const rows = [];
     state.bookings.forEach((booking) => {
+      if (!isPrintableWorkBooking(booking)) return;
       if (!isPrimaryResourceBooking(booking, resource.id)) return;
       const caseItem = state.cases.find((item) => item.id === booking.caseId);
+      if (!caseItem) return;
       (booking.segments || []).forEach((segment) => {
         const segmentStart = new Date(segment.start);
         const segmentEnd = new Date(segment.end);

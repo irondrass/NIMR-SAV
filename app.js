@@ -512,6 +512,15 @@ function bindWorkshopForms() {
       notifyUser("Renseignez une ressource et une période de congé valide.", "error");
       return;
     }
+    const conflicts = getResourceLeaveConflicts(resourceId, start, end);
+    if (conflicts.length) {
+      const details = conflicts
+        .slice(0, 3)
+        .map((booking) => `${booking.title || getDurationLabel(booking.key) || "Tâche"} · ${formatDateTime(booking.start)}`)
+        .join(" / ");
+      notifyUser(`Cette absence chevauche ${conflicts.length} tâche(s) atelier. Replanifiez les tâches non démarrées ou mettez en pause la tâche en cours avant d'ajouter l'absence.${details ? ` ${details}` : ""}`, "error");
+      return;
+    }
     state.bookings.push(normalizeBooking({
       id: uid("leave"),
       type: "leave",
@@ -533,6 +542,18 @@ function bindWorkshopForms() {
   });
 
   bindWorkHoursInputs();
+}
+
+function getResourceLeaveConflicts(resourceId, start, end) {
+  return state.bookings.filter((booking) => {
+    if (!booking || booking.type === "leave") return false;
+    if (!booking.resourceIds?.includes(resourceId)) return false;
+    return (booking.segments || []).some((segment) => {
+      const segmentStart = new Date(segment.start);
+      const segmentEnd = new Date(segment.end);
+      return segmentStart < end && segmentEnd > start;
+    });
+  });
 }
 
 function updateFastLaneSettings() {
@@ -594,7 +615,7 @@ function registerServiceWorker() {
   });
   window.addEventListener("load", async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=22.08", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=22.09", { updateViaCache: "none" });
       registration.update?.();
       if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
       registration.addEventListener("updatefound", () => {

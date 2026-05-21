@@ -590,7 +590,7 @@ function registerServiceWorker() {
   });
   window.addEventListener("load", async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=22.05", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=22.06", { updateViaCache: "none" });
       registration.update?.();
       if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
       registration.addEventListener("updatefound", () => {

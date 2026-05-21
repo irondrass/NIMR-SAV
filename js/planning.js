@@ -452,6 +452,8 @@ function proposalToBookings(item, proposal, temporary) {
 
 function stepToBooking(item, step, temporary) {
   const resourceIds = Array.isArray(step.resourceIds) ? step.resourceIds : [];
+  const segments = Array.isArray(step.segments) ? step.segments : [];
+  const plannedMinutes = sumBookingSegmentsMinutes(segments);
   return {
     id: temporary ? uid("tmp") : uid("booking"),
     caseId: item.id,
@@ -463,12 +465,276 @@ function stepToBooking(item, step, temporary) {
     resourceIds,
     primaryResourceId: resourceIds[0] || null,
     equipmentResourceIds: resourceIds.slice(1),
-    segments: step.segments,
+    segments,
+    plannedStart: step.start,
+    plannedEnd: step.end,
+    plannedSegments: clonePlanningSegments(segments),
+    plannedMinutes,
+    status: temporary ? "temporary" : "planned",
     color: step.color,
     planningMode: step.planningMode || "standard",
     details: step.details || "",
     temporary,
   };
+}
+
+function clonePlanningSegments(segments = []) {
+  return Array.isArray(segments) ? segments.map((segment) => ({ start: segment.start, end: segment.end })) : [];
+}
+
+function sumBookingSegmentsMinutes(segments = []) {
+  return clonePlanningSegments(segments).reduce((sum, segment) => {
+    const start = new Date(segment.start);
+    const end = new Date(segment.end);
+    return end > start ? sum + diffMinutes(start, end) : sum;
+  }, 0);
+}
+
+function getBookingOperationalStatus(booking) {
+  if (booking?.temporary) return "temporary";
+  const status = booking?.status || "planned";
+  return ["planned", "started", "paused", "completed", "temporary"].includes(status) ? status : "planned";
+}
+
+function getBookingStatusLabel(booking) {
+  const labels = {
+    planned: "Planifiée",
+    started: "En cours",
+    paused: "En pause",
+    completed: "Terminée",
+    temporary: "Simulation",
+  };
+  return labels[getBookingOperationalStatus(booking)] || labels.planned;
+}
+
+function getBookingDurationMinutes(booking) {
+  return Math.max(0, sumBookingSegmentsMinutes(booking?.segments || []));
+}
+
+function getBookingTemplate(booking) {
+  const baseTemplate = STEP_TEMPLATES.find((template) => template.key === booking?.key);
+  if (!baseTemplate) return null;
+  const item = state.cases.find((caseItem) => caseItem.id === booking.caseId);
+  return getPlanningTemplateForItem(item, baseTemplate);
+}
+
+function findCaseBooking(item, bookingId) {
+  return state.bookings.find((booking) => booking.id === bookingId && booking.caseId === item?.id && booking.type !== "leave");
+}
+
+function getCaseWorkBookings(item) {
+  return state.bookings
+    .filter((booking) => booking.caseId === item?.id && booking.temporary !== true && booking.type !== "leave")
+    .sort((a, b) => new Date(a.start) - new Date(b.start));
+}
+
+function truncateSegmentsAt(segments, cutoffDate) {
+  const cutoff = new Date(cutoffDate);
+  return clonePlanningSegments(segments)
+    .map((segment) => {
+      const start = new Date(segment.start);
+      const end = new Date(segment.end);
+      if (end <= cutoff) return segment;
+      if (start < cutoff && cutoff < end) return { start: segment.start, end: cutoff.toISOString() };
+      return null;
+    })
+    .filter(Boolean);
+}
+
+function countWorkedMinutesUntil(segments, cutoffDate) {
+  const cutoff = new Date(cutoffDate);
+  return clonePlanningSegments(segments).reduce((sum, segment) => {
+    const start = new Date(segment.start);
+    const end = new Date(segment.end);
+    if (cutoff <= start) return sum;
+    const effectiveEnd = minDate(end, cutoff);
+    return effectiveEnd > start ? sum + diffMinutes(start, effectiveEnd) : sum;
+  }, 0);
+}
+
+function applySegmentsToBooking(booking, segments) {
+  const cleanSegments = clonePlanningSegments(segments).filter((segment) => new Date(segment.start) < new Date(segment.end));
+  if (!cleanSegments.length) return false;
+  booking.segments = cleanSegments;
+  booking.start = cleanSegments[0].start;
+  booking.end = cleanSegments.at(-1).end;
+  return true;
+}
+
+function applySlotToBooking(booking, match, durationMinutes) {
+  const segments = clonePlanningSegments(match.slot.segments);
+  booking.start = match.slot.start.toISOString();
+  booking.end = match.slot.end.toISOString();
+  booking.segments = segments;
+  booking.resourceIds = match.resourceIds;
+  booking.primaryResourceId = match.primary?.id || match.resourceIds[0] || null;
+  booking.equipmentResourceIds = match.equipment ? [match.equipment.id] : match.resourceIds.slice(1);
+  booking.plannedStart = booking.start;
+  booking.plannedEnd = booking.end;
+  booking.plannedSegments = clonePlanningSegments(segments);
+  booking.plannedMinutes = durationMinutes || sumBookingSegmentsMinutes(segments);
+}
+
+function refreshCaseAppointmentFromBookings(item) {
+  const bookings = getCaseWorkBookings(item);
+  if (!bookings.length) return;
+  const start = bookings.reduce((earliest, booking) => minDate(earliest, new Date(booking.start)), new Date(bookings[0].start));
+  const end = bookings.reduce((latest, booking) => maxDate(latest, new Date(booking.end)), new Date(bookings[0].end));
+  const totalMinutes = bookings.reduce((sum, booking) => sum + getBookingDurationMinutes(booking), 0);
+  const marginMinutes = Number(item.appointment?.marginMinutes || 0) || Math.ceil((totalMinutes * 0.2) / STEP_MINUTES) * STEP_MINUTES;
+  item.appointment = {
+    ...(item.appointment || {}),
+    start: start.toISOString(),
+    end: end.toISOString(),
+    delivery: addWorkingMinutes(end, marginMinutes).toISOString(),
+    marginMinutes,
+  };
+}
+
+function startCaseBookingTask(item, bookingId) {
+  const booking = findCaseBooking(item, bookingId);
+  if (!booking) return { ok: false, message: "Tâche introuvable dans le planning." };
+  const status = getBookingOperationalStatus(booking);
+  if (status === "completed") return { ok: false, message: "Cette tâche est déjà terminée." };
+  if (status === "paused") return { ok: false, message: "Cette tâche est en pause. Reprenez le reliquat planifié." };
+  if (status === "started") return { ok: false, message: "Cette tâche est déjà en cours." };
+  const now = new Date().toISOString();
+  booking.status = "started";
+  booking.actualStart = now;
+  booking.startedAt = now;
+  const wasStarted = Boolean(item.flags.workStarted);
+  item.flags.workStarted = true;
+  item.flags.workCompleted = false;
+  if (!wasStarted) recordFlagHistory(item, "workStarted", true);
+  addHistory(item, "planning.task.started", "Tâche démarrée", `${booking.title || getDurationLabel(booking.key)} démarrée à ${formatDateTime(now)}.`);
+  refreshCaseAppointmentFromBookings(item);
+  return { ok: true, message: "Tâche démarrée." };
+}
+
+function completeCaseBookingTaskNow(item, bookingId) {
+  const booking = findCaseBooking(item, bookingId);
+  if (!booking) return { ok: false, message: "Tâche introuvable dans le planning." };
+  const status = getBookingOperationalStatus(booking);
+  if (status === "completed") return { ok: false, message: "Cette tâche est déjà terminée." };
+  if (status === "paused") return { ok: false, message: "Cette tâche est en pause. Terminez plutôt le reliquat planifié." };
+  const now = new Date();
+  const start = new Date(booking.start);
+  if (now < start && status !== "started") {
+    return { ok: false, message: "Cette tâche n'a pas encore démarré. Utilisez Replanifier si le créneau doit changer." };
+  }
+  const originalSegments = clonePlanningSegments(booking.segments);
+  const plannedEnd = booking.plannedEnd || booking.end;
+  const completionDate = minDate(now, new Date(booking.end));
+  const clippedSegments = truncateSegmentsAt(originalSegments, completionDate);
+  if (clippedSegments.length) applySegmentsToBooking(booking, clippedSegments);
+  booking.status = "completed";
+  booking.actualStart = booking.actualStart || booking.start;
+  booking.actualEnd = now.toISOString();
+  booking.completedAt = now.toISOString();
+  booking.plannedEnd = plannedEnd;
+  booking.plannedMinutes = booking.plannedMinutes || sumBookingSegmentsMinutes(originalSegments);
+  const freedMinutes = Math.max(0, diffMinutes(completionDate, new Date(plannedEnd)));
+  addHistory(
+    item,
+    "planning.task.completed",
+    "Tâche terminée",
+    `${booking.title || getDurationLabel(booking.key)} terminée à ${formatDateTime(now)}${freedMinutes > 0 ? `. ${formatLocalizedDecimal(freedMinutes / 60)} h libérée(s) dans le planning.` : "."}`
+  );
+  if (getCaseWorkBookings(item).every((caseBooking) => getBookingOperationalStatus(caseBooking) === "completed")) {
+    const wasCompleted = Boolean(item.flags.workCompleted);
+    item.flags.workCompleted = true;
+    if (!wasCompleted) recordFlagHistory(item, "workCompleted", true);
+  }
+  refreshCaseAppointmentFromBookings(item);
+  return { ok: true, message: freedMinutes > 0 ? "Tâche terminée. Le temps restant est libéré dans le planning." : "Tâche terminée." };
+}
+
+function pauseCaseBookingTask(item, bookingId, reason) {
+  const booking = findCaseBooking(item, bookingId);
+  if (!booking) return { ok: false, message: "Tâche introuvable dans le planning." };
+  const status = getBookingOperationalStatus(booking);
+  if (status !== "started") return { ok: false, message: "Démarrez la tâche avant de la mettre en pause." };
+  const cleanReason = String(reason || "").trim();
+  if (!cleanReason) return { ok: false, message: "Indiquez une cause de pause pour reporter le reliquat." };
+  const now = new Date();
+  const originalSegments = clonePlanningSegments(booking.segments);
+  const plannedMinutes = booking.plannedMinutes || sumBookingSegmentsMinutes(originalSegments);
+  const workedMinutes = Math.min(plannedMinutes, countWorkedMinutesUntil(originalSegments, now));
+  const remainingMinutes = Math.max(0, plannedMinutes - workedMinutes);
+  if (workedMinutes <= 0) return { ok: false, message: "Aucune portion réalisée à conserver. Utilisez Replanifier pour déplacer toute la tâche." };
+  if (remainingMinutes < 5) return completeCaseBookingTaskNow(item, bookingId);
+
+  const clippedSegments = truncateSegmentsAt(originalSegments, now);
+  if (!applySegmentsToBooking(booking, clippedSegments)) {
+    return { ok: false, message: "Impossible de découper cette tâche au moment demandé." };
+  }
+
+  booking.status = "paused";
+  booking.pausedAt = now.toISOString();
+  booking.actualEnd = now.toISOString();
+  booking.pauseReason = cleanReason;
+  booking.plannedMinutes = plannedMinutes;
+  booking.remainingMinutes = remainingMinutes;
+
+  const remainder = createPausedBookingRemainder(item, booking, remainingMinutes, cleanReason, now);
+  item.flags.workStarted = true;
+  item.flags.workCompleted = false;
+  addHistory(
+    item,
+    "planning.task.paused",
+    "Tâche mise en pause",
+    `${booking.title || getDurationLabel(booking.key)} suspendue: ${cleanReason}. Reliquat replanifié le ${formatDateTime(remainder.start)}.`
+  );
+  refreshCaseAppointmentFromBookings(item);
+  return { ok: true, message: "Tâche mise en pause et reliquat replanifié." };
+}
+
+function createPausedBookingRemainder(item, sourceBooking, remainingMinutes, reason, startAfter) {
+  const template = getBookingTemplate(sourceBooking);
+  if (!template) throw new Error("Étape planning inconnue pour replanifier le reliquat.");
+  const duration = Math.max(STEP_MINUTES, Math.round(remainingMinutes));
+  const tempBookings = state.bookings.filter((booking) => booking.id !== sourceBooking.id).map(cloneBooking);
+  const match = findBestResourceSlot(template, startAfter, duration, tempBookings, isFastLaneJob(item), sourceBooking.primaryResourceId);
+  if (!match) throw new Error("Aucun créneau disponible pour reporter le reliquat.");
+  const title = `Reprise - ${sourceBooking.title || getDurationLabel(sourceBooking.key) || "Tâche atelier"}`;
+  const step = makePlanningStep(item, template, match, {
+    title,
+    details: `Reliquat après pause: ${reason}`,
+    planningMode: sourceBooking.planningMode || "standard",
+  });
+  const booking = stepToBooking(item, step, false);
+  booking.parentBookingId = sourceBooking.id;
+  booking.remainingFromPaused = true;
+  booking.pauseReason = reason;
+  booking.plannedMinutes = duration;
+  state.bookings.push(booking);
+  return booking;
+}
+
+function rescheduleCaseBooking(item, bookingId, startAfter) {
+  const booking = findCaseBooking(item, bookingId);
+  if (!booking) return { ok: false, message: "Tâche introuvable dans le planning." };
+  const status = getBookingOperationalStatus(booking);
+  if (status !== "planned") return { ok: false, message: "Seules les tâches non démarrées peuvent être déplacées." };
+  const requestedStart = new Date(startAfter);
+  if (Number.isNaN(requestedStart.getTime())) return { ok: false, message: "Date de replanification invalide." };
+  const template = getBookingTemplate(booking);
+  if (!template) return { ok: false, message: "Étape planning inconnue." };
+  const duration = Math.max(STEP_MINUTES, booking.plannedMinutes || getBookingDurationMinutes(booking));
+  const previousStart = booking.start;
+  const tempBookings = state.bookings.filter((candidate) => candidate.id !== booking.id).map(cloneBooking);
+  const match = findBestResourceSlot(template, requestedStart, duration, tempBookings, isFastLaneJob(item), booking.primaryResourceId);
+  if (!match) return { ok: false, message: "Aucun créneau disponible à partir de cette date." };
+  applySlotToBooking(booking, match, duration);
+  booking.rescheduledAt = new Date().toISOString();
+  addHistory(
+    item,
+    "planning.task.rescheduled",
+    "Tâche replanifiée",
+    `${booking.title || getDurationLabel(booking.key)} déplacée de ${formatDateTime(previousStart)} vers ${formatDateTime(booking.start)}.`
+  );
+  refreshCaseAppointmentFromBookings(item);
+  return { ok: true, message: "Tâche replanifiée selon les disponibilités atelier." };
 }
 
 

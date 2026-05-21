@@ -555,3 +555,52 @@ assert.equal(context.getWorkflowStepsForCase(clientWorkflowCase).some(([key]) =>
 assert.equal(context.inferOrderTypeFromEstimate({ laborLines: [{ operation: 'rempl serrure av gh', text: 'rempl serrure av gh 1 35,000 35,000' }] }), 'client', 'un remplacement carrosserie client doit proposer Carrosserie client');
 assert.equal(context.inferOrderTypeFromEstimate({ laborLines: [{ operation: 'vidange moteur', text: 'vidange moteur 1 35,000 35,000' }] }), 'vidange', 'un devis vidange doit proposer ordre vidange');
 console.log('Client workflow summary regression OK');
+
+const pausedTaskRegression = JSON.parse(vm.runInContext(`(() => {
+  const now = new Date();
+  const start = new Date(now.getTime() - 30 * 60000).toISOString();
+  const end = new Date(now.getTime() + 90 * 60000).toISOString();
+  state = normalizeState({
+    resources: [
+      { id: 'tech-pause', name: 'Technicien pause', role: 'tolier', active: true },
+      { id: 'tech-pause-2', name: 'Technicien reprise', role: 'tolier', active: true }
+    ],
+    cases: [{
+      id: 'case-pause',
+      clientName: 'Pause atelier',
+      flags: { received: true },
+      appointment: { start, end, delivery: end, marginMinutes: 15 },
+      durations: { body: 2 }
+    }],
+    bookings: [{
+      id: 'booking-live',
+      caseId: 'case-pause',
+      key: 'body',
+      title: 'Tôlerie + démontage',
+      resourceIds: ['tech-pause'],
+      primaryResourceId: 'tech-pause',
+      segments: [{ start, end }],
+      plannedStart: start,
+      plannedEnd: end,
+      plannedMinutes: 120,
+      status: 'planned'
+    }]
+  });
+  const item = state.cases[0];
+  const startResult = startCaseBookingTask(item, 'booking-live');
+  const pauseResult = pauseCaseBookingTask(item, 'booking-live', 'Attente pièce');
+  return JSON.stringify({
+    startOk: startResult.ok,
+    pauseOk: pauseResult.ok,
+    bookingCount: state.bookings.length,
+    original: state.bookings.find((booking) => booking.id === 'booking-live'),
+    remainder: state.bookings.find((booking) => booking.parentBookingId === 'booking-live')
+  });
+})()`, context));
+assert.equal(pausedTaskRegression.startOk, true, 'une tâche planifiée doit pouvoir démarrer');
+assert.equal(pausedTaskRegression.pauseOk, true, 'une tâche démarrée doit pouvoir être mise en pause');
+assert.equal(pausedTaskRegression.bookingCount, 2, 'la pause doit créer un reliquat planifié');
+assert.equal(pausedTaskRegression.original.status, 'paused', 'la tâche originale doit être marquée en pause');
+assert.equal(pausedTaskRegression.remainder.status, 'planned', 'le reliquat doit rester planifié');
+assert.equal(pausedTaskRegression.remainder.remainingFromPaused, true, 'le reliquat doit garder son origine pause');
+console.log('Task pause/remainder regression OK');

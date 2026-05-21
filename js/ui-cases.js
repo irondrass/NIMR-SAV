@@ -1236,20 +1236,20 @@ function applyProductionLock(root, item) {
     if (!panel) return;
     panel.classList.add("production-locked-panel");
     disablePanelControls(panel);
-    prependLockNotice(panel, isInvoiced ? "Dossier facturé et clôturé : cette section est figée en lecture seule." : "Dossier en travaux : cette section est figée pour éviter de modifier les accords, ordres de réparation ou informations de réception déjà utilisés par le planning.");
+    prependLockNotice(panel, isInvoiced ? "Dossier facturé et clôturé : cette section est figée en lecture seule." : "Dossier en travaux : les données de base sont figées. Utilisez les actions de tâche du planning pour démarrer, terminer, mettre en pause ou reporter un reliquat.");
   });
 
   const planningPanel = root.querySelector(`[data-case-panel='planning']`);
   if (planningPanel) {
     planningPanel.classList.add("production-locked-panel");
     disablePanelControls(planningPanel);
-    prependLockNotice(planningPanel, "Travaux en cours : les durées et le rendez-vous sont figés. Utilisez l’onglet Compléments pour ajouter une réparation complémentaire validée.");
+    prependLockNotice(planningPanel, "Travaux en cours : les durées et le rendez-vous global restent figés. Les boutons de chaque tâche servent au pilotage réel : démarrage, pause, fin anticipée ou replanification avant démarrage.");
     const appointmentSection = root.querySelector("#generate-proposals")?.closest(".detail-section");
     if (appointmentSection) {
       appointmentSection.classList.add("locked-appointment-section");
       const proposals = appointmentSection.querySelector("[data-field='proposals']");
       if (proposals) {
-        proposals.innerHTML = `<div class="empty-inline"><strong>Rendez-vous figé.</strong><br>Le véhicule est déjà en travaux. Le calcul / report RDV est désactivé.</div>`;
+        proposals.innerHTML = `<div class="empty-inline"><strong>Rendez-vous global figé.</strong><br>Le véhicule est déjà en travaux. Pilotez les écarts depuis les actions des tâches réservées.</div>`;
       }
     }
   }
@@ -1257,7 +1257,7 @@ function applyProductionLock(root, item) {
   root.querySelectorAll("[data-case-tab]").forEach((button) => {
     if (["claims", "planning"].includes(button.dataset.caseTab)) {
       button.classList.add("locked-tab");
-      button.title = "Section figée car les travaux sont en cours.";
+      button.title = button.dataset.caseTab === "planning" ? "Planning global figé, actions de tâche disponibles." : "Section figée car les travaux sont en cours.";
     }
   });
 }
@@ -1273,6 +1273,7 @@ function prependLockNotice(panel, message) {
 function disablePanelControls(panel) {
   panel.querySelectorAll("input, select, textarea, button").forEach((control) => {
     if (control.closest(".case-subnav")) return;
+    if (control.hasAttribute("data-allow-production-action")) return;
     control.disabled = true;
     control.setAttribute("aria-disabled", "true");
   });
@@ -1629,12 +1630,19 @@ function getValidatedAppointmentRows(item) {
         .map((id) => getResource(id))
         .filter((resource) => resource && isEquipmentResource(resource));
       return {
+        id: booking.id,
         key: booking.key,
         title: booking.planningMode === "anticipated-new-part" ? (booking.title || "Préparation anticipée pièces neuves") : (getDurationLabel(booking.key) || booking.title || "Étape planning"),
         planningMode: booking.planningMode || "standard",
         details: booking.details || "",
         start: booking.start,
         end: booking.end,
+        status: getBookingOperationalStatus(booking),
+        statusLabel: getBookingStatusLabel(booking),
+        pauseReason: booking.pauseReason || "",
+        remainingFromPaused: Boolean(booking.remainingFromPaused),
+        actualStart: booking.actualStart || booking.startedAt || "",
+        actualEnd: booking.actualEnd || booking.completedAt || "",
         human: humanResources.map((resource) => resource.name).filter(Boolean).join(", ") || "Non affecté",
         equipment: equipmentResources.map((resource) => resource.name).filter(Boolean).join(", "),
         minutes: Math.max(0, diffMinutes(new Date(booking.start), new Date(booking.end))),
@@ -1676,35 +1684,100 @@ function renderValidatedAppointmentPlan(root, item) {
         <span>Livraison estimée ${formatDateTime(item.appointment.delivery)}</span>
       </div>
     </div>
-    <div class="validated-plan-table">
-      <div class="validated-plan-row header">
-        <span>Étape</span>
-        <span>Date</span>
-        <span>Horaire</span>
-        <span>Technicien</span>
-        <span>Matériel</span>
-        <span>Durée</span>
-      </div>
-      ${rows.map((row) => {
-        const start = new Date(row.start);
-        const end = new Date(row.end);
-        return `
-          <div class="validated-plan-row ${row.planningMode === "anticipated-new-part" ? "anticipated-new-part-row" : ""}">
-            <strong>${escapeHtml(row.title)}${row.planningMode === "anticipated-new-part" ? '<small class="anticipated-new-part-badge">Pièce neuve préparée en parallèle</small>' : ''}${row.details ? `<em>${escapeHtml(row.details)}</em>` : ''}</strong>
+      <div class="validated-plan-table">
+        <div class="validated-plan-row header">
+          <span>Étape</span>
+          <span>Date</span>
+          <span>Horaire</span>
+          <span>Technicien</span>
+          <span>Matériel</span>
+          <span>Durée</span>
+          <span>Action</span>
+        </div>
+        ${rows.map((row) => {
+          const start = new Date(row.start);
+          const end = new Date(row.end);
+          return `
+          <div class="validated-plan-row ${row.planningMode === "anticipated-new-part" ? "anticipated-new-part-row" : ""} task-status-${escapeAttr(row.status)}">
+            <strong>
+              ${escapeHtml(row.title)}
+              ${row.planningMode === "anticipated-new-part" ? '<small class="anticipated-new-part-badge">Pièce neuve préparée en parallèle</small>' : ''}
+              ${row.remainingFromPaused ? '<small class="task-remainder-badge">Reliquat</small>' : ''}
+              <small class="task-status-pill">${escapeHtml(row.statusLabel)}</small>
+              ${row.details ? `<em>${escapeHtml(row.details)}</em>` : ''}
+              ${row.pauseReason ? `<em>Cause pause: ${escapeHtml(row.pauseReason)}</em>` : ''}
+            </strong>
             <span>${formatDate(row.start)}</span>
             <span>${formatTime(start)} → ${formatTime(end)}</span>
             <span>${escapeHtml(row.human)}</span>
             <span>${escapeHtml(row.equipment || '-')}</span>
             <b>${formatLocalizedDecimal(row.minutes / 60)} h</b>
+            <span class="validated-plan-actions">${renderBookingTaskActions(row)}</span>
           </div>
         `;
-      }).join('')}
-    </div>
+        }).join('')}
+      </div>
     <div class="validated-plan-footer">
       <span>Total réservé : <strong>${formatLocalizedDecimal(totalMinutes / 60)} h</strong></span>
       <span>Marge atelier : <strong>${formatLocalizedDecimal((item.appointment.marginMinutes || 0) / 60)} h</strong></span>
     </div>
   `;
+  $$("[data-booking-action]", panel).forEach((button) => {
+    button.addEventListener("click", () => handleBookingTaskAction(item, button.dataset.bookingAction, button.dataset.bookingId));
+  });
+}
+
+function renderBookingTaskActions(row) {
+  if (row.status === "completed") return '<span class="muted">Clôturée</span>';
+  if (row.status === "paused") return '<span class="muted">Reliquat planifié</span>';
+  if (row.status === "started") {
+    return `
+      <button type="button" class="ghost-button tiny-button" data-allow-production-action data-booking-action="pause" data-booking-id="${escapeAttr(row.id)}">Pause</button>
+      <button type="button" class="primary-button tiny-button" data-allow-production-action data-booking-action="complete" data-booking-id="${escapeAttr(row.id)}">Terminer</button>
+    `;
+  }
+  return `
+    <button type="button" class="ghost-button tiny-button" data-allow-production-action data-booking-action="reschedule" data-booking-id="${escapeAttr(row.id)}">Replanifier</button>
+    <button type="button" class="primary-button tiny-button" data-allow-production-action data-booking-action="start" data-booking-id="${escapeAttr(row.id)}">Démarrer</button>
+  `;
+}
+
+function formatDateTimeLocalInputValue(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const pad = (number) => String(number).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+async function handleBookingTaskAction(item, action, bookingId) {
+  try {
+    let result = null;
+    if (action === "start") {
+      result = startCaseBookingTask(item, bookingId);
+    } else if (action === "complete") {
+      const confirmed = await showConfirmModal("Terminer cette tâche maintenant et libérer le temps restant dans le planning ?");
+      if (!confirmed) return;
+      result = completeCaseBookingTaskNow(item, bookingId);
+    } else if (action === "pause") {
+      const reason = window.prompt("Cause de pause / report du reliquat :");
+      if (reason === null) return;
+      result = pauseCaseBookingTask(item, bookingId, reason);
+    } else if (action === "reschedule") {
+      const booking = state.bookings.find((candidate) => candidate.id === bookingId && candidate.caseId === item.id);
+      const defaultValue = formatDateTimeLocalInputValue(booking?.start || new Date());
+      const requested = window.prompt("Nouvelle date et heure souhaitées (format AAAA-MM-JJTHH:MM). L'application prendra le premier créneau disponible à partir de cette date.", defaultValue);
+      if (requested === null) return;
+      result = rescheduleCaseBooking(item, bookingId, requested);
+    }
+    if (!result) return;
+    notifyUser(result.message, result.ok ? "success" : "info");
+    if (result.ok) {
+      saveState();
+      render();
+    }
+  } catch (error) {
+    notifyUser(error.message || "Action planning impossible.", "error");
+  }
 }
 
 function renderImportedLaborReview(root, item) {

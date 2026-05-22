@@ -1,3 +1,9 @@
+# v22.12 - Synchronisation cloud multi-PC
+
+- Les suppressions de dossiers sont envoyées immédiatement vers Supabase.
+- Au chargement, au retour sur l'onglet et au retour réseau, l'application tire la dernière sauvegarde cloud si elle est plus récente que le dernier cloud connu.
+- Correction du cas où une sauvegarde locale de rafraîchissement empêchait un autre PC de recevoir une suppression.
+
 # v22.11 - Correction recherche véhicule guichet rapide
 
 - Le champ visible `Immatriculation ou VIN` déclenche maintenant la recherche automatique dans la base véhicules.

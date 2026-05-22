@@ -17,7 +17,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v22.12";
+const APP_VERSION = "v22.13";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const WORKSHOP_NAME = "NIMR SAV";
@@ -111,6 +111,7 @@ const CLAIM_STATUS_LABELS = {
 
 const ACTION_LABELS = {
   claim: "Créer le premier ordre de travail",
+  labor: "Saisir la main-d’œuvre",
   expertApproved: "Valider l'accord expert",
   clientApproved: "Valider client / interne",
   appointment: "Fixer le RDV de dépôt",
@@ -536,7 +537,8 @@ function normalizeDurations(durations = {}) {
     const value = parseLocalizedDecimal(durations[key] ?? normalized[key]);
     normalized[key] = Math.min(MAX_STEP_DURATION_HOURS, Math.max(0, roundHours(value)));
   });
-  normalized.quality = 0.25;
+  const productiveTotal = ESTIMATE_PLANNING_KEYS.reduce((sum, key) => sum + Number(normalized[key] || 0), 0);
+  normalized.quality = productiveTotal > 0 ? 0.25 : 0;
   return normalized;
 }
 
@@ -621,6 +623,9 @@ function normalizeCase(item) {
     id: item.id || uid("case"),
     clientName: item.clientName || "Client",
     phone: item.phone || "",
+    ownerName: item.ownerName || item.companyName || item.owner || "",
+    driverName: item.driverName || item.depositorName || item.broughtBy || "",
+    driverPhone: item.driverPhone || item.depositorPhone || "",
     vehicle: item.vehicle || "",
     plate: item.plate || "",
     color: item.color || "",
@@ -687,7 +692,7 @@ function isClientOnlyRepairClaim(claim) {
 function getClaimTypeLabel(type) {
   const labels = {
     assurance: "Assurance / expert",
-    client: "Service carrosserie client",
+    client: "Client direct / intervention SAV",
     vidange: "Service rapide / entretien",
     mechanical_client: "Service mécanique",
     electrical_client: "Service électrique",

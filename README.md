@@ -1,3 +1,12 @@
+# v22.13 - Test réel guichet et main-d’œuvre manuelle
+
+- Le dossier rapide ne renvoie plus vers “Créer un OR” quand le premier ordre existe déjà : la prochaine action devient “Saisir la main-d’œuvre”.
+- La zone “Ajouter / modifier la main-d’œuvre de l’ordre” est ouverte et visible quand aucun devis n’a été importé.
+- Un dossier créé sans devis démarre à 0 h atelier : le planning n’est alimenté que par la main-d’œuvre saisie ou importée.
+- Le guichet rapide crée par défaut un ordre service rapide / entretien ; l’assurance expert reste un choix explicite.
+- Ajout des champs opérationnels : OR NAV, kilométrage, téléphone client, propriétaire/société, personne déposante et téléphone déposant.
+- Les fiches PDF et la synchronisation structurée conservent les informations déposant/propriétaire dans les détails du dossier.
+
 # v22.12 - Synchronisation cloud multi-PC
 
 - Les suppressions de dossiers sont envoyées immédiatement vers Supabase.

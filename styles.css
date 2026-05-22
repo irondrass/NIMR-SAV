@@ -2171,12 +2171,23 @@ a:focus-visible {
 .claim-summary-card {
   display: flex;
   justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 12px;
   border: 1px solid var(--border, #d8e2ea);
   background: #f4f8fb;
   border-radius: 14px;
   padding: 12px 14px;
   margin: 14px 0;
+}
+.claim-summary-card.needs-attention,
+.manual-labor-entry[open] {
+  border-color: rgba(181, 116, 0, 0.38);
+  background: #fffaf0;
+}
+.manual-labor-entry summary {
+  cursor: pointer;
+  font-weight: 800;
 }
 .claim-card-head {
   display: flex;

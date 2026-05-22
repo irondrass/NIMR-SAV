@@ -162,7 +162,7 @@ function renderCases() {
   const cases = state.cases
     .filter((item) => {
       const typeSummary = getCaseTypeSummary(item);
-      const haystack = `${item.clientName} ${item.vehicle} ${item.plate} ${item.phone} ${item.vin} ${item.color} ${item.orNavNumber} ${typeSummary}`.toLowerCase();
+      const haystack = `${item.clientName} ${item.ownerName} ${item.driverName} ${item.driverPhone} ${item.vehicle} ${item.plate} ${item.phone} ${item.vin} ${item.color} ${item.orNavNumber} ${typeSummary}`.toLowerCase();
       const matchesText = haystack.includes(search);
       const matchesStatus = statusFilter === "all" || getCaseStatus(item) === statusFilter;
       const matchesType = caseMatchesTypeFilter(item, typeFilter);
@@ -299,10 +299,12 @@ function renderClaims(root, item) {
   item.claims = normalizeRepairClaims(item.claims, item);
   const planningTotal = ESTIMATE_ALLOWED_KEYS.reduce((sum, key) => sum + Number(item.durations?.[key] || 0), 0);
   const includedClaims = item.claims.filter((claim) => claim.includeInPlanning !== false).length;
+  const missingLaborCount = item.claims.filter((claim) => claim.includeInPlanning !== false && !claimHasLaborEstimate(claim)).length;
   target.innerHTML = `
-    <div class="claim-summary-card">
+    <div class="claim-summary-card ${missingLaborCount ? 'needs-attention' : ''}">
       <strong>Planning global véhicule</strong>
       <span>${formatLocalizedDecimal(planningTotal)} h planifiées sur ${includedClaims} intervention(s) incluse(s).</span>
+      ${missingLaborCount ? `<span class="tag warn">${missingLaborCount} ordre${missingLaborCount > 1 ? 's' : ''} sans main-d’œuvre</span>` : `<span class="tag ok">Main-d’œuvre renseignée</span>`}
     </div>
     ${item.claims.length ? item.claims.map((claim, index) => renderClaimCard(claim, index)).join("") : `<div class="empty-inline"><strong>Aucune intervention créée.</strong><br>Créez un ordre de travail SAV, puis importez un devis ou saisissez sa main-d’œuvre.</div>`}
   `;
@@ -443,6 +445,7 @@ function renderClaimCard(claim, index) {
   const partsLines = claim.estimate?.parts || [];
   const totalSourceLines = originalLines.length ? originalLines : estimateLines;
   const total = totalSourceLines.reduce((sum, line) => sum + Number(line.laborHours || 0), 0);
+  const laborDetailsOpen = totalSourceLines.length === 0 || total <= 0 || totalSourceLines.some((line) => line.manual);
   const defaultPhase = getDefaultClaimLaborPhase(claim.type);
   const clientApprovalLabel = isClientOnlyRepairClaim(claim) ? "Validation client/interne" : "Accord client";
   const lineRows = totalSourceLines.length ? totalSourceLines.map((line) => `
@@ -483,9 +486,10 @@ function renderClaimCard(claim, index) {
         <span class="tag ${total > 0 ? 'ok' : 'warn'}">${formatLocalizedDecimal(total)} h MO</span>
         <button class="ghost-button danger-button" type="button" data-claim-delete="${escapeHtml(claim.id)}">Supprimer</button>
       </div>
-      <details class="claim-lines" ${originalLines.length ? 'open' : ''}>
-        <summary>Lignes main-d'œuvre de l'ordre (${totalSourceLines.length})</summary>
+      <details class="claim-lines manual-labor-entry" data-manual-labor-entry ${laborDetailsOpen ? 'open' : ''}>
+        <summary>Ajouter / modifier la main-d'œuvre de l'ordre (${totalSourceLines.length})</summary>
         <ul>${lineRows}</ul>
+        ${laborDetailsOpen ? `<p class="muted">Saisissez ici les heures manuelles quand il n’y a pas de devis importé.</p>` : ''}
         <form class="claim-labor-form" data-claim-labor-form data-claim-id="${escapeAttr(claim.id)}">
           <label>Étape
             <select name="phase">
@@ -626,7 +630,7 @@ function handleClaimSubmit(event, item) {
     number: reusableClaim?.number || `OT-${String(baseIndex + 1).padStart(3, '0')}`,
     title,
     vehicleArea: normalizeTextInputValue(data.get('vehicleArea')),
-    type: data.get('type') || 'assurance',
+    type: data.get('type') || 'vidange',
     status: data.get('status') || 'draft',
     estimateNumber: normalizeTextInputValue(data.get('estimateNumber')),
     orNumber: normalizeTextInputValue(data.get('orNumber')),
@@ -1119,8 +1123,10 @@ function setupCaseDetailTabs(root, item) {
       const targetEl =
         root.querySelector(`[data-action-flag="${action}"]`) ||
         root.querySelector(`[data-toggle="${action}"]`) ||
+        (action === "labor" ? root.querySelector("[data-manual-labor-entry]") : null) ||
         (action === "claim" ? root.querySelector("#claim-form") : null) ||
         (action === "appointment" ? root.querySelector("#generate-proposals") : null);
+      if (action === "labor" && targetEl?.tagName === "DETAILS") targetEl.open = true;
       if (targetEl) {
         setTimeout(() => {
           targetEl.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -1136,6 +1142,7 @@ function setupCaseDetailTabs(root, item) {
 
 function getTabForAction(action) {
   if (action === "claim") return "claims";
+  if (action === "labor") return "claims";
   if (action === "expertApproved" || action === "clientApproved") return "claims";
   if (action === "appointment") return "planning";
   if (action === "received" || action === "workStarted" || action === "workCompleted") return "atelier";
@@ -1186,16 +1193,21 @@ function renderCaseSummary(root, item) {
   const nextTitle = action ? ACTION_LABELS[action] || "Continuer" : "Dossier terminé";
   const nextDescription = action
     ? action === "claim"
-      ? "Ajoutez au moins un ordre de réparation, puis importez ou saisissez son devis avant les accords."
-      : issues.length
-        ? `Avant de continuer : ${issues[0]}`
-        : "Tout est prêt pour cette étape."
+      ? "Ajoutez au moins un ordre de travail SAV avant de planifier."
+      : action === "labor"
+        ? "L’ordre existe déjà. Ajoutez une ligne de main-d’œuvre manuelle ou importez un devis."
+        : issues.length
+          ? `Avant de continuer : ${issues[0]}`
+          : "Tout est prêt pour cette étape."
     : "Toutes les étapes principales sont validées.";
 
   setText(root, "summary-next-action", nextTitle);
   setText(root, "summary-next-description", nextDescription);
   setText(root, "summary-client", item.clientName || "Client non renseigné");
-  setText(root, "summary-phone", item.phone || "Téléphone non renseigné");
+  setText(root, "summary-phone", [
+    item.phone || "Téléphone client non renseigné",
+    item.driverName ? `Déposant: ${item.driverName}` : "",
+  ].filter(Boolean).join(" · "));
   setText(root, "summary-vehicle", item.vehicle || "Véhicule non renseigné");
   setText(root, "summary-vehicle-extra", `${item.plate || "Sans immatriculation"} · ${item.vin || "VIN non renseigné"}`);
   setText(root, "summary-planning", item.appointment ? formatDateTime(item.appointment.start) : "RDV non planifié");
@@ -1219,7 +1231,13 @@ function renderCaseSummary(root, item) {
 
   const nextButton = $(`[data-next-action-tab]`, root);
   if (nextButton) {
-    nextButton.textContent = action === "claim" ? "Créer un OR" : action ? "Continuer le dossier" : "Voir historique";
+    nextButton.textContent = action === "claim"
+      ? "Ajouter un ordre"
+      : action === "labor"
+        ? "Ajouter la main-d’œuvre"
+        : action
+          ? "Continuer le dossier"
+          : "Voir historique";
   }
 }
 
@@ -1233,7 +1251,10 @@ function renderVehicleIdentityCard(root, item) {
   if (!target) return;
   const fields = [
     ["Client", item.clientName],
-    ["Téléphone", item.phone],
+    ["Téléphone client", item.phone],
+    ["Propriétaire / société", item.ownerName],
+    ["Personne déposante", item.driverName],
+    ["Téléphone déposant", item.driverPhone],
     ["Véhicule", item.vehicle],
     ["Immatriculation", item.plate],
     ["VIN", item.vin],
@@ -1268,7 +1289,7 @@ function renderVehicleIdentityCard(root, item) {
 
 function updateCaseHeader(root, item) {
   $("[data-field='title']", root).textContent = item.clientName;
-  $("[data-field='subtitle']", root).textContent = `${item.vehicle || "Véhicule non renseigné"} · ${item.plate || item.vin || "Sans immatriculation"} · ${item.phone || "Téléphone non renseigné"}`;
+  $("[data-field='subtitle']", root).textContent = `${item.vehicle || "Véhicule non renseigné"} · ${item.plate || item.vin || "Sans immatriculation"} · ${item.phone || "Téléphone client non renseigné"}${item.driverName ? ` · Déposant: ${item.driverName}` : ""}`;
 }
 
 function getWorkflowStepsForCase(item) {
@@ -1436,7 +1457,7 @@ function getNextWorkflowAction(item) {
   if (!hasRepairClaims(item)) return "claim";
   const claimsToCheck = getWorkflowClaims(item);
   if (!claimsToCheck.length) return "claim";
-  if (claimsToCheck.some((claim) => !claimHasLaborEstimate(claim))) return "claim";
+  if (claimsToCheck.some((claim) => !claimHasLaborEstimate(claim))) return "labor";
   if (claimsToCheck.some((claim) => !isClientOnlyRepairClaim(claim) && !claim.expertApproved)) return "expertApproved";
   if (!item.appointment || appointmentNeedsReschedule(item)) return "appointment";
   if (claimsToCheck.some((claim) => !claim.clientApproved)) return "clientApproved";

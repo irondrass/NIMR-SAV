@@ -15,11 +15,11 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css?v=22.12" />
+    <link rel="stylesheet" href="styles.css?v=22.13" />
 
     <script>
-      window.NIMR_BUILD = "v22.12";
-      window.NIMR_CACHE_NAME = "nimr-sav-v22.12-cloud-delete-sync";
+      window.NIMR_BUILD = "v22.13";
+      window.NIMR_CACHE_NAME = "nimr-sav-v22.13-real-flow";
       if ("caches" in window) {
         caches.keys().then(function(keys) {
           return Promise.all(keys.filter(function(key) {
@@ -114,14 +114,14 @@
               <form class="quick-form" id="case-form">
                 <label class="check-card quick-mode-toggle">
                   <input type="checkbox" id="quick-create-mode" checked />
-                  <span>Mode guichet rapide : 4 champs essentiels</span>
+                  <span>Mode guichet rapide : champs essentiels atelier</span>
                 </label>
                 <label>
-                  Client <span style="color: #d00000;">*</span>
-                  <input name="clientName" autocomplete="name" placeholder="Nom et prénom ou import devis" />
+                  Client / société propriétaire <span style="color: #d00000;">*</span>
+                  <input name="clientName" autocomplete="name" placeholder="Nom client ou société" />
                 </label>
                 <label>
-                  Téléphone
+                  Téléphone client
                   <input name="phone" inputmode="tel" placeholder="+216 ..." />
                 </label>
                 <label data-quick-optional>
@@ -132,9 +132,25 @@
                   Immatriculation ou VIN <span style="color: #d00000;">*</span>
                   <input name="plate" placeholder="Ex. 123 TU 4567" />
                 </label>
-                <label data-quick-optional>
+                <label>
+                  OR NAV
+                  <input name="orNavNumber" placeholder="Ex. OR-NAV-2026-001" />
+                </label>
+                <label>
                   Kilométrage
                   <input name="mileage" inputmode="numeric" placeholder="Ex. 138000" />
+                </label>
+                <label>
+                  Personne déposante
+                  <input name="driverName" placeholder="Nom de la personne qui amène le véhicule" />
+                </label>
+                <label data-quick-optional>
+                  Téléphone déposant
+                  <input name="driverPhone" inputmode="tel" placeholder="+216 ..." />
+                </label>
+                <label data-quick-optional>
+                  Propriétaire / société facturée
+                  <input name="ownerName" placeholder="Si différent du client affiché" />
                 </label>
                 <label data-quick-optional>
                   Couleur
@@ -144,21 +160,16 @@
                   VIN ou immatriculation <span style="color: #d00000;">*</span>
                   <input name="vin" placeholder="Numéro de châssis" />
                 </label>
-                <label data-quick-optional>
-                  OR NAV
-                  <input name="orNavNumber" placeholder="Ex. OR-NAV-2026-001" />
-                </label>
-
                 <label>
                   Type d'ordre
                   <select name="orderType">
-                    <option value="assurance">Assurance / expert</option>
-                    <option value="client">Service carrosserie client</option>
                     <option value="vidange">Vidange / entretien rapide</option>
+                    <option value="client">Client direct / intervention SAV</option>
                     <option value="mechanical_client">Réparation mécanique client</option>
                     <option value="electrical_client">Réparation électrique client</option>
                     <option value="diagnostic">Diagnostic</option>
                     <option value="garantie">Garantie constructeur</option>
+                    <option value="assurance">Assurance / expert</option>
                   </select>
                 </label>
                 <label data-quick-optional>
@@ -210,7 +221,7 @@
                   <select id="case-type-filter" aria-label="Filtrer par type de dossier">
                     <option value="all">Tous les types</option>
                     <option value="assurance">Assurance / expert</option>
-                    <option value="client">Service carrosserie client</option>
+                    <option value="client">Client direct / intervention SAV</option>
                     <option value="vidange">Vidange / entretien rapide</option>
                     <option value="mechanical_client">Réparation mécanique client</option>
                     <option value="electrical_client">Réparation électrique client</option>
@@ -563,8 +574,11 @@
             <summary>Modifier infos véhicule</summary>
             <p class="muted">Modification véhicule : à utiliser uniquement en cas d’erreur sur le dossier.</p>
             <div class="form-grid">
-              <label>Client<input data-input="clientName" placeholder="Nom et prénom" /></label>
-              <label>Téléphone<input data-input="phone" inputmode="tel" placeholder="+216 ..." /></label>
+              <label>Client / société propriétaire<input data-input="clientName" placeholder="Nom client ou société" /></label>
+              <label>Téléphone client<input data-input="phone" inputmode="tel" placeholder="+216 ..." /></label>
+              <label>Propriétaire / société facturée<input data-input="ownerName" placeholder="Si différent du client" /></label>
+              <label>Personne déposante<input data-input="driverName" placeholder="Personne qui a amené le véhicule" /></label>
+              <label>Téléphone déposant<input data-input="driverPhone" inputmode="tel" placeholder="+216 ..." /></label>
               <label>Immatriculation<input data-input="plate" placeholder="Ex. 6486TU169" /></label>
               <label>Véhicule<input data-input="vehicle" placeholder="Marque, modèle" /></label>
               <label>Couleur<input data-input="color" placeholder="Couleur" /></label>
@@ -632,13 +646,13 @@
               <label>Zone / système<input name="vehicleArea" placeholder="Ex. aile AV droite, moteur, faisceau, freins" /></label>
               <label>Type
                 <select name="type">
-                  <option value="assurance">Assurance / expert</option>
-                  <option value="client">Service carrosserie client</option>
                   <option value="vidange">Client - vidange</option>
+                  <option value="client">Client direct / intervention SAV</option>
                   <option value="mechanical_client">Client - réparation mécanique</option>
                   <option value="electrical_client">Client - réparation électrique</option>
                   <option value="diagnostic">Diagnostic</option>
                   <option value="garantie">Garantie</option>
+                  <option value="assurance">Assurance / expert</option>
                 </select>
               </label>
               <label>Statut
@@ -827,20 +841,20 @@
     </div>
 
     <script src="vendor/pdf.min.js" defer></script>
-    <script src="js/utils.js?v=22.12" defer></script>
-    <script src="js/state.js?v=22.12" defer></script>
-    <script src="js/ui-cases.js?v=22.12" defer></script>
-    <script src="js/estimate-import.js?v=22.12" defer></script>
-    <script src="js/ui-planning.js?v=22.12" defer></script>
-    <script src="js/photos.js?v=22.12" defer></script>
-    <script src="js/storage.js?v=22.12" defer></script>
-    <script src="js/planning.js?v=22.12" defer></script>
-    <script src="js/exports.js?v=22.12" defer></script>
-    <script src="js/business-rules-v2187.js?v=22.12" defer></script>
+    <script src="js/utils.js?v=22.13" defer></script>
+    <script src="js/state.js?v=22.13" defer></script>
+    <script src="js/ui-cases.js?v=22.13" defer></script>
+    <script src="js/estimate-import.js?v=22.13" defer></script>
+    <script src="js/ui-planning.js?v=22.13" defer></script>
+    <script src="js/photos.js?v=22.13" defer></script>
+    <script src="js/storage.js?v=22.13" defer></script>
+    <script src="js/planning.js?v=22.13" defer></script>
+    <script src="js/exports.js?v=22.13" defer></script>
+    <script src="js/business-rules-v2187.js?v=22.13" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
-    <script src="js/supabase-config.js?v=22.12" defer></script>
-    <script src="js/supabase-client.js?v=22.12" defer></script>
-    <script src="js/supabase-sync.js?v=22.12" defer></script>
-    <script src="app.js?v=22.12" defer></script>
+    <script src="js/supabase-config.js?v=22.13" defer></script>
+    <script src="js/supabase-client.js?v=22.13" defer></script>
+    <script src="js/supabase-sync.js?v=22.13" defer></script>
+    <script src="app.js?v=22.13" defer></script>
   </body>
 </html>

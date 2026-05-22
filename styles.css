@@ -436,10 +436,33 @@ input:disabled {
 .quick-form,
 .resource-form,
 .holiday-form,
-.fastlane-form {
+.fastlane-form,
+.supabase-config-form,
+.supabase-login-form {
   display: grid;
   gap: 10px;
   margin: 16px 0;
+}
+
+.supabase-config-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.supabase-config-form .wide {
+  grid-column: 1 / -1;
+}
+
+.quick-mode-toggle {
+  background: #eef6f6;
+  border-color: rgba(29, 107, 117, 0.28);
+}
+
+.quick-form.quick-create-enabled {
+  gap: 12px;
+}
+
+.quick-form [hidden] {
+  display: none !important;
 }
 
 label {

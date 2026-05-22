@@ -4,6 +4,15 @@ function getSupabaseConfig() {
   return window.NIMR_SUPABASE_CONFIG || {};
 }
 
+function getSupabaseWorkshopId() {
+  const config = getSupabaseConfig();
+  return String(config.workshopId || window.NIMR_DEFAULT_WORKSHOP_ID || "00000000-0000-0000-0000-000000000001").trim();
+}
+
+function resetSupabaseClient() {
+  nimrSupabaseClient = null;
+}
+
 function isSupabaseConfigured() {
   const config = getSupabaseConfig();
   return Boolean(config.enabled && config.url && config.anonKey);
@@ -48,9 +57,10 @@ async function getSupabaseUser() {
 
 async function refreshSupabasePanel() {
   const client = getSupabaseClient();
+  hydrateSupabaseConfigForm();
   if (!isSupabaseConfigured()) {
     setSupabaseStatus("Supabase non configuré.", "error");
-    setSupabaseDetails("Renseignez Project URL et anon public key dans js/supabase-config.js.");
+    setSupabaseDetails("Renseignez l'URL projet, la clé anon publique et l'ID atelier dans Paramètres > Cloud Supabase. Ces valeurs restent dans ce navigateur.");
     return;
   }
   if (!client) {
@@ -66,4 +76,63 @@ async function refreshSupabasePanel() {
     setSupabaseStatus("Supabase configuré, utilisateur non connecté.", "warn");
     setSupabaseDetails("Connectez-vous avec l'utilisateur créé dans Authentication > Users.");
   }
+}
+
+function hydrateSupabaseConfigForm() {
+  const form = $("#supabase-config-form");
+  if (!form) return;
+  const config = getSupabaseConfig();
+  if (document.activeElement && form.contains(document.activeElement)) return;
+  form.elements.url.value = config.url || "";
+  form.elements.anonKey.value = config.anonKey || "";
+  form.elements.workshopId.value = getSupabaseWorkshopId();
+  form.elements.backupKey.value = config.backupKey || "nimr-sav-main";
+}
+
+function saveSupabaseRuntimeConfigFromForm(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const nextConfig = {
+    enabled: Boolean(form.elements.url.value.trim() && form.elements.anonKey.value.trim()),
+    url: form.elements.url.value.trim(),
+    anonKey: form.elements.anonKey.value.trim(),
+    workshopId: form.elements.workshopId.value.trim() || window.NIMR_DEFAULT_WORKSHOP_ID,
+    backupKey: form.elements.backupKey.value.trim() || "nimr-sav-main",
+    backupTable: "cloud_backups",
+    allowRuntimeConfig: true,
+  };
+  try {
+    localStorage.setItem(window.NIMR_SUPABASE_RUNTIME_CONFIG_KEY, JSON.stringify(nextConfig));
+    window.NIMR_SUPABASE_CONFIG = { ...getSupabaseConfig(), ...nextConfig };
+    resetSupabaseClient();
+    notifyUser("Configuration Supabase enregistrée sur ce poste.", "success");
+    refreshSupabasePanel();
+  } catch (error) {
+    console.error("Enregistrement config Supabase impossible", error);
+    notifyUser("Impossible d'enregistrer la configuration Supabase locale.", "error");
+  }
+}
+
+function clearSupabaseRuntimeConfig() {
+  localStorage.removeItem(window.NIMR_SUPABASE_RUNTIME_CONFIG_KEY);
+  window.NIMR_SUPABASE_CONFIG = {
+    enabled: false,
+    url: "",
+    anonKey: "",
+    workshopId: window.NIMR_DEFAULT_WORKSHOP_ID,
+    backupKey: "nimr-sav-main",
+    backupTable: "cloud_backups",
+    allowRuntimeConfig: true,
+  };
+  resetSupabaseClient();
+  if (typeof stopSupabaseLiveSync === "function") stopSupabaseLiveSync();
+  notifyUser("Configuration Supabase retirée de ce navigateur.", "success");
+  refreshSupabasePanel();
+}
+
+function bindSupabaseConfigForm() {
+  const form = $("#supabase-config-form");
+  form?.addEventListener("submit", saveSupabaseRuntimeConfigFromForm);
+  $("#supabase-config-clear")?.addEventListener("click", clearSupabaseRuntimeConfig);
+  hydrateSupabaseConfigForm();
 }

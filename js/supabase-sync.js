@@ -64,7 +64,7 @@ async function testSupabaseConnection() {
   if (orderCheck.error) {
     console.warn("Tables métier Supabase indisponibles", orderCheck.error);
     setSupabaseStatus("Connexion OK, mais tables métier absentes.", "warn");
-    setSupabaseDetails("La sauvegarde JSON fonctionne, mais repair_orders est inaccessible. Exécutez supabase-schema.sql v22.09.");
+    setSupabaseDetails("La sauvegarde JSON fonctionne, mais repair_orders est inaccessible. Exécutez supabase-schema.sql v22.10.");
     return;
   }
 
@@ -72,7 +72,7 @@ async function testSupabaseConnection() {
   if (settingsCheck.error) {
     console.warn("Table app_settings indisponible", settingsCheck.error);
     setSupabaseStatus("Connexion OK, mais réglages structurés absents.", "warn");
-    setSupabaseDetails("Exécutez supabase-schema.sql v22.09 pour créer app_settings et activer la synchronisation live, puis relancez le test.");
+    setSupabaseDetails("Exécutez supabase-schema.sql v22.10 pour créer app_settings et activer la synchronisation live, puis relancez le test.");
     return;
   }
 
@@ -80,7 +80,7 @@ async function testSupabaseConnection() {
   if (claimCheck.error) {
     console.warn("Table repair_claims indisponible", claimCheck.error);
     setSupabaseStatus("Connexion OK, cache Supabase à rafraîchir.", "warn");
-    setSupabaseDetails("La table vient probablement d’être créée. Exécutez le SQL v22.09, puis patientez 30 secondes et relancez le contrôle.");
+    setSupabaseDetails("La table vient probablement d’être créée. Exécutez le SQL v22.10, puis patientez 30 secondes et relancez le contrôle.");
     return;
   }
 
@@ -94,6 +94,34 @@ async function buildCloudBackupPayload() {
     ...payload,
     syncedAt: new Date().toISOString(),
   };
+}
+
+async function upsertCloudBackupRow(client, tableName, row) {
+  const scopedRow = withWorkshopId(row);
+  let { error } = await client.from(tableName).upsert(scopedRow, { onConflict: "workshop_id,backup_key" });
+  if (error && isWorkshopSchemaUnavailable(error)) {
+    const { workshop_id, ...legacyRow } = scopedRow;
+    ({ error } = await client.from(tableName).upsert(legacyRow, { onConflict: "backup_key" }));
+  }
+  if (error) throw error;
+}
+
+async function selectCloudBackupRow(client, tableName, backupKey, columns) {
+  let { data, error } = await client
+    .from(tableName)
+    .select(columns)
+    .eq("workshop_id", getSupabaseWorkshopId())
+    .eq("backup_key", backupKey)
+    .maybeSingle();
+  if (error && isWorkshopSchemaUnavailable(error)) {
+    ({ data, error } = await client
+      .from(tableName)
+      .select(columns)
+      .eq("backup_key", backupKey)
+      .maybeSingle());
+  }
+  if (error) throw error;
+  return data || null;
 }
 
 function uniqueByLocalId(rows) {
@@ -160,16 +188,18 @@ function buildWorkshopSettingsPayload(localState) {
 async function syncWorkshopSettingsToSupabase(client, localState, user) {
   const payload = buildWorkshopSettingsPayload(localState);
   const now = new Date().toISOString();
-  const { error } = await client.from("app_settings").upsert(
-    {
-      setting_key: "workshop_settings",
-      value: payload,
-      description: "Réglages atelier: ressources, horaires, jours fériés, Fast Lane et paramètres planning",
-      updated_by: user?.id || null,
-      updated_at: now,
-    },
-    { onConflict: "setting_key" },
-  );
+  const row = withWorkshopId({
+    setting_key: "workshop_settings",
+    value: payload,
+    description: "Réglages atelier: ressources, horaires, jours fériés, Fast Lane et paramètres planning",
+    updated_by: user?.id || null,
+    updated_at: now,
+  });
+  let { error } = await client.from("app_settings").upsert(row, { onConflict: "workshop_id,setting_key" });
+  if (error && isWorkshopSchemaUnavailable(error)) {
+    const { workshop_id, ...legacyRow } = row;
+    ({ error } = await client.from("app_settings").upsert(legacyRow, { onConflict: "setting_key" }));
+  }
   if (error) throw new Error(`app_settings: ${error.message}`);
   return {
     settings: Object.keys(payload.settings || {}).length,
@@ -202,11 +232,19 @@ function applyWorkshopSettingsToState(settingsPayload) {
 }
 
 async function restoreWorkshopSettingsFromSupabase(client) {
-  const { data, error } = await client
+  let { data, error } = await client
     .from("app_settings")
     .select("value, updated_at")
+    .eq("workshop_id", getSupabaseWorkshopId())
     .eq("setting_key", "workshop_settings")
     .maybeSingle();
+  if (error && isWorkshopSchemaUnavailable(error)) {
+    ({ data, error } = await client
+      .from("app_settings")
+      .select("value, updated_at")
+      .eq("setting_key", "workshop_settings")
+      .maybeSingle());
+  }
   if (error) throw new Error(`app_settings: ${error.message}`);
   if (!data?.value) return null;
   return { value: data.value, updatedAt: data.updated_at };
@@ -215,6 +253,15 @@ async function restoreWorkshopSettingsFromSupabase(client) {
 function isSchemaCacheTableError(error) {
   const message = String(error?.message || error || "");
   return /schema cache|Could not find the table|relation .* does not exist|does not exist/i.test(message);
+}
+
+function isWorkshopSchemaUnavailable(error) {
+  const message = String(error?.message || error || "");
+  return /workshop_id|workshop_id,local_id|workshop_id,backup_key|workshop_id,setting_key|no unique or exclusion constraint|column .* does not exist/i.test(message);
+}
+
+function withWorkshopId(row) {
+  return { ...row, workshop_id: getSupabaseWorkshopId() };
 }
 
 async function safeBusinessSyncStep(label, callback) {
@@ -232,11 +279,17 @@ async function safeBusinessSyncStep(label, callback) {
 async function upsertAndMap(client, table, rows) {
   const cleanRows = uniqueByLocalId(rows).filter((row) => row.local_id);
   if (!cleanRows.length) return new Map();
-  const { data, error } = await client.from(table).upsert(cleanRows, { onConflict: "local_id" }).select("id, local_id");
+  let { data, error } = await client
+    .from(table)
+    .upsert(cleanRows.map(withWorkshopId), { onConflict: "workshop_id,local_id" })
+    .select("id, local_id");
+  if (error && isWorkshopSchemaUnavailable(error)) {
+    ({ data, error } = await client.from(table).upsert(cleanRows, { onConflict: "local_id" }).select("id, local_id"));
+  }
   if (error) {
     const duplicateOrderNumber = table === "repair_orders" && String(error.message || "").includes("repair_orders_order_number_key");
     if (duplicateOrderNumber) {
-      throw new Error("repair_orders: contrainte unique restante sur order_number. Dans Supabase > SQL Editor, executez le supabase-schema.sql v22.09, puis relancez la sauvegarde.");
+      throw new Error("repair_orders: contrainte unique restante sur order_number. Dans Supabase > SQL Editor, executez le supabase-schema.sql v22.10, puis relancez la sauvegarde.");
     }
     throw new Error(`${table}: ${error.message}`);
   }
@@ -539,20 +592,33 @@ async function syncBusinessTablesToSupabase(payload, user) {
     // v21.11: audit_logs peut provenir d'anciennes bases sans contrainte unique utilisable.
     // On tente d'abord l'upsert; si Supabase refuse ON CONFLICT, on insere uniquement les lignes manquantes.
     const uniqueAuditRows = uniqueByLocalId(auditRows);
-    const { error } = await client.from("audit_logs").upsert(uniqueAuditRows, { onConflict: "local_id" });
+    let { error } = await client.from("audit_logs").upsert(uniqueAuditRows.map(withWorkshopId), { onConflict: "workshop_id,local_id" });
+    if (error && isWorkshopSchemaUnavailable(error)) {
+      ({ error } = await client.from("audit_logs").upsert(uniqueAuditRows, { onConflict: "local_id" }));
+    }
     if (error) {
       if (!/ON CONFLICT|unique or exclusion constraint/i.test(error.message || "")) {
         throw new Error(`audit_logs: ${error.message}`);
       }
-      const { data: existing, error: readError } = await client
+      let { data: existing, error: readError } = await client
         .from("audit_logs")
         .select("local_id")
+        .eq("workshop_id", getSupabaseWorkshopId())
         .in("local_id", uniqueAuditRows.map((row) => row.local_id).filter(Boolean));
+      if (readError && isWorkshopSchemaUnavailable(readError)) {
+        ({ data: existing, error: readError } = await client
+          .from("audit_logs")
+          .select("local_id")
+          .in("local_id", uniqueAuditRows.map((row) => row.local_id).filter(Boolean)));
+      }
       if (readError) throw new Error(`audit_logs: ${readError.message}`);
       const existingIds = new Set((existing || []).map((row) => row.local_id));
       const missingRows = uniqueAuditRows.filter((row) => row.local_id && !existingIds.has(row.local_id));
       if (missingRows.length) {
-        const { error: insertError } = await client.from("audit_logs").insert(missingRows);
+        let { error: insertError } = await client.from("audit_logs").insert(missingRows.map(withWorkshopId));
+        if (insertError && isWorkshopSchemaUnavailable(insertError)) {
+          ({ error: insertError } = await client.from("audit_logs").insert(missingRows));
+        }
         if (insertError) throw new Error(`audit_logs: ${insertError.message}`);
       }
     }
@@ -601,20 +667,16 @@ async function saveLocalToSupabase() {
     const backupKey = getSupabaseConfig().backupKey || "nimr-carrosserie-main";
     setSupabaseStatus("Envoi sauvegarde complète vers Supabase...");
     const updatedAt = new Date().toISOString();
-    const { error } = await client.from(tableName).upsert(
-      {
-        backup_key: backupKey,
-        app_version: APP_VERSION,
-        state: payload.state,
-        photos: payload.photos,
-        cases_count: payload.state.cases.length,
-        photos_count: payload.photos.length,
-        updated_by: user.id,
-        updated_at: updatedAt,
-      },
-      { onConflict: "backup_key" },
-    );
-    if (error) throw error;
+    await upsertCloudBackupRow(client, tableName, {
+      backup_key: backupKey,
+      app_version: APP_VERSION,
+      state: payload.state,
+      photos: payload.photos,
+      cases_count: payload.state.cases.length,
+      photos_count: payload.photos.length,
+      updated_by: user.id,
+      updated_at: updatedAt,
+    });
     lastKnownCloudUpdatedAt = new Date(updatedAt).getTime();
 
     setSupabaseStatus("Remplissage des tables métier...");
@@ -648,12 +710,7 @@ async function restoreLocalFromSupabase() {
     const tableName = getSupabaseConfig().backupTable || "cloud_backups";
     const backupKey = getSupabaseConfig().backupKey || "nimr-carrosserie-main";
     setSupabaseStatus("Lecture sauvegarde Supabase...");
-    const { data, error } = await client
-      .from(tableName)
-      .select("state, photos, app_version, updated_at, cases_count, photos_count")
-      .eq("backup_key", backupKey)
-      .maybeSingle();
-    if (error) throw error;
+    const data = await selectCloudBackupRow(client, tableName, backupKey, "state, photos, app_version, updated_at, cases_count, photos_count");
     if (!data?.state) {
       setSupabaseStatus("Aucune sauvegarde Supabase trouvée.", "warn");
       setSupabaseDetails("Faites d'abord une sauvegarde local → Supabase.");
@@ -722,20 +779,16 @@ async function autoBackupToSupabase(reason = "autosave") {
     const tableName = getSupabaseConfig().backupTable || "cloud_backups";
     const backupKey = getSupabaseConfig().backupKey || "nimr-carrosserie-main";
     const updatedAt = new Date().toISOString();
-    const { error } = await client.from(tableName).upsert(
-      {
-        backup_key: backupKey,
-        app_version: APP_VERSION,
-        state: payload.state,
-        photos: payload.photos,
-        cases_count: payload.state.cases.length,
-        photos_count: payload.photos.length,
-        updated_by: user.id,
-        updated_at: updatedAt,
-      },
-      { onConflict: "backup_key" },
-    );
-    if (error) throw error;
+    await upsertCloudBackupRow(client, tableName, {
+      backup_key: backupKey,
+      app_version: APP_VERSION,
+      state: payload.state,
+      photos: payload.photos,
+      cases_count: payload.state.cases.length,
+      photos_count: payload.photos.length,
+      updated_by: user.id,
+      updated_at: updatedAt,
+    });
     const stats = await syncBusinessTablesToSupabase(payload, user);
     lastAutoSupabaseBackupAt = Date.now();
     lastKnownCloudUpdatedAt = new Date(updatedAt).getTime();
@@ -757,13 +810,7 @@ async function fetchLatestCloudBackup(client = getSupabaseClient()) {
   if (!client) return null;
   const tableName = getSupabaseConfig().backupTable || "cloud_backups";
   const backupKey = getSupabaseConfig().backupKey || "nimr-carrosserie-main";
-  const { data, error } = await client
-    .from(tableName)
-    .select("state, photos, app_version, updated_at, updated_by, cases_count, photos_count")
-    .eq("backup_key", backupKey)
-    .maybeSingle();
-  if (error) throw error;
-  return data || null;
+  return selectCloudBackupRow(client, tableName, backupKey, "state, photos, app_version, updated_at, updated_by, cases_count, photos_count");
 }
 
 function getTimestampMs(value) {
@@ -859,6 +906,7 @@ function stopSupabaseLiveSync() {
 }
 
 function bindSupabaseActions() {
+  if (typeof bindSupabaseConfigForm === "function") bindSupabaseConfigForm();
   const form = $("#supabase-login-form");
   form?.addEventListener("submit", signInSupabaseFromForm);
   $("#supabase-signout")?.addEventListener("click", signOutSupabase);

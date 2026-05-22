@@ -1,9 +1,50 @@
--- NIMR SAV v22.09 - Schema Supabase complet
+-- NIMR SAV v22.10 - Schema Supabase complet
 -- A executer dans Supabase > SQL Editor > New query > Run.
 -- Cette version garde cloud_backups comme sauvegarde complete et remplit aussi
 -- les tables metier visibles dans Table Editor: clients, vehicles, repair_orders, app_settings, etc.
 
 create extension if not exists "pgcrypto";
+
+-- Isolation multi-utilisateurs / multi-ateliers.
+-- L'atelier par defaut conserve la compatibilite avec les installations existantes.
+create table if not exists public.workshops (
+  id uuid primary key default gen_random_uuid(),
+  name text not null default 'NIMR SAV',
+  created_at timestamptz not null default now()
+);
+
+insert into public.workshops (id, name)
+values ('00000000-0000-0000-0000-000000000001', 'NIMR SAV')
+on conflict (id) do nothing;
+
+create table if not exists public.workshop_members (
+  workshop_id uuid not null references public.workshops(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  role text not null default 'member',
+  created_at timestamptz not null default now(),
+  primary key (workshop_id, user_id)
+);
+
+-- Migration douce : les utilisateurs Supabase deja crees sont rattaches a l'atelier par defaut.
+insert into public.workshop_members (workshop_id, user_id, role)
+select '00000000-0000-0000-0000-000000000001'::uuid, id, 'admin'
+from auth.users
+on conflict (workshop_id, user_id) do nothing;
+
+create or replace function public.is_workshop_member(target_workshop_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.workshop_members wm
+    where wm.workshop_id = target_workshop_id
+      and wm.user_id = auth.uid()
+  );
+$$;
 
 -- Correctif v21.10 : l'ancien script pouvait creer order_number en UNIQUE.
 -- En atelier SAV, un ancien import ou une reprise peut contenir un numero OR en double.
@@ -228,6 +269,51 @@ alter table public.repair_supplement_lines add column if not exists local_id tex
 alter table public.audit_logs add column if not exists local_id text;
 alter table public.planning_slots add column if not exists updated_at timestamptz not null default now();
 
+alter table public.cloud_backups add column if not exists workshop_id uuid references public.workshops(id);
+alter table public.app_settings add column if not exists workshop_id uuid references public.workshops(id);
+alter table public.clients add column if not exists workshop_id uuid references public.workshops(id);
+alter table public.vehicles add column if not exists workshop_id uuid references public.workshops(id);
+alter table public.repair_orders add column if not exists workshop_id uuid references public.workshops(id);
+alter table public.repair_steps add column if not exists workshop_id uuid references public.workshops(id);
+alter table public.planning_resources add column if not exists workshop_id uuid references public.workshops(id);
+alter table public.planning_slots add column if not exists workshop_id uuid references public.workshops(id);
+alter table public.photos add column if not exists workshop_id uuid references public.workshops(id);
+alter table public.repair_claims add column if not exists workshop_id uuid references public.workshops(id);
+alter table public.repair_claim_labor_lines add column if not exists workshop_id uuid references public.workshops(id);
+alter table public.repair_supplements add column if not exists workshop_id uuid references public.workshops(id);
+alter table public.repair_supplement_lines add column if not exists workshop_id uuid references public.workshops(id);
+alter table public.audit_logs add column if not exists workshop_id uuid references public.workshops(id);
+
+update public.cloud_backups set workshop_id = '00000000-0000-0000-0000-000000000001' where workshop_id is null;
+update public.app_settings set workshop_id = '00000000-0000-0000-0000-000000000001' where workshop_id is null;
+update public.clients set workshop_id = '00000000-0000-0000-0000-000000000001' where workshop_id is null;
+update public.vehicles set workshop_id = '00000000-0000-0000-0000-000000000001' where workshop_id is null;
+update public.repair_orders set workshop_id = '00000000-0000-0000-0000-000000000001' where workshop_id is null;
+update public.repair_steps set workshop_id = '00000000-0000-0000-0000-000000000001' where workshop_id is null;
+update public.planning_resources set workshop_id = '00000000-0000-0000-0000-000000000001' where workshop_id is null;
+update public.planning_slots set workshop_id = '00000000-0000-0000-0000-000000000001' where workshop_id is null;
+update public.photos set workshop_id = '00000000-0000-0000-0000-000000000001' where workshop_id is null;
+update public.repair_claims set workshop_id = '00000000-0000-0000-0000-000000000001' where workshop_id is null;
+update public.repair_claim_labor_lines set workshop_id = '00000000-0000-0000-0000-000000000001' where workshop_id is null;
+update public.repair_supplements set workshop_id = '00000000-0000-0000-0000-000000000001' where workshop_id is null;
+update public.repair_supplement_lines set workshop_id = '00000000-0000-0000-0000-000000000001' where workshop_id is null;
+update public.audit_logs set workshop_id = '00000000-0000-0000-0000-000000000001' where workshop_id is null;
+
+alter table public.cloud_backups alter column workshop_id set default '00000000-0000-0000-0000-000000000001';
+alter table public.app_settings alter column workshop_id set default '00000000-0000-0000-0000-000000000001';
+alter table public.clients alter column workshop_id set default '00000000-0000-0000-0000-000000000001';
+alter table public.vehicles alter column workshop_id set default '00000000-0000-0000-0000-000000000001';
+alter table public.repair_orders alter column workshop_id set default '00000000-0000-0000-0000-000000000001';
+alter table public.repair_steps alter column workshop_id set default '00000000-0000-0000-0000-000000000001';
+alter table public.planning_resources alter column workshop_id set default '00000000-0000-0000-0000-000000000001';
+alter table public.planning_slots alter column workshop_id set default '00000000-0000-0000-0000-000000000001';
+alter table public.photos alter column workshop_id set default '00000000-0000-0000-0000-000000000001';
+alter table public.repair_claims alter column workshop_id set default '00000000-0000-0000-0000-000000000001';
+alter table public.repair_claim_labor_lines alter column workshop_id set default '00000000-0000-0000-0000-000000000001';
+alter table public.repair_supplements alter column workshop_id set default '00000000-0000-0000-0000-000000000001';
+alter table public.repair_supplement_lines alter column workshop_id set default '00000000-0000-0000-0000-000000000001';
+alter table public.audit_logs alter column workshop_id set default '00000000-0000-0000-0000-000000000001';
+
 
 -- Correctif v21.27 : eviter les doublons crees par les anciennes versions.
 -- Le numero OR devient la cle stable de synchronisation quand il existe.
@@ -325,19 +411,30 @@ drop index if exists public.repair_claim_labor_lines_local_id_uidx;
 drop index if exists public.repair_supplements_local_id_uidx;
 drop index if exists public.repair_supplement_lines_local_id_uidx;
 
-create unique index clients_local_id_uidx on public.clients(local_id);
-create unique index vehicles_local_id_uidx on public.vehicles(local_id);
-create unique index repair_orders_local_id_uidx on public.repair_orders(local_id);
-create unique index repair_steps_local_id_uidx on public.repair_steps(local_id);
-create unique index planning_resources_local_id_uidx on public.planning_resources(local_id);
-create unique index planning_slots_local_id_uidx on public.planning_slots(local_id);
-create unique index photos_local_id_uidx on public.photos(local_id);
-create unique index repair_claims_local_id_uidx on public.repair_claims(local_id);
-create unique index repair_claim_labor_lines_local_id_uidx on public.repair_claim_labor_lines(local_id);
-create unique index repair_supplements_local_id_uidx on public.repair_supplements(local_id);
-create unique index repair_supplement_lines_local_id_uidx on public.repair_supplement_lines(local_id);
-create unique index audit_logs_local_id_uidx on public.audit_logs(local_id);
+alter table public.cloud_backups drop constraint if exists cloud_backups_backup_key_key;
+alter table public.app_settings drop constraint if exists app_settings_setting_key_key;
+alter table public.repair_claims drop constraint if exists repair_claims_local_id_key;
+alter table public.repair_claim_labor_lines drop constraint if exists repair_claim_labor_lines_local_id_key;
+alter table public.repair_supplements drop constraint if exists repair_supplements_local_id_key;
+alter table public.repair_supplement_lines drop constraint if exists repair_supplement_lines_local_id_key;
 
+create unique index if not exists cloud_backups_workshop_backup_key_uidx on public.cloud_backups(workshop_id, backup_key);
+create unique index if not exists app_settings_workshop_setting_key_uidx on public.app_settings(workshop_id, setting_key);
+create unique index if not exists clients_local_id_uidx on public.clients(workshop_id, local_id);
+create unique index if not exists vehicles_local_id_uidx on public.vehicles(workshop_id, local_id);
+create unique index if not exists repair_orders_local_id_uidx on public.repair_orders(workshop_id, local_id);
+create unique index if not exists repair_steps_local_id_uidx on public.repair_steps(workshop_id, local_id);
+create unique index if not exists planning_resources_local_id_uidx on public.planning_resources(workshop_id, local_id);
+create unique index if not exists planning_slots_local_id_uidx on public.planning_slots(workshop_id, local_id);
+create unique index if not exists photos_local_id_uidx on public.photos(workshop_id, local_id);
+create unique index if not exists repair_claims_local_id_uidx on public.repair_claims(workshop_id, local_id);
+create unique index if not exists repair_claim_labor_lines_local_id_uidx on public.repair_claim_labor_lines(workshop_id, local_id);
+create unique index if not exists repair_supplements_local_id_uidx on public.repair_supplements(workshop_id, local_id);
+create unique index if not exists repair_supplement_lines_local_id_uidx on public.repair_supplement_lines(workshop_id, local_id);
+create unique index if not exists audit_logs_local_id_uidx on public.audit_logs(workshop_id, local_id);
+
+alter table public.workshops enable row level security;
+alter table public.workshop_members enable row level security;
 alter table public.cloud_backups enable row level security;
 alter table public.app_settings enable row level security;
 alter table public.clients enable row level security;
@@ -353,7 +450,18 @@ alter table public.repair_supplements enable row level security;
 alter table public.repair_supplement_lines enable row level security;
 alter table public.audit_logs enable row level security;
 
--- Policies simples pour demarrer: tout utilisateur connecte peut lire/ecrire.
+drop policy if exists "workshops select member" on public.workshops;
+drop policy if exists "workshop_members select own" on public.workshop_members;
+drop policy if exists "workshop_members manage admin" on public.workshop_members;
+
+create policy "workshops select member"
+on public.workshops for select to authenticated
+using (public.is_workshop_member(id));
+
+create policy "workshop_members select own"
+on public.workshop_members for select to authenticated
+using (user_id = auth.uid() or public.is_workshop_member(workshop_id));
+
 do $$
 declare
   t text;
@@ -361,25 +469,22 @@ declare
 begin
   foreach t in array array['cloud_backups','app_settings','clients','vehicles','repair_orders','repair_steps','planning_resources','planning_slots','photos','repair_claims','repair_claim_labor_lines','repair_supplements','repair_supplement_lines','audit_logs']
   loop
+    execute format('drop policy if exists %I on public.%I', t || ' select authenticated', t);
+    execute format('drop policy if exists %I on public.%I', t || ' insert authenticated', t);
+    execute format('drop policy if exists %I on public.%I', t || ' update authenticated', t);
+    execute format('drop policy if exists %I on public.%I', t || ' delete authenticated', t);
+
     p := t || ' select authenticated';
-    if not exists (select 1 from pg_policies where schemaname='public' and tablename=t and policyname=p) then
-      execute format('create policy %I on public.%I for select to authenticated using (true)', p, t);
-    end if;
+    execute format('create policy %I on public.%I for select to authenticated using (public.is_workshop_member(workshop_id))', p, t);
 
     p := t || ' insert authenticated';
-    if not exists (select 1 from pg_policies where schemaname='public' and tablename=t and policyname=p) then
-      execute format('create policy %I on public.%I for insert to authenticated with check (true)', p, t);
-    end if;
+    execute format('create policy %I on public.%I for insert to authenticated with check (public.is_workshop_member(workshop_id))', p, t);
 
     p := t || ' update authenticated';
-    if not exists (select 1 from pg_policies where schemaname='public' and tablename=t and policyname=p) then
-      execute format('create policy %I on public.%I for update to authenticated using (true) with check (true)', p, t);
-    end if;
+    execute format('create policy %I on public.%I for update to authenticated using (public.is_workshop_member(workshop_id)) with check (public.is_workshop_member(workshop_id))', p, t);
 
     p := t || ' delete authenticated';
-    if not exists (select 1 from pg_policies where schemaname='public' and tablename=t and policyname=p) then
-      execute format('create policy %I on public.%I for delete to authenticated using (true)', p, t);
-    end if;
+    execute format('create policy %I on public.%I for delete to authenticated using (public.is_workshop_member(workshop_id))', p, t);
   end loop;
 end $$;
 

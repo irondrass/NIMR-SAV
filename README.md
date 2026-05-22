@@ -1,3 +1,11 @@
+# v22.10 - Sécurisation cloud et guichet rapide
+
+- Retrait de la configuration Supabase codée en dur : l'URL projet, la clé anon publique, l'ID atelier et la clé de sauvegarde se configurent maintenant depuis Paramètres > Cloud Supabase et restent locaux au navigateur.
+- Le schéma Supabase ajoute `workshops`, `workshop_members`, `workshop_id` sur les tables métier et des politiques RLS par atelier. Exécutez `supabase-schema.sql v22.10` dans Supabase avant d'activer la synchro stricte.
+- La synchronisation cloud écrit maintenant `workshop_id` et utilise les contraintes composites par atelier, avec repli temporaire sur l'ancien schéma pour éviter une coupure brutale.
+- Ajout du mode “guichet rapide” dans la création dossier : seuls les champs essentiels restent visibles, l'ancien formulaire complet reste accessible en décochant le mode.
+- Cache PWA incrémenté en v22.10.
+
 # v22.09 - Audit pré-production atelier
 
 - Les impressions Planning journalier et Gantt n'affichent plus les congés/absences comme des travaux à réaliser ; ils restent visibles dans le planning écran et continuent de bloquer la ressource.

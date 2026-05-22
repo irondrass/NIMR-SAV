@@ -6,6 +6,7 @@ function initApp() {
     bindMainNavigation();
     bindCaseList();
     bindCaseCreation();
+    bindQuickCreateMode();
     bindCaseFilters();
     bindPlanningToolbar();
     bindWorkshopForms();
@@ -27,6 +28,20 @@ function initApp() {
     console.error("Initialisation impossible", error);
     notifyUser("L'application n'a pas pu démarrer. Ouvrez la console navigateur pour le détail.", "error");
   }
+}
+
+function bindQuickCreateMode() {
+  const toggle = $("#quick-create-mode");
+  const form = $("#case-form");
+  if (!toggle || !form) return;
+  const applyMode = () => {
+    form.classList.toggle("quick-create-enabled", toggle.checked);
+    $$("[data-quick-optional]", form).forEach((field) => {
+      field.hidden = toggle.checked;
+    });
+  };
+  toggle.addEventListener("change", applyMode);
+  applyMode();
 }
 
 function bindAutoSaveSafety() {
@@ -615,7 +630,7 @@ function registerServiceWorker() {
   });
   window.addEventListener("load", async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=22.09", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=22.10", { updateViaCache: "none" });
       registration.update?.();
       if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
       registration.addEventListener("updatefound", () => {

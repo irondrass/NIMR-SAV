@@ -114,11 +114,14 @@ function bindCaseCreation() {
     const data = new FormData(form);
     const estimateFile = data.get("estimateFile");
     const hasEstimateFile = estimateFile && estimateFile.name;
-    const orderType = data.get("orderType") || "assurance";
+    const orderType = data.get("orderType") || "vidange";
     const orderTitle = normalizeTextInputValue(data.get("orderTitle")) || getClaimTypeLabel(orderType);
     const candidate = {
       clientName: normalizeTextInputValue(data.get("clientName")),
       phone: normalizeTextInputValue(data.get("phone")),
+      ownerName: normalizeTextInputValue(data.get("ownerName")),
+      driverName: normalizeTextInputValue(data.get("driverName")),
+      driverPhone: normalizeTextInputValue(data.get("driverPhone")),
       vehicle: normalizeTextInputValue(data.get("vehicle")),
       plate: normalizeIdentifierValue(data.get("plate")),
       color: normalizeTextInputValue(data.get("color")),
@@ -126,6 +129,11 @@ function bindCaseCreation() {
       vin: normalizeIdentifierValue(data.get("vin")),
       orNavNumber: normalizeIdentifierValue(data.get("orNavNumber")),
     };
+    const visibleVehicleIdentity = candidate.plate.replace(/[^A-Z0-9]/gi, "").toUpperCase();
+    if (!candidate.vin && /^[A-HJ-NPR-Z0-9]{17}$/.test(visibleVehicleIdentity)) {
+      candidate.vin = visibleVehicleIdentity;
+      candidate.plate = "";
+    }
 
     if (!candidate.clientName) {
       notifyUser("Le nom du client est obligatoire pour créer un dossier.", "error");
@@ -168,6 +176,7 @@ function bindCaseCreation() {
       clientName: candidate.clientName || "Client devis",
       id: uid("case"),
       createdAt: new Date().toISOString(),
+      durations: Object.fromEntries(DURATIONS.map(([key]) => [key, 0])),
       history: [makeHistoryEntry("case.created", "Dossier créé", new Date().toISOString())],
     });
 
@@ -631,7 +640,7 @@ function registerServiceWorker() {
   });
   window.addEventListener("load", async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=22.12", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=22.13", { updateViaCache: "none" });
       registration.update?.();
       if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
       registration.addEventListener("updatefound", () => {

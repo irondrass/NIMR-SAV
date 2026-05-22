@@ -393,7 +393,13 @@ async function syncBusinessTablesToSupabase(payload, user) {
     delivery_done_at: getHistoryIso(item, "vehicle.delivered"),
     estimated_amount: null,
     customer_balance: null,
-    notes: [item.damageNotes, item.insurance ? `Assurance: ${item.insurance}` : "", item.expertName ? `Expert: ${item.expertName}` : ""].filter(Boolean).join("\n"),
+    notes: [
+      item.damageNotes,
+      item.ownerName ? `Propriétaire/société: ${item.ownerName}` : "",
+      item.driverName ? `Déposant: ${item.driverName}${item.driverPhone ? ` (${item.driverPhone})` : ""}` : "",
+      item.insurance ? `Assurance: ${item.insurance}` : "",
+      item.expertName ? `Expert: ${item.expertName}` : "",
+    ].filter(Boolean).join("\n"),
     updated_at: now,
   }));
   const orderMap = await upsertAndMap(client, "repair_orders", orderRows);

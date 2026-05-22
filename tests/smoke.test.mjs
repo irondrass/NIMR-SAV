@@ -195,9 +195,26 @@ const alerts = context.buildPilotageAlerts(new Date('2026-05-12T12:00:00.000Z'))
 assert.ok(Array.isArray(alerts), 'le pilotage doit produire une liste d’alertes');
 
 const normalizedReception = context.normalizeState({
-  cases: [{ clientName: 'Réception', arrivalNotes: 'Pare-chocs rayé à l’arrivée' }],
+  cases: [{
+    clientName: 'Réception',
+    ownerName: 'Société Alpha',
+    driverName: 'Chauffeur Atelier',
+    driverPhone: '+216 22 333 444',
+    arrivalNotes: 'Pare-chocs rayé à l’arrivée',
+  }],
 });
 assert.equal(normalizedReception.cases[0].arrivalNotes, 'Pare-chocs rayé à l’arrivée', 'les observations de réception doivent être conservées');
+assert.equal(normalizedReception.cases[0].ownerName, 'Société Alpha', 'la société/propriétaire doit être conservée');
+assert.equal(normalizedReception.cases[0].driverName, 'Chauffeur Atelier', 'la personne déposante doit être conservée');
+assert.equal(normalizedReception.cases[0].driverPhone, '+216 22 333 444', 'le téléphone déposant doit être conservé');
+
+const quickManualCase = context.normalizeCase({
+  id: 'quick-manual',
+  clientName: 'Client manuel',
+  plate: '100TU2000',
+  claims: [{ id: 'claim-manual', type: 'mechanical_client', includeInPlanning: true, title: 'Diagnostic mécanique' }],
+});
+assert.equal(context.getNextWorkflowAction(quickManualCase), 'labor', 'un dossier rapide avec ordre déjà créé doit demander la saisie MO, pas la création d’un nouvel ordre');
 
 vm.runInContext(`
 state = normalizeState({

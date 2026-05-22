@@ -1,4 +1,4 @@
-const CACHE_NAME = "nimr-sav-v22.12-cloud-delete-sync";
+const CACHE_NAME = "nimr-sav-v22.13-real-flow";
 const ASSETS = [
   "./",
   "./index.html",

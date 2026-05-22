@@ -510,10 +510,10 @@ function renderQuickVinResults() {
   const target = $("#quick-vin-results");
   const status = $("#quick-vehicle-import-status");
   if (!form || !target) return;
-  const query = form.elements.vin.value.trim();
+  const query = getQuickVehicleLookupQuery(form);
   if (!vehicleRecords.length) {
     target.innerHTML = "";
-    status.textContent = vehicleDatabaseLoaded ? "Aucun véhicule dans la base" : "Importez la base véhicules pour chercher par VIN";
+    status.textContent = vehicleDatabaseLoaded ? "Aucun véhicule dans la base" : "Importez la base véhicules pour chercher par VIN ou immatriculation";
     return;
   }
   if (normalizeVehicleKey(query).length < 1) {
@@ -521,8 +521,8 @@ function renderQuickVinResults() {
     status.textContent = `${vehicleRecords.length} véhicules chargés`;
     return;
   }
-  const matches = findVehicleRecordsByVin(query, 12);
-  status.textContent = `${matches.length} résultat${matches.length > 1 ? "s" : ""} VIN`;
+  const matches = findVehicleRecordsByVehicleQuery(query, 12);
+  status.textContent = `${matches.length} résultat${matches.length > 1 ? "s" : ""} véhicule`;
   target.innerHTML = matches.length
     ? matches
         .map(
@@ -536,7 +536,7 @@ function renderQuickVinResults() {
           `,
         )
         .join("")
-    : `<div class="empty-inline">Aucun VIN correspondant.</div>`;
+    : `<div class="empty-inline">Aucun véhicule correspondant.</div>`;
 
   $$("[data-quick-vin-result]", target).forEach((button) => {
     button.addEventListener("click", () => {
@@ -548,8 +548,38 @@ function renderQuickVinResults() {
   });
 }
 
+function getQuickVehicleLookupQuery(form) {
+  const plate = form.elements.plate?.value?.trim() || "";
+  const vin = form.elements.vin?.value?.trim() || "";
+  if (document.activeElement === form.elements.vin && vin) return vin;
+  if (document.activeElement === form.elements.plate && plate) return plate;
+  return vin || plate;
+}
+
+function findVehicleRecordsByVehicleQuery(query, limit = 8) {
+  const key = normalizeVehicleKey(query);
+  if (!key) return [];
+  const scoreRecord = (record) => {
+    const vin = normalizeVehicleKey(record.vin);
+    const plate = normalizeVehicleKey(record.plate);
+    if (vin === key || plate === key) return 0;
+    if (vin.startsWith(key)) return 1;
+    if (plate.startsWith(key)) return 2;
+    if (vin.includes(key)) return 3;
+    if (plate.includes(key)) return 4;
+    return 99;
+  };
+  return vehicleRecords
+    .map((record, index) => ({ record, index, score: scoreRecord(record) }))
+    .filter((entry) => entry.score < 99)
+    .sort((a, b) => a.score - b.score || a.index - b.index)
+    .slice(0, limit)
+    .map((entry) => entry.record);
+}
+
 function findVehicleRecordsByVin(query, limit = 8) {
   const key = normalizeVehicleKey(query);
+  if (!key) return [];
   const starts = vehicleRecords.filter((record) => normalizeVehicleKey(record.vin).startsWith(key));
   const includes = vehicleRecords.filter((record) => {
     const vin = normalizeVehicleKey(record.vin);

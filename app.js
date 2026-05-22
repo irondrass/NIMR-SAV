@@ -609,6 +609,7 @@ function bindBackupActions() {
 
 function bindVehicleLookup() {
   $("#quick-vehicle-file-input")?.addEventListener("change", handleQuickVehicleFile);
+  $("#case-form")?.elements?.plate?.addEventListener("input", renderQuickVinResults);
   $("#case-form")?.elements?.vin?.addEventListener("input", renderQuickVinResults);
 }
 
@@ -630,7 +631,7 @@ function registerServiceWorker() {
   });
   window.addEventListener("load", async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=22.10", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=22.11", { updateViaCache: "none" });
       registration.update?.();
       if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
       registration.addEventListener("updatefound", () => {

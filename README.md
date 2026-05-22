@@ -1,3 +1,9 @@
+# v22.11 - Correction recherche véhicule guichet rapide
+
+- Le champ visible `Immatriculation ou VIN` déclenche maintenant la recherche automatique dans la base véhicules.
+- La recherche accepte une immatriculation, un VIN complet ou un fragment de VIN.
+- Cache PWA incrémenté en v22.11 pour forcer le rechargement de `app.js` et `js/storage.js`.
+
 # v22.10 - Sécurisation cloud et guichet rapide
 
 - Retrait de la configuration Supabase codée en dur : l'URL projet, la clé anon publique, l'ID atelier et la clé de sauvegarde se configurent maintenant depuis Paramètres > Cloud Supabase et restent locaux au navigateur.

@@ -88,6 +88,18 @@ assert.ok(context.findDuplicateCase({ vin: ' vf123 ', plate: '' }), 'la détecti
 assert.ok(context.findDuplicateCase({ vin: '', plate: '123 tu 4567' }), 'la détection doublon immatriculation doit ignorer casse');
 assert.equal(context.findDuplicateCase({ vin: 'NEW', plate: '999 TU 9999' }), null, 'un nouveau véhicule ne doit pas être signalé comme doublon');
 
+const quickVehicleLookupRegression = JSON.parse(vm.runInContext(`(() => {
+  vehicleRecords = [
+    normalizeVehicleRecord({ vin: 'LGJF1EE26KT418026', plate: '5544TU243', vehicle: 'DFM S50', clientName: 'Client VIN' }),
+    normalizeVehicleRecord({ vin: 'ZFA3120000J578190', plate: '2212TU189', vehicle: 'Fiat 500', clientName: 'Autre client' }),
+  ];
+  const byPlate = findVehicleRecordsByVehicleQuery('5544TU243', 5).map((record) => record.vin);
+  const byVinPart = findVehicleRecordsByVehicleQuery('KT418', 5).map((record) => record.plate);
+  return JSON.stringify({ byPlate, byVinPart });
+})()`, context));
+assert.deepEqual(quickVehicleLookupRegression.byPlate, ['LGJF1EE26KT418026'], 'le guichet rapide doit chercher depuis le champ immatriculation visible');
+assert.deepEqual(quickVehicleLookupRegression.byVinPart, ['5544TU243'], 'le guichet rapide doit chercher par fragment de VIN');
+
 
 const validBackup = context.validateBackupPayload({
   app: 'nimr-carrosserie',

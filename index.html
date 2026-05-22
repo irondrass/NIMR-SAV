@@ -5,17 +5,21 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#11415f" />
     <meta name="description" content="Application PWA de pilotage SAV, ordres de travail, rendez-vous et planning atelier global." />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; connect-src 'self' https://*.supabase.co wss://*.supabase.co; img-src 'self' blob: data:; font-src 'self' https://fonts.gstatic.com data:; worker-src 'self' blob:; manifest-src 'self';"
+    />
     <title>NIMR SAV</title>
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="icon" href="assets/icon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css?v=22.09" />
+    <link rel="stylesheet" href="styles.css?v=22.10" />
 
     <script>
-      window.NIMR_BUILD = "v22.09";
-      window.NIMR_CACHE_NAME = "nimr-sav-v22.09-production-qa";
+      window.NIMR_BUILD = "v22.10";
+      window.NIMR_CACHE_NAME = "nimr-sav-v22.10-secure-simple";
       if ("caches" in window) {
         caches.keys().then(function(keys) {
           return Promise.all(keys.filter(function(key) {
@@ -108,6 +112,10 @@
               </div>
 
               <form class="quick-form" id="case-form">
+                <label class="check-card quick-mode-toggle">
+                  <input type="checkbox" id="quick-create-mode" checked />
+                  <span>Mode guichet rapide : 4 champs essentiels</span>
+                </label>
                 <label>
                   Client <span style="color: #d00000;">*</span>
                   <input name="clientName" autocomplete="name" placeholder="Nom et prénom ou import devis" />
@@ -116,7 +124,7 @@
                   Téléphone
                   <input name="phone" inputmode="tel" placeholder="+216 ..." />
                 </label>
-                <label>
+                <label data-quick-optional>
                   Véhicule
                   <input name="vehicle" placeholder="Marque, modèle si connu" />
                 </label>
@@ -124,19 +132,19 @@
                   Immatriculation ou VIN <span style="color: #d00000;">*</span>
                   <input name="plate" placeholder="Ex. 123 TU 4567" />
                 </label>
-                <label>
+                <label data-quick-optional>
                   Kilométrage
                   <input name="mileage" inputmode="numeric" placeholder="Ex. 138000" />
                 </label>
-                <label>
+                <label data-quick-optional>
                   Couleur
                   <input name="color" placeholder="Couleur" />
                 </label>
-                <label>
+                <label data-quick-optional>
                   VIN ou immatriculation <span style="color: #d00000;">*</span>
                   <input name="vin" placeholder="Numéro de châssis" />
                 </label>
-                <label>
+                <label data-quick-optional>
                   OR NAV
                   <input name="orNavNumber" placeholder="Ex. OR-NAV-2026-001" />
                 </label>
@@ -153,7 +161,7 @@
                     <option value="garantie">Garantie constructeur</option>
                   </select>
                 </label>
-                <label>
+                <label data-quick-optional>
                   Libellé OR
                   <input name="orderTitle" placeholder="Ex. Vidange, réparation mécanique..." />
                 </label>
@@ -404,6 +412,29 @@
                   <p>Sauvegarde, restauration et réglages atelier sécurisés sans perdre les données locales</p>
                 </div>
               </div>
+              <form class="supabase-config-form" id="supabase-config-form">
+                <label class="wide">
+                  Project URL Supabase
+                  <input name="url" type="url" placeholder="https://xxxx.supabase.co" autocomplete="off" />
+                </label>
+                <label>
+                  Clé anon publique
+                  <input name="anonKey" type="password" placeholder="eyJhbGci..." autocomplete="off" />
+                </label>
+                <label>
+                  ID atelier
+                  <input name="workshopId" placeholder="00000000-0000-0000-0000-000000000001" autocomplete="off" />
+                </label>
+                <label>
+                  Clé sauvegarde
+                  <input name="backupKey" placeholder="nimr-sav-main" autocomplete="off" />
+                </label>
+                <div class="backup-actions wide">
+                  <button class="primary-button" type="submit">Enregistrer config cloud</button>
+                  <button class="ghost-button" type="button" id="supabase-config-clear">Retirer config locale</button>
+                </div>
+              </form>
+              <p class="muted backup-warning">La clé anon publique n'est pas une clé service. La sécurité réelle vient de l'authentification et des règles RLS par atelier.</p>
               <form class="supabase-login-form" id="supabase-login-form">
                 <label>
                   Email utilisateur
@@ -423,7 +454,7 @@
               </div>
               <p class="muted backup-warning">Avant chaque sauvegarde ou restauration cloud, l'application télécharge automatiquement une copie JSON locale de sécurité.</p>
               <p class="muted backup-status" id="supabase-status">Initialisation Supabase...</p>
-              <p class="muted" id="supabase-details">Exécutez supabase-schema.sql v22.09 si le test indique que cloud_backups, Realtime ou app_settings manque.</p>
+              <p class="muted" id="supabase-details">Exécutez supabase-schema.sql v22.10 si le test indique que cloud_backups, Realtime ou app_settings manque.</p>
             </section>
           </div>
         </section>
@@ -796,20 +827,20 @@
     </div>
 
     <script src="vendor/pdf.min.js" defer></script>
-    <script src="js/utils.js?v=22.09" defer></script>
-    <script src="js/state.js?v=22.09" defer></script>
-    <script src="js/ui-cases.js?v=22.09" defer></script>
-    <script src="js/estimate-import.js?v=22.09" defer></script>
-    <script src="js/ui-planning.js?v=22.09" defer></script>
-    <script src="js/photos.js?v=22.09" defer></script>
-    <script src="js/storage.js?v=22.09" defer></script>
-    <script src="js/planning.js?v=22.09" defer></script>
-    <script src="js/exports.js?v=22.09" defer></script>
-    <script src="js/business-rules-v2187.js?v=22.09" defer></script>
+    <script src="js/utils.js?v=22.10" defer></script>
+    <script src="js/state.js?v=22.10" defer></script>
+    <script src="js/ui-cases.js?v=22.10" defer></script>
+    <script src="js/estimate-import.js?v=22.10" defer></script>
+    <script src="js/ui-planning.js?v=22.10" defer></script>
+    <script src="js/photos.js?v=22.10" defer></script>
+    <script src="js/storage.js?v=22.10" defer></script>
+    <script src="js/planning.js?v=22.10" defer></script>
+    <script src="js/exports.js?v=22.10" defer></script>
+    <script src="js/business-rules-v2187.js?v=22.10" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
-    <script src="js/supabase-config.js?v=22.09" defer></script>
-    <script src="js/supabase-client.js?v=22.09" defer></script>
-    <script src="js/supabase-sync.js?v=22.09" defer></script>
-    <script src="app.js?v=22.09" defer></script>
+    <script src="js/supabase-config.js?v=22.10" defer></script>
+    <script src="js/supabase-client.js?v=22.10" defer></script>
+    <script src="js/supabase-sync.js?v=22.10" defer></script>
+    <script src="app.js?v=22.10" defer></script>
   </body>
 </html>

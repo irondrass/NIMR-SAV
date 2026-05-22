@@ -86,6 +86,29 @@ function audit(name, scenarioFn) {
   }
 }
 
+audit("La configuration Supabase publiée ne doit pas contenir de clé projet codée en dur", () => {
+  const configSource = fs.readFileSync(new URL('../js/supabase-config.js', import.meta.url), 'utf8');
+  assert.equal(configSource.includes('lkbdllixvkmywxcksiuj.supabase.co'), false, 'URL Supabase réelle exposée dans js/supabase-config.js');
+  assert.equal(/eyJhbGciOiJIUzI1Ni/i.test(configSource), false, 'JWT anon codé en dur dans js/supabase-config.js');
+  assert.ok(configSource.includes('SUPABASE_RUNTIME_CONFIG_KEY'), 'la config runtime locale doit exister');
+});
+
+audit("index.html doit définir une politique CSP compatible PWA", () => {
+  const htmlSource = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  assert.ok(htmlSource.includes('Content-Security-Policy'), 'CSP absente de index.html');
+  assert.ok(htmlSource.includes("connect-src 'self' https://*.supabase.co wss://*.supabase.co"), 'CSP Supabase/Reatime incomplète');
+  assert.ok(htmlSource.includes("object-src 'none'"), 'CSP doit interdire les contenus object/embed');
+});
+
+audit("Le schéma Supabase doit isoler les données par atelier", () => {
+  const schema = fs.readFileSync(new URL('../supabase-schema.sql', import.meta.url), 'utf8');
+  assert.ok(schema.includes('public.workshops'), 'table workshops manquante');
+  assert.ok(schema.includes('public.workshop_members'), 'table workshop_members manquante');
+  assert.ok(schema.includes('public.is_workshop_member(workshop_id)'), 'politiques RLS par workshop_id manquantes');
+  assert.equal(/using\s*\(\s*true\s*\)/i.test(schema), false, 'politique RLS permissive using(true) détectée');
+  assert.equal(/with check\s*\(\s*true\s*\)/i.test(schema), false, 'politique RLS permissive with check(true) détectée');
+});
+
 // Helper pour instancier un état de base vierge avec toutes les ressources actives
 vm.runInContext(`
   function createAuditState() {

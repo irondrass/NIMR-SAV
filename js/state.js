@@ -6,6 +6,8 @@ const STORAGE_MIRROR_KEY = `${STORAGE_KEY}:mirror`;
 const STORAGE_SNAPSHOTS_KEY = `${STORAGE_KEY}:snapshots`;
 const STORAGE_META_KEY = `${STORAGE_KEY}:meta`;
 const SESSION_EMERGENCY_KEY = `${STORAGE_KEY}:session-emergency`;
+const CLOUD_UPDATED_META_KEY = `${STORAGE_KEY}:last-cloud-updated-at`;
+const LOCAL_CHANGE_META_KEY = `${STORAGE_KEY}:last-local-change-at`;
 const AUTOSAVE_SNAPSHOT_LIMIT = 8;
 const AUTOSAVE_CLOUD_DEBOUNCE_MS = 5000;
 const DB_NAME = "nimr-carrosserie-db";
@@ -15,7 +17,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v22.11";
+const APP_VERSION = "v22.12";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const WORKSHOP_NAME = "NIMR SAV";
@@ -1002,6 +1004,47 @@ function writeStateSnapshot(envelope) {
   }
 }
 
+function readTimestampMeta(key) {
+  try {
+    const value = localStorage.getItem(key);
+    const time = value ? new Date(value).getTime() : 0;
+    return Number.isFinite(time) ? time : 0;
+  } catch (error) {
+    return 0;
+  }
+}
+
+function rememberKnownCloudUpdatedAt(value) {
+  try {
+    const iso = value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+    localStorage.setItem(CLOUD_UPDATED_META_KEY, iso);
+    return new Date(iso).getTime();
+  } catch (error) {
+    return 0;
+  }
+}
+
+function getStoredCloudUpdatedAt() {
+  return readTimestampMeta(CLOUD_UPDATED_META_KEY);
+}
+
+function rememberLocalUserChangeAt(value) {
+  try {
+    const iso = value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+    localStorage.setItem(LOCAL_CHANGE_META_KEY, iso);
+  } catch (error) {
+    // Métadonnée de synchro non critique.
+  }
+}
+
+function clearLocalUserChangeAt() {
+  try {
+    localStorage.removeItem(LOCAL_CHANGE_META_KEY);
+  } catch (error) {
+    // Métadonnée de synchro non critique.
+  }
+}
+
 function saveState(options = {}) {
   try {
     const envelope = buildAutosaveEnvelope();
@@ -1011,6 +1054,7 @@ function saveState(options = {}) {
     localStorage.setItem(STORAGE_META_KEY, JSON.stringify({ savedAt: envelope.savedAt, appVersion: APP_VERSION, casesCount: state.cases.length }));
     if (typeof sessionStorage !== "undefined") sessionStorage.setItem(SESSION_EMERGENCY_KEY, JSON.stringify(envelope));
     if (!options.skipSnapshot) writeStateSnapshot(envelope);
+    if (!options.skipCloud) rememberLocalUserChangeAt(envelope.savedAt);
     if (!options.skipCloud && typeof scheduleAutoSupabaseBackup === "function") {
       scheduleAutoSupabaseBackup("local-save");
     }

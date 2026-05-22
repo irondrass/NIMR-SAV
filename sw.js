@@ -1,4 +1,4 @@
-const CACHE_NAME = "nimr-sav-v22.11-vehicle-lookup";
+const CACHE_NAME = "nimr-sav-v22.12-cloud-delete-sync";
 const ASSETS = [
   "./",
   "./index.html",

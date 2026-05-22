@@ -734,6 +734,8 @@ async function restoreLocalFromSupabase() {
     await clearPhotoStore();
     const restoredPhotos = await restorePhotoRecords(Array.isArray(data.photos) ? data.photos : []);
     lastKnownCloudUpdatedAt = new Date(data.updated_at || 0).getTime() || lastKnownCloudUpdatedAt;
+    if (typeof rememberKnownCloudUpdatedAt === "function" && lastKnownCloudUpdatedAt) rememberKnownCloudUpdatedAt(lastKnownCloudUpdatedAt);
+    if (typeof clearLocalUserChangeAt === "function") clearLocalUserChangeAt();
     saveState({ skipCloud: true });
     render();
     setSupabaseStatus("Restauration Supabase terminée.", "ok");
@@ -749,7 +751,7 @@ async function restoreLocalFromSupabase() {
 let autoSupabaseBackupTimer = null;
 let autoSupabaseBackupRunning = false;
 let lastAutoSupabaseBackupAt = 0;
-let lastKnownCloudUpdatedAt = 0;
+let lastKnownCloudUpdatedAt = typeof getStoredCloudUpdatedAt === "function" ? getStoredCloudUpdatedAt() : 0;
 let supabaseLiveSyncChannel = null;
 let supabaseLivePullTimer = null;
 let applyingRemoteSupabaseState = false;
@@ -766,10 +768,16 @@ function scheduleAutoSupabaseBackup(reason = "autosave") {
   autoSupabaseBackupTimer = window.setTimeout(() => autoBackupToSupabase(reason), AUTOSAVE_CLOUD_DEBOUNCE_MS);
 }
 
-async function autoBackupToSupabase(reason = "autosave") {
+async function flushSupabaseBackup(reason = "manual") {
+  window.clearTimeout(autoSupabaseBackupTimer);
+  autoSupabaseBackupTimer = null;
+  return autoBackupToSupabase(reason, { force: true });
+}
+
+async function autoBackupToSupabase(reason = "autosave", options = {}) {
   if (autoSupabaseBackupRunning || !shouldAutoBackupToSupabase()) return;
   const now = Date.now();
-  if (now - lastAutoSupabaseBackupAt < 15000) return;
+  if (!options.force && now - lastAutoSupabaseBackupAt < 15000) return;
   autoSupabaseBackupRunning = true;
   try {
     const client = getSupabaseClient();
@@ -792,6 +800,8 @@ async function autoBackupToSupabase(reason = "autosave") {
     const stats = await syncBusinessTablesToSupabase(payload, user);
     lastAutoSupabaseBackupAt = Date.now();
     lastKnownCloudUpdatedAt = new Date(updatedAt).getTime();
+    if (typeof rememberKnownCloudUpdatedAt === "function") rememberKnownCloudUpdatedAt(updatedAt);
+    if (typeof clearLocalUserChangeAt === "function") clearLocalUserChangeAt();
     localStorage.setItem(`${STORAGE_KEY}:last-cloud-autosave`, new Date().toISOString());
     localStorage.removeItem(`${STORAGE_KEY}:last-cloud-autosave-error`);
     if (typeof setSupabaseDetails === "function") {
@@ -821,14 +831,8 @@ function getTimestampMs(value) {
 function shouldApplyRemoteBackup(data) {
   if (!data?.state) return false;
   const remoteCloudTime = getTimestampMs(data.updated_at);
-  const remoteStateTime = getTimestampMs(data.state.updatedAt || data.state.savedAt);
-  const localStateTime = getTimestampMs(state?.updatedAt);
-  if (remoteCloudTime && remoteCloudTime <= lastKnownCloudUpdatedAt) return false;
-  if (remoteStateTime && localStateTime && localStateTime > remoteStateTime + 2000) {
-    scheduleAutoSupabaseBackup("local-newer-than-cloud");
-    return false;
-  }
-  return true;
+  if (!remoteCloudTime) return false;
+  return remoteCloudTime > lastKnownCloudUpdatedAt + 1000;
 }
 
 async function applyRemoteSupabaseBackup(data, reason = "cloud") {
@@ -847,6 +851,8 @@ async function applyRemoteSupabaseBackup(data, reason = "cloud") {
       await restorePhotoRecords(data.photos);
     }
     lastKnownCloudUpdatedAt = getTimestampMs(data.updated_at) || Date.now();
+    if (typeof rememberKnownCloudUpdatedAt === "function") rememberKnownCloudUpdatedAt(lastKnownCloudUpdatedAt);
+    if (typeof clearLocalUserChangeAt === "function") clearLocalUserChangeAt();
     saveState({ skipCloud: true });
     render();
     setSupabaseStatus("Synchronisation atelier à jour.", "ok");
@@ -916,4 +922,9 @@ function bindSupabaseActions() {
   refreshSupabasePanel();
   startSupabaseLiveSync();
   pullLatestSupabaseBackup("initialisation");
+  window.addEventListener("focus", () => pullLatestSupabaseBackup("focus"));
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") pullLatestSupabaseBackup("retour application");
+  });
+  window.addEventListener("online", () => pullLatestSupabaseBackup("retour connexion"));
 }

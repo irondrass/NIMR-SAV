@@ -216,6 +216,7 @@ async function deleteActiveCase(item) {
     delete generatedProposals[item.id];
     delete estimateImportPreviews[item.id];
     saveState();
+    if (typeof flushSupabaseBackup === "function") await flushSupabaseBackup("case-deleted");
     notifyUser("Dossier supprimé définitivement.");
     render();
   } catch (error) {

@@ -16,8 +16,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <script src="js/version.js?v=22.19"></script>
-    <link rel="stylesheet" href="styles.css?v=22.19" />
+    <script src="js/version.js?v=22.20"></script>
+    <link rel="stylesheet" href="styles.css?v=22.20" />
   </head>
   <body>
     <a class="skip-link" href="#main-content">Aller au contenu principal</a>
@@ -47,6 +47,10 @@
           <button class="nav-button" type="button" data-tab="planning">
             <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
             Planning
+          </button>
+          <button class="nav-button" type="button" data-tab="technician">
+            <svg viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L4 17l3 3 5.3-5.3a4 4 0 0 0 5.4-5.4l-2.4 2.4-3-3 2.4-2.4Z"/><path d="m7 17 3 3"/></svg>
+            Technicien
           </button>
           <button class="nav-button" type="button" data-tab="atelier">
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -316,6 +320,41 @@
             <div id="day-alert" class="day-alert" hidden></div>
             <div class="gantt" id="gantt"></div>
             <div class="daily-labor-summary" id="daily-labor-summary"></div>
+          </section>
+        </section>
+
+        <section class="view" id="view-technician">
+          <section class="panel technician-panel">
+            <div class="panel-heading">
+              <div>
+                <h1>Mes tâches technicien</h1>
+                <p>Suivi terrain : démarrer, pause, reprise, blocage, note, photo et fin de tâche.</p>
+              </div>
+              <div class="case-actions technician-toolbar">
+                <button class="ghost-button" type="button" id="technician-print-day">Imprimer planning jour</button>
+                <button class="ghost-button" type="button" id="technician-today">Aujourd'hui</button>
+              </div>
+            </div>
+            <div class="technician-controls">
+              <label>
+                Technicien
+                <select id="technician-select"></select>
+              </label>
+              <label>
+                Date
+                <input type="date" id="technician-date" />
+              </label>
+            </div>
+            <div class="technician-task-list" id="technician-task-list"></div>
+          </section>
+          <section class="panel technician-manager-panel">
+            <div class="panel-heading">
+              <div>
+                <h1>Suivi chef atelier</h1>
+                <p>Tâches actives, pauses, blocages, retards et techniciens disponibles.</p>
+              </div>
+            </div>
+            <div id="technician-manager-board"></div>
           </section>
         </section>
 
@@ -914,20 +953,20 @@
     </div>
 
     <script src="vendor/pdf.min.js" defer></script>
-    <script src="js/utils.js?v=22.19" defer></script>
-    <script src="js/state.js?v=22.19" defer></script>
-    <script src="js/ui-cases.js?v=22.19" defer></script>
-    <script src="js/estimate-import.js?v=22.19" defer></script>
-    <script src="js/ui-planning.js?v=22.19" defer></script>
-    <script src="js/photos.js?v=22.19" defer></script>
-    <script src="js/storage.js?v=22.19" defer></script>
-    <script src="js/planning.js?v=22.19" defer></script>
-    <script src="js/exports.js?v=22.19" defer></script>
-    <script src="js/business-rules-v2187.js?v=22.19" defer></script>
+    <script src="js/utils.js?v=22.20" defer></script>
+    <script src="js/state.js?v=22.20" defer></script>
+    <script src="js/ui-cases.js?v=22.20" defer></script>
+    <script src="js/estimate-import.js?v=22.20" defer></script>
+    <script src="js/ui-planning.js?v=22.20" defer></script>
+    <script src="js/photos.js?v=22.20" defer></script>
+    <script src="js/storage.js?v=22.20" defer></script>
+    <script src="js/planning.js?v=22.20" defer></script>
+    <script src="js/exports.js?v=22.20" defer></script>
+    <script src="js/business-rules-v2187.js?v=22.20" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
-    <script src="js/supabase-config.js?v=22.19" defer></script>
-    <script src="js/supabase-client.js?v=22.19" defer></script>
-    <script src="js/supabase-sync.js?v=22.19" defer></script>
-    <script src="app.js?v=22.19" defer></script>
+    <script src="js/supabase-config.js?v=22.20" defer></script>
+    <script src="js/supabase-client.js?v=22.20" defer></script>
+    <script src="js/supabase-sync.js?v=22.20" defer></script>
+    <script src="app.js?v=22.20" defer></script>
   </body>
 </html>

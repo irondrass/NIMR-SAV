@@ -9,7 +9,7 @@ const SESSION_EMERGENCY_KEY = `${STORAGE_KEY}:session-emergency`;
 const CLOUD_UPDATED_META_KEY = `${STORAGE_KEY}:last-cloud-updated-at`;
 const LOCAL_CHANGE_META_KEY = `${STORAGE_KEY}:last-local-change-at`;
 const AUTOSAVE_SNAPSHOT_LIMIT = 8;
-const AUTOSAVE_CLOUD_DEBOUNCE_MS = 5000;
+const AUTOSAVE_CLOUD_DEBOUNCE_MS = 1500;
 const DB_NAME = "nimr-carrosserie-db";
 const DB_VERSION = 2;
 const PHOTO_STORE = "photos";
@@ -17,7 +17,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v22.13";
+const APP_VERSION = "v22.14";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const WORKSHOP_NAME = "NIMR SAV";
@@ -1061,7 +1061,10 @@ function saveState(options = {}) {
     if (!options.skipSnapshot) writeStateSnapshot(envelope);
     if (!options.skipCloud) rememberLocalUserChangeAt(envelope.savedAt);
     if (!options.skipCloud && typeof scheduleAutoSupabaseBackup === "function") {
-      scheduleAutoSupabaseBackup("local-save");
+      scheduleAutoSupabaseBackup(options.cloudReason || "local-save");
+    }
+    if (!options.skipCloud && options.flushCloud && typeof flushSupabaseBackup === "function") {
+      flushSupabaseBackup(options.cloudReason || "local-save-now");
     }
   } catch (error) {
     console.error("Impossible d'enregistrer les données locales", error);

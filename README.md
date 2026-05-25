@@ -1,3 +1,11 @@
+# v22.14 - Libération planning et sync multi-PC instantanée
+
+- Le bouton global “Terminer travaux” clôture maintenant les réservations productives du dossier et libère le temps restant dans le planning, sans valider le contrôle qualité.
+- Une tâche démarrée puis terminée avant la fin prévue est tronquée à l’heure réelle de fin ; une tâche future clôturée avec le dossier est supprimée du Gantt pour rendre la ressource disponible.
+- Les réservations terminées ne bloquent plus la recherche des prochains créneaux atelier.
+- La synchronisation Supabase pousse les actions critiques immédiatement, réduit le délai de sauvegarde automatique à 1,5 s et utilise un polling de secours toutes les 3 s si Realtime n’est pas disponible.
+- Cache PWA incrémenté en v22.14.
+
 # v22.13 - Test réel guichet et main-d’œuvre manuelle
 
 - Le dossier rapide ne renvoie plus vers “Créer un OR” quand le premier ordre existe déjà : la prochaine action devient “Saisir la main-d’œuvre”.

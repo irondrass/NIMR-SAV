@@ -191,6 +191,100 @@ const normalizedBookings = context.normalizeState({
 });
 assert.equal(normalizedBookings.bookings.length, 1, 'les réservations invalides importées doivent être ignorées');
 
+const earlyTaskCompletion = JSON.parse(vm.runInContext(`(() => {
+  state = normalizeState({
+    resources: [{ id: 'mec-1', name: 'Mécanicien', role: 'mecanicien', active: true }],
+    cases: [{ id: 'early-case', clientName: 'Planning libéré', flags: { received: true, workStarted: true }, durations: { mechanical: 2, quality: 0 } }],
+    bookings: [{
+      id: 'booking-early',
+      caseId: 'early-case',
+      key: 'mechanical',
+      title: 'Réparation mécanique',
+      resourceIds: ['mec-1'],
+      start: '2026-05-12T08:00:00.000Z',
+      end: '2026-05-12T10:00:00.000Z',
+      plannedStart: '2026-05-12T08:00:00.000Z',
+      plannedEnd: '2026-05-12T10:00:00.000Z',
+      plannedMinutes: 120,
+      status: 'started',
+      actualStart: '2026-05-12T08:00:00.000Z',
+      segments: [{ start: '2026-05-12T08:00:00.000Z', end: '2026-05-12T10:00:00.000Z' }]
+    }]
+  });
+  const item = state.cases[0];
+  const result = completeCaseBookingTaskNow(item, 'booking-early', new Date('2026-05-12T08:30:00.000Z'));
+  const booking = state.bookings.find((row) => row.id === 'booking-early');
+  return JSON.stringify({ ok: result.ok, end: booking.end, status: booking.status, workCompleted: item.flags.workCompleted, minutes: getBookingDurationMinutes(booking) });
+})()`, context));
+assert.equal(earlyTaskCompletion.ok, true, 'terminer une tâche en avance doit réussir');
+assert.equal(earlyTaskCompletion.end, '2026-05-12T08:30:00.000Z', 'la réservation doit être coupée à l’heure réelle de fin');
+assert.equal(earlyTaskCompletion.minutes, 30, 'seule la durée réellement utilisée doit rester réservée');
+assert.equal(earlyTaskCompletion.workCompleted, true, 'les travaux doivent passer terminés quand toutes les tâches productives sont clôturées');
+
+const globalWorkCompletion = JSON.parse(vm.runInContext(`(() => {
+  state = normalizeState({
+    resources: [
+      { id: 'mec-1', name: 'Mécanicien', role: 'mecanicien', active: true },
+      { id: 'ctrl-1', name: 'Contrôle', role: 'controle', active: true }
+    ],
+    cases: [{ id: 'global-case', clientName: 'Clôture globale', flags: { received: true, workStarted: true }, durations: { mechanical: 2, electrical: 1, quality: 0.25 } }],
+    bookings: [
+      {
+        id: 'booking-active',
+        caseId: 'global-case',
+        key: 'mechanical',
+        title: 'Vidange rapide',
+        resourceIds: ['mec-1'],
+        start: '2026-05-12T08:00:00.000Z',
+        end: '2026-05-12T10:00:00.000Z',
+        plannedMinutes: 120,
+        status: 'started',
+        actualStart: '2026-05-12T08:00:00.000Z',
+        segments: [{ start: '2026-05-12T08:00:00.000Z', end: '2026-05-12T10:00:00.000Z' }]
+      },
+      {
+        id: 'booking-future',
+        caseId: 'global-case',
+        key: 'electrical',
+        title: 'Diagnostic électrique',
+        resourceIds: ['mec-1'],
+        start: '2026-05-12T11:00:00.000Z',
+        end: '2026-05-12T12:00:00.000Z',
+        plannedMinutes: 60,
+        status: 'planned',
+        segments: [{ start: '2026-05-12T11:00:00.000Z', end: '2026-05-12T12:00:00.000Z' }]
+      },
+      {
+        id: 'booking-quality',
+        caseId: 'global-case',
+        key: 'quality',
+        title: 'Contrôle qualité',
+        resourceIds: ['ctrl-1'],
+        start: '2026-05-12T12:00:00.000Z',
+        end: '2026-05-12T12:15:00.000Z',
+        plannedMinutes: 15,
+        status: 'planned',
+        segments: [{ start: '2026-05-12T12:00:00.000Z', end: '2026-05-12T12:15:00.000Z' }]
+      }
+    ]
+  });
+  const item = state.cases[0];
+  const result = completeCaseWorkBookingsNow(item, new Date('2026-05-12T08:30:00.000Z'));
+  return JSON.stringify({
+    completed: result.completed,
+    removed: result.removed,
+    freedMinutes: result.freedMinutes,
+    keys: state.bookings.map((booking) => booking.key),
+    activeEnd: state.bookings.find((booking) => booking.id === 'booking-active')?.end,
+    qualityStatus: state.bookings.find((booking) => booking.key === 'quality')?.status,
+  });
+})()`, context));
+assert.equal(globalWorkCompletion.completed, 2, 'Terminer travaux doit clôturer les réservations productives restantes');
+assert.equal(globalWorkCompletion.removed, 1, 'les réservations productives futures doivent être supprimées pour libérer le planning');
+assert.equal(globalWorkCompletion.activeEnd, '2026-05-12T08:30:00.000Z', 'la tâche en cours doit être tronquée à l’heure réelle de fin');
+assert.deepEqual(globalWorkCompletion.keys, ['mechanical', 'quality'], 'le contrôle qualité doit rester planifié, mais les travaux futurs doivent être libérés');
+assert.equal(globalWorkCompletion.qualityStatus, 'planned', 'Terminer travaux ne doit pas valider le contrôle qualité');
+
 const alerts = context.buildPilotageAlerts(new Date('2026-05-12T12:00:00.000Z'));
 assert.ok(Array.isArray(alerts), 'le pilotage doit produire une liste d’alertes');
 

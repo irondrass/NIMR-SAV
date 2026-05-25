@@ -1,3 +1,14 @@
+# v22.16 - CSP console propre et sécurité locale renforcée
+
+- Correction CSP : `connect-src` autorise maintenant `https://cdn.jsdelivr.net` pour éviter le blocage console des source maps CDN, sans réintroduire `unsafe-inline` dans `script-src`.
+- Les appels au verrou local sont protégés au démarrage, même si un script de sécurité local ne se charge pas correctement.
+- Le PIN local conserve uniquement un hash PBKDF2-SHA256 avec salt, ajoute un compteur de tentatives, un verrouillage temporaire et un verrouillage automatique après inactivité.
+- Ajout de “Désactiver le PIN” et rappel visible : le PIN ne chiffre pas les données locales.
+- Nettoyage poste élargi : localStorage, sessionStorage, sessions Supabase locales, IndexedDB applicatives, caches `nimr-*` et service worker.
+- Ajout du test de sauvegarde chiffrée sans restauration, avec métadonnées non sensibles dans l'enveloppe `.nimrsecure`.
+- Détection de conflit multi-PC avant d'appliquer une sauvegarde cloud distante sur un poste qui possède des modifications locales non synchronisées.
+- Cache PWA incrémenté en v22.16.
+
 # v22.15 - Sécurité locale et mise à jour contrôlée
 
 - Ajout d'un verrouillage local par PIN dans Paramètres > Sécurité du poste. Il protège la session sur un PC partagé, sans remplacer l'authentification Supabase.

@@ -253,8 +253,9 @@ function getBackupPasswordFromUser(title, message, options = {}) {
   return new Promise((resolve) => {
     const overlay = document.createElement("div");
     overlay.className = "custom-modal-overlay";
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     overlay.innerHTML = `
-      <form class="custom-modal-content password-modal" aria-label="${escapeAttr(title)}">
+      <form class="custom-modal-content password-modal" role="dialog" aria-modal="true" aria-label="${escapeAttr(title)}">
         <h3>${escapeHtml(title)}</h3>
         <p class="muted">${escapeHtml(message)}</p>
         <label>Mot de passe
@@ -272,17 +273,23 @@ function getBackupPasswordFromUser(title, message, options = {}) {
     const status = overlay.querySelector("[data-password-status]");
     const close = (value) => {
       overlay.remove();
+      previousFocus?.focus?.();
       resolve(value);
     };
     overlay.addEventListener("click", (event) => {
       if (event.target === overlay || event.target.closest("[data-password-cancel]")) close(null);
     });
+    form.addEventListener("keydown", (event) => trapFocusWithin(form, event));
     form.addEventListener("submit", (event) => {
       event.preventDefault();
       const password = form.elements.password.value;
       const confirmPassword = form.elements.confirmPassword?.value;
       if (password.length < 6) {
         status.textContent = "Utilisez au moins 6 caractères.";
+        return;
+      }
+      if (options.confirm && isWeakBackupPassword(password)) {
+        status.textContent = "Mot de passe trop faible : utilisez au moins 10 caractères avec lettres et chiffres.";
         return;
       }
       if (options.confirm && password !== confirmPassword) {
@@ -294,6 +301,11 @@ function getBackupPasswordFromUser(title, message, options = {}) {
     document.body.appendChild(overlay);
     window.setTimeout(() => form.elements.password.focus(), 50);
   });
+}
+
+function isWeakBackupPassword(password) {
+  const value = String(password || "");
+  return value.length < 10 || !/[a-zA-ZÀ-ÿ]/.test(value) || !/\d/.test(value);
 }
 
 async function deriveBackupCryptoKey(password, saltBytes, usages) {
@@ -330,6 +342,9 @@ async function encryptBackupPayload(payload, password) {
     version: 1,
     appVersion: APP_VERSION,
     createdAt: new Date().toISOString(),
+    casesCount: payload?.state?.cases?.length || 0,
+    photosCount: Array.isArray(payload?.photos) ? payload.photos.length : 0,
+    documentsCount: Array.isArray(payload?.documents) ? payload.documents.length : 0,
     algorithm: "AES-GCM",
     kdf: "PBKDF2-SHA256",
     iterations: 180000,
@@ -384,11 +399,47 @@ async function exportEncryptedBackup() {
     const payload = await buildBackupPayload();
     const encrypted = await encryptBackupPayload(payload, password);
     downloadJson(encrypted, `nimr-sav-sauvegarde-chiffree-${todayKey(new Date())}.nimrsecure`);
-    showBackupStatus(`Sauvegarde chiffrée exportée: ${state.cases.length} dossier(s), ${payload.photos.length} photo(s).`, "ok");
+    showBackupStatus(`Sauvegarde chiffrée exportée: ${state.cases.length} dossier(s), ${payload.photos.length} photo(s). Testez-la avant archivage.`, "ok");
+    notifyUser("Sauvegarde chiffrée créée. Testez-la avant archivage.", "success");
   } catch (error) {
     console.error("Export chiffré impossible", error);
     showBackupStatus(error.message || "Export chiffré impossible.", "error");
     notifyUser(error.message || "Impossible d'exporter la sauvegarde chiffrée.", "error");
+  }
+}
+
+async function testEncryptedBackup(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  showBackupStatus("Test de la sauvegarde chiffrée...");
+  try {
+    const encrypted = JSON.parse(await readFileAsText(file));
+    if (!isEncryptedBackupPayload(encrypted)) {
+      showBackupStatus("Le fichier sélectionné n'est pas une sauvegarde chiffrée .nimrsecure.", "error");
+      return;
+    }
+    const password = await getBackupPasswordFromUser(
+      "Tester une sauvegarde chiffrée",
+      "Entrez le mot de passe pour vérifier le fichier sans restaurer les données.",
+      { confirmLabel: "Tester" },
+    );
+    if (!password) {
+      showBackupStatus("Test de sauvegarde annulé.");
+      return;
+    }
+    const payload = await decryptBackupPayload(encrypted, password);
+    const { importedState, photos, metadata } = validateBackupPayload(payload);
+    showBackupStatus(
+      `Sauvegarde valide: ${importedState.cases.length} dossier(s), ${photos.length} photo(s), version ${metadata.appVersion || encrypted.appVersion || "inconnue"}. Aucune donnée restaurée.`,
+      "ok",
+    );
+    notifyUser("Sauvegarde chiffrée vérifiée sans restauration.", "success");
+  } catch (error) {
+    console.error("Test sauvegarde chiffrée impossible", error);
+    showBackupStatus(error.message || "Test de sauvegarde chiffrée impossible.", "error");
+    notifyUser(error.message || "Mot de passe incorrect ou fichier illisible.", "error");
+  } finally {
+    event.target.value = "";
   }
 }
 

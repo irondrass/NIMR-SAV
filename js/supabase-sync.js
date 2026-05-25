@@ -762,6 +762,7 @@ let lastKnownCloudUpdatedAt = typeof getStoredCloudUpdatedAt === "function" ? ge
 let supabaseLiveSyncChannel = null;
 let supabaseLivePullTimer = null;
 let applyingRemoteSupabaseState = false;
+let remoteConflictMutedUntil = 0;
 const SUPABASE_LIVE_PULL_INTERVAL_MS = 3000;
 const SUPABASE_AUTO_BACKUP_MIN_INTERVAL_MS = 1200;
 
@@ -859,8 +860,36 @@ function shouldApplyRemoteBackup(data) {
   return remoteCloudTime > lastKnownCloudUpdatedAt;
 }
 
+async function confirmRemoteBackupConflict(data, reason) {
+  const remoteCloudTime = getTimestampMs(data.updated_at);
+  const localChangeAt = typeof getLocalUserChangeAt === "function" ? getLocalUserChangeAt() : 0;
+  const hasUnsyncedLocalChanges = localChangeAt && localChangeAt > lastKnownCloudUpdatedAt;
+  if (!hasUnsyncedLocalChanges) return true;
+  if (localChangeAt >= remoteCloudTime) {
+    setSupabaseDetails("Synchronisation entrante ignorée : ce poste possède des modifications locales plus récentes à envoyer.");
+    return false;
+  }
+  if (Date.now() < remoteConflictMutedUntil) return false;
+  setSupabaseStatus("Conflit de synchronisation détecté.", "warn");
+  const confirmed = await showConfirmModal(
+    `Des modifications locales non synchronisées existent sur ce poste depuis ${new Date(localChangeAt).toLocaleString()}.<br><br>`
+      + `Une version cloud plus récente existe depuis ${new Date(remoteCloudTime).toLocaleString()} (${reason}).<br><br>`
+      + "Continuer va télécharger une sauvegarde locale de sécurité puis remplacer ce poste par la version cloud. Annuler conserve ce poste inchangé.",
+  );
+  if (!confirmed) {
+    remoteConflictMutedUntil = Date.now() + 60 * 1000;
+    setSupabaseDetails("Synchronisation entrante annulée : modifications locales conservées sur ce poste.");
+    return false;
+  }
+  const safetyPayload = await buildBackupPayload();
+  downloadJson(safetyPayload, `nimr-sav-conflit-local-avant-cloud-${todayKey(new Date())}.json`);
+  return true;
+}
+
 async function applyRemoteSupabaseBackup(data, reason = "cloud") {
   if (!shouldApplyRemoteBackup(data)) return false;
+  const canApply = await confirmRemoteBackupConflict(data, reason);
+  if (!canApply) return false;
   applyingRemoteSupabaseState = true;
   try {
     const previousActiveCaseId = activeCaseId;

@@ -2084,8 +2084,20 @@ a:focus-visible {
 }
 
 .update-toast {
+  display: grid;
+  gap: 8px;
+  pointer-events: auto;
+}
+
+.update-toast small {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.update-toast-actions {
   display: flex;
-  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 12px;
 }
 
@@ -2997,6 +3009,18 @@ a:focus-visible {
   display: flex;
   justify-content: flex-end;
   margin-top: 16px;
+}
+
+.cleaned-workstation {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: #f1f5f9;
+}
+
+.cleaned-workstation .panel {
+  max-width: 560px;
 }
 
 

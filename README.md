@@ -1,3 +1,12 @@
+# v22.17 - Installation PWA et mode hors ligne
+
+- Ajout des icônes PWA PNG `assets/icon-192.png`, `assets/icon-512.png` et `assets/apple-touch-icon.png`.
+- Mise à jour du manifest avec icônes 192/512 en `purpose: any maskable` pour Chrome/Edge Windows, Android et iOS.
+- Ajout d'un écran `offline.html` explicite : les données locales restent consultables et Supabase reprend à la reconnexion.
+- Ajout d'une bannière hors ligne dans l'application lorsque le poste perd la connexion.
+- Cache PWA incrémenté en `nimr-sav-v22.17-pwa-install`.
+- Ajout d'un test navigateur console/PWA sans dépendance externe dans `tests/browser_console_smoke.mjs`.
+
 # v22.16 - CSP console propre et sécurité locale renforcée
 
 - Correction CSP : `connect-src` autorise maintenant `https://cdn.jsdelivr.net` pour éviter le blocage console des source maps CDN, sans réintroduire `unsafe-inline` dans `script-src`.

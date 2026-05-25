@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#11415f" />
+    <title>NIMR SAV - Mode hors ligne</title>
+    <link rel="icon" href="assets/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
+    <link rel="stylesheet" href="styles.css?v=22.17" />
+  </head>
+  <body class="offline-page">
+    <main class="offline-screen" role="main">
+      <section class="offline-card">
+        <img src="assets/icon.svg" alt="" class="offline-icon" />
+        <p class="eyebrow">Mode hors ligne</p>
+        <h1>NIMR SAV reste disponible sur ce poste</h1>
+        <p>
+          Les données déjà présentes localement peuvent être consultées et préparées.
+          La synchronisation Supabase reprendra automatiquement dès le retour de la connexion.
+        </p>
+        <div class="offline-actions">
+          <a class="primary-button" href="./index.html">Ouvrir l'application</a>
+          <button class="ghost-button" type="button" onclick="window.location.reload()">Réessayer</button>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

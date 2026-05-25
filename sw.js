@@ -1,4 +1,4 @@
-const CACHE_NAME = "nimr-sav-v22.17-pwa-install";
+const CACHE_NAME = "nimr-sav-v22.18-cockpit";
 const ASSETS = [
   "./",
   "./index.html",

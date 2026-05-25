@@ -62,6 +62,7 @@ function bindOfflineStatus() {
   const refresh = () => {
     banner.hidden = navigator.onLine !== false;
     document.body.classList.toggle("is-offline", navigator.onLine === false);
+    if (typeof renderSyncStatusStrip === "function") renderSyncStatusStrip();
   };
   window.addEventListener("online", () => {
     refresh();
@@ -87,6 +88,7 @@ function bindMainNavigation() {
       const tab = button.dataset.tab;
       if (!tab) return;
       setActiveTab(tab);
+      if (tab === "today") renderTodayWorkshop();
       if (tab === "planning") renderPlanning();
       if (tab === "atelier") {
         renderResources();
@@ -99,6 +101,7 @@ function bindMainNavigation() {
       }
       if (tab === "pilotage") {
         renderSavKpis();
+        renderTodayWorkshop();
         renderPilotageAlerts();
         renderKanban();
       }

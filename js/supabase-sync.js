@@ -824,6 +824,7 @@ async function autoBackupToSupabase(reason = "autosave", options = {}) {
     if (typeof clearLocalUserChangeAt === "function") clearLocalUserChangeAt();
     localStorage.setItem(`${STORAGE_KEY}:last-cloud-autosave`, new Date().toISOString());
     localStorage.removeItem(`${STORAGE_KEY}:last-cloud-autosave-error`);
+    if (typeof renderSyncStatusStrip === "function") renderSyncStatusStrip();
     if (typeof setSupabaseDetails === "function") {
       const partial = stats.claimsSkipped || stats.supplementsSkipped ? " · tables récemment créées: cache Supabase en rafraîchissement, données JSON cloud OK" : "";
       setSupabaseDetails(`Sauvegarde automatique cloud OK (${reason}) : ${new Date().toLocaleTimeString()}${partial}`);
@@ -831,6 +832,7 @@ async function autoBackupToSupabase(reason = "autosave", options = {}) {
   } catch (error) {
     console.warn("Sauvegarde automatique Supabase impossible", error);
     localStorage.setItem(`${STORAGE_KEY}:last-cloud-autosave-error`, String(error.message || error));
+    if (typeof renderSyncStatusStrip === "function") renderSyncStatusStrip();
   } finally {
     autoSupabaseBackupRunning = false;
     if (pendingAutoSupabaseBackupReason) {

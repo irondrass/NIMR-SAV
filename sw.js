@@ -1,4 +1,4 @@
-const CACHE_NAME = "nimr-sav-v22.14-live-release";
+const CACHE_NAME = "nimr-sav-v22.15-security";
 const ASSETS = [
   "./",
   "./index.html",
@@ -6,6 +6,7 @@ const ASSETS = [
   "./styles.css",
   "./app.js",
   "./manifest.webmanifest",
+  "./js/version.js",
   "./supabase-schema.sql",
   "./assets/icon.svg",
   "./data/vehicles.json",
@@ -33,7 +34,6 @@ async function precache() {
 
 self.addEventListener("install", (event) => {
   event.waitUntil(precache());
-  self.skipWaiting();
 });
 
 self.addEventListener("activate", (event) => {

@@ -8,6 +8,8 @@ const STORAGE_META_KEY = `${STORAGE_KEY}:meta`;
 const SESSION_EMERGENCY_KEY = `${STORAGE_KEY}:session-emergency`;
 const CLOUD_UPDATED_META_KEY = `${STORAGE_KEY}:last-cloud-updated-at`;
 const LOCAL_CHANGE_META_KEY = `${STORAGE_KEY}:last-local-change-at`;
+const LOCAL_SECURITY_KEY = `${STORAGE_KEY}:local-security`;
+const LOCAL_SECURITY_SESSION_KEY = `${STORAGE_KEY}:local-security-unlocked`;
 const AUTOSAVE_SNAPSHOT_LIMIT = 8;
 const AUTOSAVE_CLOUD_DEBOUNCE_MS = 1500;
 const DB_NAME = "nimr-carrosserie-db";
@@ -17,7 +19,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v22.14";
+const APP_VERSION = "v22.15";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const WORKSHOP_NAME = "NIMR SAV";
@@ -303,6 +305,223 @@ function notifyUser(message, variant = "info") {
     toast.classList.add("toast-leaving");
     window.setTimeout(() => toast.remove(), 220);
   }, variant === "error" ? 6500 : 4200);
+}
+
+function bytesToBase64(bytes) {
+  let binary = "";
+  new Uint8Array(bytes || []).forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  return btoa(binary);
+}
+
+function base64ToBytes(value) {
+  const binary = atob(String(value || ""));
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return bytes;
+}
+
+function getBrowserCrypto() {
+  return globalThis.crypto?.subtle ? globalThis.crypto : null;
+}
+
+function readLocalSecurityConfig() {
+  try {
+    return JSON.parse(localStorage.getItem(LOCAL_SECURITY_KEY) || "{}");
+  } catch (error) {
+    console.warn("Configuration sécurité locale illisible", error);
+    return {};
+  }
+}
+
+function isLocalPinEnabled() {
+  const config = readLocalSecurityConfig();
+  return Boolean(config.enabled && config.salt && config.hash);
+}
+
+function isLocalSessionUnlocked() {
+  if (!isLocalPinEnabled()) return true;
+  try {
+    return sessionStorage.getItem(LOCAL_SECURITY_SESSION_KEY) === "true";
+  } catch (error) {
+    return false;
+  }
+}
+
+async function deriveLocalPinHash(pin, saltBase64) {
+  const cryptoApi = getBrowserCrypto();
+  if (!cryptoApi) throw new Error("Le chiffrement navigateur n'est pas disponible sur ce poste.");
+  const material = await cryptoApi.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(String(pin || "")),
+    "PBKDF2",
+    false,
+    ["deriveBits"],
+  );
+  const bits = await cryptoApi.subtle.deriveBits(
+    { name: "PBKDF2", salt: base64ToBytes(saltBase64), iterations: 120000, hash: "SHA-256" },
+    material,
+    256,
+  );
+  return bytesToBase64(bits);
+}
+
+async function verifyLocalPin(pin) {
+  const config = readLocalSecurityConfig();
+  if (!config.enabled || !config.salt || !config.hash) return true;
+  const hash = await deriveLocalPinHash(pin, config.salt);
+  return hash === config.hash;
+}
+
+function setLocalSecurityStatus(message, variant = "info") {
+  const target = $("#local-security-status");
+  if (!target) return;
+  target.textContent = message;
+  target.className = `muted backup-status ${variant === "error" ? "status-error" : variant === "ok" ? "status-ok" : ""}`;
+}
+
+function renderLocalSecurityStatus() {
+  if (isLocalPinEnabled()) setLocalSecurityStatus("PIN local actif sur ce poste. La session se verrouille à la fermeture de l'onglet.", "ok");
+  else setLocalSecurityStatus("Aucun PIN local actif. Activez-le sur les postes partagés.", "warn");
+}
+
+async function setLocalPin(pin) {
+  const cleanPin = String(pin || "").trim();
+  if (cleanPin.length < 4) throw new Error("Le PIN doit contenir au moins 4 caractères.");
+  const cryptoApi = getBrowserCrypto();
+  if (!cryptoApi) throw new Error("Le chiffrement navigateur n'est pas disponible sur ce poste.");
+  const salt = new Uint8Array(16);
+  cryptoApi.getRandomValues(salt);
+  const saltBase64 = bytesToBase64(salt);
+  const hash = await deriveLocalPinHash(cleanPin, saltBase64);
+  localStorage.setItem(LOCAL_SECURITY_KEY, JSON.stringify({
+    enabled: true,
+    salt: saltBase64,
+    hash,
+    iterations: 120000,
+    updatedAt: new Date().toISOString(),
+  }));
+  sessionStorage.setItem(LOCAL_SECURITY_SESSION_KEY, "true");
+}
+
+function hideLocalLockOverlay() {
+  const overlay = $("#local-lock-overlay");
+  if (overlay) overlay.hidden = true;
+}
+
+function showLocalLockOverlay() {
+  const overlay = $("#local-lock-overlay");
+  const form = $("#local-lock-form");
+  const status = $("#local-lock-status");
+  if (!overlay || !form) return;
+  overlay.hidden = false;
+  if (status) status.textContent = "";
+  const pinInput = form.elements?.pin;
+  if (pinInput) {
+    pinInput.value = "";
+    window.setTimeout(() => pinInput.focus(), 60);
+  }
+  if (form.dataset.bound === "true") return;
+  form.dataset.bound = "true";
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      const ok = await verifyLocalPin(form.elements.pin.value);
+      if (!ok) {
+        if (status) status.textContent = "PIN incorrect.";
+        return;
+      }
+      sessionStorage.setItem(LOCAL_SECURITY_SESSION_KEY, "true");
+      hideLocalLockOverlay();
+      renderLocalSecurityStatus();
+    } catch (error) {
+      if (status) status.textContent = error.message || "Déverrouillage impossible.";
+    }
+  });
+}
+
+function lockLocalSession() {
+  try {
+    sessionStorage.removeItem(LOCAL_SECURITY_SESSION_KEY);
+  } catch (error) {
+    // Non critique.
+  }
+  if (isLocalPinEnabled()) showLocalLockOverlay();
+}
+
+function initLocalSecurityGate() {
+  renderLocalSecurityStatus();
+  if (!isLocalSessionUnlocked()) showLocalLockOverlay();
+}
+
+function bindLocalSecurityControls() {
+  const form = $("#local-pin-form");
+  form?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const pin = form.elements.pin.value;
+    const confirmPin = form.elements.confirmPin.value;
+    if (pin !== confirmPin) {
+      setLocalSecurityStatus("Les deux PIN ne correspondent pas.", "error");
+      return;
+    }
+    try {
+      await setLocalPin(pin);
+      form.reset();
+      renderLocalSecurityStatus();
+      notifyUser("PIN local activé sur ce poste.", "success");
+    } catch (error) {
+      setLocalSecurityStatus(error.message || "Activation PIN impossible.", "error");
+      notifyUser(error.message || "Activation PIN impossible.", "error");
+    }
+  });
+  $("#lock-local-session")?.addEventListener("click", () => lockLocalSession());
+  $("#clear-local-workstation")?.addEventListener("click", cleanLocalWorkstation);
+  renderLocalSecurityStatus();
+}
+
+function deleteIndexedDatabase(name) {
+  if (!globalThis.indexedDB) return Promise.resolve();
+  return new Promise((resolve) => {
+    const request = indexedDB.deleteDatabase(name);
+    request.onsuccess = () => resolve();
+    request.onerror = () => resolve();
+    request.onblocked = () => resolve();
+  });
+}
+
+async function cleanLocalWorkstation() {
+  const confirmed = await showPromptModal(
+    "Cette action supprime les dossiers locaux, photos/documents IndexedDB, caches PWA, points de restauration et configuration Supabase de ce navigateur.<br><br>Les données déjà synchronisées dans Supabase ne sont pas supprimées.<br><br>Tapez NETTOYER pour confirmer.",
+    "NETTOYER",
+  );
+  if (!confirmed) return;
+  try {
+    if (typeof stopSupabaseLiveSync === "function") stopSupabaseLiveSync();
+    if (typeof photoObjectUrls !== "undefined") photoObjectUrls.forEach((url) => URL.revokeObjectURL(url));
+    if (typeof photoObjectUrls !== "undefined") photoObjectUrls.clear();
+    photoDbPromise = null;
+    Object.keys(localStorage).forEach((key) => {
+      if (key.startsWith(STORAGE_KEY) || key.startsWith("nimr-sav:")) localStorage.removeItem(key);
+    });
+    Object.keys(sessionStorage || {}).forEach((key) => {
+      if (key.startsWith(STORAGE_KEY) || key.startsWith("nimr-sav:")) sessionStorage.removeItem(key);
+    });
+    await deleteIndexedDatabase(DB_NAME);
+    if ("caches" in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.filter((key) => key.startsWith("nimr-carrosserie-") || key.startsWith("nimr-sav-")).map((key) => caches.delete(key)));
+    }
+    if (navigator.serviceWorker?.getRegistrations) {
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(registrations.map((registration) => registration.unregister()));
+    }
+    notifyUser("Poste nettoyé. Rechargement...", "success");
+    window.setTimeout(() => window.location.reload(), 500);
+  } catch (error) {
+    console.error("Nettoyage poste impossible", error);
+    notifyUser(error.message || "Nettoyage du poste impossible.", "error");
+  }
 }
 
 

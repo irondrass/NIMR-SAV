@@ -7,7 +7,7 @@
     <meta name="description" content="Application PWA de pilotage SAV, ordres de travail, rendez-vous et planning atelier global." />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; connect-src 'self' https://*.supabase.co wss://*.supabase.co; img-src 'self' blob: data:; font-src 'self' https://fonts.gstatic.com data:; worker-src 'self' blob:; manifest-src 'self';"
+      content="default-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; connect-src 'self' https://*.supabase.co wss://*.supabase.co; img-src 'self' blob: data:; font-src 'self' https://fonts.gstatic.com data:; worker-src 'self' blob:; manifest-src 'self';"
     />
     <title>NIMR SAV</title>
     <link rel="manifest" href="manifest.webmanifest" />
@@ -15,19 +15,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css?v=22.14" />
-
-    <script>
-      window.NIMR_BUILD = "v22.14";
-      window.NIMR_CACHE_NAME = "nimr-sav-v22.14-live-release";
-      if ("caches" in window) {
-        caches.keys().then(function(keys) {
-          return Promise.all(keys.filter(function(key) {
-            return (key.startsWith("nimr-carrosserie-") || key.startsWith("nimr-sav-")) && key !== window.NIMR_CACHE_NAME;
-          }).map(function(key) { return caches.delete(key); }));
-        }).catch(function() {});
-      }
-    </script>
+    <script src="js/version.js?v=22.15"></script>
+    <link rel="stylesheet" href="styles.css?v=22.15" />
   </head>
   <body>
     <a class="skip-link" href="#main-content">Aller au contenu principal</a>
@@ -117,7 +106,7 @@
                   <span>Mode guichet rapide : champs essentiels atelier</span>
                 </label>
                 <label>
-                  Client / société propriétaire <span style="color: #d00000;">*</span>
+                  Client / société propriétaire <span class="required-marker">*</span>
                   <input name="clientName" autocomplete="name" placeholder="Nom client ou société" />
                 </label>
                 <label>
@@ -129,7 +118,7 @@
                   <input name="vehicle" placeholder="Marque, modèle si connu" />
                 </label>
                 <label>
-                  Immatriculation ou VIN <span style="color: #d00000;">*</span>
+                  Immatriculation ou VIN <span class="required-marker">*</span>
                   <input name="plate" placeholder="Ex. 123 TU 4567" />
                 </label>
                 <label>
@@ -157,7 +146,7 @@
                   <input name="color" placeholder="Couleur" />
                 </label>
                 <label data-quick-optional>
-                  VIN ou immatriculation <span style="color: #d00000;">*</span>
+                  VIN ou immatriculation <span class="required-marker">*</span>
                   <input name="vin" placeholder="Numéro de châssis" />
                 </label>
                 <label>
@@ -394,8 +383,12 @@
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M7 10l5 5 5-5" /><path d="M12 15V3" /></svg>
                   Exporter sauvegarde
                 </button>
+                <button class="ghost-button" type="button" id="export-encrypted-backup">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 17a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z" /><path d="M17 11V8a5 5 0 0 0-10 0v3" /><rect x="5" y="11" width="14" height="10" rx="2" /></svg>
+                  Export chiffré
+                </button>
                 <label class="file-button">
-                  <input type="file" id="import-backup" accept=".json,application/json" />
+                  <input type="file" id="import-backup" accept=".json,.nimrsecure,application/json" />
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M17 8 12 3 7 8" /><path d="M12 3v12" /></svg>
                   Importer sauvegarde
                 </label>
@@ -414,6 +407,32 @@
                 </div>
                 <p class="muted backup-status" id="autosave-control-status">Contrôle non exécuté.</p>
               </div>
+            </section>
+
+            <section class="panel security-panel">
+              <div class="panel-heading">
+                <div>
+                  <h1>Sécurité du poste</h1>
+                  <p>Verrou local, exports chiffrés et nettoyage des données de ce navigateur</p>
+                </div>
+              </div>
+              <form class="security-form" id="local-pin-form">
+                <label>
+                  PIN local
+                  <input name="pin" type="password" inputmode="numeric" autocomplete="new-password" minlength="4" placeholder="4 chiffres minimum" />
+                </label>
+                <label>
+                  Confirmer PIN
+                  <input name="confirmPin" type="password" inputmode="numeric" autocomplete="new-password" minlength="4" placeholder="Répéter le PIN" />
+                </label>
+                <div class="backup-actions wide">
+                  <button class="primary-button" type="submit">Activer / changer PIN</button>
+                  <button class="ghost-button" type="button" id="lock-local-session">Verrouiller maintenant</button>
+                  <button class="ghost-button danger-button" type="button" id="clear-local-workstation">Nettoyer ce poste</button>
+                </div>
+              </form>
+              <p class="muted backup-warning">Le PIN protège l'accès local sur ce navigateur. Les exports chiffrés restent la méthode recommandée pour transporter une sauvegarde.</p>
+              <p class="muted backup-status" id="local-security-status">Sécurité locale non contrôlée.</p>
             </section>
 
             <section class="panel supabase-panel">
@@ -472,6 +491,19 @@
       </main>
     </div>
     <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="true"></div>
+    <div class="local-lock-overlay" id="local-lock-overlay" hidden>
+      <form class="local-lock-dialog" id="local-lock-form" aria-labelledby="local-lock-title">
+        <img src="assets/icon.svg" alt="" class="local-lock-logo" />
+        <h2 id="local-lock-title">Poste atelier verrouillé</h2>
+        <p>Entrez le PIN local pour accéder aux dossiers, photos et sauvegardes de ce navigateur.</p>
+        <label>
+          PIN local
+          <input name="pin" type="password" inputmode="numeric" autocomplete="current-password" required autofocus />
+        </label>
+        <button class="primary-button" type="submit">Déverrouiller</button>
+        <p class="muted" id="local-lock-status"></p>
+      </form>
+    </div>
 
     <template id="case-detail-template">
       <div class="case-header">
@@ -841,20 +873,20 @@
     </div>
 
     <script src="vendor/pdf.min.js" defer></script>
-    <script src="js/utils.js?v=22.14" defer></script>
-    <script src="js/state.js?v=22.14" defer></script>
-    <script src="js/ui-cases.js?v=22.14" defer></script>
-    <script src="js/estimate-import.js?v=22.14" defer></script>
-    <script src="js/ui-planning.js?v=22.14" defer></script>
-    <script src="js/photos.js?v=22.14" defer></script>
-    <script src="js/storage.js?v=22.14" defer></script>
-    <script src="js/planning.js?v=22.14" defer></script>
-    <script src="js/exports.js?v=22.14" defer></script>
-    <script src="js/business-rules-v2187.js?v=22.14" defer></script>
+    <script src="js/utils.js?v=22.15" defer></script>
+    <script src="js/state.js?v=22.15" defer></script>
+    <script src="js/ui-cases.js?v=22.15" defer></script>
+    <script src="js/estimate-import.js?v=22.15" defer></script>
+    <script src="js/ui-planning.js?v=22.15" defer></script>
+    <script src="js/photos.js?v=22.15" defer></script>
+    <script src="js/storage.js?v=22.15" defer></script>
+    <script src="js/planning.js?v=22.15" defer></script>
+    <script src="js/exports.js?v=22.15" defer></script>
+    <script src="js/business-rules-v2187.js?v=22.15" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
-    <script src="js/supabase-config.js?v=22.14" defer></script>
-    <script src="js/supabase-client.js?v=22.14" defer></script>
-    <script src="js/supabase-sync.js?v=22.14" defer></script>
-    <script src="app.js?v=22.14" defer></script>
+    <script src="js/supabase-config.js?v=22.15" defer></script>
+    <script src="js/supabase-client.js?v=22.15" defer></script>
+    <script src="js/supabase-sync.js?v=22.15" defer></script>
+    <script src="app.js?v=22.15" defer></script>
   </body>
 </html>

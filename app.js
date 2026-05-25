@@ -12,6 +12,7 @@ function initApp() {
     bindWorkshopForms();
     bindBackupActions();
     if (typeof bindLocalSecurityControls === "function") bindLocalSecurityControls();
+    bindOfflineStatus();
     if (typeof bindSupabaseActions === "function") bindSupabaseActions();
     bindVehicleLookup();
     bindKeyboardShortcuts();
@@ -53,6 +54,25 @@ function bindAutoSaveSafety() {
   });
   window.addEventListener("pagehide", forceEmergencyAutosave);
   window.setInterval(forceEmergencyAutosave, 10000);
+}
+
+function bindOfflineStatus() {
+  const banner = $("#offline-banner");
+  if (!banner) return;
+  const refresh = () => {
+    banner.hidden = navigator.onLine !== false;
+    document.body.classList.toggle("is-offline", navigator.onLine === false);
+  };
+  window.addEventListener("online", () => {
+    refresh();
+    notifyUser("Connexion rétablie. La synchronisation Supabase va reprendre.", "success");
+    if (typeof pullLatestSupabaseBackup === "function") pullLatestSupabaseBackup("online");
+  });
+  window.addEventListener("offline", () => {
+    refresh();
+    notifyUser("Mode hors ligne actif. Les données locales restent consultables.", "warn");
+  });
+  refresh();
 }
 
 function configurePdfWorker() {
@@ -636,7 +656,7 @@ function registerServiceWorker() {
   });
   window.addEventListener("load", async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=22.16", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=22.17", { updateViaCache: "none" });
       registration.update?.();
       if (registration.waiting) showUpdateAvailable(registration);
       window.setInterval(() => registration.update?.(), 10 * 60 * 1000);

@@ -1,7 +1,8 @@
-const CACHE_NAME = "nimr-sav-v22.16-csp-security";
+const CACHE_NAME = "nimr-sav-v22.17-pwa-install";
 const ASSETS = [
   "./",
   "./index.html",
+  "./offline.html",
   "./rescue.html",
   "./styles.css",
   "./app.js",
@@ -9,6 +10,9 @@ const ASSETS = [
   "./js/version.js",
   "./supabase-schema.sql",
   "./assets/icon.svg",
+  "./assets/icon-192.png",
+  "./assets/icon-512.png",
+  "./assets/apple-touch-icon.png",
   "./data/vehicles.json",
   "./vendor/pdf.min.js",
   "./vendor/pdf.worker.min.js",
@@ -57,7 +61,9 @@ async function networkFirst(request) {
   } catch (error) {
     const cached = await caches.match(request);
     if (cached) return cached;
-    if (request.mode === "navigate") return caches.match("./index.html");
+    if (request.mode === "navigate") {
+      return (await caches.match("./index.html")) || caches.match("./offline.html");
+    }
     return Response.error();
   }
 }
@@ -79,7 +85,7 @@ self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return;
-  const isCriticalAsset = event.request.mode === "navigate" || /\/(index\.html|app\.js|styles\.css|sw\.js|manifest\.webmanifest)$/.test(url.pathname) || /\/js\/.*\.js$/.test(url.pathname);
+  const isCriticalAsset = event.request.mode === "navigate" || /\/(index\.html|offline\.html|app\.js|styles\.css|sw\.js|manifest\.webmanifest)$/.test(url.pathname) || /\/js\/.*\.js$/.test(url.pathname);
   event.respondWith(isCriticalAsset ? networkFirst(event.request) : cacheFirst(event.request));
 });
 

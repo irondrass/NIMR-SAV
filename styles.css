@@ -3023,6 +3023,77 @@ a:focus-visible {
   max-width: 560px;
 }
 
+.offline-banner {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  z-index: 1001;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  width: min(720px, calc(100vw - 32px));
+  padding: 12px 16px;
+  border: 1px solid #f0d7aa;
+  border-radius: var(--radius);
+  color: #744705;
+  background: #fff5df;
+  box-shadow: var(--shadow);
+  transform: translateX(-50%);
+}
+
+.offline-banner[hidden] {
+  display: none !important;
+}
+
+.offline-banner strong {
+  color: #8a4b00;
+}
+
+.offline-page {
+  min-height: 100vh;
+  background: #eaf0f3;
+}
+
+.offline-screen {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.offline-card {
+  width: min(560px, 100%);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 28px;
+  background: var(--paper);
+  box-shadow: var(--shadow-float);
+}
+
+.offline-icon {
+  width: 58px;
+  height: 58px;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-sm);
+}
+
+.offline-card h1 {
+  margin: 12px 0;
+  color: var(--ink);
+}
+
+.offline-card p {
+  color: var(--muted);
+}
+
+.offline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 18px;
+}
+
 
 /* Flux atelier: préparation anticipée des pièces neuves/remplacées depuis le planning */
 .validated-plan-row.anticipated-new-part-row {

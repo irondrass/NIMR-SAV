@@ -746,6 +746,98 @@ const noShowAppointmentCase = context.normalizeCase({
 assert.equal(context.getNextWorkflowAction(noShowAppointmentCase), 'appointment', 'un client absent doit retourner vers le report RDV, pas vers la réception');
 assert.ok(context.getBusinessRuleIssues(noShowAppointmentCase, 'received').some((issue) => issue.includes('Reporter le RDV')), 'la réception doit rester bloquée tant que le RDV absent n’est pas reporté');
 
+const noIdentityCase = context.normalizeCase({
+  id: 'case-no-identity',
+  clientName: 'Identité manquante',
+  vehicle: 'Véhicule',
+  claims: [{ type: 'client', includeInPlanning: true, expertApproved: true, clientApproved: true, estimate: { lines: [{ phase: 'mechanical', operation: 'Diagnostic', laborHours: 1 }] } }],
+});
+assert.equal(context.getCaseNextAction(noIdentityCase).code, 'complete_vehicle_identity', 'un dossier sans VIN/immat doit demander l’identité véhicule');
+
+const noLaborCockpitCase = context.normalizeCase({
+  id: 'case-no-labor-cockpit',
+  clientName: 'Sans MO',
+  plate: '101 TU 2026',
+  claims: [{ type: 'client', includeInPlanning: true, expertApproved: true, clientApproved: true, estimate: { lines: [] } }],
+});
+assert.equal(context.getCaseNextAction(noLaborCockpitCase).code, 'add_labor', 'un dossier sans main-d’œuvre doit demander la MO');
+
+const laborNoPlanningCase = context.normalizeCase({
+  id: 'case-labor-no-planning',
+  clientName: 'MO sans planning',
+  plate: '102 TU 2026',
+  claims: [{ type: 'mechanical_client', includeInPlanning: true, expertApproved: true, clientApproved: true, estimate: { lines: [{ phase: 'mechanical', operation: 'Réparation', laborHours: 2 }] } }],
+});
+assert.equal(context.getCaseNextAction(laborNoPlanningCase).code, 'schedule_work', 'un dossier avec MO mais sans planning doit proposer de planifier les travaux');
+
+const blockedCockpitCase = context.normalizeCase({
+  id: 'case-blocked-cockpit',
+  clientName: 'Pièces attente',
+  plate: '103 TU 2026',
+  partsStatus: 'waiting_parts',
+  blockerReason: 'waiting_parts',
+  blockerDetails: 'Pare-chocs non reçu',
+  claims: [{ type: 'client', includeInPlanning: true, expertApproved: true, clientApproved: true, estimate: { lines: [{ phase: 'body', operation: 'Réparation', laborHours: 1 }] } }],
+});
+assert.equal(context.isCaseBlocked(blockedCockpitCase), true, 'un statut pièces bloquant doit bloquer le dossier');
+assert.equal(context.getCaseNextAction(blockedCockpitCase).code, 'resolve_blocker', 'un dossier bloqué doit prioriser la résolution du blocage');
+blockedCockpitCase.partsStatus = 'available';
+blockedCockpitCase.blockerReason = '';
+blockedCockpitCase.blockerDetails = '';
+assert.equal(context.isCaseBlocked(blockedCockpitCase), false, 'retirer statut/motif doit débloquer le dossier');
+
+const cockpitFlowCase = context.normalizeCase({
+  id: 'case-flow-cockpit',
+  clientName: 'Flux cockpit',
+  plate: '104 TU 2026',
+  appointment: { start: '2026-05-25T08:00:00.000Z', end: '2026-05-25T10:00:00.000Z', delivery: '2026-05-25T17:00:00.000Z' },
+  flags: { received: true, workStarted: true, workCompleted: true },
+  claims: [{ type: 'client', includeInPlanning: true, expertApproved: true, clientApproved: true, estimate: { lines: [{ phase: 'mechanical', operation: 'Réparation', laborHours: 2 }] } }],
+});
+vm.runInContext(`state.bookings = [{ id: 'flow-booking', caseId: 'case-flow-cockpit', key: 'mechanical', resourceIds: ['pont-1'], segments: [{ start: '2026-05-25T08:00:00.000Z', end: '2026-05-25T10:00:00.000Z' }] }];`, context);
+const cockpitFlow = context.getCaseStageFlow(cockpitFlowCase);
+assert.equal(cockpitFlow.length, 10, 'le fil cockpit doit contenir les 10 étapes métier demandées');
+assert.equal(cockpitFlow.find((step) => step.key === 'quality').state, 'current', 'après travaux terminés, Qualité doit être l’étape en cours');
+
+const zeroTodayGroups = JSON.parse(vm.runInContext(`(() => {
+  state = normalizeState({ cases: [], bookings: [], resources: [] });
+  const groups = buildTodayWorkshopGroups(new Date('2026-05-25T10:00:00.000Z'));
+  return JSON.stringify(Object.values(groups).map((items) => items.length));
+})()`, context));
+assert.equal(zeroTodayGroups.every((count) => count === 0), true, 'la vue Aujourd’hui doit accepter zéro dossier');
+
+const todayGroupsRegression = JSON.parse(vm.runInContext(`(() => {
+  state = normalizeState({
+    resources: [{ id: 'r1', name: 'R1', role: 'mecanicien', active: true }],
+    cases: [
+      { id: 'today-expected', clientName: 'RDV attendu', plate: '201 TU 2026', appointment: { start: '2026-05-25T11:00:00.000Z', end: '2026-05-25T12:00:00.000Z', delivery: '2026-05-25T16:00:00.000Z' }, claims: [{ type: 'client', includeInPlanning: true, expertApproved: true, clientApproved: true, estimate: { lines: [{ phase: 'mechanical', operation: 'MO', laborHours: 1 }] } }] },
+      { id: 'today-unplanned', clientName: 'Reçu non planifié', plate: '202 TU 2026', flags: { received: true }, claims: [{ type: 'client', includeInPlanning: true, expertApproved: true, clientApproved: true, estimate: { lines: [{ phase: 'mechanical', operation: 'MO', laborHours: 1 }] } }] },
+      { id: 'today-start', clientName: 'À démarrer', plate: '203 TU 2026', flags: { received: true }, claims: [{ type: 'client', includeInPlanning: true, expertApproved: true, clientApproved: true, estimate: { lines: [{ phase: 'mechanical', operation: 'MO', laborHours: 1 }] } }] },
+      { id: 'today-progress', clientName: 'En cours', plate: '204 TU 2026', flags: { received: true, workStarted: true }, claims: [{ type: 'client', includeInPlanning: true, expertApproved: true, clientApproved: true, estimate: { lines: [{ phase: 'mechanical', operation: 'MO', laborHours: 1 }] } }] },
+      { id: 'today-late', clientName: 'Retard', plate: '205 TU 2026', appointment: { start: '2026-05-24T08:00:00.000Z', end: '2026-05-24T10:00:00.000Z', delivery: '2026-05-24T17:00:00.000Z' }, flags: { received: true }, claims: [{ type: 'client', includeInPlanning: true, expertApproved: true, clientApproved: true, estimate: { lines: [{ phase: 'mechanical', operation: 'MO', laborHours: 1 }] } }] },
+      { id: 'today-quality', clientName: 'Qualité', plate: '206 TU 2026', flags: { received: true, workStarted: true, workCompleted: true }, claims: [{ type: 'client', includeInPlanning: true, expertApproved: true, clientApproved: true, estimate: { lines: [{ phase: 'mechanical', operation: 'MO', laborHours: 1 }] } }] },
+      { id: 'today-delivery', clientName: 'Livraison', plate: '207 TU 2026', appointment: { start: '2026-05-25T08:00:00.000Z', end: '2026-05-25T10:00:00.000Z', delivery: '2026-05-25T15:00:00.000Z' }, flags: { received: true, workStarted: true, workCompleted: true, qualityApproved: true }, claims: [{ type: 'client', includeInPlanning: true, expertApproved: true, clientApproved: true, estimate: { lines: [{ phase: 'mechanical', operation: 'MO', laborHours: 1 }] } }] },
+      { id: 'today-blocked', clientName: 'Bloqué', plate: '208 TU 2026', partsStatus: 'blocked_parts', blockerReason: 'waiting_parts', claims: [{ type: 'client', includeInPlanning: true, expertApproved: true, clientApproved: true, estimate: { lines: [{ phase: 'mechanical', operation: 'MO', laborHours: 1 }] } }] }
+    ],
+    bookings: [
+      { id: 'b-start', caseId: 'today-start', key: 'mechanical', resourceIds: ['r1'], segments: [{ start: '2026-05-25T13:00:00.000Z', end: '2026-05-25T14:00:00.000Z' }] },
+      { id: 'b-progress', caseId: 'today-progress', key: 'mechanical', resourceIds: ['r1'], segments: [{ start: '2026-05-25T08:00:00.000Z', end: '2026-05-25T12:00:00.000Z' }] },
+      { id: 'b-late', caseId: 'today-late', key: 'mechanical', resourceIds: ['r1'], segments: [{ start: '2026-05-24T08:00:00.000Z', end: '2026-05-24T10:00:00.000Z' }] }
+    ]
+  });
+  const groups = buildTodayWorkshopGroups(new Date('2026-05-25T10:00:00.000Z'));
+  return JSON.stringify(Object.fromEntries(Object.entries(groups).map(([key, value]) => [key, value.length])));
+})()`, context));
+assert.equal(todayGroupsRegression.expected, 1, 'Aujourd’hui doit lister les RDV attendus');
+assert.equal(todayGroupsRegression.receivedUnplanned, 1, 'Aujourd’hui doit lister les véhicules reçus non planifiés');
+assert.ok(todayGroupsRegression.toStart >= 1, 'Aujourd’hui doit lister les travaux à démarrer');
+assert.equal(todayGroupsRegression.inProgress, 1, 'Aujourd’hui doit lister les travaux en cours');
+assert.ok(todayGroupsRegression.late >= 1, 'Aujourd’hui doit lister les travaux en retard');
+assert.equal(todayGroupsRegression.quality, 1, 'Aujourd’hui doit lister le contrôle qualité à faire');
+assert.equal(todayGroupsRegression.deliveries, 1, 'Aujourd’hui doit lister les livraisons prévues');
+assert.equal(todayGroupsRegression.blocked, 1, 'Aujourd’hui doit lister les dossiers bloqués');
+console.log('Cockpit atelier quotidien regression OK');
+
 const printPlanningRegression = JSON.parse(vm.runInContext(`(() => {
   const writes = [];
   window.open = () => ({ document: { write(html) { writes.push(html); }, close() {} } });

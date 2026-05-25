@@ -157,11 +157,13 @@ function renderResourceBookings(resource, date, dayStart, dayEnd, total, dailyCo
       const shortStage = stage.replace("Tôlerie + démontage", "Tôlerie").replace("Peinture + vernis", "Peinture").replace("Contrôle qualité", "Contrôle");
       const laborOps = isLeave ? [] : getBookingLaborOperations(caseItem, booking.key);
       const taskStatus = isLeave ? "" : getBookingStatusLabel(booking);
-      const bookingTitle = `${taskNumber ? `Tâche n°${taskNumber} - ` : ""}${vehicleLine} - ${stage} - ${timeLine}${taskStatus ? ` - ${taskStatus}` : ""}${laborOps.length ? `\nMO: ${laborOps.join(' · ')}` : ''}`;
+      const blocked = !isLeave && typeof isCaseBlocked === "function" && isCaseBlocked(caseItem);
+      const blockedLabel = blocked && typeof getCaseBlockerLabel === "function" ? getCaseBlockerLabel(caseItem) : "";
+      const bookingTitle = `${taskNumber ? `Tâche n°${taskNumber} - ` : ""}${vehicleLine} - ${stage} - ${timeLine}${taskStatus ? ` - ${taskStatus}` : ""}${blocked ? ` - Dossier bloqué${blockedLabel ? `: ${blockedLabel}` : ""}` : ""}${laborOps.length ? `\nMO: ${laborOps.join(' · ')}` : ''}`;
       const maxTextLength = Math.max(vehicleLine.length, `${equipmentPrefix}${shortStage}`.length);
       const availableChars = Math.max(6, Math.floor(width * 1.35));
       const numberOnly = Boolean(taskNumber) && !isLeave && (width < 14 || maxTextLength > availableChars);
-      const compactClass = `${booking.planningMode === "anticipated-new-part" ? " anticipated-new-part-booking" : ""}${!isLeave ? ` task-status-${escapeAttr(getBookingOperationalStatus(booking))}` : ""}${numberOnly ? " number-only-booking" : width < 8 ? " compact-booking" : ""}`;
+      const compactClass = `${booking.planningMode === "anticipated-new-part" ? " anticipated-new-part-booking" : ""}${blocked ? " blocked-booking" : ""}${!isLeave ? ` task-status-${escapeAttr(getBookingOperationalStatus(booking))}` : ""}${numberOnly ? " number-only-booking" : width < 8 ? " compact-booking" : ""}`;
       const color = getBookingPlanningColor(booking, dailyColorMap);
       items.push(`
         <div class="booking ${isLeave ? 'leave-booking' : ''}${compactClass}" style="left:${left}%;width:${width}%;background:${color}" title="${escapeAttr(bookingTitle)}" aria-label="${escapeAttr(bookingTitle)}">

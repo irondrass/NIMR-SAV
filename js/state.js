@@ -20,7 +20,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v22.17";
+const APP_VERSION = "v22.18";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const WORKSHOP_NAME = "NIMR SAV";
@@ -128,6 +128,31 @@ const ACTION_LABELS = {
   delivered: "Livrer le véhicule",
   invoiced: "Facturer le dossier",
 };
+
+const PARTS_STATUS_OPTIONS = [
+  ["unchecked", "Non vérifié"],
+  ["not_applicable", "Non applicable"],
+  ["available", "Disponible"],
+  ["partial", "Partiellement disponible"],
+  ["ordered", "Commandé"],
+  ["waiting_parts", "En attente pièces"],
+  ["received", "Reçu"],
+  ["blocked_parts", "Bloqué pièces"],
+];
+
+const PARTS_STATUS_LABELS = Object.fromEntries(PARTS_STATUS_OPTIONS);
+const BLOCKING_PARTS_STATUSES = new Set(["waiting_parts", "blocked_parts"]);
+const BLOCKER_REASON_OPTIONS = [
+  ["", "Aucun blocage"],
+  ["waiting_parts", "Attente pièces"],
+  ["waiting_customer", "Attente client"],
+  ["waiting_internal_approval", "Attente accord interne"],
+  ["waiting_diagnostic", "Attente diagnostic"],
+  ["waiting_technician", "Attente disponibilité technicien"],
+  ["waiting_lift", "Attente disponibilité pont"],
+  ["other", "Autre"],
+];
+const BLOCKER_REASON_LABELS = Object.fromEntries(BLOCKER_REASON_OPTIONS);
 
 const FLAG_HISTORY_EVENTS = {
   expertApproved: { on: ["expert.approved", "Accord expert validé"] },
@@ -708,6 +733,9 @@ function createDefaultState() {
         vin: "VF3DEMO2026",
         insurance: "Assurance exemple",
         orNavNumber: "OR-NAV-2026-001",
+        partsStatus: "unchecked",
+        blockerReason: "",
+        blockerDetails: "",
         damageNotes: "Aile avant droite, pare-chocs et peinture.",
         expertName: "Expert assigné",
         expertPhone: "+216 00 111 222",
@@ -913,6 +941,31 @@ function normalizeStepPreferredResources(value = {}) {
   return normalized;
 }
 
+function normalizePartsStatus(value) {
+  const normalized = String(value || "unchecked").trim();
+  return PARTS_STATUS_LABELS[normalized] ? normalized : "unchecked";
+}
+
+function normalizeBlockerReason(value) {
+  const normalized = String(value || "").trim();
+  return BLOCKER_REASON_LABELS[normalized] !== undefined ? normalized : "";
+}
+
+function isCaseBlocked(item) {
+  if (!item) return false;
+  const status = normalizePartsStatus(item.partsStatus);
+  const reason = normalizeBlockerReason(item.blockerReason);
+  return BLOCKING_PARTS_STATUSES.has(status) || Boolean(reason);
+}
+
+function getCaseBlockerLabel(item) {
+  if (!item) return "";
+  const partsLabel = PARTS_STATUS_LABELS[normalizePartsStatus(item.partsStatus)] || "";
+  const reasonLabel = BLOCKER_REASON_LABELS[normalizeBlockerReason(item.blockerReason)] || "";
+  const details = String(item.blockerDetails || "").trim();
+  return [reasonLabel, partsLabel, details].filter(Boolean).join(" · ");
+}
+
 function normalizeDurations(durations = {}) {
   const normalized = { ...DEFAULT_DURATIONS };
   DURATIONS.forEach(([key]) => {
@@ -1016,6 +1069,9 @@ function normalizeCase(item) {
     vin: item.vin || "",
     insurance: item.insurance || "",
     orNavNumber: item.orNavNumber || item.claimNumber || "",
+    partsStatus: normalizePartsStatus(item.partsStatus),
+    blockerReason: normalizeBlockerReason(item.blockerReason),
+    blockerDetails: item.blockerDetails || item.blockerNote || "",
     damageNotes: item.damageNotes || "",
     arrivalNotes: item.arrivalNotes || item.receptionNotes || "",
     expertName: item.expertName || "",
@@ -1452,6 +1508,7 @@ function saveState(options = {}) {
     if (!options.skipCloud && options.flushCloud && typeof flushSupabaseBackup === "function") {
       flushSupabaseBackup(options.cloudReason || "local-save-now");
     }
+    if (typeof renderSyncStatusStrip === "function") renderSyncStatusStrip();
   } catch (error) {
     console.error("Impossible d'enregistrer les données locales", error);
     notifyUser("Le stockage local est saturé. Exportez une sauvegarde JSON depuis Atelier > Sauvegarde.", "error");

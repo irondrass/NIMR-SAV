@@ -1,6 +1,8 @@
 function render() {
+  renderSyncStatusStrip();
   renderMetrics();
   renderSavKpis();
+  renderTodayWorkshop();
   renderCases();
   renderCaseDetail();
   renderPilotageAlerts();
@@ -154,6 +156,380 @@ function getCaseTypeSummary(item) {
   return types.map(getClaimTypeLabel).join(" + ");
 }
 
+function getCaseBookings(item) {
+  return state.bookings.filter((booking) => booking.caseId === item?.id && booking.type !== "leave");
+}
+
+function hasCaseBookings(item) {
+  return getCaseBookings(item).length > 0;
+}
+
+function hasKnownLabor(item) {
+  const workflowClaims = getWorkflowClaims(item);
+  if (workflowClaims.some((claim) => claimHasLaborEstimate(claim))) return true;
+  return ESTIMATE_PLANNING_KEYS.some((key) => Number(item?.durations?.[key] || 0) > 0);
+}
+
+function caseHasCompletedValidations(item) {
+  const workflowClaims = getWorkflowClaims(item);
+  if (!workflowClaims.length) return false;
+  return workflowClaims.every((claim) => claim.clientApproved && (isClientOnlyRepairClaim(claim) || claim.expertApproved));
+}
+
+function getDeliveryDueState(item, now = new Date()) {
+  const delivery = item?.appointment?.delivery ? new Date(item.appointment.delivery) : null;
+  if (!delivery || Number.isNaN(delivery.getTime())) return "none";
+  if (delivery <= now) return "due";
+  return delivery.getTime() - now.getTime() <= 4 * 60 * 60 * 1000 ? "soon" : "later";
+}
+
+function getCaseNextAction(item) {
+  if (!item) {
+    return { code: "done", label: "Terminé", priority: "normal", reason: "Aucun dossier actif." };
+  }
+  if (isCaseBlocked(item)) {
+    return {
+      code: "resolve_blocker",
+      label: "Résoudre le blocage",
+      priority: "blocked",
+      reason: getCaseBlockerLabel(item) || "Le dossier est marqué comme bloqué.",
+    };
+  }
+  const workflowClaims = getWorkflowClaims(item);
+  if (!hasVehicleIdentity(item)) {
+    return {
+      code: "complete_vehicle_identity",
+      label: "Compléter l'identité véhicule",
+      priority: "attention",
+      reason: "Ajoutez une immatriculation ou un VIN avant de poursuivre.",
+    };
+  }
+  if (!workflowClaims.length || workflowClaims.some((claim) => !claimHasLaborEstimate(claim)) || !hasKnownLabor(item)) {
+    return {
+      code: "add_labor",
+      label: "Ajouter la main-d'œuvre",
+      priority: "attention",
+      reason: "Le dossier doit contenir des heures de main-d'œuvre pour réserver l'atelier.",
+    };
+  }
+  if (appointmentNeedsReschedule(item)) {
+    return {
+      code: "schedule_appointment",
+      label: "Fixer le RDV client",
+      priority: "urgent",
+      reason: "Le RDV doit être reporté.",
+    };
+  }
+  if (!item.appointment && !hasCaseBookings(item)) {
+    return {
+      code: "schedule_work",
+      label: "Planifier les travaux",
+      priority: "attention",
+      reason: "La main-d'œuvre est connue mais aucun RDV ou créneau atelier n'est planifié.",
+    };
+  }
+  if (!caseHasCompletedValidations(item)) {
+    return {
+      code: "validate_customer_or_internal",
+      label: "Valider client / interne",
+      priority: "attention",
+      reason: "Les accords nécessaires ne sont pas encore complets.",
+    };
+  }
+  if (!item.flags.received) {
+    const start = item.appointment?.start ? new Date(item.appointment.start) : null;
+    const due = start && !Number.isNaN(start.getTime()) && start <= new Date();
+    return {
+      code: "receive_vehicle",
+      label: "Réceptionner le véhicule",
+      priority: due ? "urgent" : "normal",
+      reason: due ? "Le RDV de réception est arrivé ou dépassé." : "Le véhicule n'est pas encore physiquement reçu.",
+    };
+  }
+  if (!hasCaseBookings(item)) {
+    return {
+      code: "schedule_work",
+      label: "Planifier les travaux",
+      priority: "attention",
+      reason: "La main-d'œuvre est connue mais aucun créneau n'est planifié.",
+    };
+  }
+  const bookings = getCaseBookings(item);
+  const pausedOrRemainder = bookings.some((booking) => ["paused", "late_paused"].includes(getBookingOperationalStatus(booking)) || Number(booking.remainingMinutes || 0) > 0);
+  if (pausedOrRemainder) {
+    return {
+      code: "resume_or_replan_work",
+      label: "Reprendre ou reporter la tâche",
+      priority: "urgent",
+      reason: "Une tâche est en pause ou possède un reliquat à replanifier.",
+    };
+  }
+  if (!item.flags.workStarted) {
+    return {
+      code: "start_work",
+      label: "Démarrer les travaux",
+      priority: "normal",
+      reason: "Le véhicule est reçu et les créneaux atelier sont prêts.",
+    };
+  }
+  if (!item.flags.workCompleted) {
+    return {
+      code: "finish_work",
+      label: "Terminer les travaux",
+      priority: "normal",
+      reason: "Les travaux sont en cours.",
+    };
+  }
+  if (!item.flags.qualityApproved) {
+    return {
+      code: "quality_check",
+      label: "Contrôle qualité",
+      priority: "attention",
+      reason: "Les travaux sont terminés, le contrôle qualité reste à valider.",
+    };
+  }
+  if (!item.flags.delivered) {
+    const deliveryState = getDeliveryDueState(item);
+    return deliveryState === "due" || deliveryState === "soon"
+      ? { code: "deliver_vehicle", label: "Livrer le véhicule", priority: deliveryState === "due" ? "urgent" : "attention", reason: "Le véhicule est prêt pour la livraison." }
+      : { code: "prepare_delivery", label: "Préparer livraison", priority: "normal", reason: "Le véhicule est contrôlé et attend la livraison." };
+  }
+  return { code: "done", label: "Terminé", priority: "normal", reason: "Le dossier est livré." };
+}
+
+function getCaseNextActionTab(actionCode) {
+  const mapping = {
+    complete_vehicle_identity: "claims",
+    add_labor: "claims",
+    schedule_appointment: "planning",
+    receive_vehicle: "atelier",
+    validate_customer_or_internal: "claims",
+    schedule_work: "planning",
+    start_work: "atelier",
+    resume_or_replan_work: "atelier",
+    finish_work: "atelier",
+    quality_check: "livraison",
+    prepare_delivery: "livraison",
+    deliver_vehicle: "livraison",
+    resolve_blocker: "claims",
+    done: "livraison",
+  };
+  return mapping[actionCode] || "claims";
+}
+
+function renderSyncStatusStrip() {
+  const target = $("#sync-status-strip");
+  if (!target) return;
+  const fallbackHealth = { principal: true, mirror: true, snapshots: 0, lastSavedAt: "", errors: [] };
+  const health = typeof getAutosaveHealth === "function" ? getAutosaveHealth() : fallbackHealth;
+  const localOk = Boolean(health.principal && health.mirror && !health.errors?.length);
+  const cloudOk = safeLocalStorageGet(`${STORAGE_KEY}:last-cloud-autosave`);
+  const cloudError = safeLocalStorageGet(`${STORAGE_KEY}:last-cloud-autosave-error`);
+  const localChangeAt = typeof getLocalUserChangeAt === "function" ? getLocalUserChangeAt() : 0;
+  const cloudAt = cloudOk ? new Date(cloudOk).getTime() || 0 : 0;
+  const pending = localChangeAt && (!cloudAt || localChangeAt > cloudAt) ? 1 : 0;
+  const configured = typeof isSupabaseConfigured === "function" ? isSupabaseConfigured() : false;
+  const online = typeof navigator === "undefined" ? true : navigator.onLine !== false;
+  const cloudLabel = !configured
+    ? "Non configuré"
+    : cloudError
+      ? "Erreur"
+      : pending
+        ? "En attente"
+        : cloudOk
+          ? "Synchronisé"
+          : "Prêt";
+  setSyncItem(target, "local", localOk ? "OK" : "À vérifier", localOk ? "ok" : "warn");
+  setSyncItem(target, "cloud", cloudLabel, !configured ? "muted" : cloudError ? "error" : pending ? "warn" : "ok");
+  setSyncItem(target, "connection", online ? "En ligne" : "Hors ligne", online ? "ok" : "warn");
+  setSyncItem(target, "last-save", formatSyncDate(health.lastSavedAt || safeReadStorageMeta()?.savedAt || ""));
+  setSyncItem(target, "pending", String(pending), pending ? "warn" : "ok");
+}
+
+function setSyncItem(root, key, value, stateName = "") {
+  const target = root.querySelector(`[data-sync-${key}]`);
+  if (!target) return;
+  target.textContent = value;
+  target.dataset.state = stateName;
+}
+
+function safeLocalStorageGet(key) {
+  try {
+    return localStorage.getItem(key) || "";
+  } catch (error) {
+    return "";
+  }
+}
+
+function safeReadStorageMeta() {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_META_KEY) || "null");
+  } catch (error) {
+    return null;
+  }
+}
+
+function formatSyncDate(value) {
+  if (!value) return "Jamais";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" });
+}
+
+const TODAY_GROUP_CONFIG = [
+  { key: "expected", label: "RDV attendus" },
+  { key: "receivedUnplanned", label: "Véhicules reçus non planifiés" },
+  { key: "toStart", label: "Travaux à démarrer" },
+  { key: "inProgress", label: "Travaux en cours" },
+  { key: "late", label: "Travaux en retard" },
+  { key: "quality", label: "Contrôle qualité à faire" },
+  { key: "deliveries", label: "Livraisons prévues" },
+  { key: "blocked", label: "Dossiers bloqués" },
+];
+
+function renderTodayWorkshop(now = new Date()) {
+  const board = $("#today-workshop-board");
+  if (!board) return;
+  const groups = buildTodayWorkshopGroups(now);
+  const total = new Set(Object.values(groups).flat().map((entry) => entry.item.id)).size;
+  const pill = $("#today-count-pill");
+  if (pill) pill.textContent = `${total} dossier${total > 1 ? "s" : ""}`;
+  board.innerHTML = TODAY_GROUP_CONFIG.map((group) => renderTodayGroup(group, groups[group.key] || [])).join("");
+  $$("[data-today-case]", board).forEach((button) => {
+    button.addEventListener("click", () => {
+      activeCaseId = button.dataset.todayCase;
+      activeCaseDetailTab = getCaseNextActionTab(button.dataset.todayAction);
+      setActiveTab("dossiers");
+      renderCases();
+      renderCaseDetail();
+    });
+  });
+}
+
+function buildTodayWorkshopGroups(now = new Date()) {
+  const groups = Object.fromEntries(TODAY_GROUP_CONFIG.map((group) => [group.key, []]));
+  state.cases
+    .filter((item) => !item.flags?.delivered)
+    .forEach((item) => {
+      const action = getCaseNextAction(item);
+      const entries = getTodayCaseEntries(item, action, now);
+      entries.forEach((entry) => groups[entry.group].push({ item, action, risk: entry.risk, timeLabel: entry.timeLabel }));
+    });
+  Object.values(groups).forEach((items) => {
+    items.sort((a, b) => sortTodayEntries(a, b));
+  });
+  return groups;
+}
+
+function getTodayCaseEntries(item, action, now = new Date()) {
+  const entries = [];
+  const start = item.appointment?.start ? new Date(item.appointment.start) : null;
+  const delivery = item.appointment?.delivery ? new Date(item.appointment.delivery) : null;
+  const bookings = getCaseBookings(item);
+  const hasBookings = bookings.length > 0;
+  const workingNow = item.flags.workStarted && !item.flags.workCompleted;
+  if (isCaseBlocked(item)) entries.push({ group: "blocked", risk: "blocked", timeLabel: getCaseBlockerLabel(item) || "Blocage" });
+  if (start && isSameBusinessDay(start, now) && !item.flags.received && item.appointmentStatus !== "no_show") {
+    entries.push({ group: "expected", risk: start <= now ? "urgent" : "normal", timeLabel: formatTime(start) });
+  }
+  if (item.flags.received && !hasBookings && !item.flags.workCompleted) {
+    entries.push({ group: "receivedUnplanned", risk: "attention", timeLabel: "À planifier" });
+  }
+  if (item.flags.received && hasBookings && !item.flags.workStarted) {
+    entries.push({ group: "toStart", risk: "normal", timeLabel: getNextBookingTimeLabel(bookings, now) });
+  }
+  if (workingNow) {
+    entries.push({ group: "inProgress", risk: "normal", timeLabel: "En cours" });
+  }
+  if (isCaseLate(item, now)) {
+    entries.push({ group: "late", risk: "urgent", timeLabel: "Retard" });
+  }
+  if (item.flags.workCompleted && !item.flags.qualityApproved) {
+    entries.push({ group: "quality", risk: "attention", timeLabel: "À contrôler" });
+  }
+  if (delivery && isSameBusinessDay(delivery, now) && item.flags.qualityApproved && !item.flags.delivered) {
+    entries.push({ group: "deliveries", risk: delivery <= now ? "urgent" : "normal", timeLabel: formatTime(delivery) });
+  }
+  if (!entries.length && action.priority !== "normal") {
+    entries.push({ group: action.code === "resolve_blocker" ? "blocked" : "late", risk: action.priority, timeLabel: action.label });
+  }
+  return dedupeTodayEntries(entries);
+}
+
+function dedupeTodayEntries(entries) {
+  const seen = new Set();
+  return entries.filter((entry) => {
+    if (seen.has(entry.group)) return false;
+    seen.add(entry.group);
+    return true;
+  });
+}
+
+function sortTodayEntries(a, b) {
+  const priority = { blocked: 0, urgent: 1, attention: 2, normal: 3 };
+  return (priority[a.risk] ?? 4) - (priority[b.risk] ?? 4)
+    || String(a.item.clientName || "").localeCompare(String(b.item.clientName || ""), "fr", { sensitivity: "base" });
+}
+
+function renderTodayGroup(group, entries) {
+  return `
+    <section class="today-group">
+      <div class="today-group-head">
+        <h2>${escapeHtml(group.label)}</h2>
+        <span>${entries.length}</span>
+      </div>
+      <div class="today-cards">
+        ${entries.length ? entries.map((entry) => renderTodayCard(entry)).join("") : `<div class="empty-inline">Aucun dossier.</div>`}
+      </div>
+    </section>
+  `;
+}
+
+function renderTodayCard({ item, action, risk, timeLabel }) {
+  const status = statusLabels[getCaseStatus(item)] || "Statut";
+  const identity = item.plate || item.vin || "Sans immatriculation";
+  return `
+    <button class="today-card risk-${escapeAttr(risk)}" type="button" data-today-case="${escapeAttr(item.id)}" data-today-action="${escapeAttr(action.code)}">
+      <span class="today-card-top"><strong>${escapeHtml(item.clientName || "Client")}</strong><b>${escapeHtml(timeLabel || "")}</b></span>
+      <span>${escapeHtml(shortVehicleModel(item.vehicle || "Véhicule"))} · ${escapeHtml(identity)}</span>
+      <span class="today-card-meta">
+        <i>${escapeHtml(getCaseTypeSummary(item))}</i>
+        <i>${escapeHtml(status)}</i>
+      </span>
+      <span class="today-next-action">Prochaine action : ${escapeHtml(action.label)}</span>
+      <span class="risk-pill">${escapeHtml(getRiskLabel(risk))}</span>
+    </button>
+  `;
+}
+
+function getRiskLabel(risk) {
+  return { normal: "Normal", attention: "Attention", urgent: "Urgent", blocked: "Bloqué" }[risk] || "Normal";
+}
+
+function isSameBusinessDay(value, now = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  return !Number.isNaN(date.getTime()) && todayKey(date) === todayKey(now);
+}
+
+function isCaseLate(item, now = new Date()) {
+  if (isCaseBlocked(item)) return false;
+  const delivery = item.appointment?.delivery ? new Date(item.appointment.delivery) : null;
+  if (delivery && !Number.isNaN(delivery.getTime()) && delivery < now && !item.flags.delivered) return true;
+  return getCaseBookings(item).some((booking) => {
+    if (["completed"].includes(getBookingOperationalStatus(booking))) return false;
+    const end = booking.end ? new Date(booking.end) : null;
+    return end && !Number.isNaN(end.getTime()) && end < now && !item.flags.workCompleted;
+  });
+}
+
+function getNextBookingTimeLabel(bookings, now = new Date()) {
+  const upcoming = bookings
+    .map((booking) => new Date(booking.start))
+    .filter((date) => !Number.isNaN(date.getTime()) && date >= startOfDay(now))
+    .sort((a, b) => a - b)[0];
+  return upcoming ? formatDateTime(upcoming) : "À démarrer";
+}
+
 function renderCases() {
   const list = $("#case-list");
   const search = $("#case-search").value.trim().toLowerCase();
@@ -178,12 +554,14 @@ function renderCases() {
         .map((item) => {
           const active = item.id === activeCaseId ? " active" : "";
           const status = getCaseStatus(item);
+          const nextAction = getCaseNextAction(item);
           return `
-            <button class="case-card${active}" type="button" data-case="${item.id}">
+            <button class="case-card${active}${isCaseBlocked(item) ? " blocked-case" : ""}" type="button" data-case="${item.id}">
               <strong>${escapeHtml(item.clientName)}</strong>
               <span>${escapeHtml(item.vehicle || "Véhicule non renseigné")} · ${escapeHtml(item.plate || item.vin || "Sans immatriculation")}</span>
               <span class="case-meta">
                 <span class="tag">${statusLabels[status]}</span>
+                <span class="tag next-action-tag priority-${escapeAttr(nextAction.priority)}">${escapeHtml(nextAction.label)}</span>
                 <span class="tag soft">${escapeHtml(getClaimTypeLabel(getCasePrimaryType(item)))}</span>
                 ${item.appointment ? `<span>${formatDateTime(item.appointment.start)}</span>` : "<span>RDV non planifié</span>"}
               </span>
@@ -240,6 +618,16 @@ function buildPilotageAlerts(now = new Date()) {
 function caseOperationalAlerts(item, now = new Date()) {
   const alerts = [];
   const label = `${item.clientName || 'Client'} · ${item.plate || item.vin || item.vehicle || 'véhicule'}`;
+  if (isCaseBlocked(item)) {
+    alerts.push({
+      caseId: item.id,
+      level: 'danger',
+      priority: 0,
+      title: 'Dossier bloqué',
+      details: `${label} · ${getCaseBlockerLabel(item) || 'blocage à résoudre'}`,
+      when: item.updatedAt || item.createdAt,
+    });
+  }
   if (item.appointment?.start && !item.flags.received) {
     const start = new Date(item.appointment.start);
     const ageMinutes = diffMinutes(start, now);
@@ -898,13 +1286,17 @@ function renderKanban() {
               cases.length
                 ? cases
                     .map(
-                      (item) => `
-                        <button class="kanban-card" type="button" data-kanban-case="${item.id}">
+                      (item) => {
+                        const nextAction = getCaseNextAction(item);
+                        return `
+                        <button class="kanban-card ${isCaseBlocked(item) ? "blocked-case" : ""}" type="button" data-kanban-case="${item.id}">
                           <strong>${escapeHtml(item.clientName)}</strong>
                           <span>${escapeHtml(shortVehicleModel(item.vehicle || "Véhicule"))} · ${escapeHtml(item.plate || item.vin || "Sans immat.")}</span>
                           <span>${escapeHtml(statusLabels[getCaseStatus(item)] || "Statut")}${item.appointment ? ` · ${formatDateTime(item.appointment.start)}` : ""}</span>
+                          <span>Prochaine action : ${escapeHtml(nextAction.label)}</span>
                         </button>
-                      `,
+                      `;
+                      },
                     )
                     .join("")
                 : `<div class="empty-inline">Aucun dossier</div>`
@@ -951,6 +1343,8 @@ function renderCaseDetail() {
       renderMetrics();
       renderCases();
       renderWorkflow(detail, item);
+      renderCaseStageFlow(detail, item);
+      renderCaseBlockerControls(detail, item);
       renderValidationAlert(detail, item);
       renderCaseSummary(detail, item);
       refreshCaseActionAvailability(detail, item);
@@ -1028,6 +1422,8 @@ function renderCaseDetail() {
   });
 
   renderWorkflow(detail, item);
+  renderCaseStageFlow(detail, item);
+  renderCaseBlockerControls(detail, item);
   renderValidationAlert(detail, item);
   renderVehicleIdentityCard(detail, item);
   renderPhotos(detail, item);
@@ -1116,7 +1512,8 @@ function setupCaseDetailTabs(root, item) {
 
   $(`[data-next-action-tab]`, root)?.addEventListener("click", () => {
     const action = getNextWorkflowAction(item);
-    const targetTab = action ? getTabForAction(action) : "planning";
+    const nextAction = getCaseNextAction(item);
+    const targetTab = nextAction?.code ? getCaseNextActionTab(nextAction.code) : (action ? getTabForAction(action) : "planning");
     activateTab(targetTab);
     // Scroll vers l'élément d'action correspondant (même si l'onglet était déjà actif)
     if (action) {
@@ -1203,18 +1600,21 @@ function applyWorkflowAction(item, action) {
 
 function renderCaseSummary(root, item) {
   const action = getNextWorkflowAction(item);
+  const nextAction = getCaseNextAction(item);
   const issues = action ? getBusinessRuleIssues(item, action) : [];
   const assignments = state.bookings.filter((booking) => booking.caseId === item.id);
-  const nextTitle = action ? ACTION_LABELS[action] || "Continuer" : "Dossier terminé";
-  const nextDescription = action
-    ? action === "claim"
-      ? "Ajoutez au moins un ordre de travail SAV avant de planifier."
-      : action === "labor"
-        ? "L’ordre existe déjà. Ajoutez une ligne de main-d’œuvre manuelle ou importez un devis."
-        : issues.length
-          ? `Avant de continuer : ${issues[0]}`
-          : "Tout est prêt pour cette étape."
-    : "Toutes les étapes principales sont validées.";
+  const nextTitle = nextAction.label || (action ? ACTION_LABELS[action] || "Continuer" : "Dossier terminé");
+  const nextDescription = isCaseBlocked(item)
+    ? nextAction.reason
+    : action
+      ? action === "claim"
+        ? "Ajoutez au moins un ordre de travail SAV avant de planifier."
+        : action === "labor"
+          ? "L’ordre existe déjà. Ajoutez une ligne de main-d’œuvre manuelle ou importez un devis."
+          : issues.length
+            ? `Avant de continuer : ${issues[0]}`
+            : nextAction.reason || "Tout est prêt pour cette étape."
+      : nextAction.reason || "Toutes les étapes principales sont validées.";
 
   setText(root, "summary-next-action", nextTitle);
   setText(root, "summary-next-description", nextDescription);
@@ -1246,13 +1646,14 @@ function renderCaseSummary(root, item) {
 
   const nextButton = $(`[data-next-action-tab]`, root);
   if (nextButton) {
-    nextButton.textContent = action === "claim"
+    nextButton.textContent = nextAction.code === "done"
+      ? "Voir historique"
+      : action === "claim"
       ? "Ajouter un ordre"
       : action === "labor"
         ? "Ajouter la main-d’œuvre"
-        : action
-          ? "Continuer le dossier"
-          : "Voir historique";
+        : nextAction.label || "Continuer le dossier";
+    nextButton.dataset.nextActionCode = nextAction.code;
   }
 }
 
@@ -1340,6 +1741,138 @@ function renderWorkflow(root, item) {
       </div>
     `;
   }).join("");
+}
+
+const CASE_STAGE_FLOW = [
+  ["opened", "Ouvert"],
+  ["appointment", "RDV"],
+  ["received", "Véhicule reçu"],
+  ["labor", "Main-d'œuvre"],
+  ["validation", "Validation"],
+  ["planned", "Planifié"],
+  ["work", "En travaux"],
+  ["quality", "Qualité"],
+  ["readyDelivery", "Prêt livraison"],
+  ["delivered", "Livré"],
+];
+
+function getCaseStageFlow(item) {
+  const values = getWorkflowValues(item);
+  const nextAction = getCaseNextAction(item);
+  const hasValidation = getWorkflowClaims(item).length > 0;
+  const hasLabor = hasKnownLabor(item);
+  const hasPlanning = hasCaseBookings(item);
+  const done = {
+    opened: true,
+    appointment: Boolean(item.appointment),
+    received: Boolean(item.flags.received),
+    labor: hasLabor,
+    validation: hasValidation ? caseHasCompletedValidations(item) : false,
+    planned: hasPlanning,
+    work: Boolean(item.flags.workCompleted),
+    quality: Boolean(item.flags.qualityApproved),
+    readyDelivery: Boolean(item.flags.qualityApproved),
+    delivered: Boolean(item.flags.delivered),
+  };
+  const currentByAction = {
+    complete_vehicle_identity: "opened",
+    add_labor: "labor",
+    schedule_appointment: "appointment",
+    receive_vehicle: "received",
+    validate_customer_or_internal: "validation",
+    schedule_work: "planned",
+    start_work: "work",
+    resume_or_replan_work: "work",
+    finish_work: "work",
+    quality_check: "quality",
+    prepare_delivery: "readyDelivery",
+    deliver_vehicle: "delivered",
+    resolve_blocker: hasPlanning || values.workStarted ? "work" : hasLabor ? "validation" : "labor",
+    done: "delivered",
+  };
+  const currentKey = currentByAction[nextAction.code] || "opened";
+  return CASE_STAGE_FLOW.map(([key, label]) => {
+    let stateName = done[key] ? "done" : key === currentKey ? "current" : "todo";
+    if (key === "validation" && !hasValidation) stateName = "na";
+    if (nextAction.code === "resolve_blocker" && key === currentKey) stateName = "blocked";
+    if (key === "work" && item.flags.workStarted && !item.flags.workCompleted && stateName !== "blocked") stateName = "current";
+    if (key === "readyDelivery" && item.flags.qualityApproved && !item.flags.delivered) stateName = "current";
+    return { key, label, state: stateName };
+  });
+}
+
+function renderCaseStageFlow(root, item) {
+  const target = $("[data-field='case-stage-flow']", root);
+  if (!target) return;
+  target.innerHTML = getCaseStageFlow(item)
+    .map((step, index) => `
+      <div class="stage-step stage-${escapeAttr(step.state)}">
+        <span class="stage-dot">${stageStateSymbol(step.state, index)}</span>
+        <span>${escapeHtml(step.label)}</span>
+      </div>
+    `)
+    .join("");
+}
+
+function stageStateSymbol(stateName, index) {
+  if (stateName === "done") return "✓";
+  if (stateName === "blocked") return "!";
+  if (stateName === "na") return "–";
+  return String(index + 1);
+}
+
+function renderCaseBlockerControls(root, item) {
+  const target = $("[data-field='case-blocker-controls']", root);
+  if (!target) return;
+  const blocked = isCaseBlocked(item);
+  target.innerHTML = `
+    <div class="blocker-head">
+      <strong>Pièces / blocage</strong>
+      <span class="tag ${blocked ? "warn" : "ok"}">${blocked ? "Bloqué" : "Suivi OK"}</span>
+    </div>
+    <div class="blocker-grid">
+      <label>Statut pièces
+        <select data-case-parts-status>
+          ${PARTS_STATUS_OPTIONS.map(([value, label]) => `<option value="${escapeAttr(value)}" ${item.partsStatus === value ? "selected" : ""}>${escapeHtml(label)}</option>`).join("")}
+        </select>
+      </label>
+      <label>Motif de blocage
+        <select data-case-blocker-reason>
+          ${BLOCKER_REASON_OPTIONS.map(([value, label]) => `<option value="${escapeAttr(value)}" ${item.blockerReason === value ? "selected" : ""}>${escapeHtml(label)}</option>`).join("")}
+        </select>
+      </label>
+      <label class="wide">Détail
+        <input data-case-blocker-details value="${escapeAttr(item.blockerDetails || "")}" placeholder="Précision libre si nécessaire" />
+      </label>
+      <button class="ghost-button" type="button" data-clear-case-blocker ${blocked ? "" : "disabled"}>Retirer blocage</button>
+    </div>
+  `;
+  const updateBlocker = (sourceLabel) => {
+    const previousBlocked = isCaseBlocked(item);
+    item.partsStatus = normalizePartsStatus(target.querySelector("[data-case-parts-status]")?.value);
+    item.blockerReason = normalizeBlockerReason(target.querySelector("[data-case-blocker-reason]")?.value);
+    item.blockerDetails = normalizeTextInputValue(target.querySelector("[data-case-blocker-details]")?.value);
+    const nextBlocked = isCaseBlocked(item);
+    addHistory(
+      item,
+      "case.blocker.updated",
+      nextBlocked ? "Dossier marqué bloqué" : previousBlocked ? "Blocage retiré" : "Statut pièces mis à jour",
+      `${sourceLabel}: ${getCaseBlockerLabel(item) || PARTS_STATUS_LABELS[item.partsStatus] || "Aucun blocage"}`,
+    );
+    saveState({ flushCloud: true, cloudReason: "case-blocker" });
+    render();
+  };
+  target.querySelector("[data-case-parts-status]")?.addEventListener("change", () => updateBlocker("Statut pièces"));
+  target.querySelector("[data-case-blocker-reason]")?.addEventListener("change", () => updateBlocker("Motif"));
+  target.querySelector("[data-case-blocker-details]")?.addEventListener("change", () => updateBlocker("Détail"));
+  target.querySelector("[data-clear-case-blocker]")?.addEventListener("click", () => {
+    item.partsStatus = "unchecked";
+    item.blockerReason = "";
+    item.blockerDetails = "";
+    addHistory(item, "case.blocker.cleared", "Blocage retiré", "Le dossier est de nouveau exploitable.");
+    saveState({ flushCloud: true, cloudReason: "case-blocker-cleared" });
+    render();
+  });
 }
 
 function renderValidationAlert(root, item) {
@@ -1494,6 +2027,11 @@ function getBusinessRuleIssues(item, action) {
   const issues = [];
   const hasAssignments = state.bookings.some((booking) => booking.caseId === item.id);
   const workflowClaims = getWorkflowClaims(item);
+
+  if (isCaseBlocked(item) && !["claim", "labor", "expertApproved", "clientApproved"].includes(action)) {
+    issues.push(`Résoudre le blocage avant de continuer : ${getCaseBlockerLabel(item) || "dossier bloqué"}.`);
+    return issues;
+  }
 
   if (action !== "claim" && !workflowClaims.length) {
     issues.push("Créer au moins un ordre de réparation actif avant de continuer.");

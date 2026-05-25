@@ -1,3 +1,13 @@
+# v22.18 - Phase 1 cockpit atelier quotidien
+
+- Ajout de la vue principale `Aujourd'hui` avec regroupement des dossiers : RDV attendus, véhicules reçus non planifiés, travaux à démarrer, travaux en cours, retards, qualité, livraisons prévues et dossiers bloqués.
+- Ajout d'une fonction métier centralisée `getCaseNextAction(caseItem)` pour afficher une seule prochaine action cohérente dans la liste, le détail, le cockpit Aujourd'hui et le pilotage.
+- Ajout d'un fil d'étapes dossier : Ouvert, RDV, Véhicule reçu, Main-d'œuvre, Validation, Planifié, En travaux, Qualité, Prêt livraison, Livré.
+- Ajout d'un suivi simple `Pièces / blocage` par dossier : statut pièces, motif de blocage et détail libre, avec historique et priorité automatique sur `Résoudre le blocage`.
+- Ajout d'un bandeau visible Local / Cloud / Connexion / Dernière sauvegarde / Modifications en attente.
+- Le planning signale visuellement les réservations dont le dossier est bloqué sans supprimer automatiquement les créneaux existants.
+- Cache PWA incrémenté en `nimr-sav-v22.18-cockpit`.
+
 # v22.17 - Installation PWA et mode hors ligne
 
 - Ajout des icônes PWA PNG `assets/icon-192.png`, `assets/icon-512.png` et `assets/apple-touch-icon.png`.

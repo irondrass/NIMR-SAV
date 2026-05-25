@@ -469,6 +469,151 @@ main {
   background: #dcf3e8;
 }
 
+.technician-panel,
+.technician-manager-panel {
+  padding: 18px;
+}
+
+.technician-toolbar {
+  align-items: center;
+}
+
+.technician-controls {
+  display: grid;
+  grid-template-columns: minmax(220px, 320px) minmax(160px, 220px);
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.technician-task-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.technician-task-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-left: 6px solid var(--brand);
+  border-radius: var(--radius);
+  background: #fff;
+  box-shadow: var(--shadow-sm);
+}
+
+.technician-task-card.task-status-in_progress {
+  border-left-color: var(--ok);
+}
+
+.technician-task-card.task-status-paused,
+.technician-task-card.task-status-quality_pending {
+  border-left-color: #d97706;
+}
+
+.technician-task-card.task-status-blocked,
+.technician-task-card.is-late {
+  border-left-color: var(--danger);
+}
+
+.technician-task-main,
+.technician-task-tags,
+.technician-task-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.technician-task-title {
+  display: grid;
+  gap: 3px;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  cursor: pointer;
+}
+
+.technician-task-title strong {
+  font-size: 1rem;
+}
+
+.technician-task-title span,
+.technician-note {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.technician-task-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.technician-task-meta div {
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fbfdff;
+}
+
+.technician-task-meta dt {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.technician-task-meta dd {
+  margin: 3px 0 0;
+  font-weight: 700;
+  word-break: break-word;
+}
+
+.danger-text {
+  color: var(--danger);
+}
+
+.chief-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.chief-summary-card {
+  min-height: 120px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fbfdff;
+}
+
+.chief-summary-card strong {
+  display: block;
+  color: var(--brand);
+  font-size: 1.8rem;
+  line-height: 1;
+}
+
+.chief-summary-card span {
+  display: block;
+  margin-top: 5px;
+  font-weight: 800;
+}
+
+.chief-summary-card small {
+  display: block;
+  margin-top: 9px;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
 .panel-list {
   position: sticky;
   top: 90px;
@@ -2032,6 +2177,7 @@ select:focus {
 @media (max-width: 1100px) {
   .dashboard-strip,
   .today-board,
+  .chief-summary-grid,
   .sav-kpi-grid,
   .detail-grid,
   .settings-grid,
@@ -2069,6 +2215,9 @@ select:focus {
 
   .dashboard-strip,
   .today-board,
+  .technician-controls,
+  .technician-task-meta,
+  .chief-summary-grid,
   .sav-kpi-grid,
   .workbench,
   .detail-grid,

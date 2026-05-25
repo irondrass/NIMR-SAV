@@ -8,6 +8,7 @@ function render() {
   renderPilotageAlerts();
   renderKanban();
   renderPlanning();
+  renderTechnicianDashboard();
   renderResources();
   renderHolidays();
   renderResourceLeaves();
@@ -404,6 +405,293 @@ function renderTodayWorkshop(now = new Date()) {
       renderCaseDetail();
     });
   });
+}
+
+function getTechnicianDashboardResources() {
+  return state.resources
+    .filter((resource) => typeof isTechnicianResource === "function" ? isTechnicianResource(resource) : resource.active !== false)
+    .sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "fr", { sensitivity: "base" }));
+}
+
+function renderTechnicianDashboard() {
+  const view = $("#view-technician");
+  if (!view) return;
+  const select = $("#technician-select", view);
+  const dateInput = $("#technician-date", view);
+  const list = $("#technician-task-list", view);
+  const manager = $("#technician-manager-board", view);
+  if (!select || !dateInput || !list || !manager) return;
+
+  const technicians = getTechnicianDashboardResources();
+  if (!state.ui.technicianDate) state.ui.technicianDate = todayKey(new Date());
+  if (!state.ui.technicianId || !technicians.some((resource) => resource.id === state.ui.technicianId)) {
+    state.ui.technicianId = technicians[0]?.id || "";
+  }
+
+  select.innerHTML = technicians.length
+    ? technicians.map((resource) => `<option value="${escapeAttr(resource.id)}">${escapeHtml(resource.name)} · ${escapeHtml(ROLE_LABELS[resource.role] || resource.role)}</option>`).join("")
+    : `<option value="">Aucun technicien actif</option>`;
+  select.value = state.ui.technicianId || "";
+  dateInput.value = state.ui.technicianDate || todayKey(new Date());
+
+  const rows = typeof getTechnicianTaskRows === "function" ? getTechnicianTaskRows(select.value, dateInput.value) : [];
+  list.innerHTML = rows.length
+    ? rows.map(renderTechnicianTaskCard).join("")
+    : `<div class="empty-state compact-empty"><strong>Aucune tâche pour ce technicien.</strong><span>Les tâches apparaissent ici dès qu'elles sont planifiées et affectées.</span></div>`;
+
+  manager.innerHTML = renderWorkshopChiefSummary(dateInput.value);
+
+  if (select.dataset.bound !== "true") {
+    select.dataset.bound = "true";
+    select.addEventListener("change", () => {
+      state.ui.technicianId = select.value;
+      saveState();
+      renderTechnicianDashboard();
+    });
+  }
+  if (dateInput.dataset.bound !== "true") {
+    dateInput.dataset.bound = "true";
+    dateInput.addEventListener("change", () => {
+      state.ui.technicianDate = dateInput.value || todayKey(new Date());
+      saveState();
+      renderTechnicianDashboard();
+    });
+  }
+  const todayButton = $("#technician-today", view);
+  if (todayButton && todayButton.dataset.bound !== "true") {
+    todayButton.dataset.bound = "true";
+    todayButton.addEventListener("click", () => {
+      state.ui.technicianDate = todayKey(new Date());
+      saveState();
+      renderTechnicianDashboard();
+    });
+  }
+  const printButton = $("#technician-print-day", view);
+  if (printButton && printButton.dataset.bound !== "true") {
+    printButton.dataset.bound = "true";
+    printButton.addEventListener("click", () => printDailyPlanning(state.ui.technicianDate || todayKey(new Date())));
+  }
+
+  $$("[data-tech-action]", view).forEach((button) => {
+    button.addEventListener("click", () => handleTechnicianTaskAction(button.dataset.techAction, button.dataset.bookingId, button.dataset.technicianId || select.value));
+  });
+  $$("[data-tech-open-case]", view).forEach((button) => {
+    button.addEventListener("click", () => {
+      activeCaseId = button.dataset.techOpenCase;
+      activeCaseDetailTab = "atelier";
+      setActiveTab("dossiers");
+      renderCases();
+      renderCaseDetail();
+    });
+  });
+}
+
+function renderTechnicianTaskCard(row) {
+  const item = row.item;
+  const booking = row.booking;
+  const start = new Date(booking.start);
+  const end = new Date(booking.end);
+  const techName = row.technician?.name || "Technicien";
+  const resources = (booking.resourceIds || [])
+    .map((id) => getResource(id))
+    .filter(Boolean)
+    .map((resource) => resource.name)
+    .join(", ");
+  const orderRef = getPrintOrderReference(item);
+  const note = row.latestNote ? `<p class="technician-note">Note : ${escapeHtml(row.latestNote)}</p>` : "";
+  return `
+    <article class="technician-task-card task-status-${escapeAttr(row.status)} ${row.late ? "is-late" : ""}">
+      <div class="technician-task-main">
+        <button type="button" class="technician-task-title" data-tech-open-case="${escapeAttr(item.id)}">
+          <strong>${escapeHtml(item.vehicle || "Véhicule non renseigné")}</strong>
+          <span>${escapeHtml(item.plate || item.vin || "Sans immatriculation")} · ${escapeHtml(item.clientName || "Client")}</span>
+        </button>
+        <div class="technician-task-tags">
+          <span class="tag">${escapeHtml(row.statusLabel)}</span>
+          ${row.late ? '<span class="tag danger">Retard</span>' : ''}
+          ${booking.remainingFromPaused ? '<span class="tag warn">Reliquat</span>' : ''}
+          ${booking.blockReason ? `<span class="tag danger">${escapeHtml(booking.blockReason)}</span>` : ''}
+        </div>
+      </div>
+      <dl class="technician-task-meta">
+        <div><dt>Dossier</dt><dd>${escapeHtml(orderRef)}</dd></div>
+        <div><dt>Étape</dt><dd>${escapeHtml(getDurationLabel(booking.key) || booking.title || "-")}</dd></div>
+        <div><dt>Prévu</dt><dd>${formatTime(start)} → ${formatTime(end)}</dd></div>
+        <div><dt>Durée</dt><dd>${formatLocalizedDecimal(row.plannedMinutes / 60)} h</dd></div>
+        <div><dt>Technicien</dt><dd>${escapeHtml(techName)}</dd></div>
+        <div><dt>Ressources</dt><dd>${escapeHtml(resources || "-")}</dd></div>
+      </dl>
+      ${booking.pauseReason ? `<p class="technician-note">Pause : ${escapeHtml(booking.pauseReason)}</p>` : ""}
+      ${booking.blockDetails ? `<p class="technician-note danger-text">Blocage : ${escapeHtml(booking.blockDetails)}</p>` : ""}
+      ${note}
+      <div class="technician-task-actions">
+        ${renderTechnicianTaskActions(row)}
+      </div>
+    </article>
+  `;
+}
+
+function renderTechnicianTaskActions(row) {
+  const base = `data-booking-id="${escapeAttr(row.booking.id)}" data-technician-id="${escapeAttr(row.technicianId || "")}"`;
+  const print = `<button class="ghost-button tiny-button" type="button" data-tech-action="print" ${base}>Imprimer fiche</button>`;
+  if (row.status === "done") return print;
+  if (row.status === "blocked") {
+    return `
+      <button class="primary-button tiny-button" type="button" data-tech-action="resume" ${base}>Reprendre</button>
+      <button class="ghost-button tiny-button" type="button" data-tech-action="note" ${base}>Ajouter note</button>
+      <button class="ghost-button tiny-button" type="button" data-tech-action="print-block" ${base}>Fiche blocage</button>
+      ${print}
+    `;
+  }
+  if (row.status === "in_progress") {
+    return `
+      <button class="ghost-button tiny-button" type="button" data-tech-action="pause" ${base}>Pause</button>
+      <button class="primary-button tiny-button" type="button" data-tech-action="complete" ${base}>Terminer</button>
+      <button class="ghost-button tiny-button" type="button" data-tech-action="block" ${base}>Signaler blocage</button>
+      <button class="ghost-button tiny-button" type="button" data-tech-action="note" ${base}>Ajouter note</button>
+      <button class="ghost-button tiny-button" type="button" data-tech-action="photo" ${base}>Ajouter photo</button>
+      ${print}
+    `;
+  }
+  if (row.status === "paused") {
+    return `
+      <button class="primary-button tiny-button" type="button" data-tech-action="resume" ${base}>Reprendre</button>
+      <button class="ghost-button tiny-button" type="button" data-tech-action="block" ${base}>Signaler blocage</button>
+      <button class="ghost-button tiny-button" type="button" data-tech-action="print-block" ${base}>Fiche pause</button>
+      ${print}
+    `;
+  }
+  return `
+    <button class="primary-button tiny-button" type="button" data-tech-action="start" ${base}>Démarrer</button>
+    <button class="ghost-button tiny-button" type="button" data-tech-action="block" ${base}>Signaler blocage</button>
+    <button class="ghost-button tiny-button" type="button" data-tech-action="note" ${base}>Ajouter note</button>
+    ${print}
+  `;
+}
+
+function renderWorkshopChiefSummary(dateKey) {
+  const rows = typeof getTechnicianTaskRows === "function" ? getTechnicianTaskRows("", dateKey) : [];
+  const byStatus = (status) => rows.filter((row) => row.status === status);
+  const activeTechnicianIds = new Set(rows.filter((row) => row.status === "in_progress").map((row) => row.technicianId).filter(Boolean));
+  const idleTechnicians = getTechnicianDashboardResources().filter((resource) => !activeTechnicianIds.has(resource.id));
+  const unassigned = state.bookings.filter((booking) => (
+    booking.type !== "leave"
+    && booking.temporary !== true
+    && !getBookingHumanResourceIds(booking).length
+  ));
+  const cards = [
+    ["Tâches en cours", byStatus("in_progress")],
+    ["Tâches en pause", byStatus("paused")],
+    ["Tâches bloquées", byStatus("blocked")],
+    ["Terminées aujourd'hui", byStatus("done")],
+    ["Tâches en retard", rows.filter((row) => row.late)],
+  ];
+  return `
+    <div class="chief-summary-grid">
+      ${cards.map(([label, items]) => `
+        <article class="chief-summary-card">
+          <strong>${items.length}</strong>
+          <span>${escapeHtml(label)}</span>
+          <small>${items.slice(0, 3).map((row) => escapeHtml(`${row.item.clientName || "-"} · ${row.booking.title || getDurationLabel(row.booking.key) || "Tâche"}`)).join("<br>") || "Aucun"}</small>
+        </article>
+      `).join("")}
+      <article class="chief-summary-card">
+        <strong>${idleTechnicians.length}</strong>
+        <span>Techniciens sans tâche active</span>
+        <small>${idleTechnicians.slice(0, 5).map((resource) => escapeHtml(resource.name)).join("<br>") || "Aucun"}</small>
+      </article>
+      <article class="chief-summary-card">
+        <strong>${unassigned.length}</strong>
+        <span>Tâches sans technicien</span>
+        <small>${unassigned.slice(0, 5).map((booking) => escapeHtml(booking.title || getDurationLabel(booking.key) || "Tâche")).join("<br>") || "Aucune"}</small>
+      </article>
+    </div>
+  `;
+}
+
+async function handleTechnicianTaskAction(action, bookingId, technicianId) {
+  const booking = state.bookings.find((candidate) => candidate.id === bookingId);
+  const item = state.cases.find((caseItem) => caseItem.id === booking?.caseId);
+  if (!item || !booking) {
+    notifyUser("Tâche introuvable.", "error");
+    return;
+  }
+  let result = null;
+  if (action === "start") {
+    result = startTechnicianTask(item, bookingId, technicianId);
+  } else if (action === "pause") {
+    const reason = window.prompt(`Motif de pause obligatoire :\n${TECHNICIAN_PAUSE_REASONS.join(" / ")}`, booking.pauseReason || "attente pièces");
+    if (reason === null) return;
+    result = pauseTechnicianTask(item, bookingId, technicianId, reason);
+  } else if (action === "resume") {
+    result = resumeTechnicianTask(item, bookingId, technicianId, { allowConcurrent: false });
+  } else if (action === "block") {
+    const reason = window.prompt("Motif de blocage : attente pièces, attente accord, attente chef atelier, panne outil / ressource, autre", booking.blockReason || "attente pièces");
+    if (reason === null) return;
+    const details = window.prompt("Commentaire blocage (optionnel)", booking.blockDetails || "");
+    if (details === null) return;
+    result = blockTechnicianTask(item, bookingId, technicianId, reason, details);
+  } else if (action === "note") {
+    const note = window.prompt("Note technicien à ajouter à cette tâche :");
+    if (note === null) return;
+    result = addTechnicianTaskNote(item, bookingId, technicianId, note);
+  } else if (action === "photo") {
+    await addTechnicianTaskPhotoFromInput(item, bookingId, technicianId);
+    return;
+  } else if (action === "complete") {
+    const confirmed = await showConfirmModal("Terminer cette tâche maintenant ? Le temps restant sera libéré dans le planning si la tâche finit en avance.");
+    if (!confirmed) return;
+    const note = window.prompt("Note de fin de tâche (optionnel)", "");
+    if (note === null) return;
+    result = completeTechnicianTask(item, bookingId, technicianId, { note, skipPhotoCheck: false });
+    if (!result.ok && /photo/i.test(result.message || "")) {
+      notifyUser(result.message, "error");
+      return;
+    }
+  } else if (action === "print") {
+    printTechnicianTaskSheet(item, bookingId, technicianId);
+    return;
+  } else if (action === "print-block") {
+    printPauseBlockSheet(item, bookingId, technicianId);
+    return;
+  }
+  if (!result?.ok) {
+    notifyUser(result?.message || "Action impossible.", "error");
+    return;
+  }
+  saveState({ flushCloud: true, cloudReason: `technician-${action}` });
+  notifyUser(result.message || "Action enregistrée.", "success");
+  render();
+}
+
+async function addTechnicianTaskPhotoFromInput(item, bookingId, technicianId) {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = ALLOWED_PHOTO_TYPES.join(",");
+  input.addEventListener("change", async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    try {
+      const prepared = await preparePhotoForStorage(file);
+      const photo = {
+        id: uid("photo"),
+        name: prepared.name,
+        type: prepared.blob.type || file.type || "image/jpeg",
+        size: prepared.blob.size,
+        category: "during",
+        createdAt: new Date().toISOString(),
+      };
+      await savePhotoRecord(item.id, photo, prepared.blob);
+      item.photos.push(photo);
+      const result = attachTechnicianTaskPhoto(item, bookingId, technicianId, photo.id);
+      saveState({ flushCloud: true, cloudReason: "technician-photo" });
+      notifyUser(result.message || "Photo ajoutée à la tâche.", "success");
+      render();
+    } catch (error) {
+      notifyUser(error.message || "Photo impossible à ajouter.", "error");
+    }
+  }, { once: true });
+  input.click();
 }
 
 function buildTodayWorkshopGroups(now = new Date()) {

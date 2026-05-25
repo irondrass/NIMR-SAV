@@ -90,6 +90,7 @@ function bindMainNavigation() {
       setActiveTab(tab);
       if (tab === "today") renderTodayWorkshop();
       if (tab === "planning") renderPlanning();
+      if (tab === "technician") renderTechnicianDashboard();
       if (tab === "atelier") {
         renderResources();
         renderFastLaneSettings();

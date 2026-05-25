@@ -69,7 +69,7 @@ function getExportPhotoFolderName(category) {
     after: "Apres_reparation",
     supplement: "Complement_avant_accord",
   };
-  return folders[normalized] || "Photos_diverses";
+  return folders[normalized] || "Divers";
 }
 
 async function exportCaseFolderZip(item, { clientOnly = false } = {}) {
@@ -81,12 +81,19 @@ async function exportCaseFolderZip(item, { clientOnly = false } = {}) {
           { path: `${folder}/00_Dossier_global/`, data: new Uint8Array(), type: "application/x-directory" },
           { path: `${folder}/00_Dossier_global/00_Devis_original_importe/`, data: new Uint8Array(), type: "application/x-directory" },
           { path: `${folder}/Ordres_SAV/`, data: new Uint8Array(), type: "application/x-directory" },
+          { path: `${folder}/Photos_globales/`, data: new Uint8Array(), type: "application/x-directory" },
+          { path: `${folder}/Photos_globales/Avant_reparation/`, data: new Uint8Array(), type: "application/x-directory" },
+          { path: `${folder}/Photos_globales/En_cours/`, data: new Uint8Array(), type: "application/x-directory" },
+          { path: `${folder}/Photos_globales/Apres_reparation/`, data: new Uint8Array(), type: "application/x-directory" },
+          { path: `${folder}/Photos_globales/Complement_avant_accord/`, data: new Uint8Array(), type: "application/x-directory" },
+          { path: `${folder}/Photos_globales/Divers/`, data: new Uint8Array(), type: "application/x-directory" },
         ]
       : [
           { path: `${folder}/Photos/Avant_reparation/`, data: new Uint8Array(), type: "application/x-directory" },
           { path: `${folder}/Photos/En_cours/`, data: new Uint8Array(), type: "application/x-directory" },
           { path: `${folder}/Photos/Apres_reparation/`, data: new Uint8Array(), type: "application/x-directory" },
           { path: `${folder}/Photos/Complement_avant_accord/`, data: new Uint8Array(), type: "application/x-directory" },
+          { path: `${folder}/Photos/Divers/`, data: new Uint8Array(), type: "application/x-directory" },
           { path: `${folder}/PDF/`, data: new Uint8Array(), type: "application/x-directory" },
           { path: `${folder}/PDF/00_Devis_original_importe/`, data: new Uint8Array(), type: "application/x-directory" },
         ];
@@ -131,27 +138,27 @@ async function exportCaseFolderZip(item, { clientOnly = false } = {}) {
       }
     }
 
+    addPdf("00_Fiche_reception_vehicule", buildReceptionPdfLines(item));
     addPdf("01_Devis_initial", buildEstimatePdfLines(item));
     addPdf("02_Devis_expert_confirme", buildConfirmedExpertEstimatePdfLines(item));
     addPdf("03_Confirmation_expert", buildExpertPdfLines(item));
     addPdf("04_Confirmation_client", buildClientPdfLines(item));
     addPdf("05_Affectations_planning", buildPlanningPdfLines(item));
     addPdf("06_Controle_qualite", buildQualityPdfLines(item));
-    addPdf("07_Fiche_livraison_client", buildDeliveryPdfLines(item));
+    addPdf("07_PV_restitution_client", buildDeliveryPdfLines(item));
     if (!clientOnly) {
       addPdf("08_Logs_dossier", buildLogsPdfLines(item));
       files.push({ path: `${folder}/dossier.json`, data: new TextEncoder().encode(JSON.stringify(item, null, 2)), type: "application/json" });
     }
 
-    if (!hasClaims) {
-      for (const photo of item.photos || []) {
-        const record = await getPhotoRecord(photo.id).catch(() => null);
-        if (!record?.blob) continue;
-        const bytes = new Uint8Array(await record.blob.arrayBuffer());
-        const ext = extensionForPhoto(photo.name, photo.type || record.blob.type);
-        const category = getExportPhotoFolderName(photo.category);
-        files.push({ path: `${folder}/Photos/${category}/${sanitizeFilename(photo.name || photo.id)}${ext}`, data: bytes, type: photo.type || record.blob.type || "application/octet-stream" });
-      }
+    for (const photo of item.photos || []) {
+      const record = await getPhotoRecord(photo.id).catch(() => null);
+      if (!record?.blob) continue;
+      const bytes = new Uint8Array(await record.blob.arrayBuffer());
+      const ext = extensionForPhoto(photo.name, photo.type || record.blob.type);
+      const category = getExportPhotoFolderName(photo.category);
+      const photoRoot = hasClaims ? `${folder}/Photos_globales` : `${folder}/Photos`;
+      files.push({ path: `${photoRoot}/${category}/${sanitizeFilename(photo.name || photo.id)}${ext}`, data: bytes, type: photo.type || record.blob.type || "application/octet-stream" });
     }
 
     const zip = createZip(files);
@@ -171,17 +178,14 @@ function buildClaimPdfLines(item, claim) {
   const estimateLines = claim.estimate?.originalLines || [];
   const appliedLines = claim.estimate?.lines || [];
   return [
-    WORKSHOP_NAME,
-    `FICHE ORDRE SAV - ${claim.number || ''}`,
-    `Dossier: ${item.clientName || ''}`,
+    ...buildCommonPdfHeader(item, `FICHE ORDRE SAV - ${claim.number || ''}`, "Document interne atelier"),
     `Véhicule: ${item.vehicle || ''} - ${item.plate || ''}`,
-    `VIN: ${item.vin || ''}`,
     `Libellé: ${claim.title || ''}`,
     `Zone: ${claim.vehicleArea || ''}`,
     `Type: ${claim.type || ''}`,
     `Statut: ${CLAIM_STATUS_LABELS?.[claim.status] || claim.status || ''}`,
     `N° devis: ${claim.estimateNumber || claim.estimate?.reference || ''}`,
-    `N° OR: ${claim.orNumber || ''}`,
+    `N° ordre: ${claim.orNumber || ''}`,
     `Accord expert: ${claim.expertApproved ? 'Oui' : 'Non'}`,
     `Validation client/interne: ${claim.clientApproved ? 'Oui' : 'Non'}`,
     `Inclus planning global: ${claim.includeInPlanning !== false ? 'Oui' : 'Non'}`,
@@ -225,9 +229,43 @@ async function deleteActiveCase(item) {
   }
 }
 
-function buildCommonPdfHeader(item, title) {
+const PRINT_WORKSHOP_SUBTITLE = "Service Après-Vente Automobile";
+const PRINT_WORKSHOP_SCOPE = "Planning atelier global";
+
+function getPrintStatusLabel(item) {
+  return statusLabels[getCaseStatus(item)] || getCaseStatus(item) || "-";
+}
+
+function getPrintOrderReference(item) {
+  const summary = getClaimReferenceSummary(item, "or");
+  if (summary && summary !== "-") return summary;
+  return item.orNavNumber || item.id || "-";
+}
+
+function getPrintCaseReference(item) {
+  return item.internalNumber || getPrintOrderReference(item) || item.plate || item.vin || item.id || "-";
+}
+
+function getPrintDocumentTypeLabel(type) {
+  return type || "Document interne atelier";
+}
+
+function getPrintHeaderMetaLines(item, type) {
   return [
-    "NIMR CARROSSERIE",
+    WORKSHOP_NAME,
+    PRINT_WORKSHOP_SUBTITLE,
+    PRINT_WORKSHOP_SCOPE,
+    getPrintDocumentTypeLabel(type),
+    `Référence dossier: ${getPrintCaseReference(item)}`,
+    `Réf. OR: ${getPrintOrderReference(item)}`,
+    `Imprimé le: ${formatDateTime(new Date())}`,
+    `Statut dossier: ${getPrintStatusLabel(item)}`,
+  ];
+}
+
+function buildCommonPdfHeader(item, title, type = "Document interne atelier") {
+  return [
+    ...getPrintHeaderMetaLines(item, type),
     title,
     "",
     `Dossier: ${item.clientName || ""}`,
@@ -240,9 +278,134 @@ function buildCommonPdfHeader(item, title) {
     `Kilométrage: ${item.mileage ? `${item.mileage} km` : ""}`,
     `VIN: ${item.vin || ""}`,
     `Créé le: ${formatDateTime(item.createdAt)}`,
-    `Statut: ${statusLabels[getCaseStatus(item)] || ""}`,
+    `Statut: ${getPrintStatusLabel(item)}`,
     "",
   ];
+}
+
+function renderPrintHeaderHtml(title, item, type = "Document interne atelier", extraLines = []) {
+  return `
+    <header>
+      <div>
+        <h1>${escapeHtml(title)}</h1>
+        <p class="muted">${escapeHtml(WORKSHOP_NAME)} · ${escapeHtml(PRINT_WORKSHOP_SUBTITLE)}</p>
+        <p>${escapeHtml(PRINT_WORKSHOP_SCOPE)}</p>
+        <p><strong>Type :</strong> ${escapeHtml(getPrintDocumentTypeLabel(type))}</p>
+        <p><strong>Référence dossier :</strong> ${escapeHtml(getPrintCaseReference(item))}</p>
+        <p><strong>Réf. OR :</strong> ${escapeHtml(getPrintOrderReference(item))}</p>
+      </div>
+      <div class="right">
+        <p><strong>Imprimé le :</strong> ${formatDateTime(new Date())}</p>
+        <p><strong>Statut dossier :</strong> ${escapeHtml(getPrintStatusLabel(item))}</p>
+        ${extraLines.map((line) => `<p>${line}</p>`).join("")}
+      </div>
+    </header>
+  `;
+}
+
+function getPartsBlockerPdfLines(item) {
+  const partsStatus = PARTS_STATUS_LABELS[normalizePartsStatus(item.partsStatus)] || "Non vérifié";
+  const blockerReason = BLOCKER_REASON_LABELS[normalizeBlockerReason(item.blockerReason)] || "Aucun blocage";
+  const blockerDetails = String(item.blockerDetails || "").trim() || "-";
+  return [
+    `Statut pièces: ${partsStatus}`,
+    `Motif de blocage: ${blockerReason}`,
+    `Détail blocage: ${blockerDetails}`,
+  ];
+}
+
+function renderPartsBlockerHtml(item) {
+  return `
+    <section class="avoid-break">
+      <h2>Pièces / blocage</h2>
+      <table>
+        <tbody>
+          <tr><th>Statut pièces</th><td>${escapeHtml(PARTS_STATUS_LABELS[normalizePartsStatus(item.partsStatus)] || "Non vérifié")}</td></tr>
+          <tr><th>Motif de blocage</th><td>${escapeHtml(BLOCKER_REASON_LABELS[normalizeBlockerReason(item.blockerReason)] || "Aucun blocage")}</td></tr>
+          <tr><th>Détail blocage</th><td>${escapeHtml(String(item.blockerDetails || "").trim() || "-")}</td></tr>
+        </tbody>
+      </table>
+    </section>
+  `;
+}
+
+function getPhotoCountByCategory(item, category) {
+  return (item.photos || []).filter((photo) => normalizePhotoCategory(photo.category) === category).length;
+}
+
+function getInterventionTypeLabelForPrint(item) {
+  if (typeof getCaseTypeSummary === "function") return getCaseTypeSummary(item);
+  return item.orderType || item.type || "Intervention atelier";
+}
+
+const QUALITY_CHECKLISTS_BY_INTERVENTION = {
+  service_rapide: [
+    "Niveau huile vérifié",
+    "Filtre remplacé si prévu",
+    "Témoin entretien remis à zéro",
+    "Absence de fuite",
+    "Essai / contrôle final",
+    "Propreté véhicule",
+  ],
+  mecanique: [
+    "Serrages contrôlés",
+    "Absence de fuite",
+    "Essai routier si nécessaire",
+    "Défauts diagnostic traités",
+    "Sécurité freinage / direction vérifiée",
+  ],
+  electrique: [
+    "Défauts effacés",
+    "Test batterie / alternateur si concerné",
+    "Équipement réparé fonctionnel",
+    "Contrôle voyant tableau de bord",
+  ],
+  diagnostic: [
+    "Lecture défauts effectuée",
+    "Cause probable documentée",
+    "Essai ou mesure de confirmation",
+    "Recommandation remise au chef atelier",
+  ],
+  carrosserie: [
+    "Alignement carrosserie",
+    "Teinte et vernis",
+    "Remontage accessoires",
+    "Nettoyage intérieur/extérieur",
+    "Photos après réparation",
+  ],
+  garantie: [
+    "Travaux conformes accord garantie",
+    "Référence garantie vérifiée",
+    "Pièces remplacées documentées",
+    "Essai / contrôle final",
+  ],
+};
+
+function getQualityChecklistType(item) {
+  const rawType = typeof getCasePrimaryType === "function" ? getCasePrimaryType(item) : (item.orderType || item.type || "");
+  const summary = getInterventionTypeLabelForPrint(item);
+  const text = `${rawType} ${summary}`.toLowerCase();
+  if (text.includes("vidange") || text.includes("rapide") || text.includes("entretien")) return "service_rapide";
+  if (text.includes("élect") || text.includes("elect")) return "electrique";
+  if (text.includes("diagnostic")) return "diagnostic";
+  if (text.includes("mécan") || text.includes("mecan")) return "mecanique";
+  if (text.includes("garantie")) return "garantie";
+  return "carrosserie";
+}
+
+function getQualityChecklistForCase(item) {
+  const type = getQualityChecklistType(item);
+  return QUALITY_CHECKLISTS_BY_INTERVENTION[type] || DEFAULT_QUALITY_CHECKS;
+}
+
+function isPrintEquipmentResource(resource) {
+  if (!resource) return false;
+  if (typeof isEquipmentResource === "function") return isEquipmentResource(resource);
+  return ["cabine", "zone_preparation", "pont_vidange", "pont_mecanique", "pont", "equipment"].includes(resource.role);
+}
+
+function isPrintHumanResource(resource) {
+  return Boolean(resource && resource.active !== false && !isPrintEquipmentResource(resource));
 }
 
 function getAllClaimEstimateLines(item) {
@@ -348,9 +511,10 @@ function buildClaimEstimatePdfTextLines(item) {
 
 function buildEstimatePdfLines(item) {
   return [
-    ...buildCommonPdfHeader(item, "FICHE DOSSIER SAV"),
+    ...buildCommonPdfHeader(item, "FICHE DOSSIER SAV", "Document interne atelier"),
     `Assurance: ${item.insurance || ""}`,
-    `Numéro OR NAV: ${item.orNavNumber || ""}`,
+    `Réf. OR: ${item.orNavNumber || ""}`,
+    ...getPartsBlockerPdfLines(item),
     "",
     "Notes dégâts:",
     item.damageNotes || "Non renseigné",
@@ -364,7 +528,7 @@ function buildEstimatePdfLines(item) {
 function buildConfirmedExpertEstimatePdfLines(item) {
   const totals = expertEstimateTotalsByPhase(item);
   return [
-    ...buildCommonPdfHeader(item, "MAIN-D’ŒUVRE VALIDÉE - ORDRES SAV"),
+    ...buildCommonPdfHeader(item, "MAIN-D’ŒUVRE VALIDÉE - ORDRES SAV", "Document interne atelier"),
     `Nombre d'ordres: ${(item.claims || []).length}`,
     `Total MO importée: ${formatLocalizedDecimal(getAllClaimEstimateTotalHours(item))} h`,
     "",
@@ -379,7 +543,7 @@ function buildConfirmedExpertEstimatePdfLines(item) {
 
 function buildExpertPdfLines(item) {
   return [
-    ...buildCommonPdfHeader(item, "CONFIRMATION EXPERT"),
+    ...buildCommonPdfHeader(item, "CONFIRMATION EXPERT", "Document interne atelier"),
     `Expert: ${item.expertName || "Non renseigné"}`,
     `Téléphone expert: ${item.expertPhone || ""}`,
     `Email expert: ${item.expertEmail || ""}`,
@@ -392,7 +556,7 @@ function buildExpertPdfLines(item) {
 
 function buildClientPdfLines(item) {
   return [
-    ...buildCommonPdfHeader(item, "CONFIRMATION CLIENT"),
+    ...buildCommonPdfHeader(item, "CONFIRMATION CLIENT", "Document client"),
     `Validation client/interne: ${item.flags.clientApproved ? "Reçue" : "Non reçue"}`,
     item.appointment ? `RDV fixé: ${formatDateTime(item.appointment.start)}` : "RDV non fixé",
     item.appointment ? `Livraison estimée: ${formatDateTime(item.appointment.delivery)}` : "Livraison estimée non planifiée",
@@ -402,7 +566,7 @@ function buildClientPdfLines(item) {
 function buildPlanningPdfLines(item) {
   const bookings = state.bookings.filter((booking) => booking.caseId === item.id);
   return [
-    ...buildCommonPdfHeader(item, "AFFECTATIONS PLANNING CONFIRMÉES"),
+    ...buildCommonPdfHeader(item, "AFFECTATIONS PLANNING CONFIRMÉES", "Document planning"),
     item.appointment ? `RDV de dépôt: ${formatDateTime(item.appointment.start)}` : "RDV non fixé",
     `État RDV: ${item.appointmentStatus || "none"}`,
     "",
@@ -418,30 +582,75 @@ function buildPlanningPdfLines(item) {
 }
 
 function buildQualityPdfLines(item) {
+  const checklist = getQualityChecklistForCase(item);
   return [
-    ...buildCommonPdfHeader(item, "CONTRÔLE QUALITÉ"),
-    ...DEFAULT_QUALITY_CHECKS.map((label) => `${item.qualityChecklist?.[label] ? "[OK]" : "[  ]"} ${label}`),
+    ...buildCommonPdfHeader(item, "CONTRÔLE QUALITÉ", "Document qualité"),
+    `Type d'intervention: ${getInterventionTypeLabelForPrint(item)}`,
+    `Contrôleur: ______________________________`,
+    `Date/heure contrôle: ______________________________`,
+    "",
+    ...checklist.map((label) => `${item.qualityChecklist?.[label] ? "[OK]" : "[  ]"} ${label}`),
     "",
     `Contrôle qualité validé: ${item.flags.qualityApproved ? "Oui" : "Non"}`,
+    `Résultat: [  ] Accepté   [  ] Refusé`,
+    `Défaut constaté: ______________________________`,
+    `Action corrective: ______________________________`,
+    `Recontrôle nécessaire: [  ] Oui   [  ] Non`,
+    "",
+    "Signature qualité: ______________________________",
+    "Signature chef atelier: ______________________________",
   ];
 }
 
 function buildDeliveryPdfLines(item) {
   return [
-    ...buildCommonPdfHeader(item, "FICHE DE LIVRAISON CLIENT"),
+    ...buildCommonPdfHeader(item, "PV DE RESTITUTION VÉHICULE", "Document client"),
+    `Date/heure livraison: ______________________________`,
+    `Kilométrage sortie: ______________________________ km`,
     `Véhicule reçu: ${item.flags.received ? "Oui" : "Non"}`,
     `Travaux démarrés: ${item.flags.workStarted ? "Oui" : "Non"}`,
     `Travaux terminés: ${item.flags.workCompleted ? "Oui" : "Non"}`,
     `Contrôle qualité validé: ${item.flags.qualityApproved ? "Oui" : "Non"}`,
     `Livraison effectuée: ${item.flags.delivered ? "Oui" : "Non"}`,
+    `Photos après réparation: ${getPhotoCountByCategory(item, "after") ? "Oui" : "Non"} (${getPhotoCountByCategory(item, "after")})`,
+    "",
+    "Résumé travaux réalisés:",
+    item.damageNotes || "À compléter",
+    "",
+    "Réserves client: ______________________________",
+    "Documents remis: [  ] Facture   [  ] Carte grise   [  ] Rapport contrôle",
+    "Clés / accessoires remis: ______________________________",
+    "",
+    "Le véhicule est restitué après contrôle qualité, sous réserve des observations mentionnées ci-dessus.",
     "",
     "Signature client: ______________________________",
+    "Signature réception: ______________________________",
+  ];
+}
+
+function buildReceptionPdfLines(item) {
+  const beforeCount = getPhotoCountByCategory(item, "before");
+  return [
+    ...buildCommonPdfHeader(item, "FICHE RÉCEPTION VÉHICULE", "Document réception atelier / client"),
+    `Propriétaire / société: ${item.ownerName || ""}`,
+    `Personne déposante: ${item.driverName || ""}`,
+    `Téléphone déposant: ${item.driverPhone || ""}`,
+    `Couleur: ${item.color || ""}`,
+    `Kilométrage entrée: ${item.mileage ? `${item.mileage} km` : ""}`,
+    `Date/heure réception: ${item.flags.received ? formatDateTime(new Date()) : "À compléter"}`,
+    `Motif client / observations réception: ${item.damageNotes || "À compléter"}`,
+    `État apparent du véhicule: ______________________________`,
+    `Accessoires remis: ______________________________`,
+    `Photos avant réparation: ${beforeCount ? "Oui" : "Non"} (${beforeCount})`,
+    "",
+    "Signature réception: ______________________________",
+    "Signature client/déposant: ______________________________",
   ];
 }
 
 function buildLogsPdfLines(item) {
   return [
-    ...buildCommonPdfHeader(item, "LOGS COMPLETS DU DOSSIER"),
+    ...buildCommonPdfHeader(item, "LOGS COMPLETS DU DOSSIER", "Document interne atelier"),
     ...(item.history || []).map((entry) => `${formatDateTime(entry.at)} - ${entry.label}${entry.details ? ` - ${entry.details}` : ""}`),
   ];
 }
@@ -599,12 +808,16 @@ function printRepairOrder(item) {
   const assignmentRows = assignments
     .map((booking) => {
       const resources = booking.resourceIds.map((id) => getResource(id)?.name).filter(Boolean).join(", ");
+      const operationalStatus = typeof getBookingOperationalStatus === "function"
+        ? getBookingOperationalStatus(booking, item)?.label
+        : null;
       return `
         <tr>
           <td>${escapeHtml(booking.title)}</td>
           <td>${escapeHtml(resources)}</td>
           <td>${formatDateTime(booking.start)}</td>
           <td>${formatDateTime(booking.end)}</td>
+          <td>${escapeHtml(operationalStatus || booking.status || "Planifié")}</td>
         </tr>
       `;
     })
@@ -645,18 +858,9 @@ function printRepairOrder(item) {
         </style>
       </head>
       <body>
-        <header>
-          <div>
-            <h1>${title}</h1>
-            <p class="muted">NIMR SAV</p>
-            <p>OR / ordre: ${escapeHtml(getClaimReferenceSummary(item, 'or'))}</p>
-            <p>Devis: ${escapeHtml(getClaimReferenceSummary(item, 'devis'))}</p>
-          </div>
-          <div>
-            <p>${formatDate(new Date())}</p>
-            <p>${statusLabels[getCaseStatus(item)]}</p>
-          </div>
-        </header>
+        ${renderPrintHeaderHtml(title, item, "Document interne atelier", [
+          `<strong>Devis :</strong> ${escapeHtml(getClaimReferenceSummary(item, "devis"))}`,
+        ])}
         <section class="grid">
           <div class="box">
             <h2>Client</h2>
@@ -677,6 +881,7 @@ function printRepairOrder(item) {
           <h2>Travaux demandés</h2>
           <p>${escapeHtml(item.damageNotes || "Aucune note renseignée.")}</p>
         </section>
+        ${renderPartsBlockerHtml(item)}
         <section class="avoid-break">
           <h2>Devis / main-d’œuvre confirmé</h2>
           <p><strong>Référence:</strong> ${escapeHtml(item.expertEstimate?.reference || "-")}</p>
@@ -705,21 +910,26 @@ function printRepairOrder(item) {
         <section class="avoid-break">
           <h2>Affectations atelier</h2>
           <table>
-            <thead><tr><th>Travail</th><th>Ressource</th><th>Début</th><th>Fin</th></tr></thead>
-            <tbody>${assignmentRows || `<tr><td colspan="4">Aucune affectation planifiée.</td></tr>`}</tbody>
+            <thead><tr><th>Travail</th><th>Ressource</th><th>Début</th><th>Fin</th><th>Statut</th></tr></thead>
+            <tbody>${assignmentRows || `<tr><td colspan="5">Aucune affectation planifiée.</td></tr>`}</tbody>
           </table>
         </section>
         <section class="avoid-break">
           <h2>Checklist qualité</h2>
           <table>
-            <tbody>${DEFAULT_QUALITY_CHECKS.map(
-              (label) => `<tr><td>${escapeHtml(label)}</td><td>${item.qualityChecklist[label] ? "OK" : "À faire"}</td></tr>`,
+            <tbody>${getQualityChecklistForCase(item).map(
+              (label) => `<tr><td>${escapeHtml(label)}</td><td>${item.qualityChecklist?.[label] ? "OK" : "À faire"}</td></tr>`,
             ).join("")}</tbody>
           </table>
         </section>
+        <section class="avoid-break">
+          <h2>Consignes atelier</h2>
+          <p>Type d'intervention : <strong>${escapeHtml(getInterventionTypeLabelForPrint(item))}</strong></p>
+          <p>Vérifier le statut pièces et signaler immédiatement toute anomalie, demande de complément ou impact délai.</p>
+        </section>
         <div class="signatures">
-          <div class="signature">Signature client</div>
-          <div class="signature">Signature atelier</div>
+          <div class="signature">Signature chef atelier</div>
+          <div class="signature">Signature réception</div>
         </div>
         <script>window.addEventListener("load", () => window.print());</script>
       </body>
@@ -733,13 +943,14 @@ function printRepairOrder(item) {
 
 function printDailyPlanningGantt(dateKey = state.planningDate) {
   const date = typeof dateKey === "string" ? parseDateKey(dateKey) : new Date(dateKey);
+  const dayKey = todayKey(date);
   const dayStart = atTime(date, "08:00");
   const dayEnd = atTime(date, "17:00");
   const totalDayMinutes = Math.max(1, diffMinutes(dayStart, dayEnd));
   const intervals = getDayIntervals(date);
   const holiday = getHoliday(date);
   const caseById = new Map(state.cases.map((item) => [item.id, item]));
-  const dailyColorMap = buildDailyVehicleColorMap(todayKey(date));
+  const dailyColorMap = buildDailyVehicleColorMap(dayKey);
   const activeResources = orderPlanningResources(state.resources.filter(isDisplayPlanningResource));
 
   const intervalText = intervals.length
@@ -808,6 +1019,27 @@ function printDailyPlanningGantt(dateKey = state.planningDate) {
     return bookingSum + diffMinutes(rowBooking.start, rowBooking.end);
   }, 0), 0);
   const dossierCount = new Set(allRows.flatMap((row) => row.bookings.map((entry) => entry.booking.caseId))).size;
+  const allEntries = allRows.flatMap((row) => row.bookings.map((entry) => ({ ...entry, resource: row.resource })));
+  const plannedCaseIds = new Set(allEntries.map((entry) => entry.booking.caseId));
+  const plannedCases = [...plannedCaseIds].map((id) => caseById.get(id)).filter(Boolean);
+  const blockedCases = plannedCases.filter((item) => isCaseBlocked(item));
+  const deliveryCases = plannedCases.filter((item) => {
+    const delivery = item.appointment?.delivery || state.bookings.find((booking) => booking.caseId === item.id)?.delivery;
+    return delivery && todayKey(new Date(delivery)) === dayKey;
+  });
+  const now = new Date();
+  const lateEntries = allEntries.filter((entry) => new Date(entry.booking.end || entry.end) < now && entry.booking.status !== "completed" && !entry.item.flags?.workCompleted);
+  const leaveEntries = state.bookings.filter((booking) => {
+    if (booking.type !== "leave") return false;
+    return (booking.segments || []).some((segment) => {
+      const start = new Date(segment.start);
+      const end = new Date(segment.end);
+      return end > dayStart && start < dayEnd;
+    });
+  });
+  const absentResources = [...new Set(leaveEntries.flatMap((booking) => booking.resourceIds || []))]
+    .map((id) => getResource(id)?.name)
+    .filter(Boolean);
 
   const getEntryMeta = (entry) => {
     const model = shortVehicleModel(entry.item.vehicle || entry.item.model || "Véhicule");
@@ -835,17 +1067,37 @@ function printDailyPlanningGantt(dateKey = state.planningDate) {
     const width = Math.max(1.2, Math.min(100 - left, rawWidth));
     const meta = getEntryMeta(entry);
     const color = getBookingPlanningColor(entry.booking, dailyColorMap) || entry.booking.color || "#174f72";
+    const stateClass = isCaseBlocked(entry.item)
+      ? " blocked"
+      : entry.booking.status === "paused"
+        ? " paused"
+        : entry.booking.status === "completed"
+          ? " completed"
+          : (new Date(entry.booking.end || entry.end) < now && !entry.item.flags?.workCompleted)
+            ? " late"
+            : "";
     const taskNumber = numberMap.get(entry) || "";
     const maxTextLength = Math.max(String(meta.vehicleLine || "").length, String(meta.stage || "").length + String(meta.timeLine || "").length + 3);
     const availableChars = Math.max(4, Math.floor(width * 1.2));
     const numberOnly = Boolean(taskNumber) && (width < 14 || maxTextLength > availableChars);
     const compactClass = numberOnly ? " number-only" : meta.minutes <= 20 ? " tiny" : meta.minutes <= 35 ? " compact" : "";
     return `
-      <div class="booking${compactClass}" style="left:${left}%;width:${width}%;background:${escapeAttr(color)}" title="${escapeAttr(`#${taskNumber} - ${meta.vehicleLine} - ${meta.stage} - ${meta.timeLine}`)}">
+      <div class="booking${stateClass}${compactClass}" style="left:${left}%;width:${width}%;background:${escapeAttr(color)}" title="${escapeAttr(`#${taskNumber} - ${meta.vehicleLine} - ${meta.stage} - ${meta.timeLine}`)}">
         <span class="task-no">${escapeHtml(String(taskNumber))}</span>
         ${numberOnly ? "" : `<strong>${escapeHtml(meta.vehicleLine)}</strong><span>${escapeHtml(meta.stage)} · ${escapeHtml(meta.timeLine)}</span>`}
       </div>`;
   };
+
+  const renderStatusLegend = () => `
+    <section class="status-legend">
+      <span><i class="legend-normal"></i>Tâche normale</span>
+      <span><i class="legend-blocked"></i>Tâche bloquée</span>
+      <span><i class="legend-paused"></i>Tâche en pause</span>
+      <span><i class="legend-completed"></i>Tâche terminée</span>
+      <span><i class="legend-late"></i>Tâche en retard</span>
+      <span><i class="legend-closed"></i>Pause / fermeture atelier</span>
+    </section>
+  `;
 
   const renderRows = (rows, numberMap) => rows.map(({ resource, bookings }) => `
     <div class="gantt-row">
@@ -892,7 +1144,8 @@ function printDailyPlanningGantt(dateKey = state.planningDate) {
       <header>
         <div>
           <h1>${escapeHtml(title)}</h1>
-          <p class="muted">NIMR SAV</p>
+          <p class="muted">NIMR SAV · Service Après-Vente Automobile</p>
+          <p>Document planning</p>
           <p><strong>Journée :</strong> ${escapeHtml(longDate(date))}</p>
           <p><strong>Horaires :</strong> ${escapeHtml(intervalText)}</p>
         </div>
@@ -909,6 +1162,7 @@ function printDailyPlanningGantt(dateKey = state.planningDate) {
         <div><strong>Occup. matérielle</strong><br>${Math.round(equipmentDayLoad(date) * 100)}%</div>
         <div><strong>Calendrier</strong><br>${escapeHtml(intervals.length ? "Ouvert" : "Fermé")}</div>
       </section>
+      ${renderStatusLegend()}
       ${rows.length ? `
         <div class="gantt-print">
           <div class="gantt-header">
@@ -921,7 +1175,50 @@ function printDailyPlanningGantt(dateKey = state.planningDate) {
     </section>`;
   };
 
-  const pages = [renderPage("Planning atelier journalier - Ressources humaines", humanRows)];
+  const renderSummaryPage = () => `
+    <section class="page">
+      <header>
+        <div>
+          <h1>Synthèse planning atelier</h1>
+          <p class="muted">NIMR SAV · Service Après-Vente Automobile</p>
+          <p>Document planning</p>
+          <p><strong>Journée :</strong> ${escapeHtml(longDate(date))}</p>
+          <p><strong>Horaires :</strong> ${escapeHtml(intervalText)}</p>
+        </div>
+        <div class="right">
+          <p><strong>Imprimé le :</strong> ${formatDateTime(new Date())}</p>
+          <p><strong>Format :</strong> A4 paysage</p>
+        </div>
+      </header>
+      <section class="summary large-summary">
+        <div><strong>Total dossiers</strong><br>${dossierCount}</div>
+        <div><strong>Total heures humaines</strong><br>${formatLocalizedDecimal(primaryHumanMinutes / 60)} h</div>
+        <div><strong>Occupation humaine</strong><br>${Math.round(humanDayLoad(date) * 100)}%</div>
+        <div><strong>Occupation matérielle</strong><br>${Math.round(equipmentDayLoad(date) * 100)}%</div>
+        <div><strong>Dossiers bloqués</strong><br>${blockedCases.length}</div>
+        <div><strong>Livraisons prévues</strong><br>${deliveryCases.length}</div>
+        <div><strong>Travaux en retard</strong><br>${lateEntries.length}</div>
+        <div><strong>Ressources absentes</strong><br>${absentResources.length}</div>
+      </section>
+      ${renderStatusLegend()}
+      <section class="task-legend">
+        <h2>Dossiers bloqués</h2>
+        ${blockedCases.length ? `<table><thead><tr><th>Client</th><th>Véhicule</th><th>Blocage</th></tr></thead><tbody>${blockedCases.map((item) => `<tr><td>${escapeHtml(item.clientName || "-")}</td><td>${escapeHtml(item.vehicle || "-")}<br><span class="muted">${escapeHtml(item.plate || item.vin || "-")}</span></td><td>${escapeHtml(getCaseBlockerLabel(item) || "-")}</td></tr>`).join("")}</tbody></table>` : `<div class="empty">Aucun dossier bloqué planifié ce jour.</div>`}
+      </section>
+      <section class="task-legend">
+        <h2>Livraisons prévues / retards / absences</h2>
+        <table>
+          <tbody>
+            <tr><th>Livraisons prévues</th><td>${deliveryCases.map((item) => escapeHtml(`${item.clientName || "-"} - ${item.plate || item.vin || ""}`)).join("<br>") || "Aucune"}</td></tr>
+            <tr><th>Travaux en retard</th><td>${lateEntries.map((entry) => escapeHtml(`${entry.item.clientName || "-"} - ${entry.booking.title || "Travail"}`)).join("<br>") || "Aucun"}</td></tr>
+            <tr><th>Ressources absentes</th><td>${absentResources.map((name) => escapeHtml(name)).join("<br>") || "Aucune"}</td></tr>
+          </tbody>
+        </table>
+      </section>
+    </section>
+  `;
+
+  const pages = [renderSummaryPage(), renderPage("Planning atelier journalier - Ressources humaines", humanRows, "page-break")];
   if (equipmentRows.length) pages.push(renderPage("Planning atelier journalier - Ressources matérielles", equipmentRows, "page-break"));
 
   const popup = window.open("", "_blank", "width=1400,height=900");
@@ -947,6 +1244,16 @@ function printDailyPlanningGantt(dateKey = state.planningDate) {
       .muted { color: #5f7280; font-size: 8px; }
       .summary { display: grid; gap: 2mm; grid-template-columns: repeat(4, 1fr); margin: 3mm 0; }
       .summary div { border: 1px solid #d9e2e8; font-size: 9px; line-height: 1.15; min-height: 10mm; padding: 1.5mm 2mm; }
+      .large-summary { grid-template-columns: repeat(4, 1fr); }
+      .status-legend { align-items: center; display: flex; flex-wrap: wrap; gap: 2mm 4mm; margin: 2mm 0 3mm; }
+      .status-legend span { align-items: center; color: #45606f; display: inline-flex; font-size: 7.5px; gap: 1mm; }
+      .status-legend i { border: 1px solid #50606b; display: inline-block; height: 3mm; width: 5mm; }
+      .legend-normal { background: #174f72; }
+      .legend-blocked { background: #7c2d12; }
+      .legend-paused { background: #7c3aed; }
+      .legend-completed { background: #047857; }
+      .legend-late { background: #b91c1c; }
+      .legend-closed { background: #f3eee6; }
       .gantt-print { border: 1px solid #d9e2e8; overflow: hidden; width: 100%; }
       .gantt-header, .gantt-row { display: grid; grid-template-columns: 34mm 1fr; }
       .gantt-corner, .resource-label { background: #f5f8fa; border-right: 1px solid #d9e2e8; color: #45606f; }
@@ -962,6 +1269,10 @@ function printDailyPlanningGantt(dateKey = state.planningDate) {
       .tick span { display: block; padding-left: 1mm; padding-top: 1mm; }
       .pause-band { background: #f3eee6; bottom: 0; left: 0; position: absolute; top: 0; z-index: 0; }
       .booking { border-radius: 1.3mm; box-shadow: 0 1mm 3mm rgba(0,0,0,.16); color: #fff; display: flex; flex-direction: column; justify-content: center; min-height: 8.5mm; overflow: hidden; padding: 1mm 1.6mm; position: absolute; top: 2mm; z-index: 2; }
+      .booking.blocked { outline: 0.7mm solid #7c2d12; outline-offset: 0; }
+      .booking.paused { outline: 0.7mm dashed #7c3aed; outline-offset: 0; }
+      .booking.completed { opacity: 0.72; }
+      .booking.late { outline: 0.7mm solid #b91c1c; outline-offset: 0; }
       .booking .task-no { background: rgba(255,255,255,.25); border: 0.25mm solid rgba(255,255,255,.35); border-radius: 999px; display: inline-flex; font-size: 6.5px; font-weight: 800; height: 3.4mm; line-height: 1; margin: 0; padding-top: 0.45mm; position: absolute; right: 0.8mm; text-align: center; top: 0.7mm; width: 3.4mm; }
       .booking strong { display: block; font-size: 8px; line-height: 1.05; max-width: calc(100% - 4.5mm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .booking span { display: block; font-size: 7px; font-weight: 600; line-height: 1.05; margin-top: 0.8mm; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1035,6 +1346,14 @@ function printDailyPlanning(dateKey = state.planningDate) {
       const body = rows.length
         ? rows.map((row, index) => {
             const item = row.caseItem || {};
+            const action = typeof getCaseNextAction === "function" ? getCaseNextAction(item) : null;
+            const riskLabel = isCaseBlocked(item) ? "Bloqué" : action?.priority === "urgent" ? "Urgent" : action?.priority === "attention" ? "Attention" : "Normal";
+            const partsLabel = PARTS_STATUS_LABELS[normalizePartsStatus(item.partsStatus)] || "Non vérifié";
+            const blockerLabel = getCaseBlockerLabel(item) || "-";
+            const delivery = row.booking.delivery || item.appointment?.delivery || "";
+            const actualStart = row.booking.actualStart || row.booking.startedAt || "";
+            const actualEnd = row.booking.actualEnd || row.booking.completedAt || "";
+            const observation = row.booking.pauseReason || row.booking.details || item.blockerDetails || "";
             return `
               <tr>
                 <td>${index + 1}</td>
@@ -1052,7 +1371,15 @@ function printDailyPlanning(dateKey = state.planningDate) {
                   ${escapeHtml(item.vehicle || "-")}
                   <div class="muted">Immat.: ${escapeHtml(item.plate || "-")} · VIN: ${escapeHtml(item.vin || "-")}</div>
                 </td>
-                <td>${escapeHtml(item.orNavNumber || "-")}</td>
+                <td>${escapeHtml(getPrintOrderReference(item))}</td>
+                <td>${escapeHtml(riskLabel)}</td>
+                <td>${escapeHtml(getPrintStatusLabel(item))}</td>
+                <td>${escapeHtml(partsLabel)}</td>
+                <td>${escapeHtml(blockerLabel)}</td>
+                <td>${delivery ? formatDateTime(delivery) : "-"}</td>
+                <td>${actualStart ? formatDateTime(actualStart) : ""}</td>
+                <td>${actualEnd ? formatDateTime(actualEnd) : ""}</td>
+                <td>${escapeHtml(observation)}</td>
                 <td class="check-cell">□</td>
                 <td class="signature-cell"></td>
               </tr>
@@ -1071,7 +1398,15 @@ function printDailyPlanning(dateKey = state.planningDate) {
                 <th>Tâche</th>
                 <th>Client</th>
                 <th>Véhicule</th>
-                <th>OR NAV</th>
+                <th>Réf. OR</th>
+                <th>Priorité / risque</th>
+                <th>Statut dossier</th>
+                <th>Statut pièces</th>
+                <th>Blocage</th>
+                <th>Livraison prévue</th>
+                <th>Début réel</th>
+                <th>Fin réelle</th>
+                <th>Observation</th>
                 <th>Fait</th>
                 <th>Signature</th>
               </tr>
@@ -1127,7 +1462,8 @@ function printDailyPlanning(dateKey = state.planningDate) {
         <header>
           <div>
             <h1>Planning atelier journalier</h1>
-            <p class="muted">NIMR SAV</p>
+            <p class="muted">NIMR SAV · Service Après-Vente Automobile</p>
+            <p>Document planning</p>
             <p><strong>Journée :</strong> ${escapeHtml(longDate(date))}</p>
             <p><strong>Horaires :</strong> ${escapeHtml(intervalText)}</p>
           </div>
@@ -1180,14 +1516,16 @@ function printSupplementWorkOrders(item, supplementId = null) {
         <header>
           <div>
             <h1>Ordre de travail complémentaire</h1>
-            <p class="muted">NIMR SAV</p>
+            <p class="muted">NIMR SAV · Service Après-Vente Automobile</p>
+            <p>Document interne atelier</p>
             <p><strong>Complément :</strong> ${escapeHtml(supplement.number || '-')} - ${escapeHtml(supplement.title || '')}</p>
             <p><strong>Statut :</strong> ${escapeHtml(SUPPLEMENT_STATUS_LABELS[supplement.status] || supplement.status)}</p>
           </div>
           <div class="right">
-            <p><strong>Date :</strong> ${formatDate(new Date())}</p>
-            <p><strong>OR / ordre :</strong> ${escapeHtml(getClaimReferenceSummary(item, 'or'))}</p>
+            <p><strong>Imprimé le :</strong> ${formatDateTime(new Date())}</p>
+            <p><strong>Réf. OR :</strong> ${escapeHtml(getPrintOrderReference(item))}</p>
             <p><strong>Devis :</strong> ${escapeHtml(getClaimReferenceSummary(item, 'devis'))}</p>
+            <p><strong>Statut dossier :</strong> ${escapeHtml(getPrintStatusLabel(item))}</p>
           </div>
         </header>
         <section class="grid">
@@ -1196,6 +1534,13 @@ function printSupplementWorkOrders(item, supplementId = null) {
         </section>
         <section><h2>Motif / dommage découvert</h2><p>${escapeHtml(supplement.reason || 'Aucun motif renseigné.')}</p></section>
         <section><h2>Accords</h2><p>Accord expert : <strong>${supplement.expertApproved ? 'Oui' : 'Non'}</strong> · Validation client/interne : <strong>${supplement.clientApproved ? 'Oui' : 'Non'}</strong></p></section>
+        <section><h2>Impact atelier / client</h2>
+          <table><tbody>
+            <tr><td>Impact délai livraison</td><td></td><td>Impact planning</td><td></td></tr>
+            <tr><td>Client informé</td><td class="check-cell">□</td><td>Pièces disponibles</td><td class="check-cell">□</td></tr>
+            <tr><td>Accord requis avant exécution</td><td class="check-cell">□</td><td>Complément intégré au planning</td><td class="check-cell">□</td></tr>
+          </tbody></table>
+        </section>
         <section><h2>Pièces complémentaires</h2><table><thead><tr><th>N°</th><th>Désignation</th><th>Qté</th><th>Notes</th></tr></thead><tbody>${partRows}</tbody></table></section>
         <section><h2>Main-d’œuvre complémentaire</h2><table><thead><tr><th>N°</th><th>Étape</th><th>Opération</th><th>Temps</th><th>Fait</th></tr></thead><tbody>${laborRows}</tbody></table></section>
         <section><h2>Observations technicien</h2><div class="notes-box"></div></section>
@@ -1229,7 +1574,7 @@ function printSupplementWorkOrders(item, supplementId = null) {
 
 function printTechnicianWorkOrders(item) {
   item.expertEstimate = normalizeExpertEstimate(item.expertEstimate);
-  const assignments = state.bookings.filter((booking) => booking.caseId === item.id);
+  const assignments = state.bookings.filter((booking) => booking.caseId === item.id && isPrintableWorkBooking(booking));
   if (!assignments.length) {
     notifyUser("Aucune tâche assignée. Calculez/validez le planning avant d'imprimer les ordres techniciens.", "error");
     return;
@@ -1237,12 +1582,17 @@ function printTechnicianWorkOrders(item) {
 
   const grouped = new Map();
   assignments.forEach((booking) => {
-    booking.resourceIds.forEach((resourceId) => {
+    const humanResourceIds = (booking.resourceIds || []).filter((resourceId) => isPrintHumanResource(getResource(resourceId)));
+    humanResourceIds.forEach((resourceId) => {
       const resource = getResource(resourceId) || { id: resourceId, name: "Technicien", role: "atelier", location: "" };
       if (!grouped.has(resource.id)) grouped.set(resource.id, { resource, tasks: [] });
       grouped.get(resource.id).tasks.push(booking);
     });
   });
+  if (!grouped.size) {
+    notifyUser("Aucune ressource humaine assignée. Les équipements seuls ne génèrent pas d'ordre technicien.", "warn");
+    return;
+  }
 
   const pages = [...grouped.values()].map(({ resource, tasks }, index) => {
     const sortedTasks = [...tasks].sort((a, b) => new Date(a.start) - new Date(b.start));
@@ -1254,9 +1604,13 @@ function printTechnicianWorkOrders(item) {
           <td>
             <strong>${escapeHtml(booking.title || getDurationLabel(booking.key) || "Travail atelier")}</strong>
             <div class="muted">Étape: ${escapeHtml(getDurationLabel(booking.key) || booking.key || "-")}</div>
+            <div class="muted">Équipement: ${escapeHtml((booking.resourceIds || []).map((id) => getResource(id)).filter(isPrintEquipmentResource).map((resource) => resource.name).join(", ") || "-")}</div>
           </td>
           <td>${formatDateTime(booking.start)}</td>
           <td>${formatDateTime(booking.end)}</td>
+          <td>${booking.actualStart ? formatDateTime(booking.actualStart) : ""}</td>
+          <td>${booking.actualEnd || booking.completedAt ? formatDateTime(booking.actualEnd || booking.completedAt) : ""}</td>
+          <td>${escapeHtml(booking.pauseReason || "")}</td>
           <td class="check-cell">□</td>
         </tr>
       `)
@@ -1297,14 +1651,16 @@ function printTechnicianWorkOrders(item) {
         <header>
           <div>
             <h1>Ordre de travail technicien</h1>
-            <p class="muted">NIMR SAV</p>
+            <p class="muted">NIMR SAV · Service Après-Vente Automobile</p>
+            <p>Document technicien</p>
             <p><strong>Technicien / ressource :</strong> ${escapeHtml(resource.name)}</p>
             <p><strong>Poste :</strong> ${escapeHtml(resource.location || resource.role || "-")}</p>
           </div>
           <div class="right">
-            <p><strong>Date :</strong> ${formatDate(new Date())}</p>
-            <p><strong>OR / ordre :</strong> ${escapeHtml(getClaimReferenceSummary(item, 'or'))}</p>
+            <p><strong>Imprimé le :</strong> ${formatDateTime(new Date())}</p>
+            <p><strong>Réf. OR :</strong> ${escapeHtml(getPrintOrderReference(item))}</p>
             <p><strong>Devis :</strong> ${escapeHtml(getClaimReferenceSummary(item, 'devis'))}</p>
+            <p><strong>Statut dossier :</strong> ${escapeHtml(getPrintStatusLabel(item))}</p>
           </div>
         </header>
 
@@ -1329,7 +1685,7 @@ function printTechnicianWorkOrders(item) {
           <h2>Tâches planifiées</h2>
           <table>
             <thead>
-              <tr><th>N°</th><th>Tâche planning</th><th>Début prévu</th><th>Fin prévue</th><th>Fait</th></tr>
+              <tr><th>N°</th><th>Tâche planning</th><th>Début prévu</th><th>Fin prévue</th><th>Début réel</th><th>Fin réelle</th><th>Pause / cause</th><th>Fait</th></tr>
             </thead>
             <tbody>${taskRows}</tbody>
           </table>
@@ -1340,6 +1696,18 @@ function printTechnicianWorkOrders(item) {
         <section>
           <h2>Consignes / observations</h2>
           <p>${escapeHtml(item.damageNotes || "Aucune observation renseignée.")}</p>
+        </section>
+
+        <section>
+          <h2>Suivi atelier</h2>
+          <table>
+            <tbody>
+              <tr><td>Pièce manquante</td><td class="check-cell">□</td><td>Anomalie découverte</td><td class="check-cell">□</td></tr>
+              <tr><td>Besoin de complément</td><td class="check-cell">□</td><td>Essai réalisé</td><td class="check-cell">□</td></tr>
+              <tr><td>Travail terminé</td><td class="check-cell">□</td><td>Retour qualité</td><td class="check-cell">□</td></tr>
+            </tbody>
+          </table>
+          <div class="notes-box">Observations technicien / demande complément :</div>
         </section>
 
         <section class="signature-grid">
@@ -1386,6 +1754,7 @@ function printTechnicianWorkOrders(item) {
           .box { border: 1px solid #dce4e9; padding: 5px; }
           .muted { color: #687987; font-size: 9.5px; }
           .empty-inline { border: 1px dashed #dce4e9; color: #687987; padding: 6px; }
+          .notes-box { border: 1px solid #dce4e9; min-height: 42px; padding: 5px; }
           .check-cell { font-size: 13px; text-align: center; width: 32px; }
           .estimate-table th:nth-child(1), .estimate-table td:nth-child(1) { width: 24px; }
           .estimate-table th:nth-child(2), .estimate-table td:nth-child(2) { width: 44%; }

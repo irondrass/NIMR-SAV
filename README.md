@@ -1,3 +1,12 @@
+# v22.19 - Imprimés SAV professionnels
+
+- Harmonisation des en-têtes imprimés : `NIMR SAV`, `Service Après-Vente Automobile`, type de document, référence dossier, Réf. OR, statut et date/heure d'impression.
+- Ajout d'une fiche réception véhicule dans les exports ZIP et transformation de la fiche livraison en PV de restitution client plus complet.
+- Enrichissement des ordres atelier, techniciens, complémentaires, planning journalier et Gantt avec statuts pièces, blocages, risques, horaires réels, pauses, observations et signatures métier.
+- Checklist qualité adaptée au type d'intervention : service rapide, mécanique, électrique, diagnostic, carrosserie ou garantie.
+- Export ZIP renforcé avec `Photos_globales` lorsque plusieurs ordres existent et classement par catégorie.
+- Cache PWA incrémenté en `nimr-sav-v22.19-documents-sav`.
+
 # v22.18 - Phase 1 cockpit atelier quotidien
 
 - Ajout de la vue principale `Aujourd'hui` avec regroupement des dossiers : RDV attendus, véhicules reçus non planifiés, travaux à démarrer, travaux en cours, retards, qualité, livraisons prévues et dossiers bloqués.
@@ -59,7 +68,7 @@
 - La zone “Ajouter / modifier la main-d’œuvre de l’ordre” est ouverte et visible quand aucun devis n’a été importé.
 - Un dossier créé sans devis démarre à 0 h atelier : le planning n’est alimenté que par la main-d’œuvre saisie ou importée.
 - Le guichet rapide crée par défaut un ordre service rapide / entretien ; l’assurance expert reste un choix explicite.
-- Ajout des champs opérationnels : OR NAV, kilométrage, téléphone client, propriétaire/société, personne déposante et téléphone déposant.
+- Ajout des champs opérationnels : Réf. OR, kilométrage, téléphone client, propriétaire/société, personne déposante et téléphone déposant.
 - Les fiches PDF et la synchronisation structurée conservent les informations déposant/propriétaire dans les détails du dossier.
 
 # v22.12 - Synchronisation cloud multi-PC

@@ -317,7 +317,7 @@ alter table public.audit_logs alter column workshop_id set default '00000000-000
 
 -- Correctif v21.27 : eviter les doublons crees par les anciennes versions.
 -- Le numero OR devient la cle stable de synchronisation quand il existe.
--- Exemple: OR-NAV-2026-001 -> case-or:or-nav-2026-001
+-- Exemple: OR-2026-001 -> case-or:or-2026-001
 with ranked_orders as (
   select id,
          row_number() over (

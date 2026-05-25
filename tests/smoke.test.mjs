@@ -846,7 +846,21 @@ const printPlanningRegression = JSON.parse(vm.runInContext(`(() => {
       { id: 'tech-print', name: 'Technicien impression', role: 'mecanicien', active: true },
       { id: 'pont-print', name: 'Pont impression', role: 'pont_mecanique', active: true }
     ],
-    cases: [{ id: 'case-print', clientName: 'Client imprimé', vehicle: 'DFM S50', plate: '123 TU 4567' }],
+    cases: [{
+      id: 'case-print',
+      clientName: 'Client imprimé',
+      phone: '+216 55 000 000',
+      vehicle: 'DFM S50',
+      plate: '123 TU 4567',
+      vin: 'VINPRINT',
+      orNavNumber: 'OR-PRINT-1',
+      orderType: 'mechanical_client',
+      partsStatus: 'waiting_parts',
+      blockerReason: 'waiting_parts',
+      blockerDetails: 'Filtre non reçu',
+      flags: { received: true, workStarted: true },
+      claims: [{ type: 'mechanical_client', includeInPlanning: true, expertApproved: true, clientApproved: true, estimate: { lines: [{ phase: 'mechanical', operation: 'Diagnostic', laborHours: 1 }] } }]
+    }],
     bookings: [
       {
         id: 'work-print',
@@ -858,6 +872,17 @@ const printPlanningRegression = JSON.parse(vm.runInContext(`(() => {
         segments: [{ start: '2026-05-20T08:00:00.000Z', end: '2026-05-20T09:00:00.000Z' }],
         start: '2026-05-20T08:00:00.000Z',
         end: '2026-05-20T09:00:00.000Z'
+      },
+      {
+        id: 'material-only-print',
+        caseId: 'case-print',
+        key: 'mechanical',
+        title: 'Réservation pont seule',
+        resourceIds: ['pont-print'],
+        primaryResourceId: 'pont-print',
+        segments: [{ start: '2026-05-20T09:00:00.000Z', end: '2026-05-20T09:30:00.000Z' }],
+        start: '2026-05-20T09:00:00.000Z',
+        end: '2026-05-20T09:30:00.000Z'
       },
       {
         id: 'leave-print',
@@ -877,11 +902,34 @@ const printPlanningRegression = JSON.parse(vm.runInContext(`(() => {
   const daily = writes.join('');
   writes.length = 0;
   printDailyPlanningGantt('2026-05-20');
-  return JSON.stringify({ daily, gantt: writes.join('') });
+  const gantt = writes.join('');
+  writes.length = 0;
+  printRepairOrder(state.cases[0]);
+  const repairOrder = writes.join('');
+  writes.length = 0;
+  printTechnicianWorkOrders(state.cases[0]);
+  const technicianOrders = writes.join('');
+  const deliveryLines = buildDeliveryPdfLines(state.cases[0]);
+  const qualityLines = buildQualityPdfLines(state.cases[0]);
+  return JSON.stringify({ daily, gantt, repairOrder, technicianOrders, deliveryLines, qualityLines });
 })()`, context));
 assert.ok(printPlanningRegression.daily.includes('Travail mécanique'), 'l’impression journalière doit conserver les tâches atelier');
 assert.equal(printPlanningRegression.daily.includes('Congé technicien'), false, 'l’impression journalière ne doit pas afficher les congés comme travail');
 assert.equal(printPlanningRegression.gantt.includes('Congé technicien'), false, 'l’impression Gantt ne doit pas afficher les congés comme tâches production');
+assert.equal(JSON.stringify(printPlanningRegression).includes('NIMR CARROSSERIE'), false, 'les imprimés ne doivent plus contenir l’ancien nom société');
+assert.equal(JSON.stringify(printPlanningRegression).includes('OR NAV'), false, 'les imprimés ne doivent plus afficher le libellé OR NAV');
+assert.ok(printPlanningRegression.daily.includes('Réf. OR'), 'le planning journalier doit afficher Réf. OR');
+assert.ok(printPlanningRegression.daily.includes('Statut pièces'), 'le planning journalier doit afficher le statut pièces');
+assert.ok(printPlanningRegression.repairOrder.includes('Statut pièces'), 'l’ordre atelier doit inclure le statut pièces');
+assert.ok(printPlanningRegression.repairOrder.includes('Détail blocage'), 'l’ordre atelier doit inclure le détail de blocage');
+assert.ok(printPlanningRegression.technicianOrders.includes('Début réel'), 'l’ordre technicien doit prévoir le début réel');
+assert.ok(printPlanningRegression.technicianOrders.includes('Pause / cause'), 'l’ordre technicien doit prévoir les pauses');
+assert.equal(printPlanningRegression.technicianOrders.includes('Technicien / ressource :</strong> Pont impression'), false, 'un équipement seul ne doit pas générer une page technicien');
+assert.ok(printPlanningRegression.deliveryLines.includes('Signature client: ______________________________'), 'le PV livraison doit contenir la signature client');
+assert.ok(printPlanningRegression.deliveryLines.some((line) => line.includes('Kilométrage sortie')), 'le PV livraison doit contenir le kilométrage sortie');
+assert.ok(printPlanningRegression.deliveryLines.some((line) => line.includes('Réserves client')), 'le PV livraison doit contenir les réserves client');
+assert.ok(printPlanningRegression.deliveryLines.some((line) => line.includes('Contrôle qualité validé')), 'le PV livraison doit mentionner le contrôle qualité');
+assert.ok(printPlanningRegression.qualityLines.some((line) => line.includes('Serrages contrôlés')), 'la fiche qualité mécanique doit utiliser une checklist adaptée');
 
 const leaveConflictRegression = JSON.parse(vm.runInContext(`(() => {
   state = normalizeState({

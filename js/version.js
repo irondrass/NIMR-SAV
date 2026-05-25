@@ -1,5 +1,5 @@
-window.NIMR_BUILD = "v22.18";
-window.NIMR_CACHE_NAME = "nimr-sav-v22.18-cockpit";
+window.NIMR_BUILD = "v22.19";
+window.NIMR_CACHE_NAME = "nimr-sav-v22.19-documents-sav";
 
 if ("caches" in window) {
   caches.keys().then((keys) => Promise.all(

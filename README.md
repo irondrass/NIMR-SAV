@@ -1,3 +1,20 @@
+# v22.15 - Sécurité locale et mise à jour contrôlée
+
+- Ajout d'un verrouillage local par PIN dans Paramètres > Sécurité du poste. Il protège la session sur un PC partagé, sans remplacer l'authentification Supabase.
+- Ajout d'un export de sauvegarde chiffré par mot de passe (`.nimrsecure`) et d'un import capable de restaurer ces sauvegardes.
+- Ajout d'un bouton “Nettoyer ce poste” qui supprime les données locales, IndexedDB, caches PWA et l'enregistrement du service worker sur le navigateur courant.
+- La PWA ne force plus le rechargement automatique pendant la saisie : une bannière “Nouvelle version disponible” laisse l'utilisateur enregistrer puis recharger au bon moment.
+- La CSP retire `unsafe-inline` de `script-src`; les styles inline hérités restent tolérés temporairement pendant la migration progressive.
+- Cache PWA incrémenté en v22.15.
+
+## Procédure sécurité atelier
+
+- Activer un PIN local sur chaque poste partagé depuis Paramètres > Sécurité du poste.
+- Utiliser en priorité “Export chiffré” pour les sauvegardes contenant clients, VIN, immatriculations, photos ou historiques.
+- Stocker le mot de passe de sauvegarde hors du PC atelier, dans une procédure interne contrôlée.
+- Tester une restauration complète après chaque sauvegarde importante.
+- Utiliser “Nettoyer ce poste” avant de céder un PC, changer d'utilisateur durablement ou diagnostiquer un navigateur compromis.
+
 # v22.14 - Libération planning et sync multi-PC instantanée
 
 - Le bouton global “Terminer travaux” clôture maintenant les réservations productives du dossier et libère le temps restant dans le planning, sans valider le contrôle qualité.

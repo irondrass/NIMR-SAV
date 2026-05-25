@@ -2910,6 +2910,95 @@ a:focus-visible {
   to { transform: translateY(0) scale(1); opacity: 1; }
 }
 
+.required-marker {
+  color: #d00000;
+  font-weight: 900;
+}
+
+.security-form {
+  display: grid;
+  gap: 12px;
+  max-width: 620px;
+}
+
+.security-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.status-ok {
+  color: var(--ok);
+  font-weight: 700;
+}
+
+.status-error {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.password-modal label,
+.local-lock-dialog label {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.password-modal input,
+.local-lock-dialog input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  color: var(--ink);
+  background: var(--paper);
+}
+
+.local-lock-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.68);
+  backdrop-filter: blur(8px);
+}
+
+.local-lock-overlay[hidden] {
+  display: none !important;
+}
+
+.local-lock-dialog {
+  width: min(420px, 100%);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 26px;
+  background: var(--paper);
+  box-shadow: var(--shadow-float);
+}
+
+.local-lock-logo {
+  display: inline-grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  margin-bottom: 14px;
+  border-radius: var(--radius-sm);
+  color: #fff;
+  background: var(--brand);
+  font-size: 1.35rem;
+  font-weight: 900;
+}
+
+.local-lock-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
 
 /* Flux atelier: préparation anticipée des pièces neuves/remplacées depuis le planning */
 .validated-plan-row.anticipated-new-part-row {

@@ -375,18 +375,26 @@ function escapeAttr(value) {
 function showUpdateAvailable(registration) {
   const region = $("#toast-region");
   if (!region) return;
+  const existing = region.querySelector(".update-toast");
+  if (existing) return;
   const toast = document.createElement("div");
   toast.className = "toast toast-info update-toast";
   toast.setAttribute("role", "status");
   const text = document.createElement("span");
-  text.textContent = "Nouvelle version disponible";
+  text.textContent = "Nouvelle version disponible. Rechargez quand la saisie en cours est terminée.";
   const button = document.createElement("button");
   button.type = "button";
   button.className = "ghost-button";
-  button.textContent = "Recharger";
+  button.textContent = "Enregistrer et recharger";
   button.addEventListener("click", () => {
-    if (registration?.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
-    window.location.reload();
+    forceEmergencyAutosave();
+    button.disabled = true;
+    button.textContent = "Rechargement...";
+    if (registration?.waiting) {
+      registration.waiting.postMessage({ type: "SKIP_WAITING" });
+    } else {
+      window.location.reload();
+    }
   });
   toast.append(text, button);
   region.appendChild(toast);
@@ -406,6 +414,7 @@ function setupServiceWorkerUpdates(registration) {
   navigator.serviceWorker.addEventListener("controllerchange", () => {
     if (!window.__nimrReloadingForUpdate) {
       window.__nimrReloadingForUpdate = true;
+      forceEmergencyAutosave();
       window.location.reload();
     }
   });

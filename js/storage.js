@@ -249,6 +249,113 @@ async function restoreLatestAutomaticSnapshot() {
   }
 }
 
+function getBackupPasswordFromUser(title, message, options = {}) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "custom-modal-overlay";
+    overlay.innerHTML = `
+      <form class="custom-modal-content password-modal" aria-label="${escapeAttr(title)}">
+        <h3>${escapeHtml(title)}</h3>
+        <p class="muted">${escapeHtml(message)}</p>
+        <label>Mot de passe
+          <input name="password" type="password" autocomplete="new-password" required minlength="6" />
+        </label>
+        ${options.confirm ? `<label>Confirmer mot de passe<input name="confirmPassword" type="password" autocomplete="new-password" required minlength="6" /></label>` : ""}
+        <p class="muted" data-password-status></p>
+        <div class="custom-modal-actions">
+          <button type="button" class="ghost-button" data-password-cancel>Annuler</button>
+          <button type="submit" class="primary-button">${escapeHtml(options.confirmLabel || "Valider")}</button>
+        </div>
+      </form>
+    `;
+    const form = overlay.querySelector("form");
+    const status = overlay.querySelector("[data-password-status]");
+    const close = (value) => {
+      overlay.remove();
+      resolve(value);
+    };
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay || event.target.closest("[data-password-cancel]")) close(null);
+    });
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const password = form.elements.password.value;
+      const confirmPassword = form.elements.confirmPassword?.value;
+      if (password.length < 6) {
+        status.textContent = "Utilisez au moins 6 caractères.";
+        return;
+      }
+      if (options.confirm && password !== confirmPassword) {
+        status.textContent = "Les mots de passe ne correspondent pas.";
+        return;
+      }
+      close(password);
+    });
+    document.body.appendChild(overlay);
+    window.setTimeout(() => form.elements.password.focus(), 50);
+  });
+}
+
+async function deriveBackupCryptoKey(password, saltBytes, usages) {
+  const cryptoApi = getBrowserCrypto();
+  if (!cryptoApi) throw new Error("Le chiffrement navigateur n'est pas disponible sur ce poste.");
+  const material = await cryptoApi.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(password),
+    "PBKDF2",
+    false,
+    ["deriveKey"],
+  );
+  return cryptoApi.subtle.deriveKey(
+    { name: "PBKDF2", salt: saltBytes, iterations: 180000, hash: "SHA-256" },
+    material,
+    { name: "AES-GCM", length: 256 },
+    false,
+    usages,
+  );
+}
+
+async function encryptBackupPayload(payload, password) {
+  const cryptoApi = getBrowserCrypto();
+  if (!cryptoApi) throw new Error("Le chiffrement navigateur n'est pas disponible sur ce poste.");
+  const salt = new Uint8Array(16);
+  const iv = new Uint8Array(12);
+  cryptoApi.getRandomValues(salt);
+  cryptoApi.getRandomValues(iv);
+  const key = await deriveBackupCryptoKey(password, salt, ["encrypt"]);
+  const plain = new TextEncoder().encode(JSON.stringify(payload));
+  const encrypted = await cryptoApi.subtle.encrypt({ name: "AES-GCM", iv }, key, plain);
+  return {
+    app: "nimr-sav-encrypted-backup",
+    version: 1,
+    appVersion: APP_VERSION,
+    createdAt: new Date().toISOString(),
+    algorithm: "AES-GCM",
+    kdf: "PBKDF2-SHA256",
+    iterations: 180000,
+    salt: bytesToBase64(salt),
+    iv: bytesToBase64(iv),
+    ciphertext: bytesToBase64(encrypted),
+  };
+}
+
+async function decryptBackupPayload(encryptedPayload, password) {
+  if (encryptedPayload?.app !== "nimr-sav-encrypted-backup") return encryptedPayload;
+  const cryptoApi = getBrowserCrypto();
+  if (!cryptoApi) throw new Error("Le chiffrement navigateur n'est pas disponible sur ce poste.");
+  const key = await deriveBackupCryptoKey(password, base64ToBytes(encryptedPayload.salt), ["decrypt"]);
+  const decrypted = await cryptoApi.subtle.decrypt(
+    { name: "AES-GCM", iv: base64ToBytes(encryptedPayload.iv) },
+    key,
+    base64ToBytes(encryptedPayload.ciphertext),
+  );
+  return JSON.parse(new TextDecoder().decode(decrypted));
+}
+
+function isEncryptedBackupPayload(payload) {
+  return payload?.app === "nimr-sav-encrypted-backup";
+}
+
 async function exportBackup() {
   showBackupStatus("Préparation de la sauvegarde...");
   try {
@@ -259,6 +366,29 @@ async function exportBackup() {
     console.error("Export sauvegarde impossible", error);
     showBackupStatus("Export impossible. Vérifiez l'espace disponible du navigateur.", "error");
     notifyUser(error.message || "Impossible d'exporter la sauvegarde.");
+  }
+}
+
+async function exportEncryptedBackup() {
+  showBackupStatus("Préparation de la sauvegarde chiffrée...");
+  const password = await getBackupPasswordFromUser(
+    "Exporter une sauvegarde chiffrée",
+    "Choisissez un mot de passe. Il sera obligatoire pour restaurer ce fichier.",
+    { confirm: true, confirmLabel: "Exporter chiffré" },
+  );
+  if (!password) {
+    showBackupStatus("Export chiffré annulé.");
+    return;
+  }
+  try {
+    const payload = await buildBackupPayload();
+    const encrypted = await encryptBackupPayload(payload, password);
+    downloadJson(encrypted, `nimr-sav-sauvegarde-chiffree-${todayKey(new Date())}.nimrsecure`);
+    showBackupStatus(`Sauvegarde chiffrée exportée: ${state.cases.length} dossier(s), ${payload.photos.length} photo(s).`, "ok");
+  } catch (error) {
+    console.error("Export chiffré impossible", error);
+    showBackupStatus(error.message || "Export chiffré impossible.", "error");
+    notifyUser(error.message || "Impossible d'exporter la sauvegarde chiffrée.", "error");
   }
 }
 
@@ -273,7 +403,23 @@ async function importBackup(event) {
   }
   showBackupStatus("Import de la sauvegarde...");
   try {
-    const payload = JSON.parse(await readFileAsText(file));
+    let payload = JSON.parse(await readFileAsText(file));
+    if (isEncryptedBackupPayload(payload)) {
+      const password = await getBackupPasswordFromUser(
+        "Restaurer une sauvegarde chiffrée",
+        "Entrez le mot de passe utilisé lors de l'export.",
+        { confirmLabel: "Déchiffrer" },
+      );
+      if (!password) {
+        showBackupStatus("Import chiffré annulé.");
+        return;
+      }
+      try {
+        payload = await decryptBackupPayload(payload, password);
+      } catch (error) {
+        throw new Error("Mot de passe incorrect ou sauvegarde chiffrée endommagée.");
+      }
+    }
     const { importedState, photos, isLegacy, metadata } = validateBackupPayload(payload);
     const documents = Array.isArray(payload.documents) ? payload.documents : [];
     const versionLabel = isLegacy ? "format ancien" : `${metadata.appVersion}, exportée le ${metadata.exportedAt}`;

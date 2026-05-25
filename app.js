@@ -11,6 +11,7 @@ function initApp() {
     bindPlanningToolbar();
     bindWorkshopForms();
     bindBackupActions();
+    bindLocalSecurityControls();
     if (typeof bindSupabaseActions === "function") bindSupabaseActions();
     bindVehicleLookup();
     bindKeyboardShortcuts();
@@ -20,6 +21,7 @@ function initApp() {
 
     setActiveTab(activeTab || "dossiers");
     render();
+    initLocalSecurityGate();
     bindWorkHoursInputs();
     loadBundledVehicleDatabase();
     migrateLegacyPhotos();
@@ -609,6 +611,7 @@ function bindWorkHoursInputs() {
 
 function bindBackupActions() {
   $("#export-backup")?.addEventListener("click", exportBackup);
+  $("#export-encrypted-backup")?.addEventListener("click", exportEncryptedBackup);
   $("#import-backup")?.addEventListener("change", importBackup);
   $("#control-autosave")?.addEventListener("click", controlAutosaveHealth);
   $("#export-safety-snapshot")?.addEventListener("click", exportSafetySnapshotNow);
@@ -624,35 +627,17 @@ function bindVehicleLookup() {
 
 function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
-  let reloadingForUpdate = false;
-  navigator.serviceWorker.addEventListener("controllerchange", () => {
-    if (reloadingForUpdate) return;
-    reloadingForUpdate = true;
-    forceEmergencyAutosave();
-    window.location.reload();
-  });
   navigator.serviceWorker.addEventListener("message", (event) => {
     if (event.data?.type === "APP_UPDATED") {
       forceEmergencyAutosave();
-      notifyUser("Nouvelle version installée. Rechargement automatique...", "success");
-      setTimeout(() => window.location.reload(), 350);
+      notifyUser("Nouvelle version prête. Cliquez sur la bannière pour recharger au bon moment.", "success");
     }
   });
   window.addEventListener("load", async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=22.14", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=22.15", { updateViaCache: "none" });
       registration.update?.();
-      if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
-      registration.addEventListener("updatefound", () => {
-        const worker = registration.installing;
-        if (!worker) return;
-        worker.addEventListener("statechange", () => {
-          if (worker.state === "installed" && navigator.serviceWorker.controller) {
-            forceEmergencyAutosave();
-            worker.postMessage({ type: "SKIP_WAITING" });
-          }
-        });
-      });
+      if (registration.waiting) showUpdateAvailable(registration);
       window.setInterval(() => registration.update?.(), 10 * 60 * 1000);
       setupServiceWorkerUpdates(registration);
     } catch (error) {

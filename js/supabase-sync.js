@@ -756,12 +756,14 @@ async function restoreLocalFromSupabase() {
 
 let autoSupabaseBackupTimer = null;
 let autoSupabaseBackupRunning = false;
+let pendingAutoSupabaseBackupReason = "";
 let lastAutoSupabaseBackupAt = 0;
 let lastKnownCloudUpdatedAt = typeof getStoredCloudUpdatedAt === "function" ? getStoredCloudUpdatedAt() : 0;
 let supabaseLiveSyncChannel = null;
 let supabaseLivePullTimer = null;
 let applyingRemoteSupabaseState = false;
-const SUPABASE_LIVE_PULL_INTERVAL_MS = 15000;
+const SUPABASE_LIVE_PULL_INTERVAL_MS = 3000;
+const SUPABASE_AUTO_BACKUP_MIN_INTERVAL_MS = 1200;
 
 function shouldAutoBackupToSupabase() {
   return Boolean(!applyingRemoteSupabaseState && getSupabaseClient && getSupabaseClient() && navigator.onLine !== false);
@@ -781,9 +783,20 @@ async function flushSupabaseBackup(reason = "manual") {
 }
 
 async function autoBackupToSupabase(reason = "autosave", options = {}) {
-  if (autoSupabaseBackupRunning || !shouldAutoBackupToSupabase()) return;
+  if (autoSupabaseBackupRunning) {
+    pendingAutoSupabaseBackupReason = reason;
+    return;
+  }
+  if (!shouldAutoBackupToSupabase()) return;
   const now = Date.now();
-  if (!options.force && now - lastAutoSupabaseBackupAt < 15000) return;
+  if (!options.force && now - lastAutoSupabaseBackupAt < SUPABASE_AUTO_BACKUP_MIN_INTERVAL_MS) {
+    window.clearTimeout(autoSupabaseBackupTimer);
+    autoSupabaseBackupTimer = window.setTimeout(
+      () => autoBackupToSupabase(reason),
+      Math.max(250, SUPABASE_AUTO_BACKUP_MIN_INTERVAL_MS - (now - lastAutoSupabaseBackupAt)),
+    );
+    return;
+  }
   autoSupabaseBackupRunning = true;
   try {
     const client = getSupabaseClient();
@@ -819,6 +832,11 @@ async function autoBackupToSupabase(reason = "autosave", options = {}) {
     localStorage.setItem(`${STORAGE_KEY}:last-cloud-autosave-error`, String(error.message || error));
   } finally {
     autoSupabaseBackupRunning = false;
+    if (pendingAutoSupabaseBackupReason) {
+      const pendingReason = pendingAutoSupabaseBackupReason;
+      pendingAutoSupabaseBackupReason = "";
+      scheduleAutoSupabaseBackup(pendingReason);
+    }
   }
 }
 
@@ -838,7 +856,7 @@ function shouldApplyRemoteBackup(data) {
   if (!data?.state) return false;
   const remoteCloudTime = getTimestampMs(data.updated_at);
   if (!remoteCloudTime) return false;
-  return remoteCloudTime > lastKnownCloudUpdatedAt + 1000;
+  return remoteCloudTime > lastKnownCloudUpdatedAt;
 }
 
 async function applyRemoteSupabaseBackup(data, reason = "cloud") {
@@ -896,15 +914,24 @@ function startSupabaseLiveSync() {
     supabaseLiveSyncChannel = client
       .channel(`nimr-sav-live-${backupKey}`)
       .on("postgres_changes", { event: "*", schema: "public", table: tableName, filter: `backup_key=eq.${backupKey}` }, () => {
-        window.setTimeout(() => pullLatestSupabaseBackup("realtime"), 500);
+        window.setTimeout(() => pullLatestSupabaseBackup("realtime"), 200);
       })
-      .subscribe();
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") {
+          setSupabaseDetails("Synchronisation temps réel active. Polling de secours toutes les 3 s.");
+          pullLatestSupabaseBackup("realtime-connect");
+        }
+        if (["CHANNEL_ERROR", "TIMED_OUT", "CLOSED"].includes(status)) {
+          setSupabaseDetails("Realtime indisponible temporairement : polling de secours actif toutes les 3 s.");
+        }
+      });
   } catch (error) {
     console.warn("Realtime Supabase indisponible, polling actif", error);
     supabaseLiveSyncChannel = null;
   }
   window.clearInterval(supabaseLivePullTimer);
   supabaseLivePullTimer = window.setInterval(() => pullLatestSupabaseBackup("poll"), SUPABASE_LIVE_PULL_INTERVAL_MS);
+  pullLatestSupabaseBackup("live-start");
 }
 
 function stopSupabaseLiveSync() {
@@ -931,6 +958,8 @@ function bindSupabaseActions() {
   window.addEventListener("focus", () => pullLatestSupabaseBackup("focus"));
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") pullLatestSupabaseBackup("retour application");
+    else flushSupabaseBackup("mise-en-arriere-plan");
   });
   window.addEventListener("online", () => pullLatestSupabaseBackup("retour connexion"));
+  window.addEventListener("pagehide", () => flushSupabaseBackup("fermeture-page"));
 }

@@ -314,6 +314,7 @@ function getResourceLoadMinutes(resourceId, bookings, fromDate) {
   const from = startOfDay(fromDate || new Date());
   const until = addDays(from, 14);
   return bookings.reduce((sum, booking) => {
+    if (!isPlanningBlockingBooking(booking)) return sum;
     if (!isPrimaryResourceBooking(booking, resourceId)) return sum;
     return sum + booking.segments.reduce((segmentSum, segment) => {
       const start = maxDate(new Date(segment.start), from);
@@ -397,6 +398,7 @@ function buildWorkingSlot(startAfter, duration) {
 function findConflict(slot, resourceIds, bookings) {
   let conflict = null;
   bookings.forEach((booking) => {
+    if (!isPlanningBlockingBooking(booking)) return;
     if (!booking.resourceIds.some((id) => resourceIds.includes(id))) return;
     booking.segments.forEach((busy) => {
       const busyStart = new Date(busy.start);
@@ -440,7 +442,7 @@ function acceptProposal(item, proposal) {
   addHistory(item, "appointment.accepted", `RDV choisi: ${formatDateTime(proposal.start)}`, `Livraison estimée ${formatDateTime(proposal.delivery)}`);
   generatedProposals[item.id] = [];
   state.planningDate = todayKey(new Date(proposal.start));
-  saveState();
+  saveState({ flushCloud: true, cloudReason: "appointment-accepted" });
   activeTab = "planning";
   setActiveTab("planning");
   render();
@@ -496,6 +498,10 @@ function getBookingOperationalStatus(booking) {
   return ["planned", "started", "paused", "completed", "temporary"].includes(status) ? status : "planned";
 }
 
+function isPlanningBlockingBooking(booking) {
+  return getBookingOperationalStatus(booking) !== "completed";
+}
+
 function getBookingStatusLabel(booking) {
   const labels = {
     planned: "Planifiée",
@@ -526,6 +532,10 @@ function getCaseWorkBookings(item) {
   return state.bookings
     .filter((booking) => booking.caseId === item?.id && booking.temporary !== true && booking.type !== "leave")
     .sort((a, b) => new Date(a.start) - new Date(b.start));
+}
+
+function getCaseProductionBookings(item) {
+  return getCaseWorkBookings(item).filter((booking) => booking.key !== "quality");
 }
 
 function truncateSegmentsAt(segments, cutoffDate) {
@@ -559,6 +569,49 @@ function applySegmentsToBooking(booking, segments) {
   booking.start = cleanSegments[0].start;
   booking.end = cleanSegments.at(-1).end;
   return true;
+}
+
+function completeBookingReservationAt(booking, completedAt, options = {}) {
+  const now = new Date(completedAt || new Date());
+  const originalSegments = clonePlanningSegments(booking.segments);
+  const plannedSegments = clonePlanningSegments(booking.plannedSegments?.length ? booking.plannedSegments : originalSegments);
+  const plannedStart = booking.plannedStart || booking.start;
+  const plannedEnd = booking.plannedEnd || booking.end;
+  const plannedMinutes = Number(booking.plannedMinutes || 0) || sumBookingSegmentsMinutes(plannedSegments);
+  const completionDate = minDate(now, new Date(booking.end || now));
+  let keptSegments = truncateSegmentsAt(originalSegments, completionDate);
+  const actualStart = booking.actualStart || booking.startedAt || "";
+  const actualStartDate = actualStart ? new Date(actualStart) : null;
+  if (!keptSegments.length && actualStartDate && !Number.isNaN(actualStartDate.getTime()) && actualStartDate < now) {
+    keptSegments = [{ start: actualStartDate.toISOString(), end: now.toISOString() }];
+  }
+  const keptMinutes = sumBookingSegmentsMinutes(keptSegments);
+  const removed = !keptSegments.length && options.removeIfEmpty !== false;
+
+  booking.status = "completed";
+  booking.actualStart = booking.actualStart || booking.startedAt || keptSegments[0]?.start || plannedStart || now.toISOString();
+  booking.actualEnd = now.toISOString();
+  booking.completedAt = now.toISOString();
+  booking.plannedStart = plannedStart;
+  booking.plannedEnd = plannedEnd;
+  booking.plannedSegments = plannedSegments;
+  booking.plannedMinutes = plannedMinutes;
+  booking.remainingMinutes = 0;
+  booking.pauseReason = "";
+
+  if (keptSegments.length) {
+    applySegmentsToBooking(booking, keptSegments);
+  } else {
+    state.bookings = state.bookings.filter((candidate) => candidate.id !== booking.id);
+  }
+
+  return {
+    removed,
+    plannedMinutes,
+    keptMinutes,
+    freedMinutes: Math.max(0, plannedMinutes - keptMinutes),
+    plannedEnd,
+  };
 }
 
 function applySlotToBooking(booking, match, durationMinutes) {
@@ -611,42 +664,57 @@ function startCaseBookingTask(item, bookingId) {
   return { ok: true, message: "Tâche démarrée." };
 }
 
-function completeCaseBookingTaskNow(item, bookingId) {
+function completeCaseBookingTaskNow(item, bookingId, completedAt = new Date()) {
   const booking = findCaseBooking(item, bookingId);
   if (!booking) return { ok: false, message: "Tâche introuvable dans le planning." };
   const status = getBookingOperationalStatus(booking);
   if (status === "completed") return { ok: false, message: "Cette tâche est déjà terminée." };
   if (status === "paused") return { ok: false, message: "Cette tâche est en pause. Terminez plutôt le reliquat planifié." };
-  const now = new Date();
+  const now = new Date(completedAt);
   const start = new Date(booking.start);
   if (now < start && status !== "started") {
     return { ok: false, message: "Cette tâche n'a pas encore démarré. Utilisez Replanifier si le créneau doit changer." };
   }
-  const originalSegments = clonePlanningSegments(booking.segments);
-  const plannedEnd = booking.plannedEnd || booking.end;
-  const completionDate = minDate(now, new Date(booking.end));
-  const clippedSegments = truncateSegmentsAt(originalSegments, completionDate);
-  if (clippedSegments.length) applySegmentsToBooking(booking, clippedSegments);
-  booking.status = "completed";
-  booking.actualStart = booking.actualStart || booking.start;
-  booking.actualEnd = now.toISOString();
-  booking.completedAt = now.toISOString();
-  booking.plannedEnd = plannedEnd;
-  booking.plannedMinutes = booking.plannedMinutes || sumBookingSegmentsMinutes(originalSegments);
-  const freedMinutes = Math.max(0, diffMinutes(completionDate, new Date(plannedEnd)));
+  const title = booking.title || getDurationLabel(booking.key);
+  const { freedMinutes, removed } = completeBookingReservationAt(booking, now);
   addHistory(
     item,
     "planning.task.completed",
     "Tâche terminée",
-    `${booking.title || getDurationLabel(booking.key)} terminée à ${formatDateTime(now)}${freedMinutes > 0 ? `. ${formatLocalizedDecimal(freedMinutes / 60)} h libérée(s) dans le planning.` : "."}`
+    `${title} terminée à ${formatDateTime(now)}${freedMinutes > 0 ? `. ${formatLocalizedDecimal(freedMinutes / 60)} h libérée(s) dans le planning.` : "."}${removed ? " Réservation future supprimée." : ""}`
   );
-  if (getCaseWorkBookings(item).every((caseBooking) => getBookingOperationalStatus(caseBooking) === "completed")) {
+  const productionBookings = getCaseProductionBookings(item);
+  if (!productionBookings.length || productionBookings.every((caseBooking) => getBookingOperationalStatus(caseBooking) === "completed")) {
     const wasCompleted = Boolean(item.flags.workCompleted);
     item.flags.workCompleted = true;
     if (!wasCompleted) recordFlagHistory(item, "workCompleted", true);
   }
   refreshCaseAppointmentFromBookings(item);
   return { ok: true, message: freedMinutes > 0 ? "Tâche terminée. Le temps restant est libéré dans le planning." : "Tâche terminée." };
+}
+
+function completeCaseWorkBookingsNow(item, completedAt = new Date()) {
+  const now = new Date(completedAt);
+  const bookings = getCaseProductionBookings(item).filter((booking) => getBookingOperationalStatus(booking) !== "completed");
+  if (!bookings.length) return { completed: 0, freedMinutes: 0, removed: 0 };
+  let freedMinutes = 0;
+  let removed = 0;
+  bookings.forEach((booking) => {
+    const title = booking.title || getDurationLabel(booking.key);
+    const result = completeBookingReservationAt(booking, now);
+    freedMinutes += result.freedMinutes;
+    if (result.removed) removed += 1;
+    addHistory(
+      item,
+      "planning.task.completed",
+      "Tâche terminée",
+      `${title} clôturée avec le dossier à ${formatDateTime(now)}${result.freedMinutes > 0 ? `. ${formatLocalizedDecimal(result.freedMinutes / 60)} h libérée(s).` : "."}`
+    );
+  });
+  item.flags.workCompleted = true;
+  recordFlagHistory(item, "workCompleted", true);
+  refreshCaseAppointmentFromBookings(item);
+  return { completed: bookings.length, freedMinutes, removed };
 }
 
 function pauseCaseBookingTask(item, bookingId, reason) {

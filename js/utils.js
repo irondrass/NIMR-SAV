@@ -617,6 +617,7 @@ function getVehiclePlanningColor(item) {
 
 function getBookingPlanningColor(booking, colorMap = null) {
   if (booking?.type === "leave") return booking.color || "#6b7280";
+  if (typeof getBookingOperationalStatus === "function" && getBookingOperationalStatus(booking) === "completed") return "#64748b";
   const item = state.cases.find((caseItem) => caseItem.id === booking?.caseId);
   if (item) return getVehiclePlanningColor(item);
   if (colorMap && booking?.caseId && colorMap[booking.caseId]) return colorMap[booking.caseId];

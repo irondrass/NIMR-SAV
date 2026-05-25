@@ -1076,7 +1076,7 @@ function renderCaseDetail() {
         if (!confirmed) return;
       }
       applyWorkflowAction(item, flag);
-      saveState();
+      saveState({ flushCloud: true, cloudReason: `workflow-${flag}` });
       render();
     });
   });
@@ -1177,6 +1177,21 @@ function applyWorkflowAction(item, action) {
     });
     refreshCaseApprovalFlagsFromClaims(item);
     recordFlagHistory(item, "clientApproved", item.flags.clientApproved);
+    return;
+  }
+
+  if (action === "workCompleted") {
+    const result = completeCaseWorkBookingsNow(item, new Date(now));
+    item.flags.workCompleted = true;
+    if (!result.completed) recordFlagHistory(item, action, true);
+    if (result.freedMinutes > 0) {
+      addHistory(
+        item,
+        "planning.capacity.released",
+        "Capacité atelier libérée",
+        `${formatLocalizedDecimal(result.freedMinutes / 60)} h libérée(s) car les travaux sont terminés avant la fin planifiée.`
+      );
+    }
     return;
   }
 
@@ -1930,7 +1945,7 @@ async function handleBookingTaskAction(item, action, bookingId) {
     if (!result) return;
     notifyUser(result.message, result.ok ? "success" : "info");
     if (result.ok) {
-      saveState();
+      saveState({ flushCloud: true, cloudReason: `booking-${action}` });
       render();
     }
   } catch (error) {

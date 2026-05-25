@@ -137,8 +137,11 @@ function renderResourceBookings(resource, date, dayStart, dayEnd, total, dailyCo
       const start = new Date(segment.start);
       const end = new Date(segment.end);
       if (todayKey(start) !== day && todayKey(end) !== day) return;
+      const status = booking.type === "leave" ? "" : getBookingOperationalStatus(booking);
+      const actualEnd = status === "completed" && booking.actualEnd ? new Date(booking.actualEnd) : null;
+      if (actualEnd && start >= actualEnd) return;
       const clippedStart = maxDate(start, dayStart);
-      const clippedEnd = minDate(end, dayEnd);
+      const clippedEnd = actualEnd ? minDate(minDate(end, dayEnd), actualEnd) : minDate(end, dayEnd);
       if (clippedEnd <= clippedStart) return;
       const left = (diffMinutes(dayStart, clippedStart) * 100) / total;
       const width = Math.max(2, (diffMinutes(clippedStart, clippedEnd) * 100) / total);
@@ -185,8 +188,11 @@ function buildDailyPlanningTaskNumberMap(date, resources) {
       const start = new Date(segment.start);
       const end = new Date(segment.end);
       if (todayKey(start) !== day && todayKey(end) !== day) return;
+      const status = getBookingOperationalStatus(booking);
+      const actualEnd = status === "completed" && booking.actualEnd ? new Date(booking.actualEnd) : null;
+      if (actualEnd && start >= actualEnd) return;
       const clippedStart = maxDate(start, dayStart);
-      const clippedEnd = minDate(end, dayEnd);
+      const clippedEnd = actualEnd ? minDate(minDate(end, dayEnd), actualEnd) : minDate(end, dayEnd);
       if (clippedEnd <= clippedStart) return;
       rows.push({ booking, segment, start: clippedStart, end: clippedEnd, resourceName: primaryResource.name || "" });
     });

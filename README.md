@@ -1,3 +1,13 @@
+# v22.20 - Flux technicien atelier
+
+- Ajout de la vue principale `Technicien` avec sélection technicien/date, cartes “Mes tâches”, statuts lisibles et actions terrain : démarrer, pause, reprendre, bloquer, noter, photographier, terminer et imprimer.
+- Extension rétrocompatible des bookings avec `startedBy`, `pausedBy`, `resumedAt`, `completedBy`, blocage tâche, notes, photos liées, sessions de travail et durée réelle.
+- Les statuts internes historiques restent conservés (`planned`, `started`, `paused`, `completed`, `temporary`) avec alias acceptés `in_progress` et `done`.
+- Ajout du suivi chef atelier : tâches en cours, en pause, bloquées, terminées aujourd’hui, retards, techniciens sans tâche active et tâches sans technicien.
+- Ajout de la fiche de travail technicien et de la fiche pause/blocage imprimables.
+- Documentation ajoutée : `TECHNICIAN_FLOW.md` et `PRINTING.md`.
+- Cache PWA incrémenté en `nimr-sav-v22.20-technician-flow`.
+
 # v22.19 - Imprimés SAV professionnels
 
 - Harmonisation des en-têtes imprimés : `NIMR SAV`, `Service Après-Vente Automobile`, type de document, référence dossier, Réf. OR, statut et date/heure d'impression.

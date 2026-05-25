@@ -20,7 +20,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v22.19";
+const APP_VERSION = "v22.20";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const WORKSHOP_NAME = "NIMR SAV";
@@ -800,6 +800,8 @@ function createDefaultState() {
       caseStatusFilter: "all",
       caseTypeFilter: "all",
       caseSort: "recent",
+      technicianId: "",
+      technicianDate: todayKey(new Date()),
     },
   };
   return stateSeed;
@@ -918,6 +920,8 @@ function normalizeUiPreferences(ui = {}) {
     caseStatusFilter: allowedStatuses.has(ui.caseStatusFilter) ? ui.caseStatusFilter : "all",
     caseTypeFilter: allowedTypes.has(ui.caseTypeFilter) ? ui.caseTypeFilter : "all",
     caseSort: allowedSorts.has(ui.caseSort) ? ui.caseSort : "recent",
+    technicianId: typeof ui.technicianId === "string" ? ui.technicianId : "",
+    technicianDate: /^\d{4}-\d{2}-\d{2}$/.test(String(ui.technicianDate || "")) ? ui.technicianDate : todayKey(new Date()),
   };
 }
 
@@ -984,6 +988,49 @@ function normalizeBookings(bookings, resources) {
     : [];
 }
 
+function normalizeBookingStatus(value, temporary = false) {
+  const aliases = {
+    in_progress: "started",
+    done: "completed",
+  };
+  const raw = String(value || "").trim();
+  const normalized = aliases[raw] || raw;
+  return ["planned", "started", "paused", "completed", "temporary"].includes(normalized)
+    ? normalized
+    : (temporary ? "temporary" : "planned");
+}
+
+function normalizeBookingNotes(notes) {
+  return Array.isArray(notes)
+    ? notes
+        .map((note) => ({
+          id: note?.id || uid("task-note"),
+          at: note?.at || note?.createdAt || new Date().toISOString(),
+          by: note?.by || note?.technicianId || "",
+          text: String(note?.text || note?.note || "").trim(),
+        }))
+        .filter((note) => note.text)
+    : [];
+}
+
+function normalizeBookingWorkSessions(sessions) {
+  return Array.isArray(sessions)
+    ? sessions
+        .map((session) => ({
+          startedAt: session?.startedAt || "",
+          startedBy: session?.startedBy || "",
+          pausedAt: session?.pausedAt || "",
+          pausedBy: session?.pausedBy || "",
+          resumedAt: session?.resumedAt || "",
+          resumedBy: session?.resumedBy || "",
+          completedAt: session?.completedAt || "",
+          completedBy: session?.completedBy || "",
+          pauseReason: session?.pauseReason || "",
+        }))
+        .filter((session) => session.startedAt || session.pausedAt || session.completedAt)
+    : [];
+}
+
 function normalizeBooking(booking, resourceIds) {
   if (!booking || typeof booking !== "object") return null;
   const ids = Array.isArray(booking.resourceIds)
@@ -1019,13 +1066,26 @@ function normalizeBooking(booking, resourceIds) {
     plannedEnd: booking.plannedEnd || booking.end || segments.at(-1).end,
     plannedSegments: Array.isArray(booking.plannedSegments) && booking.plannedSegments.length ? booking.plannedSegments : segments,
     plannedMinutes: Number(booking.plannedMinutes || 0) || segments.reduce((sum, segment) => sum + diffMinutes(new Date(segment.start), new Date(segment.end)), 0),
-    status: ["planned", "started", "paused", "completed", "temporary"].includes(booking.status) ? booking.status : (booking.temporary ? "temporary" : "planned"),
+    status: normalizeBookingStatus(booking.status, booking.temporary),
     actualStart: booking.actualStart || booking.startedAt || "",
     actualEnd: booking.actualEnd || booking.completedAt || "",
     startedAt: booking.startedAt || booking.actualStart || "",
+    startedBy: booking.startedBy || "",
     completedAt: booking.completedAt || "",
+    completedBy: booking.completedBy || "",
     pausedAt: booking.pausedAt || "",
+    pausedBy: booking.pausedBy || "",
+    resumedAt: booking.resumedAt || "",
+    resumedBy: booking.resumedBy || "",
     pauseReason: booking.pauseReason || "",
+    blockedAt: booking.blockedAt || "",
+    blockedBy: booking.blockedBy || "",
+    blockReason: booking.blockReason || "",
+    blockDetails: booking.blockDetails || "",
+    notes: normalizeBookingNotes(booking.notes),
+    photoIds: Array.isArray(booking.photoIds) ? booking.photoIds.filter(Boolean).map(String) : [],
+    workSessions: normalizeBookingWorkSessions(booking.workSessions),
+    actualWorkedMinutes: Number(booking.actualWorkedMinutes || 0) || 0,
     remainingMinutes: Number(booking.remainingMinutes || 0) || 0,
     parentBookingId: booking.parentBookingId || "",
     remainingFromPaused: Boolean(booking.remainingFromPaused),

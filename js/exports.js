@@ -1572,6 +1572,175 @@ function printSupplementWorkOrders(item, supplementId = null) {
   saveState();
 }
 
+function getBookingEquipmentNames(booking) {
+  return (booking.resourceIds || [])
+    .map((id) => getResource(id))
+    .filter((resource) => resource && isPrintEquipmentResource(resource))
+    .map((resource) => resource.name)
+    .join(", ");
+}
+
+function getBookingTechnicianName(booking, technicianId = "") {
+  const explicit = getResource(technicianId);
+  if (isPrintHumanResource(explicit)) return explicit.name;
+  const human = (booking.resourceIds || []).map((id) => getResource(id)).find(isPrintHumanResource);
+  return human?.name || "Technicien";
+}
+
+function buildTechnicianTaskPrintCss() {
+  return `
+    @page { size: A4 portrait; margin: 10mm; }
+    * { box-sizing: border-box; }
+    body { color: #14212b; font-family: Arial, sans-serif; font-size: 11px; line-height: 1.25; margin: 0 auto; max-width: 190mm; }
+    header { align-items: flex-start; border-bottom: 2px solid #11415f; display: flex; justify-content: space-between; padding-bottom: 8px; }
+    h1 { color: #11415f; font-size: 18px; margin: 0 0 3px; }
+    h2 { font-size: 13px; margin: 12px 0 5px; }
+    p { margin: 3px 0; }
+    table { border-collapse: collapse; margin-top: 5px; width: 100%; }
+    th, td { border: 1px solid #dce4e9; padding: 5px 6px; text-align: left; vertical-align: top; }
+    th { background: #f5f8fa; }
+    .right { text-align: right; }
+    .grid { display: grid; gap: 8px; grid-template-columns: repeat(2, 1fr); margin-top: 10px; }
+    .box { border: 1px solid #dce4e9; padding: 7px; }
+    .muted { color: #687987; font-size: 10px; }
+    .notes-box { border: 1px solid #dce4e9; min-height: 42px; padding: 6px; }
+    .checklist { columns: 2; list-style: none; margin: 6px 0 0; padding: 0; }
+    .checklist li { break-inside: avoid; margin: 3px 0; }
+    .signature-grid { display: grid; gap: 24px; grid-template-columns: repeat(2, 1fr); margin-top: 34px; }
+    .signature-box { border-top: 1px solid #14212b; min-height: 54px; padding-top: 6px; }
+    footer { border-top: 1px solid #dce4e9; color: #687987; font-size: 9px; margin-top: 16px; padding-top: 5px; }
+    @media print { body { margin: 0; } button, nav, .sidebar, .dashboard-strip, .sync-status-strip { display: none !important; } }
+  `;
+}
+
+function printTechnicianTaskSheet(item, bookingId, technicianId = "") {
+  const booking = state.bookings.find((candidate) => candidate.id === bookingId && candidate.caseId === item?.id && isPrintableWorkBooking(candidate));
+  if (!item || !booking) {
+    notifyUser("Tâche introuvable pour impression.", "error");
+    return;
+  }
+  const technicianName = getBookingTechnicianName(booking, technicianId);
+  const equipment = getBookingEquipmentNames(booking) || "-";
+  const notes = (booking.notes || []).map((note) => `${formatDateTime(note.at)} - ${getResource(note.by)?.name || note.by || "Technicien"} : ${escapeHtml(note.text)}`).join("<br>") || "Aucune note.";
+  const status = typeof getTechnicianTaskStatus === "function" ? getTechnicianTaskStatus(item, booking) : getBookingOperationalStatus(booking);
+  const statusLabel = typeof getTechnicianStatusLabel === "function" ? getTechnicianStatusLabel(status) : getBookingStatusLabel(booking);
+  const popup = window.open("", "_blank", "width=900,height=1100");
+  if (!popup) {
+    notifyUser("Le navigateur a bloqué l'ouverture. Autorisez les pop-ups pour imprimer la fiche tâche.", "error");
+    return;
+  }
+  popup.document.write(`
+    <!doctype html>
+    <html lang="fr">
+      <head>
+        <meta charset="utf-8" />
+        <title>Fiche tâche technicien - ${escapeHtml(item.clientName || "Dossier")}</title>
+        <style>${buildTechnicianTaskPrintCss()}</style>
+      </head>
+      <body>
+        <header>
+          <div>
+            <h1>NIMR SAV</h1>
+            <p>${PRINT_WORKSHOP_SUBTITLE}</p>
+            <p>${PRINT_WORKSHOP_SCOPE}</p>
+            <p><strong>Fiche de travail technicien</strong></p>
+          </div>
+          <div class="right">
+            <p><strong>Dossier :</strong> ${escapeHtml(getPrintCaseReference(item))}</p>
+            <p><strong>Réf. OR :</strong> ${escapeHtml(getPrintOrderReference(item))}</p>
+            <p><strong>Imprimé le :</strong> ${formatDateTime(new Date())}</p>
+            <p><strong>Statut :</strong> ${escapeHtml(getPrintStatusLabel(item))}</p>
+          </div>
+        </header>
+        <section class="grid">
+          <div class="box">
+            <h2>Client / véhicule</h2>
+            <p><strong>Client :</strong> ${escapeHtml(item.clientName || "-")}</p>
+            <p><strong>Téléphone :</strong> ${escapeHtml(item.phone || "-")}</p>
+            <p><strong>Véhicule :</strong> ${escapeHtml(item.vehicle || "-")}</p>
+            <p><strong>Immatriculation :</strong> ${escapeHtml(item.plate || "-")}</p>
+            <p><strong>VIN :</strong> ${escapeHtml(item.vin || "-")}</p>
+            <p><strong>Kilométrage :</strong> ${escapeHtml(item.mileage || "-")}</p>
+          </div>
+          <div class="box">
+            <h2>Tâche atelier</h2>
+            <p><strong>Ordre :</strong> ${escapeHtml(getPrintOrderReference(item))}</p>
+            <p><strong>Étape :</strong> ${escapeHtml(getDurationLabel(booking.key) || booking.title || "-")}</p>
+            <p><strong>Technicien :</strong> ${escapeHtml(technicianName)}</p>
+            <p><strong>Équipement :</strong> ${escapeHtml(equipment)}</p>
+            <p><strong>Prévu :</strong> ${formatDateTime(booking.start)} → ${formatDateTime(booking.end)}</p>
+            <p><strong>Durée prévue :</strong> ${formatLocalizedDecimal((booking.plannedMinutes || getBookingDurationMinutes(booking)) / 60)} h</p>
+            <p><strong>Statut :</strong> ${escapeHtml(statusLabel)}</p>
+          </div>
+        </section>
+        <section>
+          <h2>Consignes / pièces prévues</h2>
+          <table><tbody>
+            <tr><th>Consignes</th><td>${escapeHtml(booking.details || item.damageNotes || "Aucune consigne renseignée.")}</td></tr>
+            <tr><th>Pièces prévues</th><td>${escapeHtml(getAllClaimEstimateParts(item).map((part) => `${part.designation || "Article"} x ${formatLocalizedDecimal(part.quantity || 0)}`).join(" / ") || "Aucune pièce renseignée.")}</td></tr>
+            <tr><th>Notes numériques</th><td>${notes}</td></tr>
+          </tbody></table>
+        </section>
+        <section>
+          <h2>Suivi manuscrit</h2>
+          <ul class="checklist">
+            <li>□ tâche démarrée</li>
+            <li>□ tâche mise en pause</li>
+            <li>□ tâche reprise</li>
+            <li>□ tâche terminée</li>
+            <li>□ photo avant faite</li>
+            <li>□ photo après faite</li>
+            <li>□ anomalie signalée</li>
+          </ul>
+          <div class="notes-box">Commentaire manuscrit :</div>
+        </section>
+        <section class="signature-grid">
+          <div class="signature-box"><strong>Signature technicien</strong><br><span class="muted">Nom, date et signature</span></div>
+          <div class="signature-box"><strong>Validation chef atelier</strong><br><span class="muted">Nom, date et signature</span></div>
+        </section>
+        <footer>Document technicien · ${formatDateTime(new Date())}</footer>
+        <script>window.addEventListener('load', () => window.print());</script>
+      </body>
+    </html>
+  `);
+  popup.document.close();
+  addHistory(item, "planning.task.printed", "Fiche tâche imprimée", `${booking.title || getDurationLabel(booking.key)} · ${technicianName}`);
+  saveState();
+}
+
+function printPauseBlockSheet(item, bookingId, technicianId = "") {
+  const booking = state.bookings.find((candidate) => candidate.id === bookingId && candidate.caseId === item?.id && isPrintableWorkBooking(candidate));
+  if (!item || !booking) {
+    notifyUser("Tâche introuvable pour impression blocage/pause.", "error");
+    return;
+  }
+  const technicianName = getBookingTechnicianName(booking, technicianId || booking.pausedBy || booking.blockedBy);
+  const popup = window.open("", "_blank", "width=900,height=1100");
+  if (!popup) {
+    notifyUser("Le navigateur a bloqué l'ouverture. Autorisez les pop-ups pour imprimer la fiche de pause/blocage.", "error");
+    return;
+  }
+  popup.document.write(`
+    <!doctype html><html lang="fr"><head><meta charset="utf-8" />
+    <title>Fiche pause blocage - ${escapeHtml(item.clientName || "Dossier")}</title>
+    <style>${buildTechnicianTaskPrintCss()}</style></head><body>
+      <header>
+        <div><h1>NIMR SAV</h1><p>${PRINT_WORKSHOP_SUBTITLE}</p><p><strong>Fiche de pause / blocage</strong></p></div>
+        <div class="right"><p><strong>Dossier :</strong> ${escapeHtml(getPrintCaseReference(item))}</p><p><strong>Réf. OR :</strong> ${escapeHtml(getPrintOrderReference(item))}</p><p><strong>Imprimé le :</strong> ${formatDateTime(new Date())}</p></div>
+      </header>
+      <section class="grid">
+        <div class="box"><h2>Véhicule</h2><p><strong>Client :</strong> ${escapeHtml(item.clientName || "-")}</p><p><strong>Véhicule :</strong> ${escapeHtml(item.vehicle || "-")}</p><p><strong>Immat. / VIN :</strong> ${escapeHtml(item.plate || item.vin || "-")}</p></div>
+        <div class="box"><h2>Tâche concernée</h2><p><strong>Technicien :</strong> ${escapeHtml(technicianName)}</p><p><strong>Tâche :</strong> ${escapeHtml(booking.title || getDurationLabel(booking.key) || "-")}</p><p><strong>Heure pause :</strong> ${booking.pausedAt ? formatDateTime(booking.pausedAt) : ""}</p><p><strong>Heure reprise :</strong> ${booking.resumedAt ? formatDateTime(booking.resumedAt) : ""}</p></div>
+      </section>
+      <section><h2>Motif / commentaire</h2><table><tbody><tr><th>Motif pause</th><td>${escapeHtml(booking.pauseReason || "-")}</td></tr><tr><th>Motif blocage</th><td>${escapeHtml(booking.blockReason || "-")}</td></tr><tr><th>Commentaire</th><td>${escapeHtml(booking.blockDetails || "")}</td></tr><tr><th>Impact planning estimé</th><td>${booking.remainingMinutes ? `${formatLocalizedDecimal(booking.remainingMinutes / 60)} h restantes` : ""}</td></tr></tbody></table></section>
+      <section class="signature-grid"><div class="signature-box"><strong>Signature technicien</strong></div><div class="signature-box"><strong>Signature chef atelier si nécessaire</strong></div></section>
+      <footer>Document pause / blocage · ${formatDateTime(new Date())}</footer>
+      <script>window.addEventListener('load', () => window.print());</script>
+    </body></html>
+  `);
+  popup.document.close();
+}
+
 function printTechnicianWorkOrders(item) {
   item.expertEstimate = normalizeExpertEstimate(item.expertEstimate);
   const assignments = state.bookings.filter((booking) => booking.caseId === item.id && isPrintableWorkBooking(booking));

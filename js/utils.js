@@ -372,6 +372,32 @@ function escapeAttr(value) {
   return escapeHtml(value).replaceAll("\n", " ");
 }
 
+function getFocusableElements(container) {
+  if (!container) return [];
+  return $$(
+    'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    container,
+  ).filter((element) => !element.hidden && element.offsetParent !== null);
+}
+
+function trapFocusWithin(container, event) {
+  if (event.key !== "Tab") return;
+  const focusable = getFocusableElements(container);
+  if (!focusable.length) {
+    event.preventDefault();
+    return;
+  }
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
 function showUpdateAvailable(registration) {
   const region = $("#toast-region");
   if (!region) return;
@@ -382,12 +408,19 @@ function showUpdateAvailable(registration) {
   toast.setAttribute("role", "status");
   const text = document.createElement("span");
   text.textContent = "Nouvelle version disponible. Rechargez quand la saisie en cours est terminée.";
+  const version = document.createElement("small");
+  version.textContent = window.NIMR_BUILD ? `Version actuelle : ${window.NIMR_BUILD}` : "Version prête";
+  const later = document.createElement("button");
+  later.type = "button";
+  later.className = "ghost-button";
+  later.textContent = "Plus tard";
+  later.addEventListener("click", () => toast.remove());
   const button = document.createElement("button");
   button.type = "button";
-  button.className = "ghost-button";
+  button.className = "primary-button";
   button.textContent = "Enregistrer et recharger";
-  button.addEventListener("click", () => {
-    forceEmergencyAutosave();
+  button.addEventListener("click", async () => {
+    await Promise.resolve(forceEmergencyAutosave());
     button.disabled = true;
     button.textContent = "Rechargement...";
     if (registration?.waiting) {
@@ -396,7 +429,10 @@ function showUpdateAvailable(registration) {
       window.location.reload();
     }
   });
-  toast.append(text, button);
+  const actions = document.createElement("div");
+  actions.className = "update-toast-actions";
+  actions.append(later, button);
+  toast.append(text, version, actions);
   region.appendChild(toast);
 }
 

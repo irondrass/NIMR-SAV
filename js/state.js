@@ -10,6 +10,7 @@ const CLOUD_UPDATED_META_KEY = `${STORAGE_KEY}:last-cloud-updated-at`;
 const LOCAL_CHANGE_META_KEY = `${STORAGE_KEY}:last-local-change-at`;
 const LOCAL_SECURITY_KEY = `${STORAGE_KEY}:local-security`;
 const LOCAL_SECURITY_SESSION_KEY = `${STORAGE_KEY}:local-security-unlocked`;
+const LOCAL_SECURITY_FAILURE_KEY = `${STORAGE_KEY}:local-security-failures`;
 const AUTOSAVE_SNAPSHOT_LIMIT = 8;
 const AUTOSAVE_CLOUD_DEBOUNCE_MS = 1500;
 const DB_NAME = "nimr-carrosserie-db";
@@ -19,7 +20,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v22.15";
+const APP_VERSION = "v22.16";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const WORKSHOP_NAME = "NIMR SAV";
@@ -30,6 +31,9 @@ const MAX_BACKUP_IMPORT_SIZE = 50 * 1024 * 1024;
 const MAX_PHOTO_EDGE = 1600;
 const PHOTO_JPEG_QUALITY = 0.82;
 const ALLOWED_PHOTO_TYPES = ["image/jpeg", "image/png", "image/webp"];
+const LOCAL_SECURITY_MAX_FAILED_ATTEMPTS = 5;
+const LOCAL_SECURITY_LOCKOUT_MS = 5 * 60 * 1000;
+const LOCAL_SECURITY_IDLE_MS = 15 * 60 * 1000;
 const MAX_PLANNING_SEARCH_DAYS = 90;
 const MAX_PLANNING_ITERATIONS = 10000;
 const RECEPTION_GRACE_HOURS = 2;
@@ -287,6 +291,9 @@ let activeCaseId = state.cases[0]?.id ?? null;
 let activeCaseDetailTab = "resume";
 let generatedProposals = {};
 let estimateImportPreviews = {};
+let localSecurityIdleTimer = null;
+let localSecurityIdleEventsBound = false;
+let localSecurityReturnFocus = null;
 
 function notifyUser(message, variant = "info") {
   const text = Array.isArray(message) ? message.join("\n") : String(message || "");
@@ -335,6 +342,50 @@ function readLocalSecurityConfig() {
   }
 }
 
+function readLocalSecurityFailures() {
+  try {
+    const value = JSON.parse(localStorage.getItem(LOCAL_SECURITY_FAILURE_KEY) || "{}");
+    return {
+      attempts: Number(value.attempts || 0),
+      lockedUntil: Number(value.lockedUntil || 0),
+    };
+  } catch (error) {
+    return { attempts: 0, lockedUntil: 0 };
+  }
+}
+
+function writeLocalSecurityFailures(value) {
+  try {
+    localStorage.setItem(LOCAL_SECURITY_FAILURE_KEY, JSON.stringify(value));
+  } catch (error) {
+    // Non critique.
+  }
+}
+
+function clearLocalSecurityFailures() {
+  try {
+    localStorage.removeItem(LOCAL_SECURITY_FAILURE_KEY);
+  } catch (error) {
+    // Non critique.
+  }
+}
+
+function getLocalSecurityLockoutRemainingMs() {
+  const failures = readLocalSecurityFailures();
+  return Math.max(0, Number(failures.lockedUntil || 0) - Date.now());
+}
+
+function recordLocalSecurityFailure() {
+  const previous = readLocalSecurityFailures();
+  const attempts = Number(previous.attempts || 0) + 1;
+  const lockedUntil = attempts >= LOCAL_SECURITY_MAX_FAILED_ATTEMPTS
+    ? Date.now() + LOCAL_SECURITY_LOCKOUT_MS
+    : 0;
+  const next = { attempts, lockedUntil };
+  writeLocalSecurityFailures(next);
+  return next;
+}
+
 function isLocalPinEnabled() {
   const config = readLocalSecurityConfig();
   return Boolean(config.enabled && config.salt && config.hash);
@@ -370,8 +421,18 @@ async function deriveLocalPinHash(pin, saltBase64) {
 async function verifyLocalPin(pin) {
   const config = readLocalSecurityConfig();
   if (!config.enabled || !config.salt || !config.hash) return true;
+  const remainingMs = getLocalSecurityLockoutRemainingMs();
+  if (remainingMs > 0) {
+    throw new Error(`Trop de tentatives. Réessayez dans ${Math.ceil(remainingMs / 60000)} min.`);
+  }
   const hash = await deriveLocalPinHash(pin, config.salt);
-  return hash === config.hash;
+  const valid = hash === config.hash;
+  if (!valid) {
+    recordLocalSecurityFailure();
+    return false;
+  }
+  clearLocalSecurityFailures();
+  return true;
 }
 
 function setLocalSecurityStatus(message, variant = "info") {
@@ -382,8 +443,11 @@ function setLocalSecurityStatus(message, variant = "info") {
 }
 
 function renderLocalSecurityStatus() {
-  if (isLocalPinEnabled()) setLocalSecurityStatus("PIN local actif sur ce poste. La session se verrouille à la fermeture de l'onglet.", "ok");
-  else setLocalSecurityStatus("Aucun PIN local actif. Activez-le sur les postes partagés.", "warn");
+  if (isLocalPinEnabled()) {
+    setLocalSecurityStatus("PIN local actif. Verrouillage automatique après 15 min d'inactivité. Attention : le PIN ne chiffre pas les données locales.", "ok");
+  } else {
+    setLocalSecurityStatus("Aucun PIN local actif. Activez-le sur les postes partagés.", "warn");
+  }
 }
 
 async function setLocalPin(pin) {
@@ -399,15 +463,19 @@ async function setLocalPin(pin) {
     enabled: true,
     salt: saltBase64,
     hash,
+    kdf: "PBKDF2-SHA256",
     iterations: 120000,
     updatedAt: new Date().toISOString(),
   }));
   sessionStorage.setItem(LOCAL_SECURITY_SESSION_KEY, "true");
+  clearLocalSecurityFailures();
 }
 
 function hideLocalLockOverlay() {
   const overlay = $("#local-lock-overlay");
   if (overlay) overlay.hidden = true;
+  document.querySelector(".app-shell")?.removeAttribute("inert");
+  resetLocalSecurityIdleTimer();
 }
 
 function showLocalLockOverlay() {
@@ -415,6 +483,9 @@ function showLocalLockOverlay() {
   const form = $("#local-lock-form");
   const status = $("#local-lock-status");
   if (!overlay || !form) return;
+  window.clearTimeout(localSecurityIdleTimer);
+  localSecurityReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  document.querySelector(".app-shell")?.setAttribute("inert", "");
   overlay.hidden = false;
   if (status) status.textContent = "";
   const pinInput = form.elements?.pin;
@@ -424,17 +495,21 @@ function showLocalLockOverlay() {
   }
   if (form.dataset.bound === "true") return;
   form.dataset.bound = "true";
+  form.addEventListener("keydown", (event) => trapFocusWithin(form, event));
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     try {
       const ok = await verifyLocalPin(form.elements.pin.value);
       if (!ok) {
-        if (status) status.textContent = "PIN incorrect.";
+        const failures = readLocalSecurityFailures();
+        const left = Math.max(0, LOCAL_SECURITY_MAX_FAILED_ATTEMPTS - Number(failures.attempts || 0));
+        if (status) status.textContent = left ? `PIN incorrect. ${left} tentative(s) restante(s).` : "Trop de tentatives. Poste verrouillé temporairement.";
         return;
       }
       sessionStorage.setItem(LOCAL_SECURITY_SESSION_KEY, "true");
       hideLocalLockOverlay();
       renderLocalSecurityStatus();
+      localSecurityReturnFocus?.focus?.();
     } catch (error) {
       if (status) status.textContent = error.message || "Déverrouillage impossible.";
     }
@@ -450,9 +525,49 @@ function lockLocalSession() {
   if (isLocalPinEnabled()) showLocalLockOverlay();
 }
 
+function resetLocalSecurityIdleTimer() {
+  window.clearTimeout(localSecurityIdleTimer);
+  if (!isLocalPinEnabled() || !isLocalSessionUnlocked()) return;
+  localSecurityIdleTimer = window.setTimeout(() => {
+    notifyUser("Session verrouillée après inactivité.", "info");
+    lockLocalSession();
+  }, LOCAL_SECURITY_IDLE_MS);
+}
+
+function bindLocalSecurityIdleEvents() {
+  if (localSecurityIdleEventsBound) return;
+  localSecurityIdleEventsBound = true;
+  ["pointerdown", "keydown", "touchstart"].forEach((eventName) => {
+    document.addEventListener(eventName, () => resetLocalSecurityIdleTimer(), { passive: true });
+  });
+  document.addEventListener("visibilitychange", resetLocalSecurityIdleTimer);
+}
+
+async function disableLocalPin() {
+  if (!isLocalPinEnabled()) {
+    setLocalSecurityStatus("Aucun PIN à désactiver.", "warn");
+    return;
+  }
+  const confirmed = await showConfirmModal("Désactiver le PIN local sur ce poste ? Les données locales resteront présentes dans ce navigateur.");
+  if (!confirmed) return;
+  try {
+    localStorage.removeItem(LOCAL_SECURITY_KEY);
+    localStorage.removeItem(LOCAL_SECURITY_FAILURE_KEY);
+    sessionStorage.removeItem(LOCAL_SECURITY_SESSION_KEY);
+    window.clearTimeout(localSecurityIdleTimer);
+    hideLocalLockOverlay();
+    renderLocalSecurityStatus();
+    notifyUser("PIN local désactivé sur ce poste.", "success");
+  } catch (error) {
+    notifyUser(error.message || "Désactivation PIN impossible.", "error");
+  }
+}
+
 function initLocalSecurityGate() {
+  bindLocalSecurityIdleEvents();
   renderLocalSecurityStatus();
   if (!isLocalSessionUnlocked()) showLocalLockOverlay();
+  else resetLocalSecurityIdleTimer();
 }
 
 function bindLocalSecurityControls() {
@@ -476,7 +591,9 @@ function bindLocalSecurityControls() {
     }
   });
   $("#lock-local-session")?.addEventListener("click", () => lockLocalSession());
+  $("#disable-local-pin")?.addEventListener("click", disableLocalPin);
   $("#clear-local-workstation")?.addEventListener("click", cleanLocalWorkstation);
+  bindLocalSecurityIdleEvents();
   renderLocalSecurityStatus();
 }
 
@@ -490,9 +607,56 @@ function deleteIndexedDatabase(name) {
   });
 }
 
+function isApplicationLocalStorageKey(key) {
+  const normalized = String(key || "").toLowerCase();
+  return key.startsWith(STORAGE_KEY)
+    || key.startsWith("nimr-sav:")
+    || key.startsWith("nimr-carrosserie")
+    || normalized.startsWith("sb-")
+    || normalized.includes("supabase")
+    || normalized.includes("gotrue");
+}
+
+function isApplicationCacheName(key) {
+  return String(key || "").startsWith("nimr-")
+    || String(key || "").startsWith("nimr-sav-")
+    || String(key || "").startsWith("nimr-carrosserie-");
+}
+
+async function deleteApplicationIndexedDatabases() {
+  const names = new Set([DB_NAME]);
+  try {
+    if (typeof indexedDB.databases === "function") {
+      const databases = await indexedDB.databases();
+      databases.forEach((database) => {
+        const name = database?.name || "";
+        const normalized = name.toLowerCase();
+        if (normalized.includes("nimr") || normalized.includes("carrosserie") || normalized.includes("supabase")) {
+          names.add(name);
+        }
+      });
+    }
+  } catch (error) {
+    // L'API indexedDB.databases n'est pas disponible partout.
+  }
+  await Promise.all([...names].filter(Boolean).map((name) => deleteIndexedDatabase(name)));
+}
+
+function showWorkstationCleanedScreen() {
+  document.body.innerHTML = `
+    <main class="cleaned-workstation" role="main">
+      <section class="panel">
+        <h1>Poste nettoyé</h1>
+        <p>Les données locales, caches, bases IndexedDB, configuration Supabase et service worker de ce navigateur ont été supprimés.</p>
+        <p>Fermez cet onglet avant de remettre le poste à un autre utilisateur.</p>
+      </section>
+    </main>
+  `;
+}
+
 async function cleanLocalWorkstation() {
   const confirmed = await showPromptModal(
-    "Cette action supprime les dossiers locaux, photos/documents IndexedDB, caches PWA, points de restauration et configuration Supabase de ce navigateur.<br><br>Les données déjà synchronisées dans Supabase ne sont pas supprimées.<br><br>Tapez NETTOYER pour confirmer.",
+    "Cette action supprime les dossiers locaux, photos/documents IndexedDB, caches PWA, points de restauration, configuration Supabase et session Supabase locale de ce navigateur.<br><br>Les données déjà synchronisées dans Supabase ne sont pas supprimées.<br><br>Tapez NETTOYER pour confirmer.",
     "NETTOYER",
   );
   if (!confirmed) return;
@@ -502,22 +666,21 @@ async function cleanLocalWorkstation() {
     if (typeof photoObjectUrls !== "undefined") photoObjectUrls.clear();
     photoDbPromise = null;
     Object.keys(localStorage).forEach((key) => {
-      if (key.startsWith(STORAGE_KEY) || key.startsWith("nimr-sav:")) localStorage.removeItem(key);
+      if (isApplicationLocalStorageKey(key)) localStorage.removeItem(key);
     });
-    Object.keys(sessionStorage || {}).forEach((key) => {
-      if (key.startsWith(STORAGE_KEY) || key.startsWith("nimr-sav:")) sessionStorage.removeItem(key);
+    Object.keys(sessionStorage).forEach((key) => {
+      if (isApplicationLocalStorageKey(key)) sessionStorage.removeItem(key);
     });
-    await deleteIndexedDatabase(DB_NAME);
+    await deleteApplicationIndexedDatabases();
     if ("caches" in window) {
       const keys = await caches.keys();
-      await Promise.all(keys.filter((key) => key.startsWith("nimr-carrosserie-") || key.startsWith("nimr-sav-")).map((key) => caches.delete(key)));
+      await Promise.all(keys.filter(isApplicationCacheName).map((key) => caches.delete(key)));
     }
     if (navigator.serviceWorker?.getRegistrations) {
       const registrations = await navigator.serviceWorker.getRegistrations();
       await Promise.all(registrations.map((registration) => registration.unregister()));
     }
-    notifyUser("Poste nettoyé. Rechargement...", "success");
-    window.setTimeout(() => window.location.reload(), 500);
+    showWorkstationCleanedScreen();
   } catch (error) {
     console.error("Nettoyage poste impossible", error);
     notifyUser(error.message || "Nettoyage du poste impossible.", "error");
@@ -1259,6 +1422,10 @@ function rememberLocalUserChangeAt(value) {
   } catch (error) {
     // Métadonnée de synchro non critique.
   }
+}
+
+function getLocalUserChangeAt() {
+  return readTimestampMeta(LOCAL_CHANGE_META_KEY);
 }
 
 function clearLocalUserChangeAt() {

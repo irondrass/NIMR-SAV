@@ -11,7 +11,7 @@ function initApp() {
     bindPlanningToolbar();
     bindWorkshopForms();
     bindBackupActions();
-    bindLocalSecurityControls();
+    if (typeof bindLocalSecurityControls === "function") bindLocalSecurityControls();
     if (typeof bindSupabaseActions === "function") bindSupabaseActions();
     bindVehicleLookup();
     bindKeyboardShortcuts();
@@ -21,7 +21,7 @@ function initApp() {
 
     setActiveTab(activeTab || "dossiers");
     render();
-    initLocalSecurityGate();
+    if (typeof initLocalSecurityGate === "function") initLocalSecurityGate();
     bindWorkHoursInputs();
     loadBundledVehicleDatabase();
     migrateLegacyPhotos();
@@ -612,6 +612,7 @@ function bindWorkHoursInputs() {
 function bindBackupActions() {
   $("#export-backup")?.addEventListener("click", exportBackup);
   $("#export-encrypted-backup")?.addEventListener("click", exportEncryptedBackup);
+  $("#test-encrypted-backup")?.addEventListener("change", testEncryptedBackup);
   $("#import-backup")?.addEventListener("change", importBackup);
   $("#control-autosave")?.addEventListener("click", controlAutosaveHealth);
   $("#export-safety-snapshot")?.addEventListener("click", exportSafetySnapshotNow);
@@ -635,7 +636,7 @@ function registerServiceWorker() {
   });
   window.addEventListener("load", async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=22.15", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=22.16", { updateViaCache: "none" });
       registration.update?.();
       if (registration.waiting) showUpdateAvailable(registration);
       window.setInterval(() => registration.update?.(), 10 * 60 * 1000);

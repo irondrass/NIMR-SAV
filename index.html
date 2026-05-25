@@ -7,7 +7,7 @@
     <meta name="description" content="Application PWA de pilotage SAV, ordres de travail, rendez-vous et planning atelier global." />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; connect-src 'self' https://*.supabase.co wss://*.supabase.co; img-src 'self' blob: data:; font-src 'self' https://fonts.gstatic.com data:; worker-src 'self' blob:; manifest-src 'self';"
+      content="default-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://cdn.jsdelivr.net; img-src 'self' blob: data:; font-src 'self' https://fonts.gstatic.com data:; worker-src 'self' blob:; manifest-src 'self';"
     />
     <title>NIMR SAV</title>
     <link rel="manifest" href="manifest.webmanifest" />
@@ -15,8 +15,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <script src="js/version.js?v=22.15"></script>
-    <link rel="stylesheet" href="styles.css?v=22.15" />
+    <script src="js/version.js?v=22.16"></script>
+    <link rel="stylesheet" href="styles.css?v=22.16" />
   </head>
   <body>
     <a class="skip-link" href="#main-content">Aller au contenu principal</a>
@@ -388,6 +388,11 @@
                   Export chiffré
                 </button>
                 <label class="file-button">
+                  <input type="file" id="test-encrypted-backup" accept=".nimrsecure,application/json" />
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 12l2 2 4-4" /><path d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>
+                  Tester sauvegarde chiffrée
+                </label>
+                <label class="file-button">
                   <input type="file" id="import-backup" accept=".json,.nimrsecure,application/json" />
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M17 8 12 3 7 8" /><path d="M12 3v12" /></svg>
                   Importer sauvegarde
@@ -428,10 +433,11 @@
                 <div class="backup-actions wide">
                   <button class="primary-button" type="submit">Activer / changer PIN</button>
                   <button class="ghost-button" type="button" id="lock-local-session">Verrouiller maintenant</button>
+                  <button class="ghost-button" type="button" id="disable-local-pin">Désactiver le PIN</button>
                   <button class="ghost-button danger-button" type="button" id="clear-local-workstation">Nettoyer ce poste</button>
                 </div>
               </form>
-              <p class="muted backup-warning">Le PIN protège l'accès local sur ce navigateur. Les exports chiffrés restent la méthode recommandée pour transporter une sauvegarde.</p>
+              <p class="muted backup-warning">Le PIN protège l'accès local sur ce navigateur, mais ne chiffre pas les données locales. Les exports chiffrés restent la méthode recommandée pour transporter une sauvegarde.</p>
               <p class="muted backup-status" id="local-security-status">Sécurité locale non contrôlée.</p>
             </section>
 
@@ -492,7 +498,7 @@
     </div>
     <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="true"></div>
     <div class="local-lock-overlay" id="local-lock-overlay" hidden>
-      <form class="local-lock-dialog" id="local-lock-form" aria-labelledby="local-lock-title">
+      <form class="local-lock-dialog" id="local-lock-form" role="dialog" aria-modal="true" aria-labelledby="local-lock-title">
         <img src="assets/icon.svg" alt="" class="local-lock-logo" />
         <h2 id="local-lock-title">Poste atelier verrouillé</h2>
         <p>Entrez le PIN local pour accéder aux dossiers, photos et sauvegardes de ce navigateur.</p>
@@ -873,20 +879,20 @@
     </div>
 
     <script src="vendor/pdf.min.js" defer></script>
-    <script src="js/utils.js?v=22.15" defer></script>
-    <script src="js/state.js?v=22.15" defer></script>
-    <script src="js/ui-cases.js?v=22.15" defer></script>
-    <script src="js/estimate-import.js?v=22.15" defer></script>
-    <script src="js/ui-planning.js?v=22.15" defer></script>
-    <script src="js/photos.js?v=22.15" defer></script>
-    <script src="js/storage.js?v=22.15" defer></script>
-    <script src="js/planning.js?v=22.15" defer></script>
-    <script src="js/exports.js?v=22.15" defer></script>
-    <script src="js/business-rules-v2187.js?v=22.15" defer></script>
+    <script src="js/utils.js?v=22.16" defer></script>
+    <script src="js/state.js?v=22.16" defer></script>
+    <script src="js/ui-cases.js?v=22.16" defer></script>
+    <script src="js/estimate-import.js?v=22.16" defer></script>
+    <script src="js/ui-planning.js?v=22.16" defer></script>
+    <script src="js/photos.js?v=22.16" defer></script>
+    <script src="js/storage.js?v=22.16" defer></script>
+    <script src="js/planning.js?v=22.16" defer></script>
+    <script src="js/exports.js?v=22.16" defer></script>
+    <script src="js/business-rules-v2187.js?v=22.16" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
-    <script src="js/supabase-config.js?v=22.15" defer></script>
-    <script src="js/supabase-client.js?v=22.15" defer></script>
-    <script src="js/supabase-sync.js?v=22.15" defer></script>
-    <script src="app.js?v=22.15" defer></script>
+    <script src="js/supabase-config.js?v=22.16" defer></script>
+    <script src="js/supabase-client.js?v=22.16" defer></script>
+    <script src="js/supabase-sync.js?v=22.16" defer></script>
+    <script src="app.js?v=22.16" defer></script>
   </body>
 </html>

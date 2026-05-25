@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 
 const root = resolve(process.cwd());
 const defaultPort = Number(process.env.NIMR_BROWSER_TEST_PORT || 8787);
-const targetUrl = process.env.NIMR_BROWSER_TEST_URL || `http://127.0.0.1:${defaultPort}/?browser-smoke=22.19`;
+const targetUrl = process.env.NIMR_BROWSER_TEST_URL || `http://127.0.0.1:${defaultPort}/?browser-smoke=22.20`;
 const chromePath = process.env.CHROME_PATH || [
   "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
   "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
@@ -149,8 +149,8 @@ async function main() {
       returnByValue: true,
       expression: `Promise.all([
         navigator.serviceWorker?.getRegistration?.().then(Boolean).catch(() => false),
-        caches?.keys?.().then((keys) => keys.some((key) => key.includes('v22.19'))).catch(() => false),
-      ]).then(([hasServiceWorker, hasV2219Cache]) => ({ hasServiceWorker, hasV2219Cache }))`,
+        caches?.keys?.().then((keys) => keys.some((key) => key.includes('v22.20'))).catch(() => false),
+      ]).then(([hasServiceWorker, hasV2220Cache]) => ({ hasServiceWorker, hasV2220Cache }))`,
     }, sessionId);
 
     const critical = findings.filter((item) => /ReferenceError|Content Security Policy|violates.*connect-src|bindLocalSecurityControls|initLocalSecurityGate/i.test(item.text));

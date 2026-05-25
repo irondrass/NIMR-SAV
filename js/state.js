@@ -20,7 +20,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v22.18";
+const APP_VERSION = "v22.19";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const WORKSHOP_NAME = "NIMR SAV";
@@ -732,7 +732,7 @@ function createDefaultState() {
         color: "Blanc",
         vin: "VF3DEMO2026",
         insurance: "Assurance exemple",
-        orNavNumber: "OR-NAV-2026-001",
+        orNavNumber: "OR-2026-001",
         partsStatus: "unchecked",
         blockerReason: "",
         blockerDetails: "",

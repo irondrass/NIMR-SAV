@@ -1677,7 +1677,7 @@ function renderVehicleIdentityCard(root, item) {
     ["Couleur", item.color],
     ["Kilométrage", item.mileage ? `${item.mileage} km` : ""],
     ["Assurance", item.insurance],
-    ["OR NAV", item.orNavNumber],
+    ["Réf. OR", item.orNavNumber],
   ];
   target.innerHTML = `
     <div class="vehicle-identity-head">

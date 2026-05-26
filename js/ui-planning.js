@@ -47,6 +47,7 @@ function renderPlanning() {
     </div>
   `;
   renderDailyLaborSummary(date, taskNumberMap);
+  renderMobilePlanningList(date, resources, taskNumberMap);
 }
 
 function getBookingLaborOperations(caseItem, key) {
@@ -93,6 +94,79 @@ function renderDailyLaborSummary(date, taskNumberMap) {
         </article>
       `).join('')}
     </div>
+  `;
+}
+
+function renderMobilePlanningList(date, resources, taskNumberMap) {
+  const target = $("#mobile-planning-list");
+  if (!target) return;
+  const day = todayKey(date);
+  const dayStart = atTime(date, "08:00");
+  const dayEnd = atTime(date, "17:00");
+  const rows = [];
+  state.bookings.forEach((booking) => {
+    if (booking.type === "leave") return;
+    const visibleResources = resources.filter((resource) => isBookingVisibleForResource(booking, resource.id));
+    const primaryResource = visibleResources.find((resource) => !isEquipmentResource(resource)) || visibleResources[0];
+    if (!primaryResource) return;
+    (booking.segments || []).forEach((segment) => {
+      const start = new Date(segment.start);
+      const end = new Date(segment.end);
+      if (todayKey(start) !== day && todayKey(end) !== day) return;
+      const status = getBookingOperationalStatus(booking);
+      const actualEnd = status === "completed" && booking.actualEnd ? new Date(booking.actualEnd) : null;
+      if (actualEnd && start >= actualEnd) return;
+      const clippedStart = maxDate(start, dayStart);
+      const clippedEnd = actualEnd ? minDate(minDate(end, dayEnd), actualEnd) : minDate(end, dayEnd);
+      if (clippedEnd <= clippedStart) return;
+      const caseItem = state.cases.find((item) => item.id === booking.caseId);
+      rows.push({ booking, segment, caseItem, resource: primaryResource, start: clippedStart, end: clippedEnd, status });
+    });
+  });
+
+  rows.sort((a, b) => a.start - b.start || a.end - b.end || String(a.resource.name || "").localeCompare(String(b.resource.name || "")));
+  if (!rows.length) {
+    target.innerHTML = '<div class="empty-inline">Aucune tâche atelier planifiée sur cette journée.</div>';
+    return;
+  }
+
+  target.innerHTML = `
+    <div class="mobile-planning-head">
+      <strong>Planning du jour</strong>
+      <span>${rows.length} tâche${rows.length > 1 ? "s" : ""}</span>
+    </div>
+    ${rows
+      .map(({ booking, segment, caseItem, resource, start, end, status }) => {
+        const taskNumber = taskNumberMap?.get(getPlanningTaskNumberKey(booking, segment)) || "";
+        const stage = booking.planningMode === "anticipated-new-part" ? (booking.title || "Pièces neuves anticipées") : (getDurationLabel(booking.key) || booking.title || "Étape planning");
+        const model = shortVehicleModel(caseItem?.vehicle || caseItem?.model || "Véhicule");
+        const plate = caseItem?.plate || caseItem?.registration || caseItem?.vin || "";
+        const statusLabel = getBookingStatusLabel(booking);
+        const blocked = typeof isCaseBlocked === "function" && isCaseBlocked(caseItem);
+        const blockedLabel = blocked && typeof getCaseBlockerLabel === "function" ? getCaseBlockerLabel(caseItem) : "";
+        return `
+          <article class="mobile-planning-card task-status-${escapeAttr(status)} ${blocked ? "is-blocked" : ""}">
+            <div class="mobile-planning-time">
+              <strong>${escapeHtml(formatTime(start))}</strong>
+              <span>${escapeHtml(formatTime(end))}</span>
+            </div>
+            <div class="mobile-planning-body">
+              <div class="mobile-planning-title">
+                <strong>${taskNumber ? `#${escapeHtml(String(taskNumber))} · ` : ""}${escapeHtml(model)}</strong>
+                <span>${escapeHtml(plate || "Sans immatriculation/VIN")}</span>
+              </div>
+              <div class="mobile-planning-meta">
+                <span>${escapeHtml(resource.name || "Ressource")}</span>
+                <span>${escapeHtml(stage)}</span>
+                <span>${escapeHtml(statusLabel || "Planifié")}</span>
+              </div>
+              ${caseItem?.clientName ? `<p>${escapeHtml(caseItem.clientName)}</p>` : ""}
+              ${blocked ? `<span class="risk-pill">${escapeHtml(blockedLabel || "Bloqué")}</span>` : ""}
+            </div>
+          </article>
+        `;
+      })
+      .join("")}
   `;
 }
 

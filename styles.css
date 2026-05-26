@@ -30,9 +30,16 @@
   box-sizing: border-box;
 }
 
+html {
+  min-height: 100%;
+}
+
 body {
   margin: 0;
   min-width: 320px;
+  min-height: 100vh;
+  min-height: 100dvh;
+  overflow-x: hidden;
   color: var(--ink);
   background: #f1f5f9;
   -webkit-font-smoothing: antialiased;
@@ -66,6 +73,7 @@ svg {
   display: grid;
   grid-template-columns: 260px 1fr;
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 @media (max-width: 900px) {
@@ -106,6 +114,7 @@ svg {
   position: sticky;
   top: 0;
   height: 100vh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
   background: rgba(255, 255, 255, 0.7);
@@ -618,6 +627,7 @@ main {
   position: sticky;
   top: 90px;
   max-height: calc(100vh - 112px);
+  max-height: calc(100dvh - 112px);
   overflow: auto;
   padding: 16px;
 }
@@ -2174,6 +2184,109 @@ select:focus {
   text-align: center;
 }
 
+.mobile-planning-list {
+  display: none;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.mobile-planning-head,
+.mobile-planning-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--paper);
+}
+
+.mobile-planning-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 11px 12px;
+}
+
+.mobile-planning-head span {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.mobile-planning-card {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 10px;
+  padding: 12px;
+  border-left: 5px solid var(--brand);
+  box-shadow: var(--shadow-sm);
+}
+
+.mobile-planning-card.task-status-started,
+.mobile-planning-card.task-status-in_progress {
+  border-left-color: var(--ok);
+}
+
+.mobile-planning-card.task-status-paused {
+  border-left-color: var(--warn);
+}
+
+.mobile-planning-card.is-blocked,
+.mobile-planning-card.task-status-blocked {
+  border-left-color: var(--danger);
+}
+
+.mobile-planning-time {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  min-height: 58px;
+  border-radius: var(--radius-sm);
+  color: var(--brand);
+  background: var(--brand-light);
+  font-weight: 900;
+}
+
+.mobile-planning-time span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.mobile-planning-body {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.mobile-planning-title,
+.mobile-planning-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 9px;
+}
+
+.mobile-planning-title strong,
+.mobile-planning-title span,
+.mobile-planning-meta span,
+.mobile-planning-body p {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.mobile-planning-title span,
+.mobile-planning-meta,
+.mobile-planning-body p {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.mobile-planning-meta span {
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: var(--soft);
+  font-weight: 800;
+}
+
 @media (max-width: 1100px) {
   .dashboard-strip,
   .today-board,
@@ -2243,6 +2356,28 @@ select:focus {
   .panel-list {
     position: static;
     max-height: none;
+  }
+
+  .planning-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .toolbar-actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .planning-panel,
+  .gantt {
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .technician-task-actions .primary-button,
+  .technician-task-actions .ghost-button,
+  .technician-task-actions .tiny-button {
+    min-height: 44px;
   }
 
   .workflow {
@@ -3579,6 +3714,367 @@ a:focus-visible {
   flex-wrap: wrap;
   gap: 10px;
   margin-top: 18px;
+}
+
+@media (max-width: 900px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    position: sticky;
+    top: 0;
+    height: auto;
+    min-width: 0;
+    max-width: 100vw;
+    max-height: none;
+    padding: 10px 12px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .brand {
+    min-width: 0;
+    padding: 0 6px 8px;
+  }
+
+  .brand-mark {
+    width: 38px;
+    height: 38px;
+  }
+
+  .sidebar-nav {
+    min-width: 0;
+    max-width: 100%;
+    flex-direction: row;
+    gap: 6px;
+    overflow-x: auto;
+    padding: 0 0 6px;
+    scrollbar-width: thin;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .nav-button {
+    flex: 0 0 auto;
+    min-height: 44px;
+    width: auto;
+    padding: 10px 12px;
+    white-space: nowrap;
+  }
+
+  .nav-button:hover {
+    transform: none;
+  }
+
+  .dashboard-strip {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  main {
+    min-width: 0;
+  }
+
+  .workbench {
+    grid-template-columns: 1fr;
+  }
+
+  .case-detail,
+  .empty-state {
+    min-height: 0;
+  }
+
+  .panel-list {
+    position: static;
+    max-height: none;
+    overflow: visible;
+  }
+}
+
+@media (max-width: 760px) {
+  input,
+  textarea,
+  select {
+    width: 100%;
+    min-height: 44px;
+  }
+
+  .quick-form,
+  .resource-form,
+  .holiday-form,
+  .fastlane-form,
+  .supabase-config-form,
+  .supabase-login-form {
+    gap: 12px;
+  }
+
+  .technician-toolbar,
+  .technician-task-main,
+  .technician-task-actions,
+  .toolbar-actions,
+  .case-actions,
+  .resource-actions,
+  .offline-actions,
+  .local-lock-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .technician-task-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .technician-task-actions .primary-button,
+  .technician-task-actions .ghost-button,
+  .technician-task-actions .tiny-button,
+  .technician-toolbar .ghost-button,
+  .toolbar-actions .ghost-button,
+  .case-actions .primary-button,
+  .case-actions .ghost-button,
+  .file-button {
+    width: 100%;
+    min-height: 44px;
+    white-space: normal;
+  }
+
+  .tiny-button {
+    min-height: 44px;
+    padding: 8px 10px;
+    font-size: 0.82rem;
+  }
+
+  .technician-task-card {
+    padding: 12px;
+  }
+}
+
+@media (max-width: 520px) {
+  html {
+    scroll-padding-bottom: calc(92px + env(safe-area-inset-bottom));
+  }
+
+  body {
+    padding-bottom: calc(76px + env(safe-area-inset-bottom));
+  }
+
+  main {
+    padding: 10px 10px 18px;
+  }
+
+  .sidebar {
+    position: fixed;
+    inset: auto 0 0 0;
+    height: auto;
+    padding: 7px 8px calc(7px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--line);
+    border-bottom: 0;
+    box-shadow: 0 -10px 24px rgba(15, 23, 42, 0.12);
+  }
+
+  .brand {
+    display: none;
+  }
+
+  .sidebar-nav {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 4px;
+    overflow: visible;
+    padding: 0;
+  }
+
+  .nav-button {
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+    min-height: 58px;
+    width: 100%;
+    padding: 6px 3px;
+    border-radius: 10px;
+    font-size: 0.64rem;
+    line-height: 1.05;
+    text-align: center;
+    white-space: normal;
+  }
+
+  .nav-button svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .nav-button[data-tab="pilotage"],
+  .nav-button[data-tab="technician"],
+  .nav-button[data-tab="atelier"] {
+    font-size: 0;
+  }
+
+  .nav-button[data-tab="pilotage"]::after,
+  .nav-button[data-tab="technician"]::after,
+  .nav-button[data-tab="atelier"]::after {
+    font-size: 0.64rem;
+    line-height: 1.05;
+  }
+
+  .nav-button[data-tab="pilotage"]::after {
+    content: "Pilotage";
+  }
+
+  .nav-button[data-tab="technician"]::after {
+    content: "Tech";
+  }
+
+  .nav-button[data-tab="atelier"]::after {
+    content: "Réglages";
+  }
+
+  .dashboard-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+
+  .metric {
+    min-height: 74px;
+    padding: 10px;
+  }
+
+  .metric span {
+    font-size: 0.72rem;
+  }
+
+  .metric strong {
+    margin-top: 6px;
+    font-size: 1.25rem;
+  }
+
+  .metric-lines {
+    gap: 6px;
+    margin-top: 6px;
+  }
+
+  .metric-lines strong {
+    padding: 6px;
+  }
+
+  .metric-lines small {
+    font-size: 0.58rem;
+  }
+
+  .metric-lines b {
+    font-size: 1rem;
+  }
+
+  .sync-status-strip {
+    gap: 6px;
+    margin: 0 0 10px;
+    padding: 8px;
+  }
+
+  .sync-item {
+    min-height: 26px;
+    padding: 4px 7px;
+    font-size: 0.68rem;
+  }
+
+  .panel,
+  .today-group,
+  .today-card,
+  .technician-task-card,
+  .mobile-planning-card {
+    border-radius: 10px;
+  }
+
+  .panel-list,
+  .today-panel,
+  .technician-panel,
+  .technician-manager-panel {
+    padding: 12px;
+  }
+
+  .panel-list {
+    padding-bottom: calc(96px + env(safe-area-inset-bottom));
+  }
+
+  #case-form button[type="submit"] {
+    scroll-margin-bottom: calc(92px + env(safe-area-inset-bottom));
+  }
+
+  .quick-form label,
+  .case-list-tools label,
+  .technician-controls label {
+    font-size: 0.82rem;
+  }
+
+  .primary-button,
+  .ghost-button,
+  .file-button {
+    width: 100%;
+    min-height: 46px;
+    padding-inline: 12px;
+    white-space: normal;
+  }
+
+  .icon-button {
+    min-width: 44px;
+    flex: 0 0 auto;
+  }
+
+  .case-list-tools {
+    gap: 10px;
+  }
+
+  .tabs {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .tab-button {
+    flex: 0 0 auto;
+    min-height: 40px;
+  }
+
+  .gantt {
+    display: none;
+  }
+
+  .mobile-planning-list {
+    display: grid;
+  }
+
+  .daily-labor-summary {
+    margin-top: 12px;
+  }
+
+  .technician-task-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .mobile-planning-card {
+    grid-template-columns: 64px minmax(0, 1fr);
+    padding: 10px;
+  }
+
+  .local-lock-overlay {
+    align-items: end;
+    padding: 12px 12px calc(12px + env(safe-area-inset-bottom));
+  }
+
+  .local-lock-dialog,
+  .offline-card {
+    padding: 18px;
+  }
+
+  .offline-banner {
+    bottom: calc(82px + env(safe-area-inset-bottom));
+    width: calc(100vw - 20px);
+  }
+}
+
+.cleaned-workstation,
+.offline-page,
+.offline-screen {
+  min-height: 100vh;
+  min-height: 100dvh;
 }
 
 

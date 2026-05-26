@@ -2748,19 +2748,113 @@ function formatDateTimeLocalInputValue(value) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-async function handleBookingTaskAction(item, action, bookingId) {
+const BOOKING_ACTION_OVERRIDE_LABELS = {
+  start: "Démarrage tâche",
+  pause: "Pause tâche",
+  complete: "Fin tâche",
+};
+
+function getBookingTaskById(item, bookingId) {
+  return state.bookings.find((candidate) => candidate.id === bookingId && candidate.caseId === item?.id) || null;
+}
+
+function resolveBookingActionTechnicianId(booking, action, options = {}) {
+  if (options.technicianId) return options.technicianId;
+  if (!booking) return "";
+  if (action === "complete") return booking.completedBy || booking.startedBy || booking.resumedBy || getBookingPrimaryTechnicianId(booking);
+  if (action === "pause") return booking.startedBy || booking.resumedBy || getBookingPrimaryTechnicianId(booking);
+  return getBookingPrimaryTechnicianId(booking);
+}
+
+function getBookingActionRequiresTechnicianMessage(action) {
+  const label = BOOKING_ACTION_OVERRIDE_LABELS[action] || "Action tâche";
+  return `${label} à effectuer depuis la vue Technicien, sauf override chef atelier : aucun technicien humain valide n'est identifié pour cette tâche.`;
+}
+
+function recordWorkshopChiefOverride(item, booking, action, reason) {
+  const label = BOOKING_ACTION_OVERRIDE_LABELS[action] || "Action tâche";
+  addHistory(
+    item,
+    "planning.task.override",
+    "Override chef atelier",
+    `${label} appliqué sur ${booking?.title || getDurationLabel(booking?.key) || "tâche atelier"} (${booking?.id || "booking inconnu"}). Motif: ${reason}.`
+  );
+}
+
+function runWorkshopChiefOverride(item, booking, action, reason, options = {}) {
+  const actorId = options.technicianId || resolveBookingActionTechnicianId(booking, action, options) || "chef-atelier";
+  const actorLabel = "Override chef atelier";
+  let result = null;
+  if (action === "start") {
+    result = startCaseBookingTask(item, booking.id, { startedBy: actorId, actorLabel });
+  } else if (action === "pause") {
+    result = pauseCaseBookingTask(item, booking.id, options.pauseReason || reason, { pausedBy: actorId, actorLabel });
+  } else if (action === "complete") {
+    result = completeCaseBookingTaskNow(item, booking.id, new Date(), { completedBy: actorId, actorLabel, note: options.note || "" });
+  }
+  if (result?.ok) recordWorkshopChiefOverride(item, booking, action, reason);
+  return result || { ok: false, message: "Override chef atelier impossible pour cette action." };
+}
+
+async function requestWorkshopChiefOverride(item, booking, action, failedResult, options = {}) {
+  if (options.allowOverride === false) return failedResult;
+  const reasonFromOptions = String(options.overrideReason || "").trim();
+  let confirmed = options.overrideConfirmed === true;
+  if (!confirmed) {
+    confirmed = await showConfirmModal(
+      `<strong>Action bloquée par les règles technicien.</strong><br>${escapeHtml(failedResult?.message || "Action impossible.")}<br><br>Utiliser un override chef atelier ?`
+    );
+  }
+  if (!confirmed) return { ok: false, cancelled: true, message: "Action annulée." };
+  const promptFn = typeof window.prompt === "function" ? window.prompt.bind(window) : null;
+  const reason = reasonFromOptions || (promptFn ? String(promptFn("Motif obligatoire de l'override chef atelier :") || "").trim() : "");
+  if (!reason) return { ok: false, message: "Motif override chef atelier obligatoire." };
+  return runWorkshopChiefOverride(item, booking, action, reason, options);
+}
+
+async function runSecuredBookingTaskAction(item, action, bookingId, options = {}) {
+  const booking = getBookingTaskById(item, bookingId);
+  if (!booking) return { ok: false, message: "Tâche introuvable dans le planning." };
+  const technicianId = resolveBookingActionTechnicianId(booking, action, options);
+  if (!technicianId) {
+    return requestWorkshopChiefOverride(
+      item,
+      booking,
+      action,
+      { ok: false, message: getBookingActionRequiresTechnicianMessage(action) },
+      options
+    );
+  }
+
+  let result = null;
+  if (action === "start") {
+    result = startTechnicianTask(item, bookingId, technicianId);
+  } else if (action === "pause") {
+    result = pauseTechnicianTask(item, bookingId, technicianId, options.pauseReason);
+  } else if (action === "complete") {
+    result = completeTechnicianTask(item, bookingId, technicianId, { note: options.note || "", skipPhotoCheck: false });
+  }
+  if (!result) return { ok: false, message: "Action tâche inconnue." };
+  if (!result.ok) return requestWorkshopChiefOverride(item, booking, action, result, options);
+  return result;
+}
+
+async function handleBookingTaskAction(item, action, bookingId, options = {}) {
   try {
     let result = null;
     if (action === "start") {
-      result = startCaseBookingTask(item, bookingId);
+      result = await runSecuredBookingTaskAction(item, action, bookingId, options);
     } else if (action === "complete") {
-      const confirmed = await showConfirmModal("Terminer cette tâche maintenant et libérer le temps restant dans le planning ?");
-      if (!confirmed) return;
-      result = completeCaseBookingTaskNow(item, bookingId);
+      if (!options.skipConfirmation) {
+        const confirmed = await showConfirmModal("Terminer cette tâche maintenant et libérer le temps restant dans le planning ?");
+        if (!confirmed) return { ok: false, cancelled: true, message: "Action annulée." };
+      }
+      const note = options.note !== undefined ? options.note : "";
+      result = await runSecuredBookingTaskAction(item, action, bookingId, { ...options, note });
     } else if (action === "pause") {
-      const reason = window.prompt("Cause de pause / report du reliquat :");
+      const reason = options.pauseReason !== undefined ? options.pauseReason : window.prompt("Cause de pause / report du reliquat :");
       if (reason === null) return;
-      result = pauseCaseBookingTask(item, bookingId, reason);
+      result = await runSecuredBookingTaskAction(item, action, bookingId, { ...options, pauseReason: reason });
     } else if (action === "reschedule") {
       const booking = state.bookings.find((candidate) => candidate.id === bookingId && candidate.caseId === item.id);
       const defaultValue = formatDateTimeLocalInputValue(booking?.start || new Date());
@@ -2769,13 +2863,15 @@ async function handleBookingTaskAction(item, action, bookingId) {
       result = rescheduleCaseBooking(item, bookingId, requested);
     }
     if (!result) return;
-    notifyUser(result.message, result.ok ? "success" : "info");
+    if (!options.silent) notifyUser(result.message, result.ok ? "success" : "info");
     if (result.ok) {
-      saveState({ flushCloud: true, cloudReason: `booking-${action}` });
-      render();
+      if (options.persist !== false) saveState({ flushCloud: true, cloudReason: `booking-${action}` });
+      if (!options.skipRender) render();
     }
+    return result;
   } catch (error) {
     notifyUser(error.message || "Action planning impossible.", "error");
+    return { ok: false, message: error.message || "Action planning impossible." };
   }
 }
 

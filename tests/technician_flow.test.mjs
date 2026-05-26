@@ -78,6 +78,20 @@ vm.createContext(context);
 vm.runInContext(source, context);
 const app = (code) => vm.runInContext(code, context);
 
+const stateSource = fs.readFileSync('js/state.js', 'utf8');
+const appSource = fs.readFileSync('app.js', 'utf8');
+const swSource = fs.readFileSync('sw.js', 'utf8');
+const versionSource = fs.readFileSync('js/version.js', 'utf8');
+const indexSource = fs.readFileSync('index.html', 'utf8');
+const appVersion = stateSource.match(/APP_VERSION\s*=\s*"(v\d+\.\d+)"/)?.[1];
+assert.equal(appVersion, 'v22.20', 'APP_VERSION doit rester en v22.20 pour cette branche');
+assert.match(appSource, /serviceWorker\.register\("sw\.js\?v=22\.20"/, 'le service worker doit être enregistré avec sw.js?v=22.20');
+assert.match(swSource, /nimr-sav-v22\.20-technician-flow/, 'le cache PWA doit être en v22.20');
+assert.match(versionSource, /NIMR_BUILD\s*=\s*"v22\.20"/, 'js/version.js doit exposer v22.20');
+[...indexSource.matchAll(/\?v=(\d+\.\d+)/g)].forEach((match) => {
+  assert.equal(match[1], '22.20', `référence index.html incohérente: ?v=${match[1]}`);
+});
+
 function setupTechnicianState() {
   const now = new Date();
   const start = new Date(now.getTime() - 30 * 60000).toISOString();
@@ -162,6 +176,49 @@ assert.equal(blockResult.ok, true, 'une tâche doit pouvoir être bloquée avec 
 assert.equal(app(`state.bookings.find((booking) => booking.id === 'booking-main').blockReason`), 'attente pièces');
 assert.equal(app(`state.cases[0].blockerReason`), 'waiting_parts');
 assert.equal(app(`getTechnicianTaskStatus(state.cases[0], state.bookings.find((booking) => booking.id === 'booking-main'))`), 'blocked');
+
+setupTechnicianState();
+app(`state.bookings.find((booking) => booking.id === 'booking-main').resourceIds = ['pont-1']; state.bookings.find((booking) => booking.id === 'booking-main').primaryResourceId = 'pont-1';`);
+const noTechnicianHandleResult = await app(`handleBookingTaskAction(state.cases[0], 'start', 'booking-main', { allowOverride: false, silent: true, persist: false, skipRender: true })`);
+assert.equal(noTechnicianHandleResult.ok, false, 'handleBookingTaskAction ne doit pas démarrer sans technicien');
+assert.equal(app(`state.bookings.find((booking) => booking.id === 'booking-main').status`), 'planned');
+
+setupTechnicianState();
+app(`state.cases[0].flags.received = false`);
+const notReceivedHandleResult = await app(`handleBookingTaskAction(state.cases[0], 'start', 'booking-main', { allowOverride: false, silent: true, persist: false, skipRender: true })`);
+assert.equal(notReceivedHandleResult.ok, false, 'handleBookingTaskAction doit refuser un véhicule non réceptionné');
+assert.match(notReceivedHandleResult.message, /réception/i);
+
+setupTechnicianState();
+const wrongTechnicianHandleResult = await app(`handleBookingTaskAction(state.cases[0], 'start', 'booking-main', { technicianId: 'tech-2', allowOverride: false, silent: true, persist: false, skipRender: true })`);
+assert.equal(wrongTechnicianHandleResult.ok, false, 'handleBookingTaskAction doit refuser une tâche non affectée au technicien');
+assert.match(wrongTechnicianHandleResult.message, /affectée/i);
+
+setupTechnicianState();
+app(`state.cases[0].claims[0].clientApproved = false`);
+const missingApprovalHandleResult = await app(`handleBookingTaskAction(state.cases[0], 'start', 'booking-main', { allowOverride: false, silent: true, persist: false, skipRender: true })`);
+assert.equal(missingApprovalHandleResult.ok, false, 'handleBookingTaskAction doit refuser un accord requis manquant');
+assert.match(missingApprovalHandleResult.message, /validation client|accord/i);
+
+setupTechnicianState();
+const guardedStartResult = await app(`handleBookingTaskAction(state.cases[0], 'start', 'booking-main', { allowOverride: false, silent: true, persist: false, skipRender: true })`);
+assert.equal(guardedStartResult.ok, true, 'handleBookingTaskAction doit démarrer via le flux technicien sécurisé');
+const guardedConcurrentResult = await app(`handleBookingTaskAction(state.cases[1], 'start', 'booking-concurrent', { allowOverride: false, silent: true, persist: false, skipRender: true })`);
+assert.equal(guardedConcurrentResult.ok, false, 'handleBookingTaskAction doit refuser deux tâches actives pour le même technicien');
+assert.match(guardedConcurrentResult.message, /déjà une tâche en cours/i);
+
+setupTechnicianState();
+app(`const b = state.bookings.find((booking) => booking.id === 'booking-main'); b.status = 'started'; b.startedBy = ''; b.resourceIds = ['pont-1']; b.primaryResourceId = 'pont-1';`);
+const completeWithoutTechnicianResult = await app(`handleBookingTaskAction(state.cases[0], 'complete', 'booking-main', { allowOverride: false, skipConfirmation: true, silent: true, persist: false, skipRender: true })`);
+assert.equal(completeWithoutTechnicianResult.ok, false, 'handleBookingTaskAction ne doit pas terminer sans completedBy/technicien ou override');
+assert.equal(app(`state.bookings.find((booking) => booking.id === 'booking-main').completedBy`), '');
+
+setupTechnicianState();
+app(`state.cases[0].flags.received = false`);
+const overrideResult = await app(`handleBookingTaskAction(state.cases[0], 'start', 'booking-main', { overrideConfirmed: true, overrideReason: 'Urgence chef atelier', silent: true, persist: false, skipRender: true })`);
+assert.equal(overrideResult.ok, true, 'un override chef atelier explicite doit permettre une exception contrôlée');
+assert.equal(app(`state.bookings.find((booking) => booking.id === 'booking-main').status`), 'started');
+assert.equal(app(`state.cases[0].history.some((entry) => entry.type === 'planning.task.override' && /Urgence chef atelier/.test(entry.details))`), true, 'override chef atelier doit être historisé avec motif');
 
 const legacyState = app(`normalizeState({
   resources: [{ id: 'tech-legacy', name: 'Ancien tech', role: 'mecanicien', active: true }],

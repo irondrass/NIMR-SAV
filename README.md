@@ -1,3 +1,11 @@
+# v22.22 - Responsive mobile et tablette
+
+- Navigation mobile compacte : sidebar conservée sur desktop, barre compacte sur tablette, bottom bar sur smartphone.
+- Formulaire de création dossier corrigé pour 320-520 px : une colonne, champs pleine largeur, boutons visibles et zones sans débordement horizontal.
+- Vue Technicien adaptée tablette/téléphone : cartes verticales, actions tactiles minimum 44 px, accès direct depuis la navigation mobile.
+- Planning smartphone enrichi avec une liste du jour lisible en plus du Gantt desktop/tablette.
+- Cache PWA incrémenté en `nimr-sav-v22.22-mobile-responsive`.
+
 # v22.21 - Sécurité planning et règles métier
 
 - Protection du blocage dossier manuel : lever un blocage tâche ne supprime plus un blocage dossier saisi manuellement ni les autres tâches bloquées.

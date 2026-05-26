@@ -70,6 +70,9 @@ async function refreshSupabasePanel() {
   }
   const user = await getSupabaseUser();
   if (user) {
+    if (typeof syncCurrentUserWithSupabaseAuth === "function" && syncCurrentUserWithSupabaseAuth(user)) {
+      saveState({ skipCloud: true });
+    }
     setSupabaseStatus(`Connecté : ${user.email || user.id}`, "ok");
     setSupabaseDetails("Synchronisation multi-PC active : les modifications sont sauvegardées et reçues depuis Supabase.");
   } else {

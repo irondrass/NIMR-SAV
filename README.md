@@ -1,3 +1,12 @@
+# v22.23 - Fondations utilisateurs, rôles et acteur courant
+
+- Ajout du modèle local `users` et `currentUserId`, avec migration douce des anciens états sans utilisateurs.
+- Bootstrap automatique d’un premier administrateur local compatible offline.
+- Ajout des rôles atelier et permissions centrales : admin, chef atelier, réception, technicien, qualité et lecture seule.
+- Liaison préparée entre utilisateur et ressource planning (`resourceId`, `userId`, `authUserId`) sans imposer Supabase.
+- Historique enrichi avec `userId`, `userName`, `userRole` et `resourceId`, en conservant `user` pour les anciens dossiers.
+- Cache PWA incrémenté en `nimr-sav-v22.23-users-roles-foundation`.
+
 # v22.22 - Responsive mobile et tablette
 
 - Navigation mobile compacte : sidebar conservée sur desktop, barre compacte sur tablette, bottom bar sur smartphone.

@@ -1,5 +1,5 @@
-window.NIMR_BUILD = "v22.22";
-window.NIMR_CACHE_NAME = "nimr-sav-v22.22-mobile-responsive";
+window.NIMR_BUILD = "v22.23";
+window.NIMR_CACHE_NAME = "nimr-sav-v22.23-users-roles-foundation";
 
 if ("caches" in window) {
   caches.keys().then((keys) => Promise.all(

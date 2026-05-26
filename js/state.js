@@ -20,7 +20,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v22.22";
+const APP_VERSION = "v22.23";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const WORKSHOP_NAME = "NIMR SAV";
@@ -266,6 +266,46 @@ const ROLE_LABELS = {
   pont_mecanique: "Pont grands travaux mécaniques",
   controle: "Contrôle qualité",
 };
+
+const USER_ROLES = {
+  admin: "Administrateur",
+  chef_atelier: "Chef atelier",
+  reception: "Réception",
+  technicien: "Technicien",
+  qualite: "Qualité",
+  readonly: "Lecture seule",
+};
+
+const ROLE_PERMISSIONS = {
+  admin: ["*"],
+  chef_atelier: ["task.*", "task.override", "planning.edit", "quality.validate", "delivery.complete", "print.*"],
+  reception: ["case.create", "case.edit", "schedule_appointment", "receive_vehicle", "delivery.complete", "print.*"],
+  technicien: ["task.start", "task.pause", "task.resume", "task.complete", "task.block", "print.task"],
+  qualite: ["quality.validate", "quality.reject", "print.quality"],
+  readonly: ["print.*"],
+};
+
+const MUTATION_PERMISSIONS = [
+  "task.start",
+  "task.pause",
+  "task.resume",
+  "task.complete",
+  "task.block",
+  "task.override",
+  "planning.edit",
+  "quality.validate",
+  "quality.reject",
+  "delivery.complete",
+  "case.close",
+  "case.create",
+  "case.edit",
+  "schedule_appointment",
+  "receive_vehicle",
+  "export.backup",
+  "import.backup",
+  "settings.edit",
+  "users.manage",
+];
 
 
 const SERVICE_TYPE_OPTIONS = [
@@ -782,6 +822,8 @@ function createDefaultState() {
       { id: "pont-mecanique-2", name: "Pont mécanique 2", role: "pont_mecanique", location: "Grands travaux", active: true },
       { id: "pont-mecanique-3", name: "Pont mécanique 3", role: "pont_mecanique", location: "Grands travaux", active: true },
     ],
+    users: [],
+    currentUserId: "",
     bookings: [],
     holidays: [
       { date: `${today.getFullYear()}-01-01`, label: "Nouvel an" },
@@ -804,6 +846,9 @@ function createDefaultState() {
       technicianDate: todayKey(new Date()),
     },
   };
+  const admin = createBootstrapAdminUser();
+  stateSeed.users = [admin];
+  stateSeed.currentUserId = admin.id;
   return stateSeed;
 }
 
@@ -873,6 +918,174 @@ function loadState() {
   return createDefaultState();
 }
 
+function normalizeUserRole(role) {
+  return Object.prototype.hasOwnProperty.call(USER_ROLES, role) ? role : "readonly";
+}
+
+function createBootstrapAdminUser(seed = {}) {
+  const now = new Date().toISOString();
+  return normalizeUser({
+    id: seed.id || uid("user"),
+    authUserId: seed.authUserId || "",
+    name: seed.name || seed.email || "Admin local",
+    email: seed.email || "",
+    role: "admin",
+    resourceId: seed.resourceId || "",
+    active: seed.active !== false,
+    createdAt: seed.createdAt || now,
+    updatedAt: seed.updatedAt || now,
+  });
+}
+
+function normalizeUser(user = {}, resources = []) {
+  const allowedResourceIds = new Set((resources || []).map((resource) => resource.id).filter(Boolean));
+  const role = normalizeUserRole(user.role || (user.isAdmin ? "admin" : ""));
+  const createdAt = user.createdAt || new Date().toISOString();
+  const resourceId = String(user.resourceId || user.technicianId || "").trim();
+  return {
+    id: String(user.id || uid("user")).trim(),
+    authUserId: String(user.authUserId || user.auth_user_id || user.supabaseUserId || "").trim(),
+    name: String(user.name || user.displayName || user.email || "Utilisateur atelier").trim(),
+    email: String(user.email || "").trim().toLowerCase(),
+    role,
+    resourceId: !allowedResourceIds.size || allowedResourceIds.has(resourceId) ? resourceId : "",
+    active: user.active !== false,
+    createdAt,
+    updatedAt: user.updatedAt || createdAt,
+  };
+}
+
+function normalizeUsers(users, resources = []) {
+  const normalized = Array.isArray(users)
+    ? users.map((user) => normalizeUser(user, resources)).filter((user) => user.id && user.name)
+    : [];
+  const byId = new Map();
+  normalized.forEach((user) => {
+    if (!byId.has(user.id)) byId.set(user.id, user);
+  });
+  const unique = [...byId.values()];
+  if (!unique.some((user) => user.active)) {
+    unique.push(createBootstrapAdminUser());
+  }
+  return unique;
+}
+
+function resolveCurrentUserId(currentUserId, users = []) {
+  const activeUsers = users.filter((user) => user.active !== false);
+  const current = activeUsers.find((user) => user.id === currentUserId);
+  if (current) return current.id;
+  return activeUsers.find((user) => user.role === "admin")?.id || activeUsers[0]?.id || "";
+}
+
+function linkResourcesToUsers(resources = [], users = []) {
+  const usersByResource = new Map(users.filter((user) => user.resourceId).map((user) => [user.resourceId, user]));
+  resources.forEach((resource) => {
+    const linkedUser = usersByResource.get(resource.id);
+    if (!linkedUser) return;
+    resource.userId = linkedUser.id;
+    resource.authUserId = linkedUser.authUserId || resource.authUserId || "";
+  });
+}
+
+function getUserById(userId) {
+  return (state.users || []).find((user) => user.id === userId) || null;
+}
+
+function getCurrentUser() {
+  const users = Array.isArray(state?.users) ? state.users : [];
+  const activeUsers = users.filter((user) => user.active !== false);
+  return activeUsers.find((user) => user.id === state.currentUserId)
+    || activeUsers.find((user) => user.role === "admin")
+    || activeUsers[0]
+    || null;
+}
+
+function getCurrentActor() {
+  const user = getCurrentUser();
+  if (!user) {
+    return { userId: "", userName: "Atelier", userRole: "", resourceId: "" };
+  }
+  return {
+    userId: user.id,
+    userName: user.name || user.email || "Utilisateur atelier",
+    userRole: user.role || "readonly",
+    resourceId: user.resourceId || "",
+  };
+}
+
+function setCurrentUser(userId) {
+  const user = getUserById(userId);
+  if (!user || user.active === false) return false;
+  state.currentUserId = user.id;
+  return true;
+}
+
+function resolvePermissionUser(userOrId = null) {
+  if (!userOrId) return getCurrentUser();
+  if (typeof userOrId === "string") return getUserById(userOrId);
+  return normalizeUser(userOrId, state.resources || []);
+}
+
+function permissionMatches(granted, requested) {
+  if (granted === "*" || granted === requested) return true;
+  if (granted.endsWith(".*")) {
+    return requested.startsWith(granted.slice(0, -1));
+  }
+  return false;
+}
+
+function hasPermission(permission, context = {}) {
+  const requested = String(permission || "").trim();
+  if (!requested) return false;
+  const user = resolvePermissionUser(context.user || context.userId);
+  if (!user || user.active === false) return false;
+  const permissions = ROLE_PERMISSIONS[user.role] || [];
+  return permissions.some((granted) => permissionMatches(granted, requested));
+}
+
+function requirePermission(permission, context = {}) {
+  const allowed = hasPermission(permission, context);
+  if (!allowed && context.notify !== false && typeof notifyUser === "function") {
+    notifyUser(context.message || "Action non autorisée pour ce rôle utilisateur.", "error");
+  }
+  return allowed;
+}
+
+function isWorkshopManager(user = getCurrentUser()) {
+  const role = resolvePermissionUser(user)?.role || "";
+  return role === "admin" || role === "chef_atelier";
+}
+
+function isReadOnlyMode() {
+  return getCurrentUser()?.role === "readonly";
+}
+
+function canActOnTechnicianTask(user, booking) {
+  const resolvedUser = resolvePermissionUser(user);
+  if (!resolvedUser || !booking || resolvedUser.active === false) return false;
+  if (isWorkshopManager(resolvedUser)) return true;
+  if (resolvedUser.role !== "technicien" || !resolvedUser.resourceId) return false;
+  return (booking.resourceIds || []).includes(resolvedUser.resourceId);
+}
+
+function syncCurrentUserWithSupabaseAuth(authUser) {
+  if (!authUser?.id) return false;
+  state.users = normalizeUsers(state.users, state.resources);
+  let user = state.users.find((candidate) => candidate.authUserId === authUser.id)
+    || state.users.find((candidate) => authUser.email && candidate.email === String(authUser.email).toLowerCase());
+  if (!user) {
+    user = getCurrentUser() || createBootstrapAdminUser();
+    if (!state.users.some((candidate) => candidate.id === user.id)) state.users.push(user);
+  }
+  user.authUserId = authUser.id;
+  user.email = String(authUser.email || user.email || "").trim().toLowerCase();
+  if (!user.name || user.name === "Admin local") user.name = user.email || "Utilisateur Supabase";
+  user.updatedAt = new Date().toISOString();
+  state.currentUserId = user.id;
+  linkResourcesToUsers(state.resources, state.users);
+  return true;
+}
+
 function normalizeState(raw) {
   raw = raw && typeof raw === "object" ? raw : {};
   const seed = createDefaultState();
@@ -884,9 +1097,14 @@ function normalizeState(raw) {
   });
   ensureMinimumEquipmentResources(resources, seed.resources, "pont_vidange", 3);
   ensureMinimumEquipmentResources(resources, seed.resources, "pont_mecanique", 3);
+  const users = normalizeUsers(raw.users, resources);
+  const currentUserId = resolveCurrentUserId(raw.currentUserId, users);
+  linkResourcesToUsers(resources, users);
   return {
     cases: Array.isArray(raw.cases) ? raw.cases.map(normalizeCase) : seed.cases,
     resources,
+    users,
+    currentUserId,
     bookings: normalizeBookings(raw.bookings, resources),
     holidays: Array.isArray(raw.holidays) ? raw.holidays : seed.holidays,
     planningDate: raw.planningDate || todayKey(new Date()),
@@ -1110,6 +1328,8 @@ function normalizeResource(resource) {
     location: resource.location || "",
     active: resource.active !== false,
     fastLane: Boolean(resource.fastLane),
+    userId: resource.userId || "",
+    authUserId: resource.authUserId || "",
   };
 }
 
@@ -1438,7 +1658,11 @@ function normalizeHistory(history, fallbackDate) {
           type: entry.type || "note",
           label: entry.label || "Action dossier",
           details: entry.details || "",
-          user: entry.user || "Atelier",
+          user: entry.user || entry.userName || "Atelier",
+          userId: entry.userId || "",
+          userName: entry.userName || entry.user || "Atelier",
+          userRole: normalizeUserRole(entry.userRole || "") === "readonly" && !entry.userRole ? "" : normalizeUserRole(entry.userRole),
+          resourceId: entry.resourceId || "",
         }))
         .filter((entry) => entry.label)
     : [];
@@ -1450,22 +1674,38 @@ function normalizeHistory(history, fallbackDate) {
   return normalized.sort((a, b) => new Date(b.at) - new Date(a.at));
 }
 
-function makeHistoryEntry(type, label, at = new Date().toISOString(), details = "") {
+function makeHistoryEntry(type, label, at = new Date().toISOString(), details = "", actor = null) {
+  let resolvedActor = actor;
+  if (!resolvedActor) {
+    try {
+      resolvedActor = getCurrentActor();
+    } catch (error) {
+      resolvedActor = { userId: "", userName: "Atelier", userRole: "", resourceId: "" };
+    }
+  }
   return {
     id: uid("history"),
     at,
     type,
     label,
     details,
-    user: "Atelier",
+    user: resolvedActor.userName || "Atelier",
+    userId: resolvedActor.userId || "",
+    userName: resolvedActor.userName || "Atelier",
+    userRole: resolvedActor.userRole || "",
+    resourceId: resolvedActor.resourceId || "",
   };
 }
 
-function addHistory(item, type, label, details = "") {
+function addHistoryWithActor(item, type, label, details = "", actor = null) {
   if (!item) return;
   item.history = Array.isArray(item.history) ? item.history : normalizeHistory([], item.createdAt);
-  item.history.unshift(makeHistoryEntry(type, label, new Date().toISOString(), details));
+  item.history.unshift(makeHistoryEntry(type, label, new Date().toISOString(), details, actor || getCurrentActor()));
   item.history = item.history.slice(0, 200);
+}
+
+function addHistory(item, type, label, details = "") {
+  addHistoryWithActor(item, type, label, details, getCurrentActor());
 }
 
 function recordFlagHistory(item, flag, checked) {

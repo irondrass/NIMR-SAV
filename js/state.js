@@ -20,7 +20,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v22.20";
+const APP_VERSION = "v22.21";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const WORKSHOP_NAME = "NIMR SAV";
@@ -1073,6 +1073,7 @@ function normalizeBooking(booking, resourceIds) {
     startedBy: booking.startedBy || "",
     completedAt: booking.completedAt || "",
     completedBy: booking.completedBy || "",
+    completedByOverride: booking.completedByOverride || "",
     pausedAt: booking.pausedAt || "",
     pausedBy: booking.pausedBy || "",
     resumedAt: booking.resumedAt || "",
@@ -1114,6 +1115,12 @@ function normalizeResource(resource) {
 
 function normalizeCase(item) {
   item = item && typeof item === "object" ? item : {};
+  const normalizedPartsStatus = normalizePartsStatus(item.partsStatus);
+  const normalizedBlockerReason = normalizeBlockerReason(item.blockerReason);
+  const hasLegacyBlocker = BLOCKING_PARTS_STATUSES.has(normalizedPartsStatus) || Boolean(normalizedBlockerReason);
+  const blockerSource = ["manual", "task"].includes(item.blockerSource)
+    ? item.blockerSource
+    : (hasLegacyBlocker ? "manual" : "");
   return {
     id: item.id || uid("case"),
     clientName: item.clientName || "Client",
@@ -1129,9 +1136,11 @@ function normalizeCase(item) {
     vin: item.vin || "",
     insurance: item.insurance || "",
     orNavNumber: item.orNavNumber || item.claimNumber || "",
-    partsStatus: normalizePartsStatus(item.partsStatus),
-    blockerReason: normalizeBlockerReason(item.blockerReason),
+    partsStatus: normalizedPartsStatus,
+    blockerReason: normalizedBlockerReason,
     blockerDetails: item.blockerDetails || item.blockerNote || "",
+    blockerSource,
+    blockerSourceBookingIds: Array.isArray(item.blockerSourceBookingIds) ? item.blockerSourceBookingIds.filter(Boolean).map(String) : [],
     damageNotes: item.damageNotes || "",
     arrivalNotes: item.arrivalNotes || item.receptionNotes || "",
     expertName: item.expertName || "",

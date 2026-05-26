@@ -490,7 +490,11 @@ assert.ok(
   context.getBusinessRuleIssues(qualityGateCase, 'qualityApproved').some((issue) => issue.includes('travaux terminés')),
   'le contrôle qualité ne doit pas être validé avant fin travaux'
 );
-context.applyWorkflowAction(qualityGateCase, 'workCompleted');
+const qualityGateOverride = await context.completeCaseWorkWithChiefOverride(qualityGateCase, {
+  overrideConfirmed: true,
+  overrideReason: 'Smoke test clôture contrôlée',
+});
+assert.equal(qualityGateOverride.ok, true, 'la fin globale contrôlée doit accepter un override motivé dans ce scénario');
 assert.equal(context.getNextWorkflowAction(qualityGateCase), 'qualityApproved', 'après fin travaux, le flux doit passer au contrôle qualité');
 
 const insuranceDeliveryCase = context.normalizeCase({

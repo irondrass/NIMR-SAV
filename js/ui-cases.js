@@ -1759,6 +1759,18 @@ function renderCaseDetail() {
         const confirmed = await showConfirmModal(warnings.join("<br>") + "<br><br>Voulez-vous vraiment continuer ?");
         if (!confirmed) return;
       }
+      if (flag === "workCompleted") {
+        const result = await completeCaseWorkWithChiefOverride(item);
+        if (!result?.ok) {
+          notifyUser(result?.message || "Clôture globale impossible.", result?.cancelled ? "info" : "error");
+          return;
+        }
+        recordReleasedCapacityIfNeeded(item, result.freedMinutes);
+        notifyUser(result.message || "Travaux terminés.", "success");
+        saveState({ flushCloud: true, cloudReason: `workflow-${flag}` });
+        render();
+        return;
+      }
       applyWorkflowAction(item, flag);
       saveState({ flushCloud: true, cloudReason: `workflow-${flag}` });
       render();
@@ -1835,6 +1847,16 @@ function getTabForAction(action) {
   return "claims";
 }
 
+function recordReleasedCapacityIfNeeded(item, freedMinutes) {
+  if (Number(freedMinutes || 0) <= 0) return;
+  addHistory(
+    item,
+    "planning.capacity.released",
+    "Capacité atelier libérée",
+    `${formatLocalizedDecimal(Number(freedMinutes || 0) / 60)} h libérée(s) car les travaux sont terminés avant la fin planifiée.`
+  );
+}
+
 function applyWorkflowAction(item, action) {
   const workflowClaimIds = new Set(getWorkflowClaims(item).map((claim) => claim.id));
   const claims = Array.isArray(item.claims) ? item.claims : [];
@@ -1866,18 +1888,24 @@ function applyWorkflowAction(item, action) {
   }
 
   if (action === "workCompleted") {
+    const technicianBookings = getCaseIncompleteTechnicianBookings(item);
+    if (technicianBookings.length) {
+      addHistory(
+        item,
+        "planning.work.completed.blocked",
+        "Clôture globale refusée",
+        `${technicianBookings.length} tâche(s) affectée(s) doivent être terminées depuis la vue Technicien ou par override chef atelier.`
+      );
+      return {
+        ok: false,
+        message: "Terminez les tâches affectées depuis la vue Technicien, ou utilisez un override chef atelier avec motif.",
+      };
+    }
     const result = completeCaseWorkBookingsNow(item, new Date(now));
     item.flags.workCompleted = true;
     if (!result.completed) recordFlagHistory(item, action, true);
-    if (result.freedMinutes > 0) {
-      addHistory(
-        item,
-        "planning.capacity.released",
-        "Capacité atelier libérée",
-        `${formatLocalizedDecimal(result.freedMinutes / 60)} h libérée(s) car les travaux sont terminés avant la fin planifiée.`
-      );
-    }
-    return;
+    recordReleasedCapacityIfNeeded(item, result.freedMinutes);
+    return { ok: true, ...result };
   }
 
   item.flags[action] = true;
@@ -2141,6 +2169,8 @@ function renderCaseBlockerControls(root, item) {
     item.blockerReason = normalizeBlockerReason(target.querySelector("[data-case-blocker-reason]")?.value);
     item.blockerDetails = normalizeTextInputValue(target.querySelector("[data-case-blocker-details]")?.value);
     const nextBlocked = isCaseBlocked(item);
+    item.blockerSource = nextBlocked ? "manual" : "";
+    item.blockerSourceBookingIds = [];
     addHistory(
       item,
       "case.blocker.updated",
@@ -2157,6 +2187,8 @@ function renderCaseBlockerControls(root, item) {
     item.partsStatus = "unchecked";
     item.blockerReason = "";
     item.blockerDetails = "";
+    item.blockerSource = "";
+    item.blockerSourceBookingIds = [];
     addHistory(item, "case.blocker.cleared", "Blocage retiré", "Le dossier est de nouveau exploitable.");
     saveState({ flushCloud: true, cloudReason: "case-blocker-cleared" });
     render();
@@ -2753,6 +2785,53 @@ const BOOKING_ACTION_OVERRIDE_LABELS = {
   pause: "Pause tâche",
   complete: "Fin tâche",
 };
+
+function getCaseIncompleteTechnicianBookings(item) {
+  return getCaseProductionBookings(item)
+    .filter((booking) => getBookingOperationalStatus(booking) !== "completed")
+    .filter((booking) => getBookingHumanResourceIds(booking).length > 0);
+}
+
+async function completeCaseWorkWithChiefOverride(item, options = {}) {
+  const technicianBookings = getCaseIncompleteTechnicianBookings(item);
+  if (!technicianBookings.length) {
+    const result = completeCaseWorkBookingsNow(item, new Date(), {
+      completedByOverride: options.completedByOverride || "",
+      actorLabel: options.actorLabel || "",
+      overrideReason: options.overrideReason || "",
+    });
+    return { ok: true, message: "Travaux terminés.", ...result };
+  }
+  if (options.allowOverride === false) {
+    return {
+      ok: false,
+      message: "Terminez les tâches affectées depuis la vue Technicien, ou utilisez un override chef atelier avec motif.",
+    };
+  }
+  const confirmed = options.overrideConfirmed === true
+    ? true
+    : await showConfirmModal(
+      `<strong>Clôture globale des travaux.</strong><br>${technicianBookings.length} tâche(s) affectée(s) à un technicien ne sont pas terminées individuellement.<br><br>Utiliser un override chef atelier ?`
+    );
+  if (!confirmed) return { ok: false, cancelled: true, message: "Clôture globale annulée." };
+  const reasonFromOptions = String(options.overrideReason || "").trim();
+  const promptFn = typeof window.prompt === "function" ? window.prompt.bind(window) : null;
+  const reason = reasonFromOptions || (promptFn ? String(promptFn("Motif obligatoire de l'override chef atelier :") || "").trim() : "");
+  if (!reason) return { ok: false, message: "Motif override chef atelier obligatoire." };
+  const result = completeCaseWorkBookingsNow(item, new Date(), {
+    completedByOverride: options.completedByOverride || "chef-atelier",
+    actorLabel: "Override chef atelier",
+    overrideReason: reason,
+    keepEmptyBookings: true,
+  });
+  addHistory(
+    item,
+    "planning.work.completed.override",
+    "Travaux clôturés par override chef atelier",
+    `${technicianBookings.length} tâche(s) affectée(s) clôturée(s) globalement. Motif: ${reason}.`
+  );
+  return { ok: true, message: "Travaux clôturés avec override chef atelier.", ...result };
+}
 
 function getBookingTaskById(item, bookingId) {
   return state.bookings.find((candidate) => candidate.id === bookingId && candidate.caseId === item?.id) || null;

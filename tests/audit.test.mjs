@@ -281,12 +281,30 @@ audit("Progression logique de 5 dossiers dans tous les états possibles", () => 
     context.applyWorkflowAction(dossier, "received");
 
     // 6. Travaux
-    vm.runInContext(`state.bookings.push({ caseId: 'case-mass-${i}', resourceIds: ['t1'] })`, context);
+    vm.runInContext(`state.bookings.push({
+      id: 'booking-mass-${i}',
+      caseId: 'case-mass-${i}',
+      key: 'body',
+      title: 'Tôlerie',
+      resourceIds: ['t1'],
+      primaryResourceId: 't1',
+      segments: [{ start: '2026-05-18T08:00:00.000Z', end: '2026-05-18T09:00:00.000Z' }],
+      start: '2026-05-18T08:00:00.000Z',
+      end: '2026-05-18T09:00:00.000Z',
+      plannedStart: '2026-05-18T08:00:00.000Z',
+      plannedEnd: '2026-05-18T09:00:00.000Z',
+      plannedMinutes: 60
+    })`, context);
     assert.equal(context.getNextWorkflowAction(dossier), "workStarted", "L'action suivante doit être le démarrage");
     context.applyWorkflowAction(dossier, "workStarted");
 
     assert.equal(context.getNextWorkflowAction(dossier), "workCompleted", "L'action suivante doit être la fin");
-    context.applyWorkflowAction(dossier, "workCompleted");
+    context.completeCaseWorkBookingsNow(dossier, new Date("2026-05-18T09:00:00"), {
+      completedByOverride: "audit",
+      actorLabel: "Audit test",
+      overrideReason: "Progression logique audit",
+      keepEmptyBookings: true,
+    });
 
     // 7. Qualité
     dossier.qualityChecklist = Object.fromEntries(vm.runInContext('DEFAULT_QUALITY_CHECKS', context).map(l => [l, true]));

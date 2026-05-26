@@ -600,6 +600,10 @@ function bookingIntersectsRange(booking, rangeStart, rangeEnd) {
   });
 }
 
+function rangesOverlap(startA, endA, startB, endB) {
+  return startA < endB && endA > startB;
+}
+
 function getActiveTechnicianBookings(technicianId) {
   if (!technicianId) return [];
   return state.bookings.filter((booking) => (
@@ -610,25 +614,60 @@ function getActiveTechnicianBookings(technicianId) {
   ));
 }
 
-function getTechnicianLeaveConflicts(technicianId, when = new Date()) {
-  const point = when instanceof Date ? when : new Date(when);
+function getTechnicianLeaveConflicts(technicianId, rangeStart = new Date(), rangeEnd = null) {
+  const start = rangeStart instanceof Date ? rangeStart : new Date(rangeStart);
+  const end = rangeEnd ? (rangeEnd instanceof Date ? rangeEnd : new Date(rangeEnd)) : addMinutes(start, 1);
+  if (!technicianId || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) return [];
   return state.bookings.filter((booking) => (
     booking.type === "leave"
     && (booking.resourceIds || []).includes(technicianId)
-    && (booking.segments || []).some((segment) => new Date(segment.start) <= point && new Date(segment.end) >= point)
+    && (booking.segments || []).some((segment) => rangesOverlap(start, end, new Date(segment.start), new Date(segment.end)))
   ));
+}
+
+function getTechnicianLeaveCheckRange(booking, reference = new Date()) {
+  const status = getBookingOperationalStatus(booking);
+  const now = reference instanceof Date ? reference : new Date(reference);
+  let start = status === "started" ? now : new Date(booking?.start || booking?.plannedStart || now);
+  let end = new Date(booking?.end || booking?.plannedEnd || "");
+  if (Number.isNaN(start.getTime())) start = now;
+  if (Number.isNaN(end.getTime()) || end <= start) {
+    const minutes = Math.max(
+      STEP_MINUTES,
+      Number(booking?.remainingMinutes || 0)
+        || Number(booking?.plannedMinutes || 0)
+        || getBookingDurationMinutes(booking)
+        || STEP_MINUTES
+    );
+    end = addMinutes(start, minutes);
+  }
+  return { start, end };
+}
+
+const REQUIRED_PREDECESSOR_KEYS = {
+  prep: ["body"],
+  paint: ["prep"],
+  reassembly: ["paint"],
+  finish: ["reassembly"],
+  quality: ["body", "oilService", "mechanical", "electrical", "prep", "paint", "reassembly", "finish"],
+};
+
+function getRequiredPredecessorKeys(booking) {
+  if (!booking) return [];
+  if (booking.remainingFromPaused) return [];
+  if (booking.planningMode === "anticipated-new-part") return [];
+  return REQUIRED_PREDECESSOR_KEYS[booking.key] || [];
 }
 
 function getPreviousRequiredBookings(item, booking) {
   if (!item || !booking) return [];
-  const bookingStart = new Date(booking.start).getTime();
   const productionBookings = getCaseProductionBookings(item).filter((candidate) => candidate.id !== booking.id);
-  if (booking.key === "quality") return productionBookings;
+  const requiredKeys = getRequiredPredecessorKeys(booking);
+  if (!requiredKeys.length) return [];
   return productionBookings.filter((candidate) => {
     if (candidate.remainingFromPaused && candidate.parentBookingId === booking.id) return false;
     if (booking.remainingFromPaused && candidate.id === booking.parentBookingId) return false;
-    const candidateStart = new Date(candidate.start).getTime();
-    return Number.isFinite(candidateStart) && Number.isFinite(bookingStart) && candidateStart < bookingStart;
+    return requiredKeys.includes(candidate.key);
   });
 }
 
@@ -713,8 +752,11 @@ function getTechnicianTaskStartIssues(item, booking, technicianId, options = {})
   if (!options.overridePrecedence && hasUnfinishedPreviousRequiredBooking(item, booking)) {
     issues.push("La tâche précédente obligatoire n'est pas terminée.");
   }
-  if (!options.overrideLeave && getTechnicianLeaveConflicts(technicianId, new Date()).length) {
-    issues.push("Ce technicien est marqué indisponible maintenant.");
+  if (!options.overrideLeave) {
+    const { start, end } = getTechnicianLeaveCheckRange(booking);
+    if (getTechnicianLeaveConflicts(technicianId, start, end).length) {
+      issues.push("Ce technicien est marqué indisponible pendant le créneau de cette tâche.");
+    }
   }
   return [...new Set(issues)];
 }
@@ -822,7 +864,7 @@ function completeBookingReservationAt(booking, completedAt, options = {}) {
 
   if (keptSegments.length) {
     applySegmentsToBooking(booking, keptSegments);
-  } else {
+  } else if (options.removeIfEmpty !== false) {
     state.bookings = state.bookings.filter((candidate) => candidate.id !== booking.id);
   }
 
@@ -938,7 +980,7 @@ function completeCaseBookingTaskNow(item, bookingId, completedAt = new Date(), m
   return { ok: true, message: freedMinutes > 0 ? "Tâche terminée. Le temps restant est libéré dans le planning." : "Tâche terminée.", booking };
 }
 
-function completeCaseWorkBookingsNow(item, completedAt = new Date()) {
+function completeCaseWorkBookingsNow(item, completedAt = new Date(), meta = {}) {
   const now = new Date(completedAt);
   const bookings = getCaseProductionBookings(item).filter((booking) => getBookingOperationalStatus(booking) !== "completed");
   if (!bookings.length) return { completed: 0, freedMinutes: 0, removed: 0 };
@@ -946,14 +988,18 @@ function completeCaseWorkBookingsNow(item, completedAt = new Date()) {
   let removed = 0;
   bookings.forEach((booking) => {
     const title = booking.title || getDurationLabel(booking.key);
-    const result = completeBookingReservationAt(booking, now);
+    booking.completedBy = meta.completedBy || booking.completedBy || "";
+    booking.completedByOverride = meta.completedByOverride || booking.completedByOverride || "";
+    booking.actualWorkedMinutes = Math.max(Number(booking.actualWorkedMinutes || 0) || 0, estimateBookingWorkedMinutes(booking, now));
+    closeBookingWorkSession(booking, { completedAt: now.toISOString(), completedBy: booking.completedBy || booking.completedByOverride || "", pauseReason: "" });
+    const result = completeBookingReservationAt(booking, now, { removeIfEmpty: meta.keepEmptyBookings === true ? false : undefined });
     freedMinutes += result.freedMinutes;
     if (result.removed) removed += 1;
     addHistory(
       item,
       "planning.task.completed",
       "Tâche terminée",
-      `${title} clôturée avec le dossier à ${formatDateTime(now)}${result.freedMinutes > 0 ? `. ${formatLocalizedDecimal(result.freedMinutes / 60)} h libérée(s).` : "."}`
+      `${title} clôturée avec le dossier${meta.actorLabel ? ` par ${meta.actorLabel}` : ""} à ${formatDateTime(now)}${result.freedMinutes > 0 ? `. ${formatLocalizedDecimal(result.freedMinutes / 60)} h libérée(s).` : "."}${meta.overrideReason ? ` Motif override: ${meta.overrideReason}.` : ""}`
     );
   });
   item.flags.workCompleted = true;
@@ -1091,9 +1137,13 @@ function mapTechnicianBlockReason(reason) {
   return { blockerReason: "other" };
 }
 
-function applyCaseBlockerFromTask(item, reason, details) {
+function applyCaseBlockerFromTask(item, booking, reason, details) {
   if (!item) return;
   const mapped = mapTechnicianBlockReason(reason);
+  item.blockerSourceBookingIds = Array.isArray(item.blockerSourceBookingIds) ? item.blockerSourceBookingIds : [];
+  if (booking?.id && !item.blockerSourceBookingIds.includes(booking.id)) item.blockerSourceBookingIds.push(booking.id);
+  if (item.blockerSource === "manual" && isCaseBlocked(item)) return;
+  item.blockerSource = "task";
   item.blockerReason = item.blockerReason || mapped.blockerReason || "other";
   if (mapped.partsStatus && !BLOCKING_PARTS_STATUSES.has(normalizePartsStatus(item.partsStatus))) item.partsStatus = mapped.partsStatus;
   item.blockerDetails = [item.blockerDetails, details || reason].filter(Boolean).join(item.blockerDetails ? " · " : "");
@@ -1117,7 +1167,7 @@ function blockTechnicianTask(item, bookingId, technicianId, reason, details = ""
   target.blockedBy = technicianId || "";
   target.blockReason = cleanReason;
   target.blockDetails = String(details || "").trim();
-  applyCaseBlockerFromTask(item, cleanReason, target.blockDetails);
+  applyCaseBlockerFromTask(item, target, cleanReason, target.blockDetails);
   addHistory(
     item,
     "planning.task.blocked",
@@ -1135,10 +1185,15 @@ function clearTechnicianTaskBlock(item, bookingId, technicianId, options = {}) {
   booking.blockedBy = "";
   booking.blockReason = "";
   booking.blockDetails = "";
+  item.blockerSourceBookingIds = Array.isArray(item.blockerSourceBookingIds)
+    ? item.blockerSourceBookingIds.filter((id) => id !== booking.id)
+    : [];
   const caseHasOtherBlockedTasks = getCaseWorkBookings(item).some((candidate) => candidate.id !== booking.id && isBookingTaskBlocked(candidate));
-  if (!caseHasOtherBlockedTasks) {
+  if (!caseHasOtherBlockedTasks && item.blockerSource === "task") {
     item.blockerReason = "";
     item.blockerDetails = "";
+    item.blockerSource = "";
+    item.blockerSourceBookingIds = [];
     if (normalizePartsStatus(item.partsStatus) === "waiting_parts" || normalizePartsStatus(item.partsStatus) === "blocked_parts") item.partsStatus = "unchecked";
   }
   if (hadBlock && !options.silent) {

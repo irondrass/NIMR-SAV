@@ -1,3 +1,11 @@
+# v22.21 - Sécurité planning et règles métier
+
+- Protection du blocage dossier manuel : lever un blocage tâche ne supprime plus un blocage dossier saisi manuellement ni les autres tâches bloquées.
+- Vérification des congés/absences sur l'intervalle réel de la tâche planifiée ou du reliquat repris.
+- Sécurisation de la clôture globale des travaux : les tâches affectées à des techniciens doivent passer par le flux technicien ou par override chef atelier motivé et historisé.
+- Précédence métier stabilisée par clés d'étapes, avec maintien de la préparation anticipée pièces neuves.
+- Cache PWA incrémenté en `nimr-sav-v22.21-planning-safety`.
+
 # v22.20 - Flux technicien atelier
 
 - Ajout de la vue principale `Technicien` avec sélection technicien/date, cartes “Mes tâches”, statuts lisibles et actions terrain : démarrer, pause, reprendre, bloquer, noter, photographier, terminer et imprimer.

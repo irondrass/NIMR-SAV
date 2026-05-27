@@ -23,6 +23,8 @@ async function handleEstimateImportFile(event, item, root) {
     notifyUser("Sélectionnez un dossier avant d'importer un devis.", "error");
     return;
   }
+  const permissionGuard = guardEstimateImport(item);
+  if (!permissionGuard.ok) return;
   if (!file) return;
   const validationError = validateEstimateImportFile(file);
   if (validationError) {
@@ -69,6 +71,8 @@ async function handleClaimEstimateImportFile(event, item, claimId, root) {
   const file = event.target.files?.[0];
   event.target.value = "";
   if (!item) return;
+  const permissionGuard = guardEstimateImport(item);
+  if (!permissionGuard.ok) return;
   const claim = (item.claims || []).find((candidate) => candidate.id === claimId);
   if (!claim) {
     notifyUser("Ordre de travail introuvable.", "error");
@@ -380,6 +384,8 @@ function distributeLaborHours(operation, hours, options = {}) {
 
 async function applyEstimateImportToCase(item, preview) {
   if (!preview) return;
+  const permissionGuard = guardEstimateImport(item);
+  if (!permissionGuard.ok) return;
   const durations = normalizeEstimatePreviewDurations(preview.durations, item);
   ESTIMATE_ALLOWED_KEYS.forEach((key) => {
     item.durations[key] = roundPlanningHours(durations[key]);
@@ -456,6 +462,10 @@ function cleanParsedEstimateNumber(value) {
 
 async function applyEstimateImportToClaim(item, claim, preview, options = {}) {
   if (!item || !claim || !preview) return;
+  if (!options.skipPermission) {
+    const permissionGuard = guardEstimateImport(item);
+    if (!permissionGuard.ok) return;
+  }
   const previousSourceFileId = claim.estimate?.sourceFile?.id || "";
   applyDetectedEstimateInfo(item, preview.info || {});
   const parsedEstimateNumber = cleanParsedEstimateNumber(preview.info.estimateNumber);

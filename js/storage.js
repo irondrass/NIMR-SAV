@@ -208,6 +208,8 @@ function controlAutosaveHealth() {
 }
 
 async function exportSafetySnapshotNow() {
+  const permissionGuard = guardSensitiveAction("export.backup");
+  if (!permissionGuard.ok) return;
   showBackupStatus("Préparation de la copie de sécurité...");
   try {
     const payload = await buildBackupPayload();
@@ -221,6 +223,8 @@ async function exportSafetySnapshotNow() {
 }
 
 async function restoreLatestAutomaticSnapshot() {
+  const permissionGuard = guardSensitiveAction("import.backup");
+  if (!permissionGuard.ok) return;
   try {
     const snapshots = JSON.parse(localStorage.getItem(STORAGE_SNAPSHOTS_KEY) || "[]");
     if (!Array.isArray(snapshots) || !snapshots.length) {
@@ -372,10 +376,14 @@ function isEncryptedBackupPayload(payload) {
 }
 
 async function exportBackup() {
+  const permissionGuard = guardSensitiveAction("export.backup");
+  if (!permissionGuard.ok) return;
   showBackupStatus("Préparation de la sauvegarde...");
   try {
     const payload = await buildBackupPayload();
     downloadJson(payload, `nimr-carrosserie-sauvegarde-${todayKey(new Date())}.json`);
+    addAuditLog("backup.exported", "Sauvegarde exportée", `${state.cases.length} dossier(s), ${payload.photos.length} photo(s).`);
+    saveState({ skipCloud: true, skipSnapshot: true });
     showBackupStatus(`Sauvegarde exportée: ${state.cases.length} dossier(s), ${payload.photos.length} photo(s).`, "ok");
   } catch (error) {
     console.error("Export sauvegarde impossible", error);
@@ -385,6 +393,8 @@ async function exportBackup() {
 }
 
 async function exportEncryptedBackup() {
+  const permissionGuard = guardSensitiveAction("export.backup");
+  if (!permissionGuard.ok) return;
   showBackupStatus("Préparation de la sauvegarde chiffrée...");
   const password = await getBackupPasswordFromUser(
     "Exporter une sauvegarde chiffrée",
@@ -399,6 +409,8 @@ async function exportEncryptedBackup() {
     const payload = await buildBackupPayload();
     const encrypted = await encryptBackupPayload(payload, password);
     downloadJson(encrypted, `nimr-sav-sauvegarde-chiffree-${todayKey(new Date())}.nimrsecure`);
+    addAuditLog("backup.encrypted.exported", "Sauvegarde chiffrée exportée", `${state.cases.length} dossier(s), ${payload.photos.length} photo(s).`);
+    saveState({ skipCloud: true, skipSnapshot: true });
     showBackupStatus(`Sauvegarde chiffrée exportée: ${state.cases.length} dossier(s), ${payload.photos.length} photo(s). Testez-la avant archivage.`, "ok");
     notifyUser("Sauvegarde chiffrée créée. Testez-la avant archivage.", "success");
   } catch (error) {
@@ -444,6 +456,11 @@ async function testEncryptedBackup(event) {
 }
 
 async function importBackup(event) {
+  const permissionGuard = guardSensitiveAction("import.backup");
+  if (!permissionGuard.ok) {
+    if (event?.target) event.target.value = "";
+    return;
+  }
   const file = event.target.files?.[0];
   if (!file) return;
   if (file.size > MAX_BACKUP_IMPORT_SIZE) {
@@ -483,12 +500,14 @@ async function importBackup(event) {
     const safetyPayload = await buildBackupPayload();
     downloadJson(safetyPayload, `nimr-carrosserie-avant-import-${todayKey(new Date())}.json`);
 
+    const importActor = getCurrentActor();
     state = normalizeState(importedState);
     activeCaseId = state.cases[0]?.id ?? null;
     generatedProposals = {};
     await clearPhotoStore();
     const restoredPhotos = await restorePhotoRecords(photos);
     const restoredDocuments = typeof restoreDocumentRecords === "function" ? await restoreDocumentRecords(documents) : 0;
+    addAuditLog("backup.imported", "Sauvegarde importée", `${importedState.cases.length} dossier(s), ${photos.length} photo(s), ${restoredDocuments} document(s).`, { actor: importActor });
     saveState();
     render();
     showBackupStatus(`Sauvegarde importée: ${state.cases.length} dossier(s), ${restoredPhotos} photo(s), ${restoredDocuments} document(s).`, "ok");

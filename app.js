@@ -137,6 +137,8 @@ function bindCaseCreation() {
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
+    const createGuard = guardCaseCreate();
+    if (!createGuard.ok) return;
     const data = new FormData(form);
     const estimateFile = data.get("estimateFile");
     const hasEstimateFile = estimateFile && estimateFile.name;
@@ -655,7 +657,25 @@ function bindBackupActions() {
   $("#control-autosave")?.addEventListener("click", controlAutosaveHealth);
   $("#export-safety-snapshot")?.addEventListener("click", exportSafetySnapshotNow);
   $("#restore-auto-snapshot")?.addEventListener("click", restoreLatestAutomaticSnapshot);
+  applyBackupPermissionState();
   renderAutosaveHealthStatus();
+}
+
+function applyBackupPermissionState() {
+  [
+    ["#export-backup", "export.backup"],
+    ["#export-encrypted-backup", "export.backup"],
+    ["#import-backup", "import.backup"],
+    ["#restore-auto-snapshot", "import.backup"],
+    ["#export-safety-snapshot", "export.backup"],
+  ].forEach(([selector, permission]) => {
+    const target = $(selector);
+    if (!target) return;
+    const guard = guardSensitiveAction(permission, {}, { notify: false });
+    target.disabled = !guard.ok;
+    target.title = guard.message;
+    target.closest("label")?.classList.toggle("disabled-card", !guard.ok);
+  });
 }
 
 function bindVehicleLookup() {

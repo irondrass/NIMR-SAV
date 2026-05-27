@@ -278,8 +278,36 @@ const USER_ROLES = {
 
 const ROLE_PERMISSIONS = {
   admin: ["*"],
-  chef_atelier: ["task.*", "task.override", "planning.edit", "quality.validate", "delivery.complete", "print.*"],
-  reception: ["case.create", "case.edit", "schedule_appointment", "receive_vehicle", "delivery.complete", "print.*"],
+  chef_atelier: [
+    "case.create",
+    "case.edit",
+    "estimate.import",
+    "appointment.schedule",
+    "schedule_appointment",
+    "vehicle.receive",
+    "receive_vehicle",
+    "task.*",
+    "task.override",
+    "planning.edit",
+    "quality.validate",
+    "quality.reject",
+    "delivery.complete",
+    "case.close",
+    "export.backup",
+    "print.*",
+  ],
+  reception: [
+    "case.create",
+    "case.edit",
+    "estimate.import",
+    "appointment.schedule",
+    "schedule_appointment",
+    "vehicle.receive",
+    "receive_vehicle",
+    "delivery.complete",
+    "case.close",
+    "print.*",
+  ],
   technicien: ["task.start", "task.pause", "task.resume", "task.complete", "task.block", "print.task"],
   qualite: ["quality.validate", "quality.reject", "print.quality"],
   readonly: ["print.*"],
@@ -297,14 +325,19 @@ const MUTATION_PERMISSIONS = [
   "quality.reject",
   "delivery.complete",
   "case.close",
+  "case.delete",
   "case.create",
   "case.edit",
+  "estimate.import",
+  "appointment.schedule",
   "schedule_appointment",
+  "vehicle.receive",
   "receive_vehicle",
   "export.backup",
   "import.backup",
   "settings.edit",
   "users.manage",
+  "supabase.configure",
 ];
 
 
@@ -609,6 +642,8 @@ function bindLocalSecurityIdleEvents() {
 }
 
 async function disableLocalPin() {
+  const permissionGuard = guardSensitiveAction("settings.edit");
+  if (!permissionGuard.ok) return;
   if (!isLocalPinEnabled()) {
     setLocalSecurityStatus("Aucun PIN à désactiver.", "warn");
     return;
@@ -621,6 +656,8 @@ async function disableLocalPin() {
     sessionStorage.removeItem(LOCAL_SECURITY_SESSION_KEY);
     window.clearTimeout(localSecurityIdleTimer);
     hideLocalLockOverlay();
+    addAuditLog("security.pin.disabled", "PIN local désactivé", "Protection locale retirée sur ce poste.");
+    saveState({ skipCloud: true, skipSnapshot: true });
     renderLocalSecurityStatus();
     notifyUser("PIN local désactivé sur ce poste.", "success");
   } catch (error) {
@@ -637,8 +674,23 @@ function initLocalSecurityGate() {
 
 function bindLocalSecurityControls() {
   const form = $("#local-pin-form");
+  const settingsGuard = guardSensitiveAction("settings.edit", {}, { notify: false });
+  if (form) {
+    $$("input, button", form).forEach((control) => {
+      control.disabled = !settingsGuard.ok;
+      control.title = settingsGuard.message;
+    });
+  }
+  ["#disable-local-pin", "#clear-local-workstation"].forEach((selector) => {
+    const control = $(selector);
+    if (!control) return;
+    control.disabled = !settingsGuard.ok;
+    control.title = settingsGuard.message;
+  });
   form?.addEventListener("submit", async (event) => {
     event.preventDefault();
+    const permissionGuard = guardSensitiveAction("settings.edit");
+    if (!permissionGuard.ok) return;
     const pin = form.elements.pin.value;
     const confirmPin = form.elements.confirmPin.value;
     if (pin !== confirmPin) {
@@ -647,6 +699,8 @@ function bindLocalSecurityControls() {
     }
     try {
       await setLocalPin(pin);
+      addAuditLog("security.pin.enabled", "PIN local activé", "Protection locale activée sur ce poste.");
+      saveState({ skipCloud: true, skipSnapshot: true });
       form.reset();
       renderLocalSecurityStatus();
       notifyUser("PIN local activé sur ce poste.", "success");
@@ -720,6 +774,8 @@ function showWorkstationCleanedScreen() {
 }
 
 async function cleanLocalWorkstation() {
+  const permissionGuard = guardSensitiveAction("settings.edit");
+  if (!permissionGuard.ok) return;
   const confirmed = await showPromptModal(
     "Cette action supprime les dossiers locaux, photos/documents IndexedDB, caches PWA, points de restauration, configuration Supabase et session Supabase locale de ce navigateur.<br><br>Les données déjà synchronisées dans Supabase ne sont pas supprimées.<br><br>Tapez NETTOYER pour confirmer.",
     "NETTOYER",
@@ -824,6 +880,7 @@ function createDefaultState() {
     ],
     users: [],
     currentUserId: "",
+    auditLog: [],
     bookings: [],
     holidays: [
       { date: `${today.getFullYear()}-01-01`, label: "Nouvel an" },
@@ -1057,6 +1114,17 @@ function getPermissionDeniedMessage(permission, context = {}) {
   const role = user?.role || "";
   if (!user) return "Aucun utilisateur actif n'est sélectionné.";
   if (user.active === false) return "Utilisateur inactif.";
+  if (role === "readonly" && MUTATION_PERMISSIONS.includes(requested)) return "Mode lecture seule : modification impossible.";
+  if (requested === "case.delete") return "Suppression réservée administrateur.";
+  if (requested === "supabase.configure") return "Configuration Supabase réservée administrateur.";
+  if (requested === "import.backup") return "Import sauvegarde réservé administrateur.";
+  if (requested === "settings.edit" || requested === "users.manage") return "Action réservée administrateur.";
+  if (requested === "export.backup") return "Export sauvegarde réservé chef atelier/admin.";
+  if (requested === "quality.validate" || requested === "quality.reject") return "Action réservée qualité/chef atelier/admin.";
+  if (requested === "delivery.complete" || requested === "case.close") return "Livraison réservée réception/chef atelier/admin.";
+  if (["case.create", "case.edit", "estimate.import", "appointment.schedule", "schedule_appointment", "vehicle.receive", "receive_vehicle"].includes(requested)) {
+    return "Action réservée réception/chef atelier/admin.";
+  }
   if (requested === "task.override" || requested === "planning.edit") return "Action réservée chef atelier/admin.";
   if (requested.startsWith("task.")) {
     if (role === "technicien" && !user.resourceId) return "Aucune ressource technicien liée à cet utilisateur.";
@@ -1066,7 +1134,6 @@ function getPermissionDeniedMessage(permission, context = {}) {
     if (role === "readonly") return "Mode lecture seule : modification impossible.";
     if (role === "reception" || role === "qualite") return "Action réservée au technicien affecté ou au chef atelier/admin.";
   }
-  if (role === "readonly" && MUTATION_PERMISSIONS.includes(requested)) return "Mode lecture seule : modification impossible.";
   return "Permission insuffisante.";
 }
 
@@ -1098,6 +1165,63 @@ function guardAction(permission, context = {}, options = {}) {
 
 function canRenderAction(permission, context = {}, options = {}) {
   return guardAction(permission, context, { ...options, notify: false }).ok;
+}
+
+function getWorkflowActionPermission(action, checked = true) {
+  if (action === "claim" || action === "labor" || action === "expertApproved" || action === "clientApproved") return "case.edit";
+  if (action === "appointment") return "appointment.schedule";
+  if (action === "received") return "vehicle.receive";
+  if (action === "qualityApproved") return checked ? "quality.validate" : "quality.reject";
+  if (action === "delivered") return "delivery.complete";
+  if (action === "invoiced") return "case.close";
+  return "";
+}
+
+function guardWorkflowAction(action, item, checked = true, options = {}) {
+  const permission = getWorkflowActionPermission(action, checked);
+  if (!permission) {
+    return {
+      ok: true,
+      allowed: true,
+      permission: "",
+      message: "",
+      user: getCurrentUser(),
+      actor: getCurrentActor(),
+    };
+  }
+  return guardAction(permission, { item, action, checked }, options);
+}
+
+function guardCaseCreate(options = {}) {
+  return guardAction("case.create", {}, options);
+}
+
+function guardCaseEdit(item, options = {}) {
+  return guardAction("case.edit", { item }, options);
+}
+
+function guardEstimateImport(item, options = {}) {
+  return guardAction("estimate.import", { item }, options);
+}
+
+function guardAppointmentSchedule(item, options = {}) {
+  return guardAction("appointment.schedule", { item }, options);
+}
+
+function guardVehicleReceive(item, options = {}) {
+  return guardAction("vehicle.receive", { item }, options);
+}
+
+function guardQualityValidate(item, options = {}) {
+  return guardAction("quality.validate", { item }, options);
+}
+
+function guardDeliveryComplete(item, options = {}) {
+  return guardAction("delivery.complete", { item }, options);
+}
+
+function guardSensitiveAction(permission, context = {}, options = {}) {
+  return guardAction(permission, context, options);
 }
 
 function isWorkshopManager(user = getCurrentUser()) {
@@ -1154,6 +1278,7 @@ function normalizeState(raw) {
     resources,
     users,
     currentUserId,
+    auditLog: normalizeAuditLog(raw.auditLog),
     bookings: normalizeBookings(raw.bookings, resources),
     holidays: Array.isArray(raw.holidays) ? raw.holidays : seed.holidays,
     planningDate: raw.planningDate || todayKey(new Date()),
@@ -1723,6 +1848,26 @@ function normalizeHistory(history, fallbackDate) {
   return normalized.sort((a, b) => new Date(b.at) - new Date(a.at));
 }
 
+function normalizeAuditLog(entries) {
+  return (Array.isArray(entries) ? entries : [])
+    .map((entry) => ({
+      id: entry.id || uid("audit"),
+      at: entry.at || new Date().toISOString(),
+      type: entry.type || "audit",
+      label: entry.label || "Action atelier",
+      details: entry.details || "",
+      user: entry.user || entry.userName || "Atelier",
+      userId: entry.userId || "",
+      userName: entry.userName || entry.user || "Atelier",
+      userRole: entry.userRole || "",
+      resourceId: entry.resourceId || "",
+      caseId: entry.caseId || "",
+    }))
+    .filter((entry) => entry.label)
+    .sort((a, b) => new Date(b.at) - new Date(a.at))
+    .slice(0, 500);
+}
+
 function makeHistoryEntry(type, label, at = new Date().toISOString(), details = "", actor = null) {
   let resolvedActor = actor;
   if (!resolvedActor) {
@@ -1744,6 +1889,17 @@ function makeHistoryEntry(type, label, at = new Date().toISOString(), details = 
     userRole: resolvedActor.userRole || "",
     resourceId: resolvedActor.resourceId || "",
   };
+}
+
+function addAuditLog(type, label, details = "", context = {}) {
+  state.auditLog = normalizeAuditLog(state.auditLog);
+  const entry = {
+    ...makeHistoryEntry(type, label, new Date().toISOString(), details, context.actor || getCurrentActor()),
+    caseId: context.caseId || context.item?.id || "",
+  };
+  state.auditLog.unshift(entry);
+  state.auditLog = state.auditLog.slice(0, 500);
+  return entry;
 }
 
 function addHistoryWithActor(item, type, label, details = "", actor = null) {

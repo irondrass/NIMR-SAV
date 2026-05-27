@@ -17,6 +17,8 @@ function isPrintableWorkBooking(booking) {
 }
 
 async function markAppointmentNoShow(item) {
+  const permissionGuard = guardAppointmentSchedule(item);
+  if (!permissionGuard.ok) return;
   if (!item.appointment) {
     notifyUser("Aucun RDV fixé pour ce dossier.");
     return;
@@ -35,6 +37,8 @@ async function markAppointmentNoShow(item) {
 }
 
 async function rescheduleAppointment(item) {
+  const permissionGuard = guardAppointmentSchedule(item);
+  if (!permissionGuard.ok) return;
   if (!item.appointment) {
     notifyUser("Aucun RDV à reporter. Calculez d'abord un RDV.");
     return;
@@ -204,6 +208,8 @@ function buildClaimPdfLines(item, claim) {
 
 async function deleteActiveCase(item) {
   if (!item) return;
+  const permissionGuard = guardSensitiveAction("case.delete", { item });
+  if (!permissionGuard.ok) return;
   const confirmed = await showConfirmModal("Cette action supprimera définitivement le dossier, son historique, ses photos et ses réservations planning. Continuer ?");
   if (!confirmed) return;
   const typedOk = await showPromptModal("Pour confirmer la suppression définitive, tapez SUPPRIMER :", "SUPPRIMER");
@@ -212,6 +218,7 @@ async function deleteActiveCase(item) {
     return;
   }
   try {
+    addAuditLog("case.deleted", "Dossier supprimé", `${item.clientName || "Client"} - ${item.plate || item.vin || item.id}`, { item });
     await Promise.all((item.photos || []).map((photo) => deletePhotoRecord(photo.id).catch(() => null)));
     revokePhotoUrlsForCase(item);
     state.bookings = state.bookings.filter((booking) => booking.caseId !== item.id);

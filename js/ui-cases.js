@@ -1248,6 +1248,8 @@ function refreshClaimEstimateFromManualLines(claim) {
 
 function handleClaimLaborSubmit(event, item) {
   event.preventDefault();
+  const permissionGuard = guardCaseEdit(item);
+  if (!permissionGuard.ok) return;
   const form = event.currentTarget;
   const claim = item.claims.find((candidate) => candidate.id === form.dataset.claimId);
   if (!claim) return;
@@ -1281,6 +1283,8 @@ function handleClaimLaborSubmit(event, item) {
 }
 
 async function removeClaimLaborLine(item, claimId, lineId) {
+  const permissionGuard = guardCaseEdit(item);
+  if (!permissionGuard.ok) return;
   const claim = item.claims.find((candidate) => candidate.id === claimId);
   if (!claim?.estimate) return;
   const sourceLine = [...(claim.estimate.originalLines || []), ...(claim.estimate.lines || [])].find((line) => line.id === lineId);
@@ -1302,6 +1306,8 @@ async function removeClaimLaborLine(item, claimId, lineId) {
 
 function handleClaimSubmit(event, item) {
   event.preventDefault();
+  const permissionGuard = guardCaseEdit(item);
+  if (!permissionGuard.ok) return;
   const form = event.currentTarget;
   const data = new FormData(form);
   const rawClaims = Array.isArray(item.claims) ? item.claims : [];
@@ -1441,7 +1447,15 @@ function renderSupplements(root, item) {
     : `<div class="empty-inline">Aucune réparation complémentaire. Ajoutez un complément quand un dommage est découvert pendant les travaux.</div>`;
 
   $$('[data-supplement-status]', target).forEach((select) => {
+    const canEdit = canRenderAction("case.edit", { item });
+    select.disabled = !canEdit;
+    if (!canEdit) select.title = getPermissionDeniedMessage("case.edit", { item });
     select.addEventListener('change', () => {
+      const permissionGuard = guardCaseEdit(item);
+      if (!permissionGuard.ok) {
+        renderCaseDetail();
+        return;
+      }
       const supplement = item.supplements.find((candidate) => candidate.id === select.dataset.supplementStatus);
       if (!supplement) return;
       supplement.status = normalizeSupplementStatus(select.value);
@@ -1452,18 +1466,34 @@ function renderSupplements(root, item) {
     });
   });
   $$('[data-supplement-integrate]', target).forEach((button) => {
-    button.addEventListener('click', () => integrateSupplementDurations(item, button.dataset.supplementIntegrate));
+    const canEdit = canRenderAction("case.edit", { item });
+    button.disabled = !canEdit;
+    if (!canEdit) button.title = getPermissionDeniedMessage("case.edit", { item });
+    button.addEventListener('click', () => {
+      const permissionGuard = guardCaseEdit(item);
+      if (!permissionGuard.ok) return;
+      integrateSupplementDurations(item, button.dataset.supplementIntegrate);
+    });
   });
   $$('[data-supplement-print]', target).forEach((button) => {
     button.addEventListener('click', () => printSupplementWorkOrders(item, button.dataset.supplementPrint));
   });
   $$('[data-supplement-delete]', target).forEach((button) => {
-    button.addEventListener('click', () => deleteSupplement(item, button.dataset.supplementDelete));
+    const canEdit = canRenderAction("case.edit", { item });
+    button.disabled = !canEdit;
+    if (!canEdit) button.title = getPermissionDeniedMessage("case.edit", { item });
+    button.addEventListener('click', () => {
+      const permissionGuard = guardCaseEdit(item);
+      if (!permissionGuard.ok) return;
+      deleteSupplement(item, button.dataset.supplementDelete);
+    });
   });
 }
 
 async function handleSupplementSubmit(event, item) {
   event.preventDefault();
+  const permissionGuard = guardCaseEdit(item);
+  if (!permissionGuard.ok) return;
   const form = event.currentTarget;
 
   if (!item.flags.received) {
@@ -1523,6 +1553,8 @@ function getSupplementClaimLabel(item, supplement) {
 }
 
 async function integrateSupplementDurations(item, supplementId) {
+  const permissionGuard = guardCaseEdit(item);
+  if (!permissionGuard.ok) return;
   const supplement = (item.supplements || []).find((candidate) => candidate.id === supplementId);
   if (!supplement) return;
   if (supplement.integrated) {
@@ -1552,6 +1584,8 @@ async function integrateSupplementDurations(item, supplementId) {
 }
 
 async function deleteSupplement(item, supplementId) {
+  const permissionGuard = guardCaseEdit(item);
+  if (!permissionGuard.ok) return;
   const supplement = (item.supplements || []).find((candidate) => candidate.id === supplementId);
   if (!supplement) return;
   const confirmed = await showConfirmModal(`Supprimer le complément ${supplement.number || supplement.title} ?`);
@@ -1634,11 +1668,19 @@ function renderCaseDetail() {
   $("[data-field='expert-state']", detail).innerHTML = item.expertName
     ? `<span class="tag ok">Expert renseigné</span>`
     : `<span class="tag warn">À compléter</span>`;
+  const canEditCase = canRenderAction("case.edit", { item });
 
   $$("[data-input]", detail).forEach((input) => {
     const field = input.dataset.input;
     input.value = item[field] || "";
+    input.disabled = !canEditCase;
+    if (!canEditCase) input.title = getPermissionDeniedMessage("case.edit", { item });
     input.addEventListener("input", () => {
+      const guard = guardCaseEdit(item);
+      if (!guard.ok) {
+        input.value = item[field] || "";
+        return;
+      }
       item[field] = input.value;
       saveState();
       renderMetrics();
@@ -1659,6 +1701,11 @@ function renderCaseDetail() {
     input.checked = Boolean(item.flags[field]);
     input.addEventListener("change", async () => {
       const checked = input.checked;
+      const permissionGuard = guardWorkflowAction(field, item, checked);
+      if (!permissionGuard.ok) {
+        input.checked = !checked;
+        return;
+      }
       if (checked) {
         const issues = getBusinessRuleIssues(item, field);
         if (issues.length) {
@@ -1751,6 +1798,8 @@ function renderCaseDetail() {
   });
   const proposalButton = $("#generate-proposals", detail);
   proposalButton.addEventListener("click", () => {
+    const permissionGuard = guardAppointmentSchedule(item);
+    if (!permissionGuard.ok) return;
     const issues = getBusinessRuleIssues(item, "appointment");
     if (issues.length) {
       notifyUser(issues.join("\n"));
@@ -1762,6 +1811,8 @@ function renderCaseDetail() {
   $$("[data-action-flag]", detail).forEach((button) => {
     const flag = button.dataset.actionFlag;
     button.addEventListener("click", async () => {
+      const permissionGuard = guardWorkflowAction(flag, item, true);
+      if (!permissionGuard.ok) return;
       const issues = getBusinessRuleIssues(item, flag);
       if (issues.length) {
         notifyUser(issues.join("\n"));
@@ -1871,6 +1922,8 @@ function recordReleasedCapacityIfNeeded(item, freedMinutes) {
 }
 
 function applyWorkflowAction(item, action) {
+  const permissionGuard = guardWorkflowAction(action, item, true);
+  if (!permissionGuard.ok) return { ok: false, message: permissionGuard.message };
   const workflowClaimIds = new Set(getWorkflowClaims(item).map((claim) => claim.id));
   const claims = Array.isArray(item.claims) ? item.claims : [];
   const now = new Date().toISOString();
@@ -2176,7 +2229,19 @@ function renderCaseBlockerControls(root, item) {
       <button class="ghost-button" type="button" data-clear-case-blocker ${blocked ? "" : "disabled"}>Retirer blocage</button>
     </div>
   `;
+  const canEdit = canRenderAction("case.edit", { item });
+  $$("[data-case-parts-status], [data-case-blocker-reason], [data-case-blocker-details]", target).forEach((control) => {
+    control.disabled = !canEdit;
+    if (!canEdit) control.title = getPermissionDeniedMessage("case.edit", { item });
+  });
+  const clearButton = target.querySelector("[data-clear-case-blocker]");
+  if (clearButton && !canEdit) {
+    clearButton.disabled = true;
+    clearButton.title = getPermissionDeniedMessage("case.edit", { item });
+  }
   const updateBlocker = (sourceLabel) => {
+    const permissionGuard = guardCaseEdit(item);
+    if (!permissionGuard.ok) return;
     const previousBlocked = isCaseBlocked(item);
     item.partsStatus = normalizePartsStatus(target.querySelector("[data-case-parts-status]")?.value);
     item.blockerReason = normalizeBlockerReason(target.querySelector("[data-case-blocker-reason]")?.value);
@@ -2197,6 +2262,8 @@ function renderCaseBlockerControls(root, item) {
   target.querySelector("[data-case-blocker-reason]")?.addEventListener("change", () => updateBlocker("Motif"));
   target.querySelector("[data-case-blocker-details]")?.addEventListener("change", () => updateBlocker("Détail"));
   target.querySelector("[data-clear-case-blocker]")?.addEventListener("click", () => {
+    const permissionGuard = guardCaseEdit(item);
+    if (!permissionGuard.ok) return;
     item.partsStatus = "unchecked";
     item.blockerReason = "";
     item.blockerDetails = "";
@@ -2231,25 +2298,35 @@ function refreshCaseActionAvailability(root, item) {
   const proposalButton = $("#generate-proposals", root);
   if (proposalButton) {
     const issues = getBusinessRuleIssues(item, "appointment");
-    proposalButton.disabled = issues.length > 0;
-    proposalButton.title = issues.join("\n");
+    const permissionGuard = guardAppointmentSchedule(item, { notify: false });
+    proposalButton.disabled = issues.length > 0 || !permissionGuard.ok;
+    proposalButton.title = issues.length ? issues.join("\n") : permissionGuard.message;
   }
 
   $$("[data-action-flag]", root).forEach((button) => {
     const flag = button.dataset.actionFlag;
     const issues = item.flags[flag] ? [] : getBusinessRuleIssues(item, flag);
-    button.disabled = Boolean(item.flags[flag]) || issues.length > 0;
+    const permissionGuard = guardWorkflowAction(flag, item, true, { notify: false });
+    button.disabled = Boolean(item.flags[flag]) || issues.length > 0 || !permissionGuard.ok;
     button.classList.toggle("validated", Boolean(item.flags[flag]));
-    button.title = issues.join("\n");
+    button.title = issues.length ? issues.join("\n") : permissionGuard.message;
   });
 
   $$("[data-toggle]", root).forEach((input) => {
     const field = input.dataset.toggle;
     const issues = input.checked ? [] : getBusinessRuleIssues(item, field);
-    input.disabled = !input.checked && issues.length > 0;
-    input.title = issues.join("\n");
+    const permissionGuard = guardWorkflowAction(field, item, !input.checked, { notify: false });
+    input.disabled = (!input.checked && issues.length > 0) || !permissionGuard.ok;
+    input.title = issues.length ? issues.join("\n") : permissionGuard.message;
     input.closest(".check-card")?.classList.toggle("disabled-card", input.disabled);
   });
+
+  const deleteButton = $("#delete-case", root);
+  if (deleteButton) {
+    const permissionGuard = guardSensitiveAction("case.delete", { item }, { notify: false });
+    deleteButton.disabled = !permissionGuard.ok;
+    deleteButton.title = permissionGuard.message;
+  }
 }
 
 
@@ -3406,7 +3483,11 @@ function renderEstimateImportPreview(root, item) {
     });
   });
 
-  $("[data-apply-estimate-import]", target).addEventListener("click", () => applyEstimateImportToCase(item, preview));
+  const applyButton = $("[data-apply-estimate-import]", target);
+  const importGuard = guardEstimateImport(item, { notify: false });
+  applyButton.disabled = !importGuard.ok;
+  applyButton.title = importGuard.message;
+  applyButton.addEventListener("click", () => applyEstimateImportToCase(item, preview));
   $("[data-cancel-estimate-import]", target).addEventListener("click", () => {
     delete estimateImportPreviews[item.id];
     renderEstimateImportPreview(root, item);
@@ -3534,7 +3615,15 @@ function renderQualityChecklist(root, item) {
     </div>
   `;
   $$("[data-quality-check]", target).forEach((input) => {
+    const permissionGuard = guardQualityValidate(item, { notify: false });
+    input.disabled = !permissionGuard.ok;
+    input.title = permissionGuard.message;
     input.addEventListener("change", () => {
+      const guard = input.checked ? guardQualityValidate(item) : guardAction("quality.reject", { item });
+      if (!guard.ok) {
+        input.checked = !input.checked;
+        return;
+      }
       item.qualityChecklist[input.dataset.qualityCheck] = input.checked;
       if (!isQualityChecklistComplete(item)) {
         item.flags.qualityApproved = false;

@@ -1,3 +1,11 @@
+# v22.23 PR 2B - Permissions réception, qualité, livraison et sensibles
+
+- Extension des permissions aux flux réception/dossier : création, modification, import devis, planification RDV et réception véhicule.
+- Séparation stricte des actions qualité (`quality.validate` / `quality.reject`) et livraison (`delivery.complete` / `case.close`).
+- Protection des actions sensibles : suppression dossier, export/import sauvegarde, snapshots, configuration Supabase, PIN et nettoyage poste.
+- Audit global enrichi pour les actions sensibles avec acteur courant (`userId`, `userName`, `userRole`, `resourceId`).
+- Cache PWA incrémenté en `nimr-sav-v22.23-permissions-reception-quality-sensitive`.
+
 # v22.23 PR 2A - Permissions technicien et planning
 
 - Activation progressive des permissions sur les actions technicien : démarrer, pause, reprendre, terminer, bloquer et override.

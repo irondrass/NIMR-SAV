@@ -94,6 +94,8 @@ function hydrateSupabaseConfigForm() {
 
 function saveSupabaseRuntimeConfigFromForm(event) {
   event.preventDefault();
+  const permissionGuard = guardSensitiveAction("supabase.configure");
+  if (!permissionGuard.ok) return;
   const form = event.currentTarget;
   const nextConfig = {
     enabled: Boolean(form.elements.url.value.trim() && form.elements.anonKey.value.trim()),
@@ -108,6 +110,8 @@ function saveSupabaseRuntimeConfigFromForm(event) {
     localStorage.setItem(window.NIMR_SUPABASE_RUNTIME_CONFIG_KEY, JSON.stringify(nextConfig));
     window.NIMR_SUPABASE_CONFIG = { ...getSupabaseConfig(), ...nextConfig };
     resetSupabaseClient();
+    addAuditLog("supabase.config.updated", "Configuration Supabase modifiée", nextConfig.enabled ? "Synchronisation cloud configurée sur ce poste." : "Configuration cloud désactivée.");
+    saveState({ skipCloud: true, skipSnapshot: true });
     notifyUser("Configuration Supabase enregistrée sur ce poste.", "success");
     refreshSupabasePanel();
   } catch (error) {
@@ -117,6 +121,8 @@ function saveSupabaseRuntimeConfigFromForm(event) {
 }
 
 function clearSupabaseRuntimeConfig() {
+  const permissionGuard = guardSensitiveAction("supabase.configure");
+  if (!permissionGuard.ok) return;
   localStorage.removeItem(window.NIMR_SUPABASE_RUNTIME_CONFIG_KEY);
   window.NIMR_SUPABASE_CONFIG = {
     enabled: false,
@@ -129,6 +135,8 @@ function clearSupabaseRuntimeConfig() {
   };
   resetSupabaseClient();
   if (typeof stopSupabaseLiveSync === "function") stopSupabaseLiveSync();
+  addAuditLog("supabase.config.cleared", "Configuration Supabase retirée", "Configuration cloud locale retirée de ce navigateur.");
+  saveState({ skipCloud: true, skipSnapshot: true });
   notifyUser("Configuration Supabase retirée de ce navigateur.", "success");
   refreshSupabasePanel();
 }
@@ -138,4 +146,16 @@ function bindSupabaseConfigForm() {
   form?.addEventListener("submit", saveSupabaseRuntimeConfigFromForm);
   $("#supabase-config-clear")?.addEventListener("click", clearSupabaseRuntimeConfig);
   hydrateSupabaseConfigForm();
+  const permissionGuard = guardSensitiveAction("supabase.configure", {}, { notify: false });
+  if (form) {
+    $$("input, button", form).forEach((control) => {
+      control.disabled = !permissionGuard.ok;
+      control.title = permissionGuard.message;
+    });
+  }
+  const clearButton = $("#supabase-config-clear");
+  if (clearButton) {
+    clearButton.disabled = !permissionGuard.ok;
+    clearButton.title = permissionGuard.message;
+  }
 }

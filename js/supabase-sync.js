@@ -652,6 +652,8 @@ async function syncBusinessTablesToSupabase(payload, user) {
 }
 
 async function saveLocalToSupabase() {
+  const permissionGuard = guardSensitiveAction("export.backup");
+  if (!permissionGuard.ok) return;
   const client = getSupabaseClient();
   if (!client) {
     refreshSupabasePanel();
@@ -687,6 +689,8 @@ async function saveLocalToSupabase() {
 
     setSupabaseStatus("Remplissage des tables métier...");
     const stats = await syncBusinessTablesToSupabase(payload, user);
+    addAuditLog("backup.cloud.exported", "Sauvegarde Supabase envoyée", `${payload.state.cases.length} dossier(s), ${payload.photos.length} photo(s).`);
+    saveState({ skipCloud: true, skipSnapshot: true });
 
     setSupabaseStatus("Sauvegarde Supabase terminée.", "ok");
     setSupabaseDetails(`${stats.repairOrders} dossier(s), ${stats.clients} client(s), ${stats.vehicles} véhicule(s), ${stats.repairSteps} étape(s), ${stats.resources} ressource(s), ${stats.holidays} jour(s) férié(s), ${stats.workHoursDays} jour(s) horaire(s), ${stats.planningSlots} créneau(x), ${stats.claims || 0} ordre(s), ${stats.supplements || 0} complément(s), ${stats.photos} photo(s) synchronisé(s). Réglages enregistrés dans app_settings.`);
@@ -699,6 +703,8 @@ async function saveLocalToSupabase() {
 }
 
 async function restoreLocalFromSupabase() {
+  const permissionGuard = guardSensitiveAction("import.backup");
+  if (!permissionGuard.ok) return;
   const client = getSupabaseClient();
   if (!client) {
     refreshSupabasePanel();
@@ -726,6 +732,7 @@ async function restoreLocalFromSupabase() {
     const safetyPayload = await buildBackupPayload();
     downloadJson(safetyPayload, `nimr-carrosserie-avant-restauration-cloud-${todayKey(new Date())}.json`);
 
+    const restoreActor = getCurrentActor();
     state = normalizeState(data.state);
     let settingsRestored = false;
     try {
@@ -739,6 +746,7 @@ async function restoreLocalFromSupabase() {
     generatedProposals = {};
     await clearPhotoStore();
     const restoredPhotos = await restorePhotoRecords(Array.isArray(data.photos) ? data.photos : []);
+    addAuditLog("backup.cloud.imported", "Restauration Supabase effectuée", `${state.cases.length} dossier(s), ${restoredPhotos} photo(s).`, { actor: restoreActor });
     lastKnownCloudUpdatedAt = new Date(data.updated_at || 0).getTime() || lastKnownCloudUpdatedAt;
     if (typeof rememberKnownCloudUpdatedAt === "function" && lastKnownCloudUpdatedAt) rememberKnownCloudUpdatedAt(lastKnownCloudUpdatedAt);
     if (typeof clearLocalUserChangeAt === "function") clearLocalUserChangeAt();

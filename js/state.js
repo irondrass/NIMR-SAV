@@ -1051,6 +1051,55 @@ function requirePermission(permission, context = {}) {
   return allowed;
 }
 
+function getPermissionDeniedMessage(permission, context = {}) {
+  const requested = String(permission || "").trim();
+  const user = resolvePermissionUser(context.user || context.userId);
+  const role = user?.role || "";
+  if (!user) return "Aucun utilisateur actif n'est sélectionné.";
+  if (user.active === false) return "Utilisateur inactif.";
+  if (requested === "task.override" || requested === "planning.edit") return "Action réservée chef atelier/admin.";
+  if (requested.startsWith("task.")) {
+    if (role === "technicien" && !user.resourceId) return "Aucune ressource technicien liée à cet utilisateur.";
+    if (role === "technicien" && context.booking && !canActOnTechnicianTask(user, context.booking)) {
+      return "Cette tâche est affectée à un autre technicien.";
+    }
+    if (role === "readonly") return "Mode lecture seule : modification impossible.";
+    if (role === "reception" || role === "qualite") return "Action réservée au technicien affecté ou au chef atelier/admin.";
+  }
+  if (role === "readonly" && MUTATION_PERMISSIONS.includes(requested)) return "Mode lecture seule : modification impossible.";
+  return "Permission insuffisante.";
+}
+
+function guardAction(permission, context = {}, options = {}) {
+  const requested = String(permission || "").trim();
+  const user = resolvePermissionUser(context.user || context.userId);
+  let allowed = hasPermission(requested, { user });
+  if (allowed && requested.startsWith("task.") && requested !== "task.override") {
+    allowed = canActOnTechnicianTask(user, context.booking);
+  }
+  const message = allowed ? "" : (options.message || context.message || getPermissionDeniedMessage(requested, { ...context, user }));
+  if (!allowed && options.notify !== false && context.notify !== false && typeof notifyUser === "function") {
+    notifyUser(message, "error");
+  }
+  return {
+    ok: allowed,
+    allowed,
+    permission: requested,
+    message,
+    user,
+    actor: user ? {
+      userId: user.id,
+      userName: user.name || user.email || "Utilisateur atelier",
+      userRole: user.role || "readonly",
+      resourceId: user.resourceId || "",
+    } : { userId: "", userName: "Atelier", userRole: "", resourceId: "" },
+  };
+}
+
+function canRenderAction(permission, context = {}, options = {}) {
+  return guardAction(permission, context, { ...options, notify: false }).ok;
+}
+
 function isWorkshopManager(user = getCurrentUser()) {
   const role = resolvePermissionUser(user)?.role || "";
   return role === "admin" || role === "chef_atelier";

@@ -285,6 +285,8 @@ function getPlanningTaskNumberKey(booking, segment) {
 
 function renderResources() {
   const target = $("#resource-list");
+  const canEditPlanning = canRenderAction("planning.edit");
+  const deniedTitle = canEditPlanning ? "" : getPermissionDeniedMessage("planning.edit");
   target.innerHTML = state.resources
     .map(
       (resource) => `
@@ -292,11 +294,11 @@ function renderResources() {
           <div class="resource-edit-grid">
             <label>
               Nom
-              <input data-resource-field="name" data-resource-id="${resource.id}" value="${escapeAttr(resource.name)}" />
+              <input data-resource-field="name" data-resource-id="${resource.id}" value="${escapeAttr(resource.name)}" ${canEditPlanning ? "" : `disabled title="${escapeAttr(deniedTitle)}"`} />
             </label>
             <label>
               Rôle
-              <select data-resource-field="role" data-resource-id="${resource.id}">
+              <select data-resource-field="role" data-resource-id="${resource.id}" ${canEditPlanning ? "" : `disabled title="${escapeAttr(deniedTitle)}"`}>
                 ${Object.entries(ROLE_LABELS)
                   .map(([value, label]) => `<option value="${value}" ${resource.role === value ? "selected" : ""}>${label}</option>`)
                   .join("")}
@@ -304,7 +306,7 @@ function renderResources() {
             </label>
             <label>
               Emplacement
-              <input data-resource-field="location" data-resource-id="${resource.id}" value="${escapeAttr(resource.location || "")}" />
+              <input data-resource-field="location" data-resource-id="${resource.id}" value="${escapeAttr(resource.location || "")}" ${canEditPlanning ? "" : `disabled title="${escapeAttr(deniedTitle)}"`} />
             </label>
             <span class="case-meta">
               ${resource.fastLane ? `<span class="tag ok">Fast Lane</span>` : ""}
@@ -312,10 +314,10 @@ function renderResources() {
             </span>
           </div>
           <div class="resource-actions">
-            <button class="ghost-button" type="button" data-toggle-fastlane="${resource.id}">
+            <button class="ghost-button" type="button" data-toggle-fastlane="${resource.id}" ${canEditPlanning ? "" : `disabled title="${escapeAttr(deniedTitle)}"`}>
               ${resource.fastLane ? "Standard" : "Fast Lane"}
             </button>
-            <button class="ghost-button" type="button" data-toggle-resource="${resource.id}">
+            <button class="ghost-button" type="button" data-toggle-resource="${resource.id}" ${canEditPlanning ? "" : `disabled title="${escapeAttr(deniedTitle)}"`}>
               ${resource.active === false ? "Activer" : "Désactiver"}
             </button>
           </div>
@@ -325,6 +327,12 @@ function renderResources() {
     .join("");
   $$("[data-resource-field]", target).forEach((input) => {
     input.addEventListener("change", () => {
+      const permission = guardAction("planning.edit", {}, { notify: false });
+      if (!permission.ok) {
+        notifyUser(permission.message, "error");
+        renderResources();
+        return;
+      }
       const resource = getResource(input.dataset.resourceId);
       resource[input.dataset.resourceField] = input.value;
       saveState();
@@ -333,6 +341,8 @@ function renderResources() {
   });
   $$("[data-toggle-resource]", target).forEach((button) => {
     button.addEventListener("click", () => {
+      const permission = guardAction("planning.edit", {}, { notify: false });
+      if (!permission.ok) return notifyUser(permission.message, "error");
       const resource = getResource(button.dataset.toggleResource);
       resource.active = resource.active === false;
       saveState();
@@ -341,6 +351,8 @@ function renderResources() {
   });
   $$("[data-toggle-fastlane]", target).forEach((button) => {
     button.addEventListener("click", () => {
+      const permission = guardAction("planning.edit", {}, { notify: false });
+      if (!permission.ok) return notifyUser(permission.message, "error");
       const resource = getResource(button.dataset.toggleFastlane);
       resource.fastLane = !resource.fastLane;
       saveState();
@@ -352,18 +364,27 @@ function renderResources() {
 function renderFastLaneSettings() {
   const form = $("#fastlane-form");
   if (!form) return;
+  const canEditPlanning = canRenderAction("planning.edit");
+  const deniedTitle = canEditPlanning ? "" : getPermissionDeniedMessage("planning.edit");
   form.elements.fastLaneEnabled.checked = Boolean(state.settings.fastLaneEnabled);
   form.elements.fastLaneMaxHours.value = formatLocalizedDecimal(state.settings.fastLaneMaxHours);
+  Array.from(form.elements || []).forEach((control) => {
+    if (!control) return;
+    control.disabled = !canEditPlanning;
+    if (!canEditPlanning) control.title = deniedTitle;
+  });
 }
 
 function renderWorkHoursSettings() {
   const target = $("#work-hours-list");
   if (!target) return;
+  const canEditPlanning = canRenderAction("planning.edit");
+  const deniedTitle = canEditPlanning ? "" : getPermissionDeniedMessage("planning.edit");
   target.innerHTML = DAY_LABELS.map(
     (label, day) => `
       <label class="work-hour-row">
         <span>${label}</span>
-        <input data-work-day="${day}" value="${formatWorkIntervals(state.workHours[day] || [])}" placeholder="08:00-12:00,13:00-17:00 ou fermé" />
+        <input data-work-day="${day}" value="${formatWorkIntervals(state.workHours[day] || [])}" placeholder="08:00-12:00,13:00-17:00 ou fermé" ${canEditPlanning ? "" : `disabled title="${escapeAttr(deniedTitle)}"`} />
       </label>
     `,
   ).join("");
@@ -391,6 +412,8 @@ function isValidTime(value) {
 
 function renderHolidays() {
   const target = $("#holiday-list");
+  const canEditPlanning = canRenderAction("planning.edit");
+  const deniedTitle = canEditPlanning ? "" : getPermissionDeniedMessage("planning.edit");
   target.innerHTML = state.holidays
     .slice()
     .sort((a, b) => a.date.localeCompare(b.date))
@@ -401,13 +424,15 @@ function renderHolidays() {
             <strong>${formatDate(holiday.date)}</strong>
             <span class="muted">${escapeHtml(holiday.label)}</span>
           </div>
-          <button class="ghost-button" type="button" data-remove-holiday="${holiday.date}">Retirer</button>
+          <button class="ghost-button" type="button" data-remove-holiday="${holiday.date}" ${canEditPlanning ? "" : `disabled title="${escapeAttr(deniedTitle)}"`}>Retirer</button>
         </article>
       `,
     )
     .join("");
   $$("[data-remove-holiday]", target).forEach((button) => {
     button.addEventListener("click", () => {
+      const permission = guardAction("planning.edit", {}, { notify: false });
+      if (!permission.ok) return notifyUser(permission.message, "error");
       state.holidays = state.holidays.filter((holiday) => holiday.date !== button.dataset.removeHoliday);
       saveState();
       render();
@@ -424,7 +449,14 @@ function renderResourceLeaves() {
   const form = $("#resource-leave-form");
   const list = $("#resource-leave-list");
   if (!form || !list) return;
+  const canEditPlanning = canRenderAction("planning.edit");
+  const deniedTitle = canEditPlanning ? "" : getPermissionDeniedMessage("planning.edit");
   const select = form.elements.resourceId;
+  Array.from(form.elements || []).forEach((control) => {
+    if (!control) return;
+    control.disabled = !canEditPlanning;
+    if (!canEditPlanning) control.title = deniedTitle;
+  });
   const selected = select.value;
   const humans = orderPlanningResources(state.resources.filter(isHumanPlanningResource));
   select.innerHTML = humans.map((resource) => `<option value="${escapeAttr(resource.id)}">${escapeHtml(resource.name)} · ${escapeHtml(ROLE_LABELS[resource.role] || resource.role)}</option>`).join("");
@@ -438,12 +470,14 @@ function renderResourceLeaves() {
         const resource = getResource(leave.resourceIds?.[0]);
         return `<article class="holiday-card">
           <div><strong>${escapeHtml(resource?.name || "Ressource")}</strong><span class="muted">${escapeHtml(leave.title || "Congé")} · ${formatDateTime(leave.start)} → ${formatDateTime(leave.end)}</span></div>
-          <button class="ghost-button" type="button" data-remove-leave="${escapeAttr(leave.id)}">Retirer</button>
+          <button class="ghost-button" type="button" data-remove-leave="${escapeAttr(leave.id)}" ${canEditPlanning ? "" : `disabled title="${escapeAttr(deniedTitle)}"`}>Retirer</button>
         </article>`;
       }).join("")
     : `<div class="empty-inline">Aucun congé ou absence planifié.</div>`;
   $$('[data-remove-leave]', list).forEach((button) => {
     button.addEventListener('click', () => {
+      const permission = guardAction("planning.edit", {}, { notify: false });
+      if (!permission.ok) return notifyUser(permission.message, "error");
       state.bookings = state.bookings.filter((booking) => booking.id !== button.dataset.removeLeave);
       saveState();
       renderPlanning();

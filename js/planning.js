@@ -845,8 +845,9 @@ function completeBookingReservationAt(booking, completedAt, options = {}) {
   let keptSegments = truncateSegmentsAt(originalSegments, completionDate);
   const actualStart = booking.actualStart || booking.startedAt || "";
   const actualStartDate = actualStart ? new Date(actualStart) : null;
-  if (!keptSegments.length && actualStartDate && !Number.isNaN(actualStartDate.getTime()) && actualStartDate < now) {
-    keptSegments = [{ start: actualStartDate.toISOString(), end: now.toISOString() }];
+  if (!keptSegments.length && actualStartDate && !Number.isNaN(actualStartDate.getTime()) && actualStartDate <= now) {
+    const safeEnd = actualStartDate < now ? now : new Date(actualStartDate.getTime() + 1000);
+    keptSegments = [{ start: actualStartDate.toISOString(), end: safeEnd.toISOString() }];
   }
   const keptMinutes = sumBookingSegmentsMinutes(keptSegments);
   const removed = !keptSegments.length && options.removeIfEmpty !== false;
@@ -1079,6 +1080,8 @@ function getTechnicianActorLabel(technicianId) {
 
 function startTechnicianTask(item, bookingId, technicianId, options = {}) {
   const booking = findCaseBooking(item, bookingId);
+  const permission = guardAction("task.start", { booking, technicianId }, { notify: false });
+  if (!permission.ok) return { ok: false, message: permission.message, issues: [permission.message] };
   const validation = canStartTechnicianTask(item, booking, technicianId, options);
   if (!validation.ok) return { ok: false, message: validation.issues.join("\n"), issues: validation.issues };
   if (options.clearBlock) clearTechnicianTaskBlock(item, bookingId, technicianId, { silent: true });
@@ -1092,6 +1095,9 @@ function startTechnicianTask(item, bookingId, technicianId, options = {}) {
 function pauseTechnicianTask(item, bookingId, technicianId, reason) {
   const cleanReason = String(reason || "").trim();
   if (!cleanReason) return { ok: false, message: "Motif de pause obligatoire." };
+  const booking = findCaseBooking(item, bookingId);
+  const permission = guardAction("task.pause", { booking, technicianId }, { notify: false });
+  if (!permission.ok) return { ok: false, message: permission.message };
   return pauseCaseBookingTask(item, bookingId, cleanReason, {
     pausedBy: technicianId,
     actorLabel: getTechnicianActorLabel(technicianId),
@@ -1112,6 +1118,8 @@ function resumeTechnicianTask(item, bookingId, technicianId, options = {}) {
     target = findRemainderBookingForPausedTask(booking.id);
     if (!target) return { ok: false, message: "Aucun reliquat planifié à reprendre pour cette tâche." };
   }
+  const permission = guardAction("task.resume", { booking: target, technicianId }, { notify: false });
+  if (!permission.ok) return { ok: false, message: permission.message };
   if (isBookingTaskBlocked(target)) clearTechnicianTaskBlock(item, target.id, technicianId, { silent: true });
   target.resumedAt = new Date().toISOString();
   target.resumedBy = technicianId || target.resumedBy || "";
@@ -1154,6 +1162,8 @@ function blockTechnicianTask(item, bookingId, technicianId, reason, details = ""
   if (!cleanReason) return { ok: false, message: "Motif de blocage obligatoire." };
   const booking = findCaseBooking(item, bookingId);
   if (!booking) return { ok: false, message: "Tâche introuvable dans le planning." };
+  const permission = guardAction("task.block", { booking, technicianId }, { notify: false });
+  if (!permission.ok) return { ok: false, message: permission.message };
   let target = booking;
   const status = getBookingOperationalStatus(booking);
   if (status === "started") {
@@ -1210,6 +1220,8 @@ function technicianTaskRequiresCompletionPhoto(item, booking) {
 function completeTechnicianTask(item, bookingId, technicianId, options = {}) {
   const booking = findCaseBooking(item, bookingId);
   if (!booking) return { ok: false, message: "Tâche introuvable dans le planning." };
+  const permission = guardAction("task.complete", { booking, technicianId }, { notify: false });
+  if (!permission.ok) return { ok: false, message: permission.message };
   if (isBookingTaskBlocked(booking)) return { ok: false, message: "Résolvez le blocage avant de terminer la tâche." };
   if (technicianTaskRequiresCompletionPhoto(item, booking) && !options.skipPhotoCheck && !booking.photoIds?.length && !options.photoId) {
     return { ok: false, message: "Ajoutez une photo après intervention avant de terminer cette tâche." };
@@ -1252,6 +1264,8 @@ function attachTechnicianTaskPhoto(item, bookingId, technicianId, photoId) {
 function rescheduleCaseBooking(item, bookingId, startAfter) {
   const booking = findCaseBooking(item, bookingId);
   if (!booking) return { ok: false, message: "Tâche introuvable dans le planning." };
+  const permission = guardAction("planning.edit", { booking }, { notify: false });
+  if (!permission.ok) return { ok: false, message: permission.message };
   const status = getBookingOperationalStatus(booking);
   if (status !== "planned") return { ok: false, message: "Seules les tâches non démarrées peuvent être déplacées." };
   const requestedStart = new Date(startAfter);

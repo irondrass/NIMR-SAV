@@ -1,4 +1,4 @@
-const CACHE_NAME = "nimr-sav-v22.23-users-roles-foundation";
+const CACHE_NAME = "nimr-sav-v22.23-permissions-technician-planning";
 const ASSETS = [
   "./",
   "./index.html",

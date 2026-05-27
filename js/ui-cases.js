@@ -422,24 +422,31 @@ function renderTechnicianDashboard() {
   const manager = $("#technician-manager-board", view);
   if (!select || !dateInput || !list || !manager) return;
 
-  const technicians = getTechnicianDashboardResources();
+  const currentUser = typeof getCurrentUser === "function" ? getCurrentUser() : null;
+  const allTechnicians = getTechnicianDashboardResources();
+  const technicians = currentUser?.role === "technicien"
+    ? allTechnicians.filter((resource) => resource.id === currentUser.resourceId)
+    : allTechnicians;
   if (!state.ui.technicianDate) state.ui.technicianDate = todayKey(new Date());
   if (!state.ui.technicianId || !technicians.some((resource) => resource.id === state.ui.technicianId)) {
-    state.ui.technicianId = technicians[0]?.id || "";
+    state.ui.technicianId = currentUser?.role === "technicien" ? (currentUser.resourceId || "") : (technicians[0]?.id || "");
   }
 
   select.innerHTML = technicians.length
     ? technicians.map((resource) => `<option value="${escapeAttr(resource.id)}">${escapeHtml(resource.name)} · ${escapeHtml(ROLE_LABELS[resource.role] || resource.role)}</option>`).join("")
-    : `<option value="">Aucun technicien actif</option>`;
+    : `<option value="">${currentUser?.role === "technicien" ? "Aucune ressource liée" : "Aucun technicien actif"}</option>`;
   select.value = state.ui.technicianId || "";
   dateInput.value = state.ui.technicianDate || todayKey(new Date());
 
-  const rows = typeof getTechnicianTaskRows === "function" ? getTechnicianTaskRows(select.value, dateInput.value) : [];
+  const selectedTechnicianId = currentUser?.role === "technicien" ? (currentUser.resourceId || "__no_resource__") : select.value;
+  const rows = typeof getTechnicianTaskRows === "function" && selectedTechnicianId !== "__no_resource__"
+    ? getTechnicianTaskRows(selectedTechnicianId, dateInput.value)
+    : [];
   list.innerHTML = rows.length
     ? rows.map(renderTechnicianTaskCard).join("")
-    : `<div class="empty-state compact-empty"><strong>Aucune tâche pour ce technicien.</strong><span>Les tâches apparaissent ici dès qu'elles sont planifiées et affectées.</span></div>`;
+    : `<div class="empty-state compact-empty"><strong>Aucune tâche pour ce technicien.</strong><span>${currentUser?.role === "technicien" && !currentUser.resourceId ? "Aucune ressource technicien n'est liée à votre utilisateur." : "Les tâches apparaissent ici dès qu'elles sont planifiées et affectées."}</span></div>`;
 
-  manager.innerHTML = renderWorkshopChiefSummary(dateInput.value);
+  manager.innerHTML = currentUser?.role === "technicien" ? "" : renderWorkshopChiefSummary(dateInput.value);
 
   if (select.dataset.bound !== "true") {
     select.dataset.bound = "true";
@@ -533,40 +540,46 @@ function renderTechnicianTaskCard(row) {
 
 function renderTechnicianTaskActions(row) {
   const base = `data-booking-id="${escapeAttr(row.booking.id)}" data-technician-id="${escapeAttr(row.technicianId || "")}"`;
-  const print = `<button class="ghost-button tiny-button" type="button" data-tech-action="print" ${base}>Imprimer fiche</button>`;
+  const print = renderPermissionAwareButton("print.task", "Imprimer fiche", "print", base, "ghost-button tiny-button", row.booking);
   if (row.status === "done") return print;
   if (row.status === "blocked") {
     return `
-      <button class="primary-button tiny-button" type="button" data-tech-action="resume" ${base}>Reprendre</button>
-      <button class="ghost-button tiny-button" type="button" data-tech-action="note" ${base}>Ajouter note</button>
+      ${renderPermissionAwareButton("task.resume", "Reprendre", "resume", base, "primary-button tiny-button", row.booking)}
+      ${renderPermissionAwareButton("task.start", "Ajouter note", "note", base, "ghost-button tiny-button", row.booking)}
       <button class="ghost-button tiny-button" type="button" data-tech-action="print-block" ${base}>Fiche blocage</button>
       ${print}
     `;
   }
   if (row.status === "in_progress") {
     return `
-      <button class="ghost-button tiny-button" type="button" data-tech-action="pause" ${base}>Pause</button>
-      <button class="primary-button tiny-button" type="button" data-tech-action="complete" ${base}>Terminer</button>
-      <button class="ghost-button tiny-button" type="button" data-tech-action="block" ${base}>Signaler blocage</button>
-      <button class="ghost-button tiny-button" type="button" data-tech-action="note" ${base}>Ajouter note</button>
-      <button class="ghost-button tiny-button" type="button" data-tech-action="photo" ${base}>Ajouter photo</button>
+      ${renderPermissionAwareButton("task.pause", "Pause", "pause", base, "ghost-button tiny-button", row.booking)}
+      ${renderPermissionAwareButton("task.complete", "Terminer", "complete", base, "primary-button tiny-button", row.booking)}
+      ${renderPermissionAwareButton("task.block", "Signaler blocage", "block", base, "ghost-button tiny-button", row.booking)}
+      ${renderPermissionAwareButton("task.start", "Ajouter note", "note", base, "ghost-button tiny-button", row.booking)}
+      ${renderPermissionAwareButton("task.start", "Ajouter photo", "photo", base, "ghost-button tiny-button", row.booking)}
       ${print}
     `;
   }
   if (row.status === "paused") {
     return `
-      <button class="primary-button tiny-button" type="button" data-tech-action="resume" ${base}>Reprendre</button>
-      <button class="ghost-button tiny-button" type="button" data-tech-action="block" ${base}>Signaler blocage</button>
+      ${renderPermissionAwareButton("task.resume", "Reprendre", "resume", base, "primary-button tiny-button", row.booking)}
+      ${renderPermissionAwareButton("task.block", "Signaler blocage", "block", base, "ghost-button tiny-button", row.booking)}
       <button class="ghost-button tiny-button" type="button" data-tech-action="print-block" ${base}>Fiche pause</button>
       ${print}
     `;
   }
   return `
-    <button class="primary-button tiny-button" type="button" data-tech-action="start" ${base}>Démarrer</button>
-    <button class="ghost-button tiny-button" type="button" data-tech-action="block" ${base}>Signaler blocage</button>
-    <button class="ghost-button tiny-button" type="button" data-tech-action="note" ${base}>Ajouter note</button>
+    ${renderPermissionAwareButton("task.start", "Démarrer", "start", base, "primary-button tiny-button", row.booking)}
+    ${renderPermissionAwareButton("task.block", "Signaler blocage", "block", base, "ghost-button tiny-button", row.booking)}
+    ${renderPermissionAwareButton("task.start", "Ajouter note", "note", base, "ghost-button tiny-button", row.booking)}
     ${print}
   `;
+}
+
+function renderPermissionAwareButton(permission, label, action, dataset, className, booking) {
+  const allowed = canRenderAction(permission, { booking });
+  const title = allowed ? "" : getPermissionDeniedMessage(permission, { booking });
+  return `<button class="${className}" type="button" data-tech-action="${escapeAttr(action)}" ${dataset} ${allowed ? "" : `disabled title="${escapeAttr(title)}" aria-label="${escapeAttr(`${label} indisponible : ${title}`)}"`}>${escapeHtml(label)}</button>`;
 }
 
 function renderWorkshopChiefSummary(dateKey) {
@@ -2758,18 +2771,24 @@ function renderValidatedAppointmentPlan(root, item) {
   });
 }
 
+function renderBookingTaskActionButton(row, permission, action, label, className) {
+  const allowed = canRenderAction(permission, { booking: row });
+  const title = allowed ? "" : getPermissionDeniedMessage(permission, { booking: row });
+  return `<button type="button" class="${className}" data-allow-production-action data-booking-action="${escapeAttr(action)}" data-booking-id="${escapeAttr(row.id)}" ${allowed ? "" : `disabled title="${escapeAttr(title)}" aria-label="${escapeAttr(`${label} indisponible : ${title}`)}"`}>${escapeHtml(label)}</button>`;
+}
+
 function renderBookingTaskActions(row) {
   if (row.status === "completed") return '<span class="muted">Clôturée</span>';
   if (row.status === "paused") return '<span class="muted">Reliquat planifié</span>';
   if (row.status === "started") {
     return `
-      <button type="button" class="ghost-button tiny-button" data-allow-production-action data-booking-action="pause" data-booking-id="${escapeAttr(row.id)}">Pause</button>
-      <button type="button" class="primary-button tiny-button" data-allow-production-action data-booking-action="complete" data-booking-id="${escapeAttr(row.id)}">Terminer</button>
+      ${renderBookingTaskActionButton(row, "task.pause", "pause", "Pause", "ghost-button tiny-button")}
+      ${renderBookingTaskActionButton(row, "task.complete", "complete", "Terminer", "primary-button tiny-button")}
     `;
   }
   return `
-    <button type="button" class="ghost-button tiny-button" data-allow-production-action data-booking-action="reschedule" data-booking-id="${escapeAttr(row.id)}">Replanifier</button>
-    <button type="button" class="primary-button tiny-button" data-allow-production-action data-booking-action="start" data-booking-id="${escapeAttr(row.id)}">Démarrer</button>
+    ${renderBookingTaskActionButton(row, "planning.edit", "reschedule", "Replanifier", "ghost-button tiny-button")}
+    ${renderBookingTaskActionButton(row, "task.start", "start", "Démarrer", "primary-button tiny-button")}
   `;
 }
 
@@ -2808,6 +2827,8 @@ async function completeCaseWorkWithChiefOverride(item, options = {}) {
       message: "Terminez les tâches affectées depuis la vue Technicien, ou utilisez un override chef atelier avec motif.",
     };
   }
+  const overrideGuard = guardAction("task.override", { booking: technicianBookings[0] }, { notify: false });
+  if (!overrideGuard.ok) return { ok: false, message: overrideGuard.message };
   const confirmed = options.overrideConfirmed === true
     ? true
     : await showConfirmModal(
@@ -2861,7 +2882,12 @@ function recordWorkshopChiefOverride(item, booking, action, reason) {
 }
 
 function runWorkshopChiefOverride(item, booking, action, reason, options = {}) {
-  const actorId = options.technicianId || resolveBookingActionTechnicianId(booking, action, options) || "chef-atelier";
+  const cleanReason = String(reason || "").trim();
+  if (!cleanReason) return { ok: false, message: "Motif override chef atelier obligatoire." };
+  const overrideGuard = guardAction("task.override", { booking }, { notify: false });
+  if (!overrideGuard.ok) return { ok: false, message: overrideGuard.message };
+  const actor = getCurrentActor();
+  const actorId = actor.resourceId || actor.userId || options.technicianId || resolveBookingActionTechnicianId(booking, action, options) || "chef-atelier";
   const actorLabel = "Override chef atelier";
   let result = null;
   if (action === "start") {
@@ -2871,12 +2897,14 @@ function runWorkshopChiefOverride(item, booking, action, reason, options = {}) {
   } else if (action === "complete") {
     result = completeCaseBookingTaskNow(item, booking.id, new Date(), { completedBy: actorId, actorLabel, note: options.note || "" });
   }
-  if (result?.ok) recordWorkshopChiefOverride(item, booking, action, reason);
+  if (result?.ok) recordWorkshopChiefOverride(item, booking, action, cleanReason);
   return result || { ok: false, message: "Override chef atelier impossible pour cette action." };
 }
 
 async function requestWorkshopChiefOverride(item, booking, action, failedResult, options = {}) {
   if (options.allowOverride === false) return failedResult;
+  const overrideGuard = guardAction("task.override", { booking }, { notify: false });
+  if (!overrideGuard.ok) return { ok: false, message: overrideGuard.message };
   const reasonFromOptions = String(options.overrideReason || "").trim();
   let confirmed = options.overrideConfirmed === true;
   if (!confirmed) {
@@ -3009,6 +3037,8 @@ function renderDurations(root, item) {
   const durationGrid = $("[data-field='durations']", root);
   item.stepServiceTypes = normalizeStepServiceTypes(item.stepServiceTypes);
   item.stepPreferredResources = normalizeStepPreferredResources(item.stepPreferredResources);
+  const canEditPlanning = canRenderAction("planning.edit");
+  const planningEditTitle = canEditPlanning ? "" : getPermissionDeniedMessage("planning.edit");
   const activeCount = DURATIONS.filter(([key]) => Number(item.durations[key] ?? DEFAULT_DURATIONS[key]) > 0).length;
   durationGrid.innerHTML = `
     <div class="duration-edit-guide">
@@ -3033,12 +3063,12 @@ function renderDurations(root, item) {
     const technicianControl = !isActive
       ? ""
       : technicianOptions.length
-        ? `<label class="technician-override-field"><span>Technicien à réserver</span><small>Choisissez avant de calculer le RDV. Vérifiez aussi l'état des pièces ci-dessus : neuve/remplacée ou réparée.</small><select data-preferred-technician="${key}"><option value="">Auto - meilleur disponible</option>${technicianOptions.map((resource) => `<option value="${resource.id}" ${resource.id === preferredTechnicianId ? "selected" : ""}>${escapeHtml(resource.name)}${resource.location ? ` - ${escapeHtml(resource.location)}` : ""}</option>`).join("")}</select></label>`
+        ? `<label class="technician-override-field"><span>Technicien à réserver</span><small>${canEditPlanning ? "Choisissez avant de calculer le RDV. Vérifiez aussi l'état des pièces ci-dessus : neuve/remplacée ou réparée." : planningEditTitle}</small><select data-preferred-technician="${key}" ${canEditPlanning ? "" : `disabled title="${escapeAttr(planningEditTitle)}"`}><option value="">Auto - meilleur disponible</option>${technicianOptions.map((resource) => `<option value="${resource.id}" ${resource.id === preferredTechnicianId ? "selected" : ""}>${escapeHtml(resource.name)}${resource.location ? ` - ${escapeHtml(resource.location)}` : ""}</option>`).join("")}</select></label>`
         : `<div class="service-inactive-note">Aucun technicien actif disponible pour ce métier.</div>`;
     const serviceControl = !isActive
       ? `<div class="service-inactive-note">Ajoutez un temps atelier pour activer cette étape.</div>`
       : canChangeType
-        ? `<label class="service-override-field"><span>Service à réserver dans le planning</span><small>Gardez Auto sauf si cette opération doit changer de métier.</small><select data-service-type="${key}">${SERVICE_TYPE_OPTIONS.map(([type, text]) => {
+        ? `<label class="service-override-field"><span>Service à réserver dans le planning</span><small>${canEditPlanning ? "Gardez Auto sauf si cette opération doit changer de métier." : planningEditTitle}</small><select data-service-type="${key}" ${canEditPlanning ? "" : `disabled title="${escapeAttr(planningEditTitle)}"`}>${SERVICE_TYPE_OPTIONS.map(([type, text]) => {
             const helper = type === "auto" ? `Auto recommandé - ${autoHelp}` : `${text} - ${getServiceResourceHelp(type)}`;
             return `<option value="${type}" ${type === currentType ? "selected" : ""}>${helper}</option>`;
           }).join("")}</select></label>`
@@ -3096,6 +3126,12 @@ function renderDurations(root, item) {
   $$('[data-preferred-technician]', durationGrid).forEach((select) => {
     select.dataset.previousPreferredTechnician = getPreferredTechnicianForStep(item, select.dataset.preferredTechnician);
     select.addEventListener('change', () => {
+      const permission = guardAction("planning.edit", {}, { notify: false });
+      if (!permission.ok) {
+        notifyUser(permission.message, "error");
+        select.value = select.dataset.previousPreferredTechnician || "";
+        return;
+      }
       const key = select.dataset.preferredTechnician;
       const previous = select.dataset.previousPreferredTechnician || '';
       const next = select.value || '';
@@ -3113,6 +3149,12 @@ function renderDurations(root, item) {
   $$("[data-service-type]", durationGrid).forEach((select) => {
     select.dataset.previousServiceType = getStepServiceTypeValue(item, select.dataset.serviceType);
     select.addEventListener("change", () => {
+      const permission = guardAction("planning.edit", {}, { notify: false });
+      if (!permission.ok) {
+        notifyUser(permission.message, "error");
+        select.value = select.dataset.previousServiceType || "auto";
+        return;
+      }
       const key = select.dataset.serviceType;
       const previous = select.dataset.previousServiceType || "auto";
       const next = select.value || "auto";

@@ -1,3 +1,10 @@
+# v22.23 PR 2A - Permissions technicien et planning
+
+- Activation progressive des permissions sur les actions technicien : démarrer, pause, reprendre, terminer, bloquer et override.
+- Verrouillage des mutations planning : replanification, affectation technicien, ressources, fast lane, horaires, jours fériés et congés/absences.
+- Messages UI lisibles pour les actions refusées, avec boutons désactivés quand le rôle courant n'est pas autorisé.
+- Cache PWA incrémenté en `nimr-sav-v22.23-permissions-technician-planning`.
+
 # v22.23 - Fondations utilisateurs, rôles et acteur courant
 
 - Ajout du modèle local `users` et `currentUserId`, avec migration douce des anciens états sans utilisateurs.
@@ -5,7 +12,7 @@
 - Ajout des rôles atelier et permissions centrales : admin, chef atelier, réception, technicien, qualité et lecture seule.
 - Liaison préparée entre utilisateur et ressource planning (`resourceId`, `userId`, `authUserId`) sans imposer Supabase.
 - Historique enrichi avec `userId`, `userName`, `userRole` et `resourceId`, en conservant `user` pour les anciens dossiers.
-- Cache PWA incrémenté en `nimr-sav-v22.23-users-roles-foundation`.
+- Cache PWA initial de la phase rôles : `nimr-sav-v22.23-users-roles-foundation`.
 
 # v22.22 - Responsive mobile et tablette
 

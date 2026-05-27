@@ -516,6 +516,8 @@ function changePlanningDay(delta) {
 function bindWorkshopForms() {
   $("#resource-form")?.addEventListener("submit", (event) => {
     event.preventDefault();
+    const permission = guardAction("planning.edit", {}, { notify: false });
+    if (!permission.ok) return notifyUser(permission.message, "error");
     const form = event.currentTarget;
     const data = new FormData(form);
     state.resources.push(normalizeResource({
@@ -536,6 +538,8 @@ function bindWorkshopForms() {
 
   $("#holiday-form")?.addEventListener("submit", (event) => {
     event.preventDefault();
+    const permission = guardAction("planning.edit", {}, { notify: false });
+    if (!permission.ok) return notifyUser(permission.message, "error");
     const form = event.currentTarget;
     const data = new FormData(form);
     const date = data.get("date");
@@ -552,6 +556,8 @@ function bindWorkshopForms() {
 
   $("#resource-leave-form")?.addEventListener("submit", (event) => {
     event.preventDefault();
+    const permission = guardAction("planning.edit", {}, { notify: false });
+    if (!permission.ok) return notifyUser(permission.message, "error");
     const form = event.currentTarget;
     const data = new FormData(form);
     const resourceId = data.get("resourceId");
@@ -609,6 +615,8 @@ function getResourceLeaveConflicts(resourceId, start, end) {
 function updateFastLaneSettings() {
   const form = $("#fastlane-form");
   if (!form) return;
+  const permission = guardAction("planning.edit", {}, { notify: false });
+  if (!permission.ok) return notifyUser(permission.message, "error");
   state.settings.fastLaneEnabled = Boolean(form.elements.fastLaneEnabled.checked);
   state.settings.fastLaneMaxHours = Math.max(0, roundHours(parseLocalizedDecimal(form.elements.fastLaneMaxHours.value || FAST_LANE_DEFAULT_HOURS)));
   saveState();
@@ -620,6 +628,12 @@ function bindWorkHoursInputs() {
     if (input.dataset.bound === "true") return;
     input.dataset.bound = "true";
     input.addEventListener("change", () => {
+      const permission = guardAction("planning.edit", {}, { notify: false });
+      if (!permission.ok) {
+        notifyUser(permission.message, "error");
+        input.value = formatWorkIntervals(state.workHours[input.dataset.workDay] || []);
+        return;
+      }
       try {
         state.workHours[input.dataset.workDay] = parseWorkIntervals(input.value);
         saveState();

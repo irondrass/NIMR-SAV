@@ -1,4 +1,4 @@
-const CACHE_NAME = "nimr-sav-v22.23-permissions-reception-quality-sensitive";
+const CACHE_NAME = "nimr-sav-v22.24-public-review-fixes";
 const ASSETS = [
   "./",
   "./index.html",

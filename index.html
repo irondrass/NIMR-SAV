@@ -16,8 +16,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <script src="js/version.js?v=22.23"></script>
-    <link rel="stylesheet" href="styles.css?v=22.23" />
+    <script src="js/version.js?v=22.24"></script>
+    <link rel="stylesheet" href="styles.css?v=22.24" />
   </head>
   <body>
     <a class="skip-link" href="#main-content">Aller au contenu principal</a>
@@ -176,8 +176,8 @@
                   <input name="color" placeholder="Couleur" />
                 </label>
                 <label data-quick-optional>
-                  VIN ou immatriculation <span class="required-marker">*</span>
-                  <input name="vin" placeholder="Numéro de châssis" />
+                  VIN complet, si différent
+                  <input name="vin" placeholder="Numéro de châssis complet si connu" />
                 </label>
                 <label>
                   Type d'ordre
@@ -445,13 +445,13 @@
                 </div>
               </div>
               <div class="backup-actions">
-                <button class="primary-button" type="button" id="export-backup">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M7 10l5 5 5-5" /><path d="M12 15V3" /></svg>
-                  Exporter sauvegarde
-                </button>
-                <button class="ghost-button" type="button" id="export-encrypted-backup">
+                <button class="primary-button" type="button" id="export-encrypted-backup">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 17a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z" /><path d="M17 11V8a5 5 0 0 0-10 0v3" /><rect x="5" y="11" width="14" height="10" rx="2" /></svg>
-                  Export chiffré
+                  Exporter sauvegarde chiffrée
+                </button>
+                <button class="ghost-button danger-button" type="button" id="export-backup">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M7 10l5 5 5-5" /><path d="M12 15V3" /></svg>
+                  Exporter JSON non chiffré
                 </button>
                 <label class="file-button">
                   <input type="file" id="test-encrypted-backup" accept=".nimrsecure,application/json" />
@@ -464,7 +464,7 @@
                   Importer sauvegarde
                 </label>
               </div>
-              <p class="muted backup-warning">Attention : la sauvegarde contient des données clients, photos, véhicules, téléphones, VIN, immatriculations et historique. Conservez ce fichier dans un emplacement sécurisé.</p>
+              <p class="muted backup-warning">Recommandé : utilisez l’export chiffré pour transporter ou archiver une sauvegarde. Le JSON non chiffré contient clients, photos, véhicules, téléphones, VIN, immatriculations et historique.</p>
               <p class="muted backup-status" id="backup-status">Inclut dossiers, planning, paramètres, historique et photos.</p>
               <div class="autosave-control-panel">
                 <div>
@@ -556,7 +556,7 @@
               </div>
               <p class="muted backup-warning">Avant chaque sauvegarde ou restauration cloud, l'application télécharge automatiquement une copie JSON locale de sécurité.</p>
               <p class="muted backup-status" id="supabase-status">Initialisation Supabase...</p>
-              <p class="muted" id="supabase-details">Exécutez supabase-schema.sql v22.10 si le test indique que cloud_backups, Realtime ou app_settings manque.</p>
+              <p class="muted" id="supabase-details">Exécutez le dernier supabase-schema.sql fourni avec cette version si le test indique que cloud_backups, Realtime, app_settings ou les politiques atelier manquent.</p>
             </section>
           </div>
         </section>
@@ -850,13 +850,14 @@
             </button>
             <button class="primary-button" type="button" data-action-flag="workStarted">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg>
-              Démarrer travaux
+              Ouvrir tâches technicien
             </button>
-            <button class="primary-button" type="button" data-action-flag="workCompleted">
+            <button class="primary-button" type="button" data-action-flag="workCompleted" title="Action chef atelier avec contrôle des permissions et motif d’override si nécessaire.">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg>
-              Terminer travaux
+              Finaliser travaux via chef atelier
             </button>
           </div>
+          <p class="muted">Le suivi opérationnel se fait dans l’onglet Technicien. La finalisation globale reste réservée au chef atelier avec les contrôles de permissions.</p>
           <div class="assignment-list" data-field="assignments"></div>
         </section>
         <section class="detail-section full-width">
@@ -954,20 +955,20 @@
     </div>
 
     <script src="vendor/pdf.min.js" defer></script>
-    <script src="js/utils.js?v=22.23" defer></script>
-    <script src="js/state.js?v=22.23" defer></script>
-    <script src="js/ui-cases.js?v=22.23" defer></script>
-    <script src="js/estimate-import.js?v=22.23" defer></script>
-    <script src="js/ui-planning.js?v=22.23" defer></script>
-    <script src="js/photos.js?v=22.23" defer></script>
-    <script src="js/storage.js?v=22.23" defer></script>
-    <script src="js/planning.js?v=22.23" defer></script>
-    <script src="js/exports.js?v=22.23" defer></script>
-    <script src="js/business-rules-v2187.js?v=22.23" defer></script>
+    <script src="js/utils.js?v=22.24" defer></script>
+    <script src="js/state.js?v=22.24" defer></script>
+    <script src="js/ui-cases.js?v=22.24" defer></script>
+    <script src="js/estimate-import.js?v=22.24" defer></script>
+    <script src="js/ui-planning.js?v=22.24" defer></script>
+    <script src="js/photos.js?v=22.24" defer></script>
+    <script src="js/storage.js?v=22.24" defer></script>
+    <script src="js/planning.js?v=22.24" defer></script>
+    <script src="js/exports.js?v=22.24" defer></script>
+    <script src="js/business-rules-v2187.js?v=22.24" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
-    <script src="js/supabase-config.js?v=22.23" defer></script>
-    <script src="js/supabase-client.js?v=22.23" defer></script>
-    <script src="js/supabase-sync.js?v=22.23" defer></script>
-    <script src="app.js?v=22.23" defer></script>
+    <script src="js/supabase-config.js?v=22.24" defer></script>
+    <script src="js/supabase-client.js?v=22.24" defer></script>
+    <script src="js/supabase-sync.js?v=22.24" defer></script>
+    <script src="app.js?v=22.24" defer></script>
   </body>
 </html>

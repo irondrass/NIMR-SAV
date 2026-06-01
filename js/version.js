@@ -1,5 +1,5 @@
-window.NIMR_BUILD = "v22.23";
-window.NIMR_CACHE_NAME = "nimr-sav-v22.23-permissions-reception-quality-sensitive";
+window.NIMR_BUILD = "v22.24";
+window.NIMR_CACHE_NAME = "nimr-sav-v22.24-public-review-fixes";
 
 if ("caches" in window) {
   caches.keys().then((keys) => Promise.all(

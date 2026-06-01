@@ -75,12 +75,12 @@ const appSource = fs.readFileSync('app.js', 'utf8');
 const swSource = fs.readFileSync('sw.js', 'utf8');
 const versionSource = fs.readFileSync('js/version.js', 'utf8');
 const indexSource = fs.readFileSync('index.html', 'utf8');
-assert.match(stateSource, /APP_VERSION\s*=\s*"v22\.24"/, 'APP_VERSION doit être en v22.24');
-assert.match(appSource, /serviceWorker\.register\("sw\.js\?v=22\.24"/, 'le service worker doit pointer vers sw.js?v=22.24');
-assert.match(swSource, /nimr-sav-v22\.24-public-review-fixes/, 'le cache PWA doit être en v22.24');
-assert.match(versionSource, /NIMR_BUILD\s*=\s*"v22\.24"/, 'js/version.js doit exposer v22.24');
+assert.match(stateSource, /APP_VERSION\s*=\s*"v22\.25"/, 'APP_VERSION doit être en v22.25');
+assert.match(appSource, /serviceWorker\.register\("sw\.js\?v=22\.25"/, 'le service worker doit pointer vers sw.js?v=22.25');
+assert.match(swSource, /nimr-sav-v22\.25-sync-integrity/, 'le cache PWA doit être en v22.25');
+assert.match(versionSource, /NIMR_BUILD\s*=\s*"v22\.25"/, 'js/version.js doit exposer v22.25');
 [...indexSource.matchAll(/\?v=(\d+\.\d+)/g)].forEach((match) => {
-  assert.equal(match[1], '22.24', `référence index.html incohérente: ?v=${match[1]}`);
+  assert.equal(match[1], '22.25', `référence index.html incohérente: ?v=${match[1]}`);
 });
 
 app(`
@@ -187,4 +187,4 @@ app(`
 `);
 assert.equal(app('getCurrentUser().role'), 'admin', 'offline/local sans Supabase doit fonctionner');
 
-console.log('Users roles foundation v22.24 OK');
+console.log('Users roles foundation v22.25 OK');

@@ -866,6 +866,362 @@ function getTimestampMs(value) {
   return Number.isFinite(time) ? time : 0;
 }
 
+const PROTECTED_CASE_FLAGS = ["received", "workStarted", "workCompleted", "qualityApproved", "delivered", "invoiced"];
+const BOOKING_STATUS_RANK = {
+  temporary: 0,
+  planned: 1,
+  paused: 2,
+  started: 3,
+  completed: 4,
+};
+
+function makeEntityKey(entity, fallbackPrefix = "entity") {
+  if (!entity || typeof entity !== "object") return `${fallbackPrefix}:empty`;
+  if (entity.id) return `id:${entity.id}`;
+  return [
+    fallbackPrefix,
+    entity.at || entity.createdAt || entity.startedAt || entity.completedAt || "",
+    entity.type || entity.status || entity.label || "",
+    entity.label || entity.operation || entity.text || entity.name || "",
+    entity.details || entity.pauseReason || "",
+  ].join("|");
+}
+
+function mergeArrayById(localEntries = [], remoteEntries = [], options = {}) {
+  const fallbackPrefix = options.fallbackPrefix || "entry";
+  const preferRemote = options.preferRemote !== false;
+  const map = new Map();
+  (Array.isArray(localEntries) ? localEntries : []).forEach((entry) => {
+    map.set(makeEntityKey(entry, fallbackPrefix), entry);
+  });
+  (Array.isArray(remoteEntries) ? remoteEntries : []).forEach((entry) => {
+    const key = makeEntityKey(entry, fallbackPrefix);
+    if (!map.has(key)) {
+      map.set(key, entry);
+      return;
+    }
+    map.set(key, preferRemote ? { ...map.get(key), ...entry } : { ...entry, ...map.get(key) });
+  });
+  return [...map.values()];
+}
+
+function mergePrimitiveList(localEntries = [], remoteEntries = []) {
+  return [...new Set([...(Array.isArray(localEntries) ? localEntries : []), ...(Array.isArray(remoteEntries) ? remoteEntries : [])].filter(Boolean))];
+}
+
+function mergeHistoryAppendOnly(localHistory = [], remoteHistory = []) {
+  const before = Array.isArray(localHistory) ? localHistory.length : 0;
+  const merged = mergeArrayById(localHistory, remoteHistory, { fallbackPrefix: "history", preferRemote: false })
+    .sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0));
+  return {
+    history: merged,
+    added: Math.max(0, merged.length - before),
+  };
+}
+
+function getBookingStatusRank(booking) {
+  const status = typeof getBookingOperationalStatus === "function"
+    ? getBookingOperationalStatus(booking)
+    : (booking?.status || "planned");
+  return BOOKING_STATUS_RANK[status] ?? BOOKING_STATUS_RANK.planned;
+}
+
+function isProtectedBooking(booking) {
+  if (!booking) return false;
+  const status = typeof getBookingOperationalStatus === "function"
+    ? getBookingOperationalStatus(booking)
+    : (booking.status || "planned");
+  return status === "started"
+    || status === "completed"
+    || Boolean(booking.startedAt)
+    || Boolean(booking.completedAt)
+    || Boolean(booking.actualStart)
+    || Boolean(booking.actualEnd)
+    || (Array.isArray(booking.workSessions) && booking.workSessions.length > 0);
+}
+
+function isProtectedCase(item) {
+  if (!item) return false;
+  const flags = item.flags || {};
+  return Boolean(flags.delivered || flags.invoiced || item.closedAt || item.deletedAt);
+}
+
+function shouldKeepLocalEntity(localEntity, remoteEntity) {
+  if (!localEntity) return false;
+  if (!remoteEntity) return true;
+  if (isProtectedBooking(localEntity) && getBookingStatusRank(localEntity) > getBookingStatusRank(remoteEntity)) return true;
+  if (isProtectedCase(localEntity) && !isProtectedCase(remoteEntity)) return true;
+  return false;
+}
+
+function pushSyncConflict(stats, conflict) {
+  const entry = {
+    id: uid("sync-conflict"),
+    at: new Date().toISOString(),
+    resolution: "kept_local",
+    ...conflict,
+  };
+  stats.conflictEntries.push(entry);
+  stats.conflicts += 1;
+  return entry;
+}
+
+function mergeCaseFlags(localCase, remoteCase, stats) {
+  const localFlags = localCase?.flags || {};
+  const remoteFlags = remoteCase?.flags || {};
+  const merged = { ...localFlags, ...remoteFlags };
+  PROTECTED_CASE_FLAGS.forEach((flag) => {
+    if (localFlags[flag] === true && remoteFlags[flag] === false) {
+      merged[flag] = true;
+      pushSyncConflict(stats, {
+        entity: "case",
+        entityId: localCase.id,
+        field: `flags.${flag}`,
+        reason: "Statut dossier local protégé conservé.",
+        localValue: true,
+        remoteValue: false,
+      });
+    }
+  });
+  return merged;
+}
+
+function mergeCaseEntity(localCase, remoteCase, stats) {
+  if (!localCase) {
+    stats.casesMerged += 1;
+    return remoteCase;
+  }
+  if (!remoteCase) {
+    stats.protectedKept += 1;
+    return localCase;
+  }
+  const historyResult = mergeHistoryAppendOnly(localCase.history, remoteCase.history);
+  stats.historyMerged += historyResult.added;
+  const merged = {
+    ...localCase,
+    ...remoteCase,
+    flags: mergeCaseFlags(localCase, remoteCase, stats),
+    history: historyResult.history,
+    photos: mergeArrayById(localCase.photos, remoteCase.photos, { fallbackPrefix: "photo", preferRemote: true }),
+    claims: mergeArrayById(localCase.claims, remoteCase.claims, { fallbackPrefix: "claim", preferRemote: true }),
+    supplements: mergeArrayById(localCase.supplements, remoteCase.supplements, { fallbackPrefix: "supplement", preferRemote: true }),
+    blockerSourceBookingIds: mergePrimitiveList(localCase.blockerSourceBookingIds, remoteCase.blockerSourceBookingIds),
+    deletedAt: remoteCase.deletedAt || localCase.deletedAt || "",
+    deletedBy: remoteCase.deletedBy || localCase.deletedBy || "",
+    deleteReason: remoteCase.deleteReason || localCase.deleteReason || "",
+  };
+  if (isProtectedCase(localCase) && !isProtectedCase(remoteCase)) {
+    merged.appointment = localCase.appointment || merged.appointment;
+    merged.appointmentStatus = localCase.appointmentStatus || merged.appointmentStatus;
+    stats.protectedKept += 1;
+  }
+  stats.casesMerged += 1;
+  return merged;
+}
+
+function mergeCasesById(localCases = [], remoteCases = [], stats = createEmptySyncMergeStats()) {
+  const remoteById = new Map((Array.isArray(remoteCases) ? remoteCases : []).filter((item) => item?.id).map((item) => [item.id, item]));
+  const usedRemoteIds = new Set();
+  const cases = [];
+  (Array.isArray(localCases) ? localCases : []).forEach((localCase) => {
+    const remoteCase = localCase?.id ? remoteById.get(localCase.id) : null;
+    if (remoteCase) usedRemoteIds.add(localCase.id);
+    cases.push(mergeCaseEntity(localCase, remoteCase, stats));
+  });
+  (Array.isArray(remoteCases) ? remoteCases : []).forEach((remoteCase) => {
+    if (!remoteCase?.id || usedRemoteIds.has(remoteCase.id)) return;
+    cases.push(mergeCaseEntity(null, remoteCase, stats));
+  });
+  return { cases, stats };
+}
+
+function mergeBookingEntity(localBooking, remoteBooking, stats) {
+  if (!localBooking) {
+    stats.bookingsMerged += 1;
+    return remoteBooking;
+  }
+  if (!remoteBooking) {
+    stats.protectedKept += 1;
+    return localBooking;
+  }
+  const localRank = getBookingStatusRank(localBooking);
+  const remoteRank = getBookingStatusRank(remoteBooking);
+  const merged = {
+    ...localBooking,
+    ...remoteBooking,
+    notes: mergeArrayById(localBooking.notes, remoteBooking.notes, { fallbackPrefix: "task-note", preferRemote: false }),
+    photoIds: mergePrimitiveList(localBooking.photoIds, remoteBooking.photoIds),
+    workSessions: mergeArrayById(localBooking.workSessions, remoteBooking.workSessions, { fallbackPrefix: "work-session", preferRemote: true }),
+    deletedAt: remoteBooking.deletedAt || localBooking.deletedAt || "",
+    deletedBy: remoteBooking.deletedBy || localBooking.deletedBy || "",
+    deleteReason: remoteBooking.deleteReason || localBooking.deleteReason || "",
+  };
+  if (localRank > remoteRank) {
+    [
+      "status",
+      "start",
+      "end",
+      "segments",
+      "plannedStart",
+      "plannedEnd",
+      "plannedSegments",
+      "plannedMinutes",
+      "actualStart",
+      "actualEnd",
+      "startedAt",
+      "startedBy",
+      "pausedAt",
+      "pausedBy",
+      "resumedAt",
+      "resumedBy",
+      "completedAt",
+      "completedBy",
+      "completedByOverride",
+      "actualWorkedMinutes",
+      "remainingMinutes",
+      "parentBookingId",
+      "remainingFromPaused",
+      "pauseReason",
+    ].forEach((field) => {
+      merged[field] = localBooking[field];
+    });
+    pushSyncConflict(stats, {
+      entity: "booking",
+      entityId: localBooking.id,
+      field: "status",
+      reason: "Statut tâche local protégé conservé.",
+      localValue: localBooking.status,
+      remoteValue: remoteBooking.status,
+    });
+    stats.protectedKept += 1;
+  } else if (localRank === remoteRank && isProtectedBooking(localBooking)) {
+    merged.actualWorkedMinutes = Math.max(Number(localBooking.actualWorkedMinutes || 0), Number(remoteBooking.actualWorkedMinutes || 0));
+    merged.startedAt = remoteBooking.startedAt || localBooking.startedAt || "";
+    merged.completedAt = remoteBooking.completedAt || localBooking.completedAt || "";
+  }
+  stats.bookingsMerged += 1;
+  return merged;
+}
+
+function mergeBookingsById(localBookings = [], remoteBookings = [], stats = createEmptySyncMergeStats()) {
+  const remoteById = new Map((Array.isArray(remoteBookings) ? remoteBookings : []).filter((booking) => booking?.id).map((booking) => [booking.id, booking]));
+  const usedRemoteIds = new Set();
+  const bookings = [];
+  (Array.isArray(localBookings) ? localBookings : []).forEach((localBooking) => {
+    const remoteBooking = localBooking?.id ? remoteById.get(localBooking.id) : null;
+    if (remoteBooking) usedRemoteIds.add(localBooking.id);
+    bookings.push(mergeBookingEntity(localBooking, remoteBooking, stats));
+  });
+  (Array.isArray(remoteBookings) ? remoteBookings : []).forEach((remoteBooking) => {
+    if (!remoteBooking?.id || usedRemoteIds.has(remoteBooking.id)) return;
+    bookings.push(mergeBookingEntity(null, remoteBooking, stats));
+  });
+  return { bookings, stats };
+}
+
+function createEmptySyncMergeStats() {
+  return {
+    casesMerged: 0,
+    bookingsMerged: 0,
+    historyMerged: 0,
+    conflicts: 0,
+    protectedKept: 0,
+    conflictEntries: [],
+  };
+}
+
+function mergeRemoteStateIntoLocal(localState, remoteState, options = {}) {
+  const stats = createEmptySyncMergeStats();
+  const normalizedLocal = normalizeState(localState);
+  const normalizedRemote = normalizeState(remoteState);
+  const mergedCases = mergeCasesById(normalizedLocal.cases, normalizedRemote.cases, stats).cases;
+  const mergedBookings = mergeBookingsById(normalizedLocal.bookings, normalizedRemote.bookings, stats).bookings;
+  const syncLogEntry = {
+    id: uid("sync-log"),
+    at: new Date().toISOString(),
+    source: options.source || options.reason || "supabase",
+    reason: options.reason || "cloud",
+    localVersion: APP_VERSION,
+    remoteVersion: options.remoteVersion || remoteState?.appVersion || "",
+    remoteUpdatedAt: options.remoteUpdatedAt || "",
+    casesMerged: stats.casesMerged,
+    bookingsMerged: stats.bookingsMerged,
+    historyMerged: stats.historyMerged,
+    conflicts: stats.conflicts,
+    protectedKept: stats.protectedKept,
+    details: options.details || "",
+  };
+  const mergedRaw = {
+    ...normalizedLocal,
+    ...normalizedRemote,
+    cases: mergedCases,
+    bookings: mergedBookings,
+    resources: mergeArrayById(normalizedLocal.resources, normalizedRemote.resources, { fallbackPrefix: "resource", preferRemote: true }),
+    users: mergeArrayById(normalizedLocal.users, normalizedRemote.users, { fallbackPrefix: "user", preferRemote: true }),
+    auditLog: mergeArrayById(normalizedLocal.auditLog, normalizedRemote.auditLog, { fallbackPrefix: "audit", preferRemote: false }),
+    syncConflicts: [...stats.conflictEntries, ...(normalizedLocal.syncConflicts || []), ...(normalizedRemote.syncConflicts || [])],
+    syncLog: [syncLogEntry, ...(normalizedLocal.syncLog || []), ...(normalizedRemote.syncLog || [])],
+    settings: {
+      ...(normalizedLocal.settings || {}),
+      ...(normalizedRemote.settings || {}),
+    },
+    ui: normalizedLocal.ui,
+    currentUserId: normalizedLocal.currentUserId || normalizedRemote.currentUserId,
+  };
+  return {
+    state: normalizeState(mergedRaw),
+    stats,
+    log: syncLogEntry,
+    conflicts: stats.conflictEntries,
+  };
+}
+
+async function createSyncSafetySnapshot(reason = "remote-sync", metadata = {}) {
+  if (typeof forceEmergencyAutosave === "function") forceEmergencyAutosave();
+  const payload = typeof buildBackupPayload === "function"
+    ? await buildBackupPayload()
+    : {
+        app: BACKUP_APP_ID,
+        version: BACKUP_FORMAT_VERSION,
+        appVersion: APP_VERSION,
+        exportedAt: new Date().toISOString(),
+        state,
+        photos: [],
+      };
+  payload.syncSafety = {
+    reason,
+    createdAt: new Date().toISOString(),
+    localVersion: APP_VERSION,
+    ...metadata,
+  };
+  try {
+    localStorage.setItem(`${STORAGE_KEY}:sync-safety-last`, JSON.stringify({
+      createdAt: payload.syncSafety.createdAt,
+      reason,
+      metadata,
+      casesCount: payload.state?.cases?.length || 0,
+      bookingsCount: payload.state?.bookings?.length || 0,
+    }));
+  } catch (error) {
+    console.warn("Snapshot sync local non mémorisé", error);
+  }
+  if (metadata.download === true && typeof downloadJson === "function") {
+    downloadJson(payload, `nimr-sav-snapshot-sync-${todayKey(new Date())}.json`);
+  }
+  return payload;
+}
+
+function recordSyncConflict(conflict) {
+  const entry = {
+    id: uid("sync-conflict"),
+    at: new Date().toISOString(),
+    resolution: "kept_local",
+    ...conflict,
+  };
+  state.syncConflicts = normalizeSyncConflicts([entry, ...(state.syncConflicts || [])]);
+  return entry;
+}
+
 function shouldApplyRemoteBackup(data) {
   if (!data?.state) return false;
   const remoteCloudTime = getTimestampMs(data.updated_at);
@@ -907,23 +1263,44 @@ async function applyRemoteSupabaseBackup(data, reason = "cloud") {
   try {
     const previousActiveCaseId = activeCaseId;
     const previousTab = activeCaseDetailTab;
-    state = normalizeState(data.state);
+    await createSyncSafetySnapshot("remote-before-merge", {
+      reason,
+      remoteUpdatedAt: data.updated_at || "",
+      remoteVersion: data.app_version || "",
+      source: data.updated_by || "supabase",
+    });
+    const mergeResult = mergeRemoteStateIntoLocal(state, data.state, {
+      reason,
+      source: data.updated_by || "supabase",
+      remoteUpdatedAt: data.updated_at || "",
+      remoteVersion: data.app_version || "",
+    });
+    state = mergeResult.state;
     if (previousActiveCaseId && state.cases.some((item) => item.id === previousActiveCaseId)) activeCaseId = previousActiveCaseId;
     else activeCaseId = state.cases[0]?.id ?? null;
     activeCaseDetailTab = previousTab || "resume";
     generatedProposals = {};
     if (Array.isArray(data.photos)) {
-      await clearPhotoStore();
       await restorePhotoRecords(data.photos);
     }
     lastKnownCloudUpdatedAt = getTimestampMs(data.updated_at) || Date.now();
     if (typeof rememberKnownCloudUpdatedAt === "function") rememberKnownCloudUpdatedAt(lastKnownCloudUpdatedAt);
-    if (typeof clearLocalUserChangeAt === "function") clearLocalUserChangeAt();
+    if (mergeResult.stats.conflicts > 0) {
+      if (typeof rememberLocalUserChangeAt === "function") rememberLocalUserChangeAt(new Date());
+    } else if (typeof clearLocalUserChangeAt === "function") {
+      clearLocalUserChangeAt();
+    }
     saveState({ skipCloud: true });
     render();
-    setSupabaseStatus("Synchronisation atelier à jour.", "ok");
-    setSupabaseDetails(`Dernière mise à jour reçue (${reason}) : ${new Date(lastKnownCloudUpdatedAt).toLocaleTimeString()}`);
-    notifyUser("Mise à jour reçue depuis un autre poste.", "info");
+    if (mergeResult.stats.conflicts > 0) {
+      setSupabaseStatus("Conflit de synchronisation détecté.", "warn");
+      setSupabaseDetails(`Données locales protégées conservées : ${mergeResult.stats.conflicts} conflit(s), ${mergeResult.stats.protectedKept} élément(s) protégé(s).`);
+      notifyUser("Conflit de synchronisation détecté — données locales conservées.", "warn");
+    } else {
+      setSupabaseStatus("Synchronisation atelier à jour.", "ok");
+      setSupabaseDetails(`Dernière mise à jour reçue (${reason}) : ${new Date(lastKnownCloudUpdatedAt).toLocaleTimeString()} · ${mergeResult.stats.casesMerged} dossier(s), ${mergeResult.stats.bookingsMerged} tâche(s) fusionné(s).`);
+      notifyUser("Mise à jour reçue depuis un autre poste.", "info");
+    }
     return true;
   } catch (error) {
     console.warn("Application de la sauvegarde cloud impossible", error);

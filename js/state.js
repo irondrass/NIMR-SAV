@@ -20,7 +20,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v22.24";
+const APP_VERSION = "v22.25";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const WORKSHOP_NAME = "NIMR SAV";
@@ -881,6 +881,8 @@ function createDefaultState() {
     users: [],
     currentUserId: "",
     auditLog: [],
+    syncLog: [],
+    syncConflicts: [],
     bookings: [],
     holidays: [
       { date: `${today.getFullYear()}-01-01`, label: "Nouvel an" },
@@ -1279,6 +1281,8 @@ function normalizeState(raw) {
     users,
     currentUserId,
     auditLog: normalizeAuditLog(raw.auditLog),
+    syncLog: normalizeSyncLog(raw.syncLog),
+    syncConflicts: normalizeSyncConflicts(raw.syncConflicts),
     bookings: normalizeBookings(raw.bookings, resources),
     holidays: Array.isArray(raw.holidays) ? raw.holidays : seed.holidays,
     planningDate: raw.planningDate || todayKey(new Date()),
@@ -1487,6 +1491,9 @@ function normalizeBooking(booking, resourceIds) {
     planningMode: booking.planningMode || "standard",
     details: booking.details || "",
     temporary: Boolean(booking.temporary),
+    deletedAt: booking.deletedAt || "",
+    deletedBy: booking.deletedBy || "",
+    deleteReason: booking.deleteReason || "",
   };
 }
 
@@ -1563,6 +1570,9 @@ function normalizeCase(item) {
     appointment: item.appointment || null,
     claims: normalizeRepairClaims(item.claims, item),
     supplements: normalizeRepairSupplements(item.supplements),
+    deletedAt: item.deletedAt || "",
+    deletedBy: item.deletedBy || "",
+    deleteReason: item.deleteReason || "",
   };
 }
 
@@ -1868,6 +1878,44 @@ function normalizeAuditLog(entries) {
     .slice(0, 500);
 }
 
+function normalizeSyncLog(entries) {
+  return (Array.isArray(entries) ? entries : [])
+    .map((entry) => ({
+      id: entry.id || uid("sync-log"),
+      at: entry.at || new Date().toISOString(),
+      source: entry.source || "",
+      reason: entry.reason || "",
+      localVersion: entry.localVersion || "",
+      remoteVersion: entry.remoteVersion || "",
+      remoteUpdatedAt: entry.remoteUpdatedAt || "",
+      casesMerged: Number(entry.casesMerged || 0),
+      bookingsMerged: Number(entry.bookingsMerged || 0),
+      historyMerged: Number(entry.historyMerged || 0),
+      conflicts: Number(entry.conflicts || 0),
+      protectedKept: Number(entry.protectedKept || 0),
+      details: entry.details || "",
+    }))
+    .sort((a, b) => new Date(b.at) - new Date(a.at))
+    .slice(0, 300);
+}
+
+function normalizeSyncConflicts(entries) {
+  return (Array.isArray(entries) ? entries : [])
+    .map((entry) => ({
+      id: entry.id || uid("sync-conflict"),
+      at: entry.at || new Date().toISOString(),
+      entity: entry.entity || "unknown",
+      entityId: entry.entityId || "",
+      field: entry.field || "",
+      reason: entry.reason || "",
+      localValue: entry.localValue ?? "",
+      remoteValue: entry.remoteValue ?? "",
+      resolution: entry.resolution || "kept_local",
+    }))
+    .sort((a, b) => new Date(b.at) - new Date(a.at))
+    .slice(0, 500);
+}
+
 function makeHistoryEntry(type, label, at = new Date().toISOString(), details = "", actor = null) {
   let resolvedActor = actor;
   if (!resolvedActor) {
@@ -2053,6 +2101,9 @@ function normalizePhotoMeta(photo) {
     size: Number(meta.size || 0),
     category: normalizePhotoCategory(meta.category),
     createdAt: meta.createdAt || new Date().toISOString(),
+    deletedAt: meta.deletedAt || "",
+    deletedBy: meta.deletedBy || "",
+    deleteReason: meta.deleteReason || "",
   };
 }
 

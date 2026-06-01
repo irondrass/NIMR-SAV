@@ -1,3 +1,13 @@
+# v22.25 - Intégrité synchronisation multi-PC
+
+- Remplacement de l’application brutale des sauvegardes Supabase entrantes par une fusion local/cloud par entité.
+- Les dossiers, bookings, historiques et photos locales ne sont plus supprimés par simple absence dans l’état distant.
+- Les tâches démarrées, terminées, avec sessions réelles ou liées à un dossier livré/facturé sont protégées contre les rétrogradations.
+- Historique dossier fusionné en append-only pour éviter la perte d’événements terrain.
+- Ajout d’un journal local de synchronisation et d’entrées de conflit lorsque des données locales protégées sont conservées.
+- Snapshot local de sécurité mémorisé avant application d’une mise à jour distante.
+- Cache PWA incrémenté en `nimr-sav-v22.25-sync-integrity`.
+
 # v22.24 - Finitions revue publique
 
 - Texte Cloud Supabase rendu durable : l'interface renvoie vers le dernier `supabase-schema.sql` du dépôt, sans mention d'ancien jalon.

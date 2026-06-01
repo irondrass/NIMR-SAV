@@ -1,3 +1,6 @@
+const SUPABASE_SCHEMA_HINT =
+  "Exécutez le dernier supabase-schema.sql fourni avec cette version si le test indique que cloud_backups, Realtime, app_settings ou les politiques atelier manquent.";
+
 async function signInSupabaseFromForm(event) {
   event.preventDefault();
   const client = getSupabaseClient();
@@ -64,7 +67,7 @@ async function testSupabaseConnection() {
   if (orderCheck.error) {
     console.warn("Tables métier Supabase indisponibles", orderCheck.error);
     setSupabaseStatus("Connexion OK, mais tables métier absentes.", "warn");
-    setSupabaseDetails("La sauvegarde JSON fonctionne, mais repair_orders est inaccessible. Exécutez supabase-schema.sql v22.10.");
+    setSupabaseDetails(`La sauvegarde JSON fonctionne, mais repair_orders est inaccessible. ${SUPABASE_SCHEMA_HINT}`);
     return;
   }
 
@@ -72,7 +75,7 @@ async function testSupabaseConnection() {
   if (settingsCheck.error) {
     console.warn("Table app_settings indisponible", settingsCheck.error);
     setSupabaseStatus("Connexion OK, mais réglages structurés absents.", "warn");
-    setSupabaseDetails("Exécutez supabase-schema.sql v22.10 pour créer app_settings et activer la synchronisation live, puis relancez le test.");
+    setSupabaseDetails(SUPABASE_SCHEMA_HINT);
     return;
   }
 
@@ -80,7 +83,7 @@ async function testSupabaseConnection() {
   if (claimCheck.error) {
     console.warn("Table repair_claims indisponible", claimCheck.error);
     setSupabaseStatus("Connexion OK, cache Supabase à rafraîchir.", "warn");
-    setSupabaseDetails("La table vient probablement d’être créée. Exécutez le SQL v22.10, puis patientez 30 secondes et relancez le contrôle.");
+    setSupabaseDetails(`La table vient probablement d’être créée. ${SUPABASE_SCHEMA_HINT} Patientez 30 secondes puis relancez le contrôle.`);
     return;
   }
 
@@ -289,7 +292,7 @@ async function upsertAndMap(client, table, rows) {
   if (error) {
     const duplicateOrderNumber = table === "repair_orders" && String(error.message || "").includes("repair_orders_order_number_key");
     if (duplicateOrderNumber) {
-      throw new Error("repair_orders: contrainte unique restante sur order_number. Dans Supabase > SQL Editor, executez le supabase-schema.sql v22.10, puis relancez la sauvegarde.");
+      throw new Error(`repair_orders: contrainte unique restante sur order_number. Dans Supabase > SQL Editor, ${SUPABASE_SCHEMA_HINT.toLowerCase()} Puis relancez la sauvegarde.`);
     }
     throw new Error(`${table}: ${error.message}`);
   }

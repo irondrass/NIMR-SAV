@@ -1,3 +1,11 @@
+# v22.24 - Finitions revue publique
+
+- Texte Cloud Supabase rendu durable : l'interface renvoie vers le dernier `supabase-schema.sql` du dépôt, sans mention d'ancien jalon.
+- Sauvegarde chiffrée mise en action principale ; l'export JSON non chiffré est renommé et affiche un avertissement avant téléchargement.
+- Création dossier clarifiée : un seul champ obligatoire `Immatriculation ou VIN`, avec un champ VIN complet optionnel si besoin.
+- Libellés des boutons atelier clarifiés pour orienter vers le flux Technicien et l'override chef atelier.
+- Cache PWA incrémenté en `nimr-sav-v22.24-public-review-fixes`.
+
 # v22.23 PR 2B - Permissions réception, qualité, livraison et sensibles
 
 - Extension des permissions aux flux réception/dossier : création, modification, import devis, planification RDV et réception véhicule.
@@ -99,14 +107,14 @@
 ## Procédure sécurité atelier
 
 - Activer un PIN local sur chaque poste partagé depuis Paramètres > Sécurité du poste.
-- Utiliser en priorité “Export chiffré” pour les sauvegardes contenant clients, VIN, immatriculations, photos ou historiques.
+- Utiliser en priorité “Exporter sauvegarde chiffrée” pour les sauvegardes contenant clients, VIN, immatriculations, photos ou historiques.
 - Stocker le mot de passe de sauvegarde hors du PC atelier, dans une procédure interne contrôlée.
 - Tester une restauration complète après chaque sauvegarde importante.
 - Utiliser “Nettoyer ce poste” avant de céder un PC, changer d'utilisateur durablement ou diagnostiquer un navigateur compromis.
 
 # v22.14 - Libération planning et sync multi-PC instantanée
 
-- Le bouton global “Terminer travaux” clôture maintenant les réservations productives du dossier et libère le temps restant dans le planning, sans valider le contrôle qualité.
+- Le bouton global de finalisation travaux clôture maintenant les réservations productives du dossier et libère le temps restant dans le planning, sans valider le contrôle qualité.
 - Une tâche démarrée puis terminée avant la fin prévue est tronquée à l’heure réelle de fin ; une tâche future clôturée avec le dossier est supprimée du Gantt pour rendre la ressource disponible.
 - Les réservations terminées ne bloquent plus la recherche des prochains créneaux atelier.
 - La synchronisation Supabase pousse les actions critiques immédiatement, réduit le délai de sauvegarde automatique à 1,5 s et utilise un polling de secours toutes les 3 s si Realtime n’est pas disponible.
@@ -136,7 +144,7 @@
 # v22.10 - Sécurisation cloud et guichet rapide
 
 - Retrait de la configuration Supabase codée en dur : l'URL projet, la clé anon publique, l'ID atelier et la clé de sauvegarde se configurent maintenant depuis Paramètres > Cloud Supabase et restent locaux au navigateur.
-- Le schéma Supabase ajoute `workshops`, `workshop_members`, `workshop_id` sur les tables métier et des politiques RLS par atelier. Exécutez `supabase-schema.sql v22.10` dans Supabase avant d'activer la synchro stricte.
+- Le schéma Supabase ajoute `workshops`, `workshop_members`, `workshop_id` sur les tables métier et des politiques RLS par atelier. Pour une installation actuelle, exécutez le dernier `supabase-schema.sql` du dépôt avant d'activer la synchro stricte.
 - La synchronisation cloud écrit maintenant `workshop_id` et utilise les contraintes composites par atelier, avec repli temporaire sur l'ancien schéma pour éviter une coupure brutale.
 - Ajout du mode “guichet rapide” dans la création dossier : seuls les champs essentiels restent visibles, l'ancien formulaire complet reste accessible en décochant le mode.
 - Cache PWA incrémenté en v22.10.

@@ -378,13 +378,23 @@ function isEncryptedBackupPayload(payload) {
 async function exportBackup() {
   const permissionGuard = guardSensitiveAction("export.backup");
   if (!permissionGuard.ok) return;
-  showBackupStatus("Préparation de la sauvegarde...");
+  const confirmed = confirm(
+    "Exporter une sauvegarde JSON non chiffrée ?\n\n" +
+      "Ce fichier contient des données clients, photos, téléphones, VIN, immatriculations et historique. " +
+      "Utilisez plutôt l’export chiffré pour archiver ou transférer une sauvegarde.",
+  );
+  if (!confirmed) {
+    showBackupStatus("Export JSON non chiffré annulé.");
+    return;
+  }
+  showBackupStatus("Préparation de la sauvegarde JSON non chiffrée...");
   try {
     const payload = await buildBackupPayload();
-    downloadJson(payload, `nimr-carrosserie-sauvegarde-${todayKey(new Date())}.json`);
-    addAuditLog("backup.exported", "Sauvegarde exportée", `${state.cases.length} dossier(s), ${payload.photos.length} photo(s).`);
+    downloadJson(payload, `nimr-sav-sauvegarde-non-chiffree-${todayKey(new Date())}.json`);
+    addAuditLog("backup.exported", "Sauvegarde JSON non chiffrée exportée", `${state.cases.length} dossier(s), ${payload.photos.length} photo(s).`);
     saveState({ skipCloud: true, skipSnapshot: true });
-    showBackupStatus(`Sauvegarde exportée: ${state.cases.length} dossier(s), ${payload.photos.length} photo(s).`, "ok");
+    showBackupStatus(`Sauvegarde JSON non chiffrée exportée: ${state.cases.length} dossier(s), ${payload.photos.length} photo(s). Protégez ce fichier.`, "ok");
+    notifyUser("Export JSON non chiffré créé. Protégez ce fichier.", "warn");
   } catch (error) {
     console.error("Export sauvegarde impossible", error);
     showBackupStatus("Export impossible. Vérifiez l'espace disponible du navigateur.", "error");

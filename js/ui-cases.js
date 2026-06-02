@@ -2982,6 +2982,13 @@ const BOOKING_ACTION_OVERRIDE_LABELS = {
 };
 
 function getCaseIncompleteTechnicianBookings(item) {
+  if (typeof getCaseBusinessTaskRows === "function" && typeof isBusinessTaskFamilyCompleted === "function") {
+    return getCaseBusinessTaskRows(item, { includeQuality: false })
+      .filter((row) => !isBusinessTaskFamilyCompleted(row.bookings || row.family || []))
+      .filter((row) => getBookingHumanResourceIds(row.actionBooking || row.displayBooking).length > 0)
+      .map((row) => row.actionBooking || row.displayBooking)
+      .filter(Boolean);
+  }
   return getCaseProductionBookings(item)
     .filter((booking) => getBookingOperationalStatus(booking) !== "completed")
     .filter((booking) => getBookingHumanResourceIds(booking).length > 0);
@@ -3704,24 +3711,43 @@ function renderAssignments(root, item) {
   } else {
     delivery.textContent = item.appointment ? `Livraison estimée: ${formatDateTime(item.appointment.delivery)}` : "Livraison non planifiée";
   }
-  const assignments = state.bookings.filter((booking) => booking.caseId === item.id);
-  if (!assignments.length) {
+  const assignmentRows = typeof getCaseBusinessTaskRows === "function"
+    ? getCaseBusinessTaskRows(item)
+    : state.bookings
+      .filter((booking) => booking.caseId === item.id)
+      .map((booking) => ({
+        displayBooking: booking,
+        actionBooking: booking,
+        statusLabel: getBookingStatusLabel(booking),
+        pauseRemainder: false,
+        plannedMinutes: getBookingDurationMinutes(booking),
+        start: booking.start,
+        end: booking.end,
+        resourceIds: booking.resourceIds || [],
+      }));
+  if (!assignmentRows.length) {
     target.innerHTML = appointmentNeedsReschedule(item)
       ? `<div class="empty-inline">RDV à reporter. Utilisez Calculer RDV puis choisissez une nouvelle date disponible.</div>`
       : `<div class="empty-inline">Aucun travail affecté.</div>`;
     return;
   }
-  target.innerHTML = assignments
-    .map((booking) => {
-      const resources = booking.resourceIds.map((id) => getResource(id)?.name).filter(Boolean).join(", ");
+  target.innerHTML = assignmentRows
+    .map((row) => {
+      const booking = row.displayBooking || row.actionBooking;
+      const resources = (row.resourceIds || booking.resourceIds || []).map((id) => getResource(id)?.name).filter(Boolean).join(", ");
+      const statusText = row.pauseRemainder ? `${row.statusLabel || "En pause"} · Reprise planifiée` : row.statusLabel || getBookingStatusLabel(booking);
+      const start = row.start || booking.start;
+      const end = row.end || booking.end;
       return `
         <article class="assignment-card">
           <div>
             <strong>${escapeHtml(booking.title)}</strong>
             <p class="muted">${escapeHtml(resources)}</p>
+            <p class="muted">${escapeHtml(statusText)}${row.plannedMinutes ? ` · ${formatLocalizedDecimal(row.plannedMinutes / 60)} h utiles` : ""}</p>
+            ${row.pauseRemainder ? '<p class="muted">Reprise planifiée après pause.</p>' : ""}
           </div>
-          <span>${formatDateTime(booking.start)}</span>
-          <span>${formatDateTime(booking.end)}</span>
+          <span>${formatDateTime(start)}</span>
+          <span>${formatDateTime(end)}</span>
         </article>
       `;
     })

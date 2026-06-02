@@ -558,6 +558,13 @@ function getBookingPlannedMinutes(booking, item = null) {
   return Math.max(0, Math.round(sumBookingSegmentsMinutes(fallbackSegments)));
 }
 
+function getBookingEffectivePlanningMinutes(booking, item = null) {
+  const plannedMinutes = Number(getBookingPlannedMinutes(booking, item) || 0) || 0;
+  if (plannedMinutes > 0) return Math.max(STEP_MINUTES, Math.round(plannedMinutes));
+  const fallbackMinutes = Number(getBookingDurationMinutes(booking) || 0) || 0;
+  return Math.max(STEP_MINUTES, Math.round(fallbackMinutes || STEP_MINUTES));
+}
+
 function countBookingSegmentMinutesBetween(segments = [], rangeStart, rangeEnd) {
   const startBoundary = new Date(rangeStart);
   const endBoundary = new Date(rangeEnd);
@@ -863,6 +870,59 @@ function getTechnicianBusinessTaskRows(technicianId, dateLike = new Date()) {
     .sort((a, b) => new Date(a.displayBooking.start) - new Date(b.displayBooking.start));
 }
 
+function isBusinessTaskFamilyCompleted(family = []) {
+  const bookings = Array.isArray(family) ? family.filter(Boolean) : [];
+  return Boolean(bookings.length && bookings.every((booking) => getBookingOperationalStatus(booking) === "completed"));
+}
+
+function getCaseBusinessTaskFamilies(item, options = {}) {
+  if (!item) return [];
+  const includeQuality = options.includeQuality !== false;
+  const sourceBookings = Array.isArray(options.bookings) ? options.bookings : getCaseWorkBookings(item);
+  const grouped = new Map();
+  sourceBookings.forEach((booking) => {
+    if (!booking || booking.type === "leave" || booking.temporary === true) return;
+    if (!includeQuality && booking.key === "quality") return;
+    const businessTaskId = getBookingBusinessTaskId(booking) || booking.id;
+    const key = `${booking.caseId || item.id || ""}::${businessTaskId}`;
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(booking);
+  });
+  return [...grouped.values()].map((family) => family.sort((a, b) => new Date(a.start) - new Date(b.start)));
+}
+
+function getCaseBusinessTaskRows(item, options = {}) {
+  return getCaseBusinessTaskFamilies(item, options)
+    .map((family) => {
+      const visible = getVisibleTechnicianBookingForFamily(family);
+      const displayBooking = visible.displayBooking;
+      const actionBooking = visible.actionBooking || displayBooking;
+      if (!displayBooking || !actionBooking) return null;
+      const startDates = family.map((booking) => new Date(booking.start)).filter((date) => !Number.isNaN(date.getTime()));
+      const endDates = family.map((booking) => new Date(booking.end)).filter((date) => !Number.isNaN(date.getTime()));
+      const completed = isBusinessTaskFamilyCompleted(family);
+      const status = completed ? "done" : getTechnicianTaskStatus(item, displayBooking);
+      return {
+        id: getBookingBusinessTaskId(displayBooking) || displayBooking.id,
+        item,
+        bookings: family,
+        family,
+        displayBooking,
+        actionBooking,
+        actionBookingId: actionBooking.id,
+        status,
+        statusLabel: getTechnicianStatusLabel(status),
+        pauseRemainder: visible.pauseRemainder,
+        plannedMinutes: getBookingEffectivePlanningMinutes(displayBooking, item),
+        start: startDates.length ? new Date(Math.min(...startDates.map((date) => date.getTime()))).toISOString() : displayBooking.start,
+        end: endDates.length ? new Date(Math.max(...endDates.map((date) => date.getTime()))).toISOString() : displayBooking.end,
+        resourceIds: [...new Set(family.flatMap((booking) => booking.resourceIds || []))],
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => new Date(a.start) - new Date(b.start));
+}
+
 function getTechnicianTaskRows(technicianId, dateLike = new Date()) {
   return getTechnicianBusinessTaskRows(technicianId, dateLike);
 }
@@ -1046,7 +1106,12 @@ function refreshCaseAppointmentFromBookings(item) {
   if (!bookings.length) return;
   const start = bookings.reduce((earliest, booking) => minDate(earliest, new Date(booking.start)), new Date(bookings[0].start));
   const end = bookings.reduce((latest, booking) => maxDate(latest, new Date(booking.end)), new Date(bookings[0].end));
-  const totalMinutes = bookings.reduce((sum, booking) => sum + getBookingDurationMinutes(booking), 0);
+  const totalMinutes = bookings.reduce((sum, booking) => {
+    const productiveMinutes = typeof getBookingEffectivePlanningMinutes === "function"
+      ? getBookingEffectivePlanningMinutes(booking, item)
+      : getBookingPlannedMinutes(booking, item);
+    return sum + Math.max(0, Math.round(Number(productiveMinutes || 0) || 0));
+  }, 0);
   const marginMinutes = Number(item.appointment?.marginMinutes || 0) || Math.ceil((totalMinutes * 0.2) / STEP_MINUTES) * STEP_MINUTES;
   item.appointment = {
     ...(item.appointment || {}),
@@ -1444,7 +1509,7 @@ function rescheduleCaseBooking(item, bookingId, startAfter) {
   if (Number.isNaN(requestedStart.getTime())) return { ok: false, message: "Date de replanification invalide." };
   const template = getBookingTemplate(booking);
   if (!template) return { ok: false, message: "Étape planning inconnue." };
-  const duration = Math.max(STEP_MINUTES, booking.plannedMinutes || getBookingDurationMinutes(booking));
+  const duration = getBookingEffectivePlanningMinutes(booking, item);
   const previousStart = booking.start;
   const tempBookings = state.bookings.filter((candidate) => candidate.id !== booking.id).map(cloneBooking);
   const match = findBestResourceSlot(template, requestedStart, duration, tempBookings, isFastLaneJob(item), booking.primaryResourceId);
@@ -1695,7 +1760,7 @@ function canAdvanceBooking(item, booking, targetStart) {
       return false;
     }
   }
-  const duration = booking.plannedMinutes || getBookingDurationMinutes(booking) || STEP_MINUTES;
+  const duration = getBookingEffectivePlanningMinutes(booking, item);
   const slot = buildWorkingSlot(targetStart, duration);
   if (!slot) return false;
   const tempBookings = state.bookings.filter((b) => b.id !== booking.id);
@@ -1705,7 +1770,7 @@ function canAdvanceBooking(item, booking, targetStart) {
 
 function findEarliestAvailableSlotForBooking(item, booking, earliestStart) {
   if (!item || !booking) return null;
-  const duration = booking.plannedMinutes || getBookingDurationMinutes(booking) || STEP_MINUTES;
+  const duration = getBookingEffectivePlanningMinutes(booking, item);
   const tempBookings = state.bookings.filter((b) => b.id !== booking.id);
   return findEarliestSlot(booking.resourceIds, earliestStart, duration, tempBookings);
 }
@@ -1744,7 +1809,7 @@ function previewDependentBookingReschedule(item, completedBooking) {
       return;
     }
 
-    const duration = candidate.plannedMinutes || getBookingDurationMinutes(candidate) || STEP_MINUTES;
+    const duration = getBookingEffectivePlanningMinutes(candidate, item);
     const tempBookingsMinusCandidate = tempBookings.filter((b) => b.id !== candidate.id);
     const slot = findEarliestSlot(candidate.resourceIds, earliestStart, duration, tempBookingsMinusCandidate);
 
@@ -1758,6 +1823,8 @@ function previewDependentBookingReschedule(item, completedBooking) {
           oldEnd: candidate.end,
           newStart: slot.start instanceof Date ? slot.start.toISOString() : slot.start,
           newEnd: slot.end instanceof Date ? slot.end.toISOString() : slot.end,
+          segments: clonePlanningSegments(slot.segments),
+          plannedMinutes: duration,
           resourceIds: [...(candidate.resourceIds || [])],
           reason: "Optimisation planning : avancement rendu possible par la fin anticipée de l'étape précédente.",
         });
@@ -1766,7 +1833,11 @@ function previewDependentBookingReschedule(item, completedBooking) {
         if (simBooking) {
           simBooking.start = slot.start instanceof Date ? slot.start.toISOString() : slot.start;
           simBooking.end = slot.end instanceof Date ? slot.end.toISOString() : slot.end;
-          simBooking.segments = slot.segments;
+          simBooking.segments = clonePlanningSegments(slot.segments);
+          simBooking.plannedStart = simBooking.start;
+          simBooking.plannedEnd = simBooking.end;
+          simBooking.plannedSegments = clonePlanningSegments(slot.segments);
+          simBooking.plannedMinutes = duration;
         }
       }
     }
@@ -1785,13 +1856,16 @@ function applyDependentBookingReschedule(item, previews, actor) {
 
     const oldStart = booking.start;
     const oldEnd = booking.end;
+    const segments = clonePlanningSegments(preview.segments);
+    if (!segments.length) return;
 
     booking.start = preview.newStart;
     booking.end = preview.newEnd;
-    booking.segments = preview.segments;
+    booking.segments = segments;
     booking.plannedStart = preview.newStart;
     booking.plannedEnd = preview.newEnd;
-    booking.plannedSegments = clonePlanningSegments(preview.segments);
+    booking.plannedSegments = clonePlanningSegments(segments);
+    booking.plannedMinutes = Number(preview.plannedMinutes || 0) || getBookingEffectivePlanningMinutes(booking, item);
     booking.rescheduledAt = new Date().toISOString();
 
     addHistory(

@@ -1,5 +1,5 @@
-window.NIMR_BUILD = "v22.26";
-window.NIMR_CACHE_NAME = "nimr-sav-v22.26-closed-archive-duration-fixes";
+window.NIMR_BUILD = "v22.27";
+window.NIMR_CACHE_NAME = "nimr-sav-v22.27-technician-pause-remainder-single-card";
 
 if ("caches" in window) {
   caches.keys().then((keys) => Promise.all(

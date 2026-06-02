@@ -20,7 +20,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v22.26";
+const APP_VERSION = "v22.27";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const WORKSHOP_NAME = "NIMR SAV";
@@ -1505,8 +1505,10 @@ function normalizeBooking(booking, resourceIds) {
   const type = booking.type || "work";
   const caseId = booking.caseId || (type === "leave" ? "__leave__" : "");
   if (!caseId || !ids.length || !segments.length) return null;
+  const id = booking.id || uid(type === "leave" ? "leave" : "booking");
+  const parentBookingId = booking.parentBookingId || "";
   return {
-    id: booking.id || uid(type === "leave" ? "leave" : "booking"),
+    id,
     caseId,
     type,
     title: booking.title || (type === "leave" ? "Congé / absence" : "Travail atelier"),
@@ -1546,7 +1548,9 @@ function normalizeBooking(booking, resourceIds) {
     workSessions: normalizeBookingWorkSessions(booking.workSessions),
     actualWorkedMinutes: Number(booking.actualWorkedMinutes || 0) || 0,
     remainingMinutes: Number(booking.remainingMinutes || 0) || 0,
-    parentBookingId: booking.parentBookingId || "",
+    parentBookingId,
+    businessTaskId: booking.businessTaskId || parentBookingId || id,
+    supersededBy: booking.supersededBy || "",
     remainingFromPaused: Boolean(booking.remainingFromPaused),
     rescheduledAt: booking.rescheduledAt || "",
     color: booking.color || (type === "leave" ? "#6b7280" : "#11415f"),

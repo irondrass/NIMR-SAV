@@ -1,4 +1,4 @@
-const CACHE_NAME = "nimr-sav-v22.29-planning-business-task-aggregation";
+const CACHE_NAME = "nimr-sav-v22.30-users-roles-settings";
 const ASSETS = [
   "./",
   "./index.html",

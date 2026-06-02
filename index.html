@@ -16,8 +16,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <script src="js/version.js?v=22.29"></script>
-    <link rel="stylesheet" href="styles.css?v=22.29" />
+    <script src="js/version.js?v=22.30"></script>
+    <link rel="stylesheet" href="styles.css?v=22.30" />
   </head>
   <body>
     <a class="skip-link" href="#main-content">Aller au contenu principal</a>
@@ -402,6 +402,87 @@
                   <input name="fastLaneMaxHours" type="text" inputmode="decimal" placeholder="Ex. 4 ou 4,5" />
                 </label>
               </form>
+            </section>
+
+            <section class="panel users-roles-panel">
+              <div class="panel-heading">
+                <div>
+                  <h1>Utilisateurs & rôles</h1>
+                  <p>Gérer les profils de l'atelier, leurs rôles, permissions et ressources liées.</p>
+                </div>
+              </div>
+              <form class="resource-form" id="user-form">
+                <input name="userId" type="hidden" />
+                <input name="name" required placeholder="Nom complet" />
+                <select name="role" required>
+                  <option value="admin">Administrateur</option>
+                  <option value="chef_atelier">Chef atelier</option>
+                  <option value="reception">Réception</option>
+                  <option value="technicien">Technicien</option>
+                  <option value="qualite">Qualité</option>
+                  <option value="readonly">Lecture seule</option>
+                </select>
+                <input name="email" type="email" placeholder="Email (optionnel)" />
+                <select name="resourceId">
+                  <option value="">Lier à aucune ressource technicien</option>
+                </select>
+                <label class="check-card">
+                  <input type="checkbox" name="active" checked />
+                  <span>Utilisateur actif</span>
+                </label>
+                <div class="backup-actions wide">
+                  <button class="primary-button" type="submit" id="user-submit-btn">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+                    <span id="user-submit-label">Ajouter l'utilisateur</span>
+                  </button>
+                  <button class="ghost-button" type="button" id="user-cancel-btn" hidden>
+                    Annuler
+                  </button>
+                </div>
+              </form>
+              <div class="resource-list" id="users-list"></div>
+              
+              <div class="section-heading compact-heading">
+                <div>
+                  <h2>Utilisateur actif actuel</h2>
+                  <span>Sélectionner l'utilisateur pour simuler ou basculer les permissions locales (mode offline).</span>
+                </div>
+              </div>
+              <div class="calendar-summary">
+                <select id="current-user-selector" style="min-width: 240px;"></select>
+              </div>
+              
+              <div class="section-heading compact-heading">
+                <div>
+                  <h2>Résumé des permissions par rôle</h2>
+                </div>
+              </div>
+              <div class="holiday-list" id="roles-permissions-summary" style="gap: 8px;">
+                <article class="resource-card" style="padding: 12px; font-size: 0.85rem; display: block;">
+                  <strong>Administrateur</strong>
+                  <p class="muted" style="margin: 4px 0 0;">Accès complet et gestion de l'atelier (Sauvegardes, Configuration Supabase, Gestion Utilisateurs, Suppression dossiers, Paramètres globaux).</p>
+                </article>
+                <article class="resource-card" style="padding: 12px; font-size: 0.85rem; display: block;">
+                  <strong>Chef atelier</strong>
+                  <p class="muted" style="margin: 4px 0 0;">Supervision complète de la production, planification (Gantt), gestion des priorités et affectations, validation qualité et signature des overrides chef atelier.</p>
+                </article>
+                <article class="resource-card" style="padding: 12px; font-size: 0.85rem; display: block;">
+                  <strong>Réception</strong>
+                  <p class="muted" style="margin: 4px 0 0;">Création et édition de dossiers, import de devis, planification de rendez-vous, réception de véhicules, livraison de véhicules et clôture opérationnelle.</p>
+                </article>
+                <article class="resource-card" style="padding: 12px; font-size: 0.85rem; display: block;">
+                  <strong>Technicien</strong>
+                  <p class="muted" style="margin: 4px 0 0;">Démarrer, suspendre (pause), reprendre et terminer ses propres tâches rattachées à sa ressource technicien d'atelier.</p>
+                </article>
+                <article class="resource-card" style="padding: 12px; font-size: 0.85rem; display: block;">
+                  <strong>Qualité</strong>
+                  <p class="muted" style="margin: 4px 0 0;">Accéder aux listes de contrôle qualité, valider ou refuser les contrôles de fin de travaux.</p>
+                </article>
+                <article class="resource-card" style="padding: 12px; font-size: 0.85rem; display: block;">
+                  <strong>Lecture seule</strong>
+                  <p class="muted" style="margin: 4px 0 0;">Consultation générale du planning et des dossiers de l'atelier, accès aux impressions (ordres de réparation, etc.).</p>
+                </article>
+              </div>
             </section>
 
             <section class="panel">
@@ -955,20 +1036,20 @@
     </div>
 
     <script src="vendor/pdf.min.js" defer></script>
-    <script src="js/utils.js?v=22.29" defer></script>
-    <script src="js/state.js?v=22.29" defer></script>
-    <script src="js/ui-cases.js?v=22.29" defer></script>
-    <script src="js/estimate-import.js?v=22.29" defer></script>
-    <script src="js/ui-planning.js?v=22.29" defer></script>
-    <script src="js/photos.js?v=22.29" defer></script>
-    <script src="js/storage.js?v=22.29" defer></script>
-    <script src="js/planning.js?v=22.29" defer></script>
-    <script src="js/exports.js?v=22.29" defer></script>
-    <script src="js/business-rules-v2187.js?v=22.29" defer></script>
+     <script src="js/utils.js?v=22.30" defer></script>
+    <script src="js/state.js?v=22.30" defer></script>
+    <script src="js/ui-cases.js?v=22.30" defer></script>
+    <script src="js/estimate-import.js?v=22.30" defer></script>
+    <script src="js/ui-planning.js?v=22.30" defer></script>
+    <script src="js/photos.js?v=22.30" defer></script>
+    <script src="js/storage.js?v=22.30" defer></script>
+    <script src="js/planning.js?v=22.30" defer></script>
+    <script src="js/exports.js?v=22.30" defer></script>
+    <script src="js/business-rules-v2187.js?v=22.30" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
-    <script src="js/supabase-config.js?v=22.29" defer></script>
-    <script src="js/supabase-client.js?v=22.29" defer></script>
-    <script src="js/supabase-sync.js?v=22.29" defer></script>
-    <script src="app.js?v=22.29" defer></script>
+    <script src="js/supabase-config.js?v=22.30" defer></script>
+    <script src="js/supabase-client.js?v=22.30" defer></script>
+    <script src="js/supabase-sync.js?v=22.30" defer></script>
+    <script src="app.js?v=22.30" defer></script>
   </body>
 </html>

@@ -8,7 +8,7 @@ const appJs = fs.readFileSync('app.js', 'utf8');
 const uiCasesJs = fs.readFileSync('js/ui-cases.js', 'utf8');
 const syncJs = fs.readFileSync('js/supabase-sync.js', 'utf8');
 
-console.log("Démarrage des tests v22.31 : Notifications de sauvegarde silencieuse...");
+console.log("Démarrage des tests v22.32 : Notifications de sauvegarde silencieuse...");
 
 // Test 1: Versions et Caches
 assert.match(stateJs, /APP_VERSION\s*=\s*"v22\.31"/, "state.js n'a pas la bonne version");
@@ -59,4 +59,4 @@ assert.ok(appJs.includes('quietNotify("Utilisateur actif mis à jour.", "success
 assert.ok(syncJs.includes('notifyUser("Données et réglages restaurés depuis Supabase.", "success")'), "Restauration cloud doit garder son toast");
 assert.ok(syncJs.includes('notifyUser("Conflit de synchronisation détecté — données locales conservées.", "warn")'), "Conflit sync doit garder son toast");
 
-console.log("Tests v22.31 compilés avec succès.");
+console.log("Tests v22.32 compilés avec succès.");

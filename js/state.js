@@ -279,6 +279,7 @@ const USER_ROLES = {
 const ROLE_PERMISSIONS = {
   admin: ["*"],
   chef_atelier: [
+    "audit.view",
     "case.create",
     "case.edit",
     "estimate.import",
@@ -338,6 +339,7 @@ const MUTATION_PERMISSIONS = [
   "settings.edit",
   "users.manage",
   "supabase.configure",
+  "audit.view",
 ];
 
 
@@ -2168,6 +2170,94 @@ function addHistoryWithActor(item, type, label, details = "", actor = null) {
 function addHistory(item, type, label, details = "") {
   addHistoryWithActor(item, type, label, details, getCurrentActor());
 }
+
+function getAggregatedActivityLog(limit = 200, roleOrUser = null) {
+  let role = "readonly";
+  if (roleOrUser) {
+    if (typeof roleOrUser === "string") role = roleOrUser;
+    else if (roleOrUser.userRole) role = roleOrUser.userRole;
+    else if (roleOrUser.role) role = roleOrUser.role;
+  } else {
+    try {
+      role = getCurrentActor()?.userRole || getCurrentActor()?.role || "readonly";
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  const events = [];
+
+  // 1. Audit Log
+  if (Array.isArray(state.auditLog)) {
+    state.auditLog.forEach(log => {
+      if (role !== "admin") {
+        if (log.type.startsWith("users.") || log.type.startsWith("supabase.") || log.type.startsWith("settings.")) {
+          return;
+        }
+      }
+      events.push({
+        ...log,
+        category: log.type.split(".")[0] || "system",
+        level: log.type.includes("error") || log.type.includes("failed") ? "error" : "info"
+      });
+    });
+  }
+
+  // 2. Case History
+  if (Array.isArray(state.cases)) {
+    state.cases.forEach(item => {
+      if (Array.isArray(item.history)) {
+        item.history.forEach(log => {
+          events.push({
+            ...log,
+            caseId: item.id,
+            caseNumber: item.number,
+            category: log.type.startsWith("planning.") || log.type.startsWith("task.") || log.type.includes("dynamic-reschedule") ? "planning" : "case",
+            level: log.type.includes("deleted") || log.type.includes("error") ? "warn" : "info"
+          });
+        });
+      }
+    });
+  }
+
+  // 3. Sync Log
+  if (Array.isArray(state.syncLog)) {
+    state.syncLog.forEach(log => {
+      events.push({
+        id: "sync-" + new Date(log.at).getTime() + Math.random().toString(36).substring(2, 6),
+        at: log.at,
+        type: log.status === "success" ? "sync.run" : "sync.error",
+        label: "Synchronisation",
+        details: `${log.items} élément(s), ${log.duration}ms. ${log.source || ""}`,
+        category: "sync",
+        level: log.status === "success" ? "info" : "error",
+        actorName: "Système"
+      });
+    });
+  }
+
+  // 4. Sync Conflicts
+  if (Array.isArray(state.syncConflicts)) {
+    state.syncConflicts.forEach(conf => {
+      events.push({
+        id: conf.id,
+        at: conf.at,
+        type: "sync.conflict",
+        label: "Conflit de synchronisation",
+        details: `Conflit résolu (${conf.resolution}) pour ${conf.type}`,
+        category: "sync",
+        level: "warn",
+        actorName: "Système"
+      });
+    });
+  }
+
+  events.sort((a, b) => new Date(b.at) - new Date(a.at));
+
+  return events.slice(0, limit);
+}
+
+window.getAggregatedActivityLog = getAggregatedActivityLog;
 
 function recordFlagHistory(item, flag, checked) {
   const event = FLAG_HISTORY_EVENTS[flag]?.[checked ? "on" : "off"];

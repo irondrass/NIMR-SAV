@@ -491,3 +491,125 @@ function renderResourceLeaves() {
     });
   });
 }
+
+function renderUsersAndRoles() {
+  const form = document.getElementById("user-form");
+  const list = document.getElementById("users-list");
+  const switcher = document.getElementById("current-user-selector");
+  if (!form || !list) return;
+
+  const canManageUsers = typeof canRenderAction === "function" ? canRenderAction("users.manage") : false;
+  const deniedTitle = canManageUsers ? "" : (typeof getPermissionDeniedMessage === "function" ? getPermissionDeniedMessage("users.manage") : "Action réservée administrateur.");
+
+  Array.from(form.elements || []).forEach((control) => {
+    if (control.id === "current-user-selector" || control.name === "userId") return;
+    control.disabled = !canManageUsers;
+    if (!canManageUsers) control.title = deniedTitle;
+  });
+
+  const resourceSelect = form.elements.resourceId;
+  if (resourceSelect) {
+    const technicians = state.resources.filter((res) => typeof isTechnicianResource === "function" ? isTechnicianResource(res) : res.active !== false);
+    const currentSelected = resourceSelect.value;
+    resourceSelect.innerHTML = `
+      <option value="">Lier à aucune ressource technicien</option>
+      ${technicians.map((t) => `<option value="${escapeAttr(t.id)}">${escapeHtml(t.name)} · ${escapeHtml(ROLE_LABELS[t.role] || t.role)}</option>`).join("")}
+    `;
+    if (currentSelected && technicians.some(t => t.id === currentSelected)) {
+      resourceSelect.value = currentSelected;
+    }
+  }
+
+  const users = Array.isArray(state.users) ? state.users : [];
+  list.innerHTML = users.map((user) => {
+    const isCurrent = user.id === state.currentUserId;
+    const linkedResource = user.resourceId ? state.resources.find(r => r.id === user.resourceId) : null;
+    const isTechWithoutRes = user.role === "technicien" && !user.resourceId;
+    
+    const roleLabel = USER_ROLES[user.role] || user.role;
+    const activeLabel = user.active !== false ? `<span class="tag ok">Actif</span>` : `<span class="tag warn">Inactif</span>`;
+    const currentBadge = isCurrent ? `<span class="tag" style="background:#e0f2fe;color:#0369a1;">Utilisateur actuel</span>` : "";
+    const supabaseBadge = user.authUserId ? `<span class="tag soft" title="Supabase UID: ${escapeAttr(user.authUserId)}">Supabase</span>` : "";
+    const warnNoResource = isTechWithoutRes ? `<p class="risk-pill" style="margin-top: 6px; font-size: 0.8rem; font-weight: 700;">Aucune ressource technicien liée à cet utilisateur.</p>` : "";
+    
+    return `
+      <article class="resource-card user-card ${isCurrent ? 'active' : ''}">
+        <div class="resource-edit-grid">
+          <div>
+            <strong>${escapeHtml(user.name)}</strong>
+            <span class="muted" style="display: block;">${escapeHtml(user.email || "Pas d'email")}</span>
+          </div>
+          <div>
+            <span class="muted">Rôle : <strong>${escapeHtml(roleLabel)}</strong></span>
+            ${user.resourceId ? `<span class="muted" style="display: block;">Ressource : <strong>${escapeHtml(linkedResource?.name || user.resourceId)}</strong></span>` : ""}
+          </div>
+          <div class="case-meta" style="margin-top: 4px;">
+            ${activeLabel}
+            ${currentBadge}
+            ${supabaseBadge}
+          </div>
+          ${warnNoResource}
+        </div>
+        <div class="resource-actions">
+          <button class="ghost-button" type="button" data-edit-user="${escapeAttr(user.id)}" ${canManageUsers ? "" : `disabled title="${escapeAttr(deniedTitle)}"`}>
+            Modifier
+          </button>
+          <button class="ghost-button" type="button" data-toggle-user-status="${escapeAttr(user.id)}" ${canManageUsers ? "" : `disabled title="${escapeAttr(deniedTitle)}"`}>
+            ${user.active === false ? "Activer" : "Désactiver"}
+          </button>
+        </div>
+      </article>
+    `;
+  }).join("");
+
+  if (switcher) {
+    const activeUsers = users.filter(u => u.active !== false);
+    switcher.innerHTML = activeUsers.map(u => `<option value="${escapeAttr(u.id)}" ${u.id === state.currentUserId ? 'selected' : ''}>${escapeHtml(u.name)} (${escapeHtml(USER_ROLES[u.role] || u.role)})</option>`).join("");
+  }
+
+  $$("[data-edit-user]", list).forEach((button) => {
+    button.addEventListener("click", () => {
+      const user = getUserById(button.dataset.editUser);
+      if (!user) return;
+      
+      form.elements.userId.value = user.id;
+      form.elements.name.value = user.name;
+      form.elements.role.value = user.role;
+      form.elements.email.value = user.email || "";
+      form.elements.resourceId.value = user.resourceId || "";
+      form.elements.active.checked = user.active !== false;
+      
+      const submitLabel = document.getElementById("user-submit-label");
+      if (submitLabel) submitLabel.textContent = "Enregistrer les modifications";
+      
+      const cancelBtn = document.getElementById("user-cancel-btn");
+      if (cancelBtn) cancelBtn.hidden = false;
+      
+      form.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    });
+  });
+
+  $$("[data-toggle-user-status]", list).forEach((button) => {
+    button.addEventListener("click", () => {
+      const user = getUserById(button.dataset.toggleUserStatus);
+      if (!user) return;
+      
+      const newActive = user.active === false;
+      const result = updateUserLocal(user.id, {
+        name: user.name,
+        role: user.role,
+        email: user.email,
+        resourceId: user.resourceId,
+        active: newActive
+      });
+      
+      if (!result.ok) {
+        notifyUser(result.message, "error");
+      } else {
+        saveState();
+        render();
+      }
+    });
+  });
+}
+

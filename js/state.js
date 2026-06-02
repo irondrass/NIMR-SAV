@@ -20,7 +20,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v22.29";
+const APP_VERSION = "v22.30";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const WORKSHOP_NAME = "NIMR SAV";
@@ -998,11 +998,11 @@ function createBootstrapAdminUser(seed = {}) {
 
 function normalizeUser(user = {}, resources = []) {
   const allowedResourceIds = new Set((resources || []).map((resource) => resource.id).filter(Boolean));
-  const role = normalizeUserRole(user.role || (user.isAdmin ? "admin" : ""));
+  const role = normalizeUserRole(user.role || user.userRole || (user.isAdmin ? "admin" : ""));
   const createdAt = user.createdAt || new Date().toISOString();
   const resourceId = String(user.resourceId || user.technicianId || "").trim();
   return {
-    id: String(user.id || uid("user")).trim(),
+    id: String(user.id || user.userId || uid("user")).trim(),
     authUserId: String(user.authUserId || user.auth_user_id || user.supabaseUserId || "").trim(),
     name: String(user.name || user.displayName || user.email || "Utilisateur atelier").trim(),
     email: String(user.email || "").trim().toLowerCase(),
@@ -1077,6 +1077,109 @@ function setCurrentUser(userId) {
   if (!user || user.active === false) return false;
   state.currentUserId = user.id;
   return true;
+}
+
+function canDisableOrDemoteUser(userId, newRole, newActive) {
+  const user = getUserById(userId);
+  if (!user) return { ok: true };
+  const wasAdmin = user.role === "admin" && user.active !== false;
+  const becomesInactiveOrNonAdmin = newActive === false || newRole !== "admin";
+  if (wasAdmin && becomesInactiveOrNonAdmin) {
+    const otherActiveAdmins = (state.users || []).filter(
+      (u) => u.id !== userId && u.role === "admin" && u.active !== false
+    );
+    if (otherActiveAdmins.length === 0) {
+      return { ok: false, message: "Impossible de désactiver ou de retirer le rôle du dernier administrateur actif." };
+    }
+  }
+  return { ok: true };
+}
+
+function createUserLocal(userData, actor = null) {
+  const resolvedActor = actor || getCurrentActor();
+  if (!hasPermission("users.manage", { user: resolvedActor })) {
+    return { ok: false, message: "Action réservée administrateur." };
+  }
+  const name = String(userData?.name || "").trim();
+  const role = String(userData?.role || "").trim();
+  if (!name) return { ok: false, message: "Le nom complet est obligatoire." };
+  if (!role || !Object.prototype.hasOwnProperty.call(USER_ROLES, role)) {
+    return { ok: false, message: "Le rôle sélectionné est invalide." };
+  }
+  
+  const newUser = normalizeUser({
+    id: userData.id || uid("user"),
+    name,
+    role,
+    email: userData.email || "",
+    resourceId: userData.resourceId || "",
+    active: userData.active !== false,
+    authUserId: userData.authUserId || "",
+  }, state.resources || []);
+  
+  if (!state.users) state.users = [];
+  state.users.push(newUser);
+  linkResourcesToUsers(state.resources, state.users);
+  
+  addAuditLog("users.created", `Utilisateur créé : ${newUser.name} (${USER_ROLES[newUser.role]})`, "", { actor: resolvedActor });
+  return { ok: true, user: newUser };
+}
+
+function updateUserLocal(userId, userData, actor = null) {
+  const resolvedActor = actor || getCurrentActor();
+  if (!hasPermission("users.manage", { user: resolvedActor })) {
+    return { ok: false, message: "Action réservée administrateur." };
+  }
+  const user = getUserById(userId);
+  if (!user) return { ok: false, message: "Utilisateur introuvable." };
+  
+  const name = String(userData?.name || "").trim();
+  const role = String(userData?.role || "").trim();
+  if (!name) return { ok: false, message: "Le nom complet est obligatoire." };
+  if (!role || !Object.prototype.hasOwnProperty.call(USER_ROLES, role)) {
+    return { ok: false, message: "Le rôle sélectionné est invalide." };
+  }
+  
+  const newActive = userData.active !== false;
+  const safety = canDisableOrDemoteUser(userId, role, newActive);
+  if (!safety.ok) return safety;
+  
+  const oldRole = user.role;
+  const oldActive = user.active;
+  
+  user.name = name;
+  user.role = role;
+  user.email = String(userData.email || "").trim().toLowerCase();
+  user.resourceId = String(userData.resourceId || "").trim();
+  user.active = newActive;
+  user.updatedAt = new Date().toISOString();
+  if (userData.authUserId !== undefined) {
+    user.authUserId = String(userData.authUserId || "").trim();
+  }
+  
+  const normalized = normalizeUser(user, state.resources || []);
+  Object.assign(user, normalized);
+  
+  linkResourcesToUsers(state.resources, state.users);
+  
+  if (oldRole !== role) {
+    addAuditLog("users.role_changed", `Rôle modifié pour ${user.name} : ${USER_ROLES[oldRole]} -> ${USER_ROLES[role]}`, "", { actor: resolvedActor });
+  }
+  if (oldActive !== newActive) {
+    if (newActive === false) {
+      addAuditLog("users.disabled", `Utilisateur désactivé : ${user.name}`, "", { actor: resolvedActor });
+    } else {
+      addAuditLog("users.updated", `Utilisateur réactivé : ${user.name}`, "", { actor: resolvedActor });
+    }
+  } else if (oldRole === role) {
+    addAuditLog("users.updated", `Utilisateur modifié : ${user.name}`, "", { actor: resolvedActor });
+  }
+  
+  if (state.currentUserId === userId && newActive === false) {
+    state.currentUserId = resolveCurrentUserId(state.currentUserId, state.users);
+  }
+  
+  return { ok: true, user };
 }
 
 function resolvePermissionUser(userOrId = null) {
@@ -1997,10 +2100,10 @@ function makeHistoryEntry(type, label, at = new Date().toISOString(), details = 
     type,
     label,
     details,
-    user: resolvedActor.userName || "Atelier",
-    userId: resolvedActor.userId || "",
-    userName: resolvedActor.userName || "Atelier",
-    userRole: resolvedActor.userRole || "",
+    user: resolvedActor.userName || resolvedActor.name || "Atelier",
+    userId: resolvedActor.userId || resolvedActor.id || "",
+    userName: resolvedActor.userName || resolvedActor.name || "Atelier",
+    userRole: resolvedActor.userRole || resolvedActor.role || "",
     resourceId: resolvedActor.resourceId || "",
   };
 }

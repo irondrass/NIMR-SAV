@@ -1,5 +1,5 @@
-window.NIMR_BUILD = "v22.27";
-window.NIMR_CACHE_NAME = "nimr-sav-v22.27-technician-pause-remainder-single-card";
+window.NIMR_BUILD = "v22.28";
+window.NIMR_CACHE_NAME = "nimr-sav-v22.28-dynamic-dependent-reschedule";
 
 if ("caches" in window) {
   caches.keys().then((keys) => Promise.all(

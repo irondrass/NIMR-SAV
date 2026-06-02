@@ -1,4 +1,4 @@
-const CACHE_NAME = "nimr-sav-v22.28-dynamic-dependent-reschedule";
+const CACHE_NAME = "nimr-sav-v22.29-planning-business-task-aggregation";
 const ASSETS = [
   "./",
   "./index.html",

@@ -149,7 +149,7 @@ async function main() {
       returnByValue: true,
       expression: `Promise.all([
         navigator.serviceWorker?.getRegistration?.().then(Boolean).catch(() => false),
-        caches?.keys?.().then((keys) => keys.some((key) => key.includes('v22.31'))).catch(() => false),
+        caches?.keys?.().then((keys) => keys.some((key) => key.includes('v22.32'))).catch(() => false),
       ]).then(([hasServiceWorker, hasExpectedCache]) => ({ hasServiceWorker, hasExpectedCache }))`,
     }, sessionId);
 

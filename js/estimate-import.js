@@ -468,7 +468,7 @@ async function applyEstimateImportToCase(item, preview) {
     .join(" ");
   addHistory(item, "expert.estimate.imported", "Devis validé importé", details);
   saveState();
-  notifyUser("Répartition appliquée aux durées estimées.");
+  quietNotify("Répartition appliquée aux durées estimées.", "info");
   renderCaseDetail();
 }
 

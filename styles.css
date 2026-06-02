@@ -4118,3 +4118,38 @@ a:focus-visible {
   .validated-plan-row.anticipated-new-part-row strong { gap: 0.35rem; }
   .anticipated-new-part-badge { white-space: normal; }
 }
+
+.save-status-indicator {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  transition: opacity 0.3s ease, transform 0.4s ease;
+  margin-top: 8px;
+  align-self: flex-start;
+  color: var(--muted);
+  background: var(--soft);
+}
+.save-status-indicator.status-saved {
+  color: var(--surface);
+  background: var(--success);
+}
+.save-status-indicator.status-syncing {
+  color: var(--surface);
+  background: var(--accent);
+}
+.save-status-indicator.status-error {
+  color: var(--surface);
+  background: var(--danger);
+}
+.save-status-indicator.status-warn,
+.save-status-indicator.status-offline {
+  color: var(--main);
+  background: var(--warn);
+}
+.save-status-indicator.status-conflict {
+  color: var(--surface);
+  background: var(--danger);
+}
+

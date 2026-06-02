@@ -201,7 +201,7 @@ function controlAutosaveHealth() {
   renderAutosaveHealthStatus();
   const health = getAutosaveHealth();
   if (health.principal && health.mirror) {
-    notifyUser("Sauvegarde automatique locale contrôlée avec succès.", "success");
+    quietNotify("Sauvegarde automatique locale contrôlée avec succès.", "success");
   } else {
     notifyUser("Contrôle sauvegarde incomplet. Exportez une sauvegarde JSON maintenant.", "error");
   }

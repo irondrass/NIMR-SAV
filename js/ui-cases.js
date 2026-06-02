@@ -698,7 +698,7 @@ async function handleTechnicianTaskAction(action, bookingId, technicianId) {
     return;
   }
   saveState({ flushCloud: true, cloudReason: `technician-${action}` });
-  notifyUser(result.message || "Action enregistrée.", "success");
+  quietNotify(result.message || "Action enregistrée.", "success");
   render();
 }
 
@@ -723,7 +723,7 @@ async function addTechnicianTaskPhotoFromInput(item, bookingId, technicianId) {
       item.photos.push(photo);
       const result = attachTechnicianTaskPhoto(item, bookingId, technicianId, photo.id);
       saveState({ flushCloud: true, cloudReason: "technician-photo" });
-      notifyUser(result.message || "Photo ajoutée à la tâche.", "success");
+      quietNotify(result.message || "Photo ajoutée à la tâche.", "success");
       render();
     } catch (error) {
       notifyUser(error.message || "Photo impossible à ajouter.", "error");
@@ -1119,7 +1119,7 @@ function clearPlanningIfNeeded(item, reason) {
   const hasPlanning = Boolean(item?.appointment) || state.bookings.some((booking) => booking.caseId === item?.id);
   if (!hasPlanning) return;
   clearCasePlanning(item, reason);
-  notifyUser('Le planning a été annulé car une donnée utilisée pour le calcul a changé.', 'info');
+  quietNotify('Le planning a été annulé car une donnée utilisée pour le calcul a changé.', 'info');
 }
 
 function getWorkflowClaims(item) {
@@ -1607,7 +1607,7 @@ async function integrateSupplementDurations(item, supplementId) {
   saveState();
   generatedProposals[item.id] = null;
   render();
-  notifyUser('Durées complémentaires intégrées. Recalculez le RDV/planning si nécessaire.', 'success');
+  quietNotify('Durées complémentaires intégrées. Recalculez le RDV/planning si nécessaire.', 'success');
 }
 
 async function deleteSupplement(item, supplementId) {
@@ -3181,7 +3181,7 @@ async function handleBookingTaskAction(item, action, bookingId, options = {}) {
       result = rescheduleCaseBooking(item, bookingId, requested);
     }
     if (!result) return;
-    if (!options.silent) notifyUser(result.message, result.ok ? "success" : "info");
+    if (!options.silent) quietNotify(result.message, result.ok ? "success" : "info");
     if (result.ok) {
       if (options.persist !== false) saveState({ flushCloud: true, cloudReason: `booking-${action}` });
       if (!options.skipRender) render();

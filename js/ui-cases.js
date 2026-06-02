@@ -667,6 +667,24 @@ async function handleTechnicianTaskAction(action, bookingId, technicianId) {
       notifyUser(result.message, "error");
       return;
     }
+    if (result.ok && result.booking) {
+      const currentUser = typeof getCurrentUser === "function" ? getCurrentUser() : null;
+      const isManager = !currentUser || currentUser.role === "admin" || currentUser.role === "chef_atelier";
+      if (isManager) {
+        const previews = previewDependentBookingReschedule(item, result.booking);
+        if (previews.length > 0) {
+          const advanceConfirmed = await showConfirmModal(
+            `Tâche terminée. ${previews.length} tâche(s) suivante(s) peuve(nt) être avancée(s).\n\nVoulez-vous recaler ces tâches automatiquement ?`
+          );
+          if (advanceConfirmed) {
+            const res = applyDependentBookingReschedule(item, previews, currentUser?.name || "Chef Atelier");
+            if (res.ok) {
+              result.message = `${result.message || "Tâche terminée."} ${res.rescheduled} tâche(s) suivante(s) recalée(s) avec succès.`;
+            }
+          }
+        }
+      }
+    }
   } else if (action === "print") {
     printTechnicianTaskSheet(item, bookingId, technicianId);
     return;
@@ -3125,6 +3143,24 @@ async function handleBookingTaskAction(item, action, bookingId, options = {}) {
       }
       const note = options.note !== undefined ? options.note : "";
       result = await runSecuredBookingTaskAction(item, action, bookingId, { ...options, note });
+      if (result && result.ok && result.booking) {
+        const currentUser = typeof getCurrentUser === "function" ? getCurrentUser() : null;
+        const isManager = !currentUser || currentUser.role === "admin" || currentUser.role === "chef_atelier";
+        if (isManager) {
+          const previews = previewDependentBookingReschedule(item, result.booking);
+          if (previews.length > 0) {
+            const advanceConfirmed = await showConfirmModal(
+              `Tâche terminée. ${previews.length} tâche(s) suivante(s) peuve(nt) être avancée(s).\n\nVoulez-vous recaler ces tâches automatiquement ?`
+            );
+            if (advanceConfirmed) {
+              const res = applyDependentBookingReschedule(item, previews, currentUser?.name || "Chef Atelier");
+              if (res.ok) {
+                result.message = `${result.message || "Tâche terminée."} ${res.rescheduled} tâche(s) suivante(s) recalée(s) avec succès.`;
+              }
+            }
+          }
+        }
+      }
     } else if (action === "pause") {
       const reason = options.pauseReason !== undefined ? options.pauseReason : window.prompt("Cause de pause / report du reliquat :");
       if (reason === null) return;

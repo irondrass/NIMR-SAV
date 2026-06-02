@@ -1660,3 +1660,152 @@ function migratePlanningLogicV36() {
     saveState();
   }
 }
+
+function findDependentBookingsAfterCompletion(item, completedBooking) {
+  if (!item || !completedBooking) return [];
+  return state.bookings
+    .filter((b) => (
+      b.caseId === item.id &&
+      b.id !== completedBooking.id &&
+      b.type !== "leave" &&
+      b.temporary !== true &&
+      getBookingOperationalStatus(b) === "planned" &&
+      !isBookingTaskBlocked(b) &&
+      b.locked !== true &&
+      b.manualLock !== true
+    ))
+    .sort((a, b) => new Date(a.start) - new Date(b.start));
+}
+
+function canAdvanceBooking(item, booking, targetStart) {
+  if (!item || !booking) return false;
+  const predecessors = getPreviousRequiredBookings(item, booking);
+  for (const pred of predecessors) {
+    const status = getBookingOperationalStatus(pred);
+    if (isBookingTaskBlocked(pred)) return false;
+    if (status === "planned") {
+      const isCandidate = pred.caseId === item.id &&
+                         getBookingOperationalStatus(pred) === "planned" &&
+                         !isBookingTaskBlocked(pred) &&
+                         pred.locked !== true &&
+                         pred.manualLock !== true;
+      if (!isCandidate) return false;
+    }
+    if (new Date(pred.end) > new Date(targetStart)) {
+      return false;
+    }
+  }
+  const duration = booking.plannedMinutes || getBookingDurationMinutes(booking) || STEP_MINUTES;
+  const slot = buildWorkingSlot(targetStart, duration);
+  if (!slot) return false;
+  const tempBookings = state.bookings.filter((b) => b.id !== booking.id);
+  const conflict = findConflict(slot, booking.resourceIds, tempBookings);
+  return !conflict;
+}
+
+function findEarliestAvailableSlotForBooking(item, booking, earliestStart) {
+  if (!item || !booking) return null;
+  const duration = booking.plannedMinutes || getBookingDurationMinutes(booking) || STEP_MINUTES;
+  const tempBookings = state.bookings.filter((b) => b.id !== booking.id);
+  return findEarliestSlot(booking.resourceIds, earliestStart, duration, tempBookings);
+}
+
+function previewDependentBookingReschedule(item, completedBooking) {
+  if (!item || !completedBooking) return [];
+  if (isCaseReadonlyArchive(item)) return [];
+  const isClosed = typeof isCaseOperationallyClosed === "function"
+    ? isCaseOperationallyClosed(item)
+    : Boolean(item?.flags?.delivered || item?.flags?.invoiced || item?.closedAt);
+  if (isClosed) return [];
+
+  const candidates = findDependentBookingsAfterCompletion(item, completedBooking);
+  if (!candidates.length) return [];
+
+  let tempBookings = state.bookings.map(cloneBooking);
+  const previews = [];
+
+  const completionEnd = new Date(completedBooking.actualEnd || completedBooking.completedAt || new Date());
+
+  candidates.forEach((candidate) => {
+    let earliestStart = new Date(completionEnd);
+    const predecessors = getPreviousRequiredBookings(item, candidate);
+    predecessors.forEach((pred) => {
+      const simPred = tempBookings.find((b) => b.id === pred.id);
+      if (simPred) {
+        const predEnd = new Date(simPred.end);
+        if (predEnd > earliestStart) {
+          earliestStart = predEnd;
+        }
+      }
+    });
+
+    const originalStart = new Date(candidate.start);
+    if (earliestStart >= originalStart) {
+      return;
+    }
+
+    const duration = candidate.plannedMinutes || getBookingDurationMinutes(candidate) || STEP_MINUTES;
+    const tempBookingsMinusCandidate = tempBookings.filter((b) => b.id !== candidate.id);
+    const slot = findEarliestSlot(candidate.resourceIds, earliestStart, duration, tempBookingsMinusCandidate);
+
+    if (slot) {
+      const slotStart = new Date(slot.start);
+      if (slotStart < originalStart) {
+        previews.push({
+          bookingId: candidate.id,
+          bookingTitle: candidate.title || getDurationLabel(candidate.key) || "Étape planning",
+          oldStart: candidate.start,
+          oldEnd: candidate.end,
+          newStart: slot.start instanceof Date ? slot.start.toISOString() : slot.start,
+          newEnd: slot.end instanceof Date ? slot.end.toISOString() : slot.end,
+          resourceIds: [...(candidate.resourceIds || [])],
+          reason: "Optimisation planning : avancement rendu possible par la fin anticipée de l'étape précédente.",
+        });
+
+        const simBooking = tempBookings.find((b) => b.id === candidate.id);
+        if (simBooking) {
+          simBooking.start = slot.start instanceof Date ? slot.start.toISOString() : slot.start;
+          simBooking.end = slot.end instanceof Date ? slot.end.toISOString() : slot.end;
+          simBooking.segments = slot.segments;
+        }
+      }
+    }
+  });
+
+  return previews;
+}
+
+function applyDependentBookingReschedule(item, previews, actor) {
+  if (!item || !previews || !previews.length) return { ok: false, rescheduled: 0 };
+  let count = 0;
+  previews.forEach((preview) => {
+    const booking = state.bookings.find((b) => b.id === preview.bookingId);
+    if (!booking) return;
+    if (getBookingOperationalStatus(booking) !== "planned") return;
+
+    const oldStart = booking.start;
+    const oldEnd = booking.end;
+
+    booking.start = preview.newStart;
+    booking.end = preview.newEnd;
+    booking.segments = preview.segments;
+    booking.plannedStart = preview.newStart;
+    booking.plannedEnd = preview.newEnd;
+    booking.plannedSegments = clonePlanningSegments(preview.segments);
+    booking.rescheduledAt = new Date().toISOString();
+
+    addHistory(
+      item,
+      "planning.task.rescheduled",
+      "Tâche avancée",
+      `${preview.bookingTitle} avancée par ${actor || "Système"} (recalage dynamique). De ${formatDateTime(oldStart)} vers ${formatDateTime(preview.newStart)}. Source: dynamic-reschedule-v22.28.`
+    );
+    count++;
+  });
+
+  if (count > 0) {
+    refreshCaseAppointmentFromBookings(item);
+    saveState({ flushCloud: true, cloudReason: "reschedule-dependent-tasks" });
+  }
+  return { ok: true, rescheduled: count };
+}

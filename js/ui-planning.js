@@ -74,6 +74,7 @@ function renderDailyLaborSummary(date, taskNumberMap) {
   state.bookings.forEach((booking) => {
     if (booking.type === 'leave') return;
     const caseItem = state.cases.find((item) => item.id === booking.caseId);
+    if (isCaseOperationallyClosed(caseItem)) return;
     const hasSegmentOnDay = (booking.segments || []).some((segment) => todayKey(new Date(segment.start)) === day || todayKey(new Date(segment.end)) === day);
     if (!caseItem || !hasSegmentOnDay) return;
     const ops = getBookingLaborOperations(caseItem, booking.key);
@@ -106,6 +107,8 @@ function renderMobilePlanningList(date, resources, taskNumberMap) {
   const rows = [];
   state.bookings.forEach((booking) => {
     if (booking.type === "leave") return;
+    const caseItem = state.cases.find((item) => item.id === booking.caseId);
+    if (isCaseOperationallyClosed(caseItem)) return;
     const visibleResources = resources.filter((resource) => isBookingVisibleForResource(booking, resource.id));
     const primaryResource = visibleResources.find((resource) => !isEquipmentResource(resource)) || visibleResources[0];
     if (!primaryResource) return;
@@ -119,7 +122,6 @@ function renderMobilePlanningList(date, resources, taskNumberMap) {
       const clippedStart = maxDate(start, dayStart);
       const clippedEnd = actualEnd ? minDate(minDate(end, dayEnd), actualEnd) : minDate(end, dayEnd);
       if (clippedEnd <= clippedStart) return;
-      const caseItem = state.cases.find((item) => item.id === booking.caseId);
       rows.push({ booking, segment, caseItem, resource: primaryResource, start: clippedStart, end: clippedEnd, status });
     });
   });
@@ -219,8 +221,9 @@ function renderResourceBookings(resource, date, dayStart, dayEnd, total, dailyCo
       if (clippedEnd <= clippedStart) return;
       const left = (diffMinutes(dayStart, clippedStart) * 100) / total;
       const width = Math.max(2, (diffMinutes(clippedStart, clippedEnd) * 100) / total);
-      const caseItem = state.cases.find((item) => item.id === booking.caseId);
       const isLeave = booking.type === "leave";
+      const caseItem = isLeave ? null : state.cases.find((item) => item.id === booking.caseId);
+      if (!isLeave && isCaseOperationallyClosed(caseItem)) return;
       const model = isLeave ? "Indisponible" : shortVehicleModel(caseItem?.vehicle || caseItem?.model || "Véhicule");
       const plate = isLeave ? "" : (caseItem?.plate || caseItem?.registration || "");
       const vehicleLine = isLeave ? (booking.title || "Congé / absence") : `${model}${plate ? ` · ${plate}` : ""}`;
@@ -258,6 +261,8 @@ function buildDailyPlanningTaskNumberMap(date, resources) {
   const rows = [];
   state.bookings.forEach((booking) => {
     if (booking.type === "leave") return;
+    const caseItem = state.cases.find((item) => item.id === booking.caseId);
+    if (isCaseOperationallyClosed(caseItem)) return;
     const primaryResource = resources.find((resource) => isBookingVisibleForResource(booking, resource.id));
     if (!primaryResource) return;
     booking.segments.forEach((segment) => {

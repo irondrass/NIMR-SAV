@@ -20,7 +20,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v22.25";
+const APP_VERSION = "v22.26";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const WORKSHOP_NAME = "NIMR SAV";
@@ -1114,6 +1114,9 @@ function getPermissionDeniedMessage(permission, context = {}) {
   const requested = String(permission || "").trim();
   const user = resolvePermissionUser(context.user || context.userId);
   const role = user?.role || "";
+  if (context.item && isCaseReadonlyArchive(context.item) && MUTATION_PERMISSIONS.includes(requested)) {
+    return getArchivedCaseMessage(context.item);
+  }
   if (!user) return "Aucun utilisateur actif n'est sélectionné.";
   if (user.active === false) return "Utilisateur inactif.";
   if (role === "readonly" && MUTATION_PERMISSIONS.includes(requested)) return "Mode lecture seule : modification impossible.";
@@ -1143,6 +1146,9 @@ function guardAction(permission, context = {}, options = {}) {
   const requested = String(permission || "").trim();
   const user = resolvePermissionUser(context.user || context.userId);
   let allowed = hasPermission(requested, { user });
+  if (allowed && context.item && isCaseReadonlyArchive(context.item) && MUTATION_PERMISSIONS.includes(requested)) {
+    allowed = false;
+  }
   if (allowed && requested.startsWith("task.") && requested !== "task.override") {
     allowed = canActOnTechnicianTask(user, context.booking);
   }
@@ -1169,6 +1175,48 @@ function canRenderAction(permission, context = {}, options = {}) {
   return guardAction(permission, context, { ...options, notify: false }).ok;
 }
 
+function makeDeniedPermissionGuard(permission, message, context = {}, options = {}) {
+  if (options.notify !== false && context.notify !== false && typeof notifyUser === "function") {
+    notifyUser(message, "error");
+  }
+  return {
+    ok: false,
+    allowed: false,
+    permission: permission || "",
+    message,
+    user: getCurrentUser(),
+    actor: getCurrentActor(),
+  };
+}
+
+function guardArchivedCaseMutation(permission, item, context = {}, options = {}) {
+  if (!isCaseReadonlyArchive(item)) return null;
+  return makeDeniedPermissionGuard(permission, getArchivedCaseMessage(item), { ...context, item }, options);
+}
+
+// Règle v22.26: un dossier livré sort du flux atelier actif, mais seule la
+// facturation/clôture/archive/suppression rend le dossier totalement lecture seule.
+function isCaseArchived(item) {
+  if (!item) return false;
+  const flags = item.flags || {};
+  return Boolean(flags.invoiced || item.closedAt || item.archivedAt || item.deletedAt);
+}
+
+function isCaseReadonlyArchive(item) {
+  return isCaseArchived(item);
+}
+
+function isCaseOperationallyClosed(item) {
+  if (!item) return false;
+  const flags = item.flags || {};
+  return Boolean(isCaseArchived(item) || flags.delivered || flags.invoiced || item.closedAt || item.deletedAt);
+}
+
+function getArchivedCaseMessage(item) {
+  if (!isCaseReadonlyArchive(item)) return "";
+  return "Dossier clôturé — aucune action requise.";
+}
+
 function getWorkflowActionPermission(action, checked = true) {
   if (action === "claim" || action === "labor" || action === "expertApproved" || action === "clientApproved") return "case.edit";
   if (action === "appointment") return "appointment.schedule";
@@ -1181,6 +1229,8 @@ function getWorkflowActionPermission(action, checked = true) {
 
 function guardWorkflowAction(action, item, checked = true, options = {}) {
   const permission = getWorkflowActionPermission(action, checked);
+  const archivedGuard = guardArchivedCaseMutation(permission || "case.edit", item, { action, checked }, options);
+  if (archivedGuard) return archivedGuard;
   if (!permission) {
     return {
       ok: true,
@@ -1199,26 +1249,38 @@ function guardCaseCreate(options = {}) {
 }
 
 function guardCaseEdit(item, options = {}) {
+  const archivedGuard = guardArchivedCaseMutation("case.edit", item, {}, options);
+  if (archivedGuard) return archivedGuard;
   return guardAction("case.edit", { item }, options);
 }
 
 function guardEstimateImport(item, options = {}) {
+  const archivedGuard = guardArchivedCaseMutation("estimate.import", item, {}, options);
+  if (archivedGuard) return archivedGuard;
   return guardAction("estimate.import", { item }, options);
 }
 
 function guardAppointmentSchedule(item, options = {}) {
+  const archivedGuard = guardArchivedCaseMutation("appointment.schedule", item, {}, options);
+  if (archivedGuard) return archivedGuard;
   return guardAction("appointment.schedule", { item }, options);
 }
 
 function guardVehicleReceive(item, options = {}) {
+  const archivedGuard = guardArchivedCaseMutation("vehicle.receive", item, {}, options);
+  if (archivedGuard) return archivedGuard;
   return guardAction("vehicle.receive", { item }, options);
 }
 
 function guardQualityValidate(item, options = {}) {
+  const archivedGuard = guardArchivedCaseMutation("quality.validate", item, {}, options);
+  if (archivedGuard) return archivedGuard;
   return guardAction("quality.validate", { item }, options);
 }
 
 function guardDeliveryComplete(item, options = {}) {
+  const archivedGuard = guardArchivedCaseMutation("delivery.complete", item, {}, options);
+  if (archivedGuard) return archivedGuard;
   return guardAction("delivery.complete", { item }, options);
 }
 

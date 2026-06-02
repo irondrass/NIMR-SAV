@@ -1,4 +1,4 @@
-const CACHE_NAME = "nimr-sav-v22.26-closed-archive-duration-fixes";
+const CACHE_NAME = "nimr-sav-v22.27-technician-pause-remainder-single-card";
 const ASSETS = [
   "./",
   "./index.html",

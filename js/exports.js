@@ -1615,6 +1615,25 @@ function getBookingTechnicianName(booking, technicianId = "") {
   return human?.name || "Technicien";
 }
 
+function getPrintableTechnicianBusinessAssignments(assignments = []) {
+  if (typeof getBookingBusinessTaskId !== "function" || typeof getVisibleTechnicianBookingForFamily !== "function") {
+    return assignments;
+  }
+  const grouped = new Map();
+  assignments.forEach((booking) => {
+    const businessTaskId = getBookingBusinessTaskId(booking) || booking.id;
+    const key = `${booking.caseId || ""}::${businessTaskId}`;
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(booking);
+  });
+  return [...grouped.values()]
+    .map((family) => {
+      const visible = getVisibleTechnicianBookingForFamily(family);
+      return visible?.actionBooking || visible?.displayBooking || family[0] || null;
+    })
+    .filter(Boolean);
+}
+
 function buildTechnicianTaskPrintCss() {
   return `
     @page { size: A4 portrait; margin: 10mm; }
@@ -1780,9 +1799,10 @@ function printTechnicianWorkOrders(item) {
     notifyUser("Aucune tâche assignée. Calculez/validez le planning avant d'imprimer les ordres techniciens.", "error");
     return;
   }
+  const businessAssignments = getPrintableTechnicianBusinessAssignments(assignments);
 
   const grouped = new Map();
-  assignments.forEach((booking) => {
+  businessAssignments.forEach((booking) => {
     const humanResourceIds = (booking.resourceIds || []).filter((resourceId) => isPrintHumanResource(getResource(resourceId)));
     humanResourceIds.forEach((resourceId) => {
       const resource = getResource(resourceId) || { id: resourceId, name: "Technicien", role: "atelier", location: "" };

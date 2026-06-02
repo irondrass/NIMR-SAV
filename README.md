@@ -1,11 +1,11 @@
-# v22.26 - Archives clôturées et durées productives
+# v22.27 - Pause / reprise technicien sans doublons
 
-- Les dossiers clôturés/facturés deviennent des archives en lecture seule : plus d’actions réception, travaux, planning, complément ou suppression métier.
-- Les tâches rattachées à un dossier livré/facturé/clôturé ne comptent plus comme charge active ni comme travail à exécuter dans les vues/impressions opérationnelles.
-- Les durées affichées dans le planning du dossier utilisent la durée utile planifiée, pas l’amplitude calendrier multi-jours.
-- La durée réelle productive d’une tâche terminée est plafonnée aux segments utiles afin d’éviter les 3 h affichées en 47 h après fermeture/nuit/week-end.
-- La couche de synchronisation issue de v22.25 conserve explicitement les bookings locaux liés à un dossier livré/facturé/clôturé, même si le booking est encore planifié.
-- Cache PWA incrémenté en `nimr-sav-v22.26-closed-archive-duration-fixes`.
+- Ajout d’un identifiant métier `businessTaskId` sur les bookings pour relier tâche parent et reliquats techniques sans supprimer les segments planning.
+- La pause continue à créer un reliquat planifié, mais “Mes tâches” affiche une seule carte métier par technicien.
+- Après reprise, l’ancienne carte en pause n’apparaît plus comme un doublon : la carte unique repasse en cours sur le bon segment technique.
+- Le suivi chef atelier et les ordres techniciens opérationnels agrègent parent/reliquat pour ne pas compter deux travaux identiques.
+- Terminer le dernier reliquat clôture toute la famille technique, y compris les anciennes pauses parentes.
+- Cache PWA incrémenté en `nimr-sav-v22.27-technician-pause-remainder-single-card`.
 
 # v22.25 - Intégrité synchronisation multi-PC
 

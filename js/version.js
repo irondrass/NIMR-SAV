@@ -1,5 +1,5 @@
-window.NIMR_BUILD = "v22.30";
-window.NIMR_CACHE_NAME = "nimr-sav-v22.30-users-roles-settings";
+window.NIMR_BUILD = "v22.31";
+window.NIMR_CACHE_NAME = "nimr-sav-v22.31-quiet-save-ux";
 
 if ("caches" in window) {
   caches.keys().then((keys) => Promise.all(

@@ -28,7 +28,7 @@ async function signInSupabaseFromForm(event) {
   startSupabaseLiveSync();
   await pullLatestSupabaseBackup("connexion");
   scheduleAutoSupabaseBackup("connexion");
-  notifyUser("Connexion Supabase réussie. Synchronisation atelier multi-PC activée.", "success");
+  quietNotify("Connexion Supabase réussie. Synchronisation atelier multi-PC activée.", "success");
 }
 
 async function signOutSupabase() {
@@ -37,7 +37,7 @@ async function signOutSupabase() {
   stopSupabaseLiveSync();
   await client.auth.signOut();
   await refreshSupabasePanel();
-  notifyUser("Déconnecté de Supabase.", "success");
+  quietNotify("Déconnecté de Supabase.", "success");
 }
 
 async function testSupabaseConnection() {
@@ -697,7 +697,7 @@ async function saveLocalToSupabase() {
 
     setSupabaseStatus("Sauvegarde Supabase terminée.", "ok");
     setSupabaseDetails(`${stats.repairOrders} dossier(s), ${stats.clients} client(s), ${stats.vehicles} véhicule(s), ${stats.repairSteps} étape(s), ${stats.resources} ressource(s), ${stats.holidays} jour(s) férié(s), ${stats.workHoursDays} jour(s) horaire(s), ${stats.planningSlots} créneau(x), ${stats.claims || 0} ordre(s), ${stats.supplements || 0} complément(s), ${stats.photos} photo(s) synchronisé(s). Réglages enregistrés dans app_settings.`);
-    notifyUser("Sauvegarde envoyée vers Supabase, réglages atelier inclus.", "success");
+    quietNotify("Sauvegarde envoyée vers Supabase, réglages atelier inclus.", "success");
   } catch (error) {
     console.error("Sauvegarde Supabase impossible", error);
     setSupabaseStatus(`Sauvegarde impossible : ${error.message}`, "error");
@@ -1350,7 +1350,7 @@ async function applyRemoteSupabaseBackup(data, reason = "cloud") {
     } else {
       setSupabaseStatus("Synchronisation atelier à jour.", "ok");
       setSupabaseDetails(`Dernière mise à jour reçue (${reason}) : ${new Date(lastKnownCloudUpdatedAt).toLocaleTimeString()} · ${mergeResult.stats.casesMerged} dossier(s), ${mergeResult.stats.bookingsMerged} tâche(s) fusionné(s).`);
-      notifyUser("Mise à jour reçue depuis un autre poste.", "info");
+      quietNotify("Mise à jour reçue depuis un autre poste.", "info");
     }
     return true;
   } catch (error) {

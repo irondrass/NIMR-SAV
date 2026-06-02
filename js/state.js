@@ -20,7 +20,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v22.30";
+const APP_VERSION = "v22.31";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const WORKSHOP_NAME = "NIMR SAV";
@@ -406,10 +406,49 @@ function notifyUser(message, variant = "info") {
   toast.setAttribute("role", variant === "error" ? "alert" : "status");
   toast.textContent = text;
   region.appendChild(toast);
-  window.setTimeout(() => {
-    toast.classList.add("toast-leaving");
-    window.setTimeout(() => toast.remove(), 220);
+  setTimeout(() => {
+    if (toast.classList) toast.classList.add("toast-leaving");
+    setTimeout(() => {
+      if (typeof toast.remove === "function") toast.remove();
+      else if (toast.parentNode) toast.parentNode.removeChild(toast);
+    }, 220);
   }, variant === "error" ? 6500 : 4200);
+}
+
+let saveStatusTimeout = null;
+
+function updateSaveStatusIndicator(message, variant = "saved") {
+  if (typeof document === "undefined" || !document.getElementById) return;
+  const indicator = document.getElementById("save-status-indicator");
+  if (!indicator) return;
+  indicator.textContent = message;
+  indicator.className = `save-status-indicator status-${variant}`;
+  
+  if (saveStatusTimeout) {
+    clearTimeout(saveStatusTimeout);
+    saveStatusTimeout = null;
+  }
+  
+  if (variant !== "saved" && variant !== "offline") {
+    saveStatusTimeout = setTimeout(() => {
+      indicator.textContent = "Sauvegardé";
+      indicator.className = "save-status-indicator status-saved";
+    }, 2000);
+  }
+}
+
+function quietNotify(message, variant = "success") {
+  if (variant === "error" || variant === "warn") {
+    notifyUser(message, variant);
+    return;
+  }
+  
+  let indicatorVariant = "saved";
+  if (variant === "success") indicatorVariant = "saved";
+  else if (variant === "info") indicatorVariant = "syncing";
+  else indicatorVariant = variant;
+  
+  updateSaveStatusIndicator(message, indicatorVariant);
 }
 
 function bytesToBase64(bytes) {
@@ -2240,6 +2279,7 @@ function saveState(options = {}) {
       flushSupabaseBackup(options.cloudReason || "local-save-now");
     }
     if (typeof renderSyncStatusStrip === "function") renderSyncStatusStrip();
+    if (typeof updateSaveStatusIndicator === "function") updateSaveStatusIndicator("Sauvegardé", "saved");
   } catch (error) {
     console.error("Impossible d'enregistrer les données locales", error);
     notifyUser("Le stockage local est saturé. Exportez une sauvegarde JSON depuis Atelier > Sauvegarde.", "error");

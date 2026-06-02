@@ -66,12 +66,12 @@ function bindOfflineStatus() {
   };
   window.addEventListener("online", () => {
     refresh();
-    notifyUser("Connexion rétablie. La synchronisation Supabase va reprendre.", "success");
+    quietNotify("Connexion rétablie. La synchronisation Supabase va reprendre.", "success");
     if (typeof pullLatestSupabaseBackup === "function") pullLatestSupabaseBackup("online");
   });
   window.addEventListener("offline", () => {
     refresh();
-    notifyUser("Mode hors ligne actif. Les données locales restent consultables.", "warn");
+    quietNotify("Mode hors ligne actif. Les données locales restent consultables.", "offline");
   });
   refresh();
 }
@@ -633,7 +633,7 @@ function bindWorkshopForms() {
     if (cancelBtn) cancelBtn.hidden = true;
     
     render();
-    notifyUser(userId ? "Utilisateur mis à jour." : "Utilisateur créé.", "success");
+    quietNotify(userId ? "Utilisateur mis à jour." : "Utilisateur créé.", "success");
   });
 
   $("#user-cancel-btn")?.addEventListener("click", () => {
@@ -661,7 +661,7 @@ function bindWorkshopForms() {
       addAuditLog("users.current_changed", `Changement d'utilisateur actif : ${user.name}`);
       saveState();
       render();
-      notifyUser("Utilisateur actif mis à jour.", "success");
+      quietNotify("Utilisateur actif mis à jour.", "success");
     } else {
       notifyUser("Impossible de basculer d'utilisateur.", "error");
     }
@@ -762,7 +762,7 @@ function registerServiceWorker() {
   });
   window.addEventListener("load", async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=22.30", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=22.31", { updateViaCache: "none" });
       registration.update?.();
       if (registration.waiting) showUpdateAvailable(registration);
       window.setInterval(() => registration.update?.(), 10 * 60 * 1000);

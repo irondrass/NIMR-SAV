@@ -98,6 +98,7 @@ function bindMainNavigation() {
         renderHolidays();
         renderResourceLeaves();
         bindWorkHoursInputs();
+        if (typeof renderUsersAndRoles === "function") renderUsersAndRoles();
         if (typeof refreshSupabasePanel === "function") refreshSupabasePanel();
       }
       if (tab === "pilotage") {
@@ -599,6 +600,73 @@ function bindWorkshopForms() {
     renderMetrics();
   });
 
+  $("#user-form")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    const userId = data.get("userId");
+    const name = normalizeTextInputValue(data.get("name"));
+    const role = data.get("role");
+    const email = normalizeTextInputValue(data.get("email"));
+    const resourceId = data.get("resourceId") || "";
+    const active = form.elements.active.checked;
+    
+    let result;
+    if (userId) {
+      result = updateUserLocal(userId, { name, role, email, resourceId, active });
+    } else {
+      result = createUserLocal({ name, role, email, resourceId, active });
+    }
+    
+    if (!result.ok) {
+      return notifyUser(result.message, "error");
+    }
+    
+    saveState();
+    form.reset();
+    form.elements.userId.value = "";
+    
+    const submitLabel = document.getElementById("user-submit-label");
+    if (submitLabel) submitLabel.textContent = "Ajouter l'utilisateur";
+    
+    const cancelBtn = document.getElementById("user-cancel-btn");
+    if (cancelBtn) cancelBtn.hidden = true;
+    
+    render();
+    notifyUser(userId ? "Utilisateur mis à jour." : "Utilisateur créé.", "success");
+  });
+
+  $("#user-cancel-btn")?.addEventListener("click", () => {
+    const form = document.getElementById("user-form");
+    if (form) {
+      form.reset();
+      form.elements.userId.value = "";
+      const submitLabel = document.getElementById("user-submit-label");
+      if (submitLabel) submitLabel.textContent = "Ajouter l'utilisateur";
+      const cancelBtn = document.getElementById("user-cancel-btn");
+      if (cancelBtn) cancelBtn.hidden = true;
+    }
+  });
+
+  $("#current-user-selector")?.addEventListener("change", (event) => {
+    const newUserId = event.currentTarget.value;
+    if (!newUserId) return;
+    const user = getUserById(newUserId);
+    if (!user || user.active === false) {
+      notifyUser("Utilisateur inactif ou invalide.", "error");
+      render();
+      return;
+    }
+    if (setCurrentUser(newUserId)) {
+      addAuditLog("users.current_changed", `Changement d'utilisateur actif : ${user.name}`);
+      saveState();
+      render();
+      notifyUser("Utilisateur actif mis à jour.", "success");
+    } else {
+      notifyUser("Impossible de basculer d'utilisateur.", "error");
+    }
+  });
+
   bindWorkHoursInputs();
 }
 
@@ -694,7 +762,7 @@ function registerServiceWorker() {
   });
   window.addEventListener("load", async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=22.29", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=22.30", { updateViaCache: "none" });
       registration.update?.();
       if (registration.waiting) showUpdateAvailable(registration);
       window.setInterval(() => registration.update?.(), 10 * 60 * 1000);

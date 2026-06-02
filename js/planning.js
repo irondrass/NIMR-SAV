@@ -1106,7 +1106,12 @@ function refreshCaseAppointmentFromBookings(item) {
   if (!bookings.length) return;
   const start = bookings.reduce((earliest, booking) => minDate(earliest, new Date(booking.start)), new Date(bookings[0].start));
   const end = bookings.reduce((latest, booking) => maxDate(latest, new Date(booking.end)), new Date(bookings[0].end));
-  const totalMinutes = bookings.reduce((sum, booking) => sum + getBookingDurationMinutes(booking), 0);
+  const totalMinutes = bookings.reduce((sum, booking) => {
+    const productiveMinutes = typeof getBookingEffectivePlanningMinutes === "function"
+      ? getBookingEffectivePlanningMinutes(booking, item)
+      : getBookingPlannedMinutes(booking, item);
+    return sum + Math.max(0, Math.round(Number(productiveMinutes || 0) || 0));
+  }, 0);
   const marginMinutes = Number(item.appointment?.marginMinutes || 0) || Math.ceil((totalMinutes * 0.2) / STEP_MINUTES) * STEP_MINUTES;
   item.appointment = {
     ...(item.appointment || {}),

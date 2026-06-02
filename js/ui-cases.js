@@ -498,7 +498,7 @@ function renderTechnicianDashboard() {
 
 function renderTechnicianTaskCard(row) {
   const item = row.item;
-  const booking = row.booking;
+  const booking = row.displayBooking || row.booking;
   const start = new Date(booking.start);
   const end = new Date(booking.end);
   const techName = row.technician?.name || "Technicien";
@@ -519,7 +519,6 @@ function renderTechnicianTaskCard(row) {
         <div class="technician-task-tags">
           <span class="tag">${escapeHtml(row.statusLabel)}</span>
           ${row.late ? '<span class="tag danger">Retard</span>' : ''}
-          ${booking.remainingFromPaused ? '<span class="tag warn">Reliquat</span>' : ''}
           ${booking.blockReason ? `<span class="tag danger">${escapeHtml(booking.blockReason)}</span>` : ''}
         </div>
       </div>
@@ -532,6 +531,7 @@ function renderTechnicianTaskCard(row) {
         <div><dt>Ressources</dt><dd>${escapeHtml(resources || "-")}</dd></div>
       </dl>
       ${booking.pauseReason ? `<p class="technician-note">Pause : ${escapeHtml(booking.pauseReason)}</p>` : ""}
+      ${row.pauseRemainder ? '<p class="technician-note">Reprise planifiée après pause.</p>' : ""}
       ${booking.blockDetails ? `<p class="technician-note danger-text">Blocage : ${escapeHtml(booking.blockDetails)}</p>` : ""}
       ${note}
       <div class="technician-task-actions">
@@ -542,39 +542,42 @@ function renderTechnicianTaskCard(row) {
 }
 
 function renderTechnicianTaskActions(row) {
-  const base = `data-booking-id="${escapeAttr(row.booking.id)}" data-technician-id="${escapeAttr(row.technicianId || "")}"`;
-  const print = renderPermissionAwareButton("print.task", "Imprimer fiche", "print", base, "ghost-button tiny-button", row.booking);
+  const displayBooking = row.displayBooking || row.booking;
+  const actionBooking = row.actionBooking || displayBooking;
+  const actionBase = `data-booking-id="${escapeAttr(row.actionBookingId || actionBooking.id)}" data-technician-id="${escapeAttr(row.technicianId || "")}"`;
+  const displayBase = `data-booking-id="${escapeAttr(displayBooking.id)}" data-technician-id="${escapeAttr(row.technicianId || "")}"`;
+  const print = renderPermissionAwareButton("print.task", "Imprimer fiche", "print", actionBase, "ghost-button tiny-button", actionBooking);
   if (row.status === "done") return print;
   if (row.status === "blocked") {
     return `
-      ${renderPermissionAwareButton("task.resume", "Reprendre", "resume", base, "primary-button tiny-button", row.booking)}
-      ${renderPermissionAwareButton("task.start", "Ajouter note", "note", base, "ghost-button tiny-button", row.booking)}
-      <button class="ghost-button tiny-button" type="button" data-tech-action="print-block" ${base}>Fiche blocage</button>
+      ${renderPermissionAwareButton("task.resume", "Reprendre", "resume", actionBase, "primary-button tiny-button", actionBooking)}
+      ${renderPermissionAwareButton("task.start", "Ajouter note", "note", actionBase, "ghost-button tiny-button", actionBooking)}
+      <button class="ghost-button tiny-button" type="button" data-tech-action="print-block" ${displayBase}>Fiche blocage</button>
       ${print}
     `;
   }
   if (row.status === "in_progress") {
     return `
-      ${renderPermissionAwareButton("task.pause", "Pause", "pause", base, "ghost-button tiny-button", row.booking)}
-      ${renderPermissionAwareButton("task.complete", "Terminer", "complete", base, "primary-button tiny-button", row.booking)}
-      ${renderPermissionAwareButton("task.block", "Signaler blocage", "block", base, "ghost-button tiny-button", row.booking)}
-      ${renderPermissionAwareButton("task.start", "Ajouter note", "note", base, "ghost-button tiny-button", row.booking)}
-      ${renderPermissionAwareButton("task.start", "Ajouter photo", "photo", base, "ghost-button tiny-button", row.booking)}
+      ${renderPermissionAwareButton("task.pause", "Pause", "pause", actionBase, "ghost-button tiny-button", actionBooking)}
+      ${renderPermissionAwareButton("task.complete", "Terminer", "complete", actionBase, "primary-button tiny-button", actionBooking)}
+      ${renderPermissionAwareButton("task.block", "Signaler blocage", "block", actionBase, "ghost-button tiny-button", actionBooking)}
+      ${renderPermissionAwareButton("task.start", "Ajouter note", "note", actionBase, "ghost-button tiny-button", actionBooking)}
+      ${renderPermissionAwareButton("task.start", "Ajouter photo", "photo", actionBase, "ghost-button tiny-button", actionBooking)}
       ${print}
     `;
   }
   if (row.status === "paused") {
     return `
-      ${renderPermissionAwareButton("task.resume", "Reprendre", "resume", base, "primary-button tiny-button", row.booking)}
-      ${renderPermissionAwareButton("task.block", "Signaler blocage", "block", base, "ghost-button tiny-button", row.booking)}
-      <button class="ghost-button tiny-button" type="button" data-tech-action="print-block" ${base}>Fiche pause</button>
+      ${renderPermissionAwareButton("task.resume", "Reprendre", "resume", actionBase, "primary-button tiny-button", actionBooking)}
+      ${renderPermissionAwareButton("task.block", "Signaler blocage", "block", actionBase, "ghost-button tiny-button", actionBooking)}
+      <button class="ghost-button tiny-button" type="button" data-tech-action="print-block" ${displayBase}>Fiche pause</button>
       ${print}
     `;
   }
   return `
-    ${renderPermissionAwareButton("task.start", "Démarrer", "start", base, "primary-button tiny-button", row.booking)}
-    ${renderPermissionAwareButton("task.block", "Signaler blocage", "block", base, "ghost-button tiny-button", row.booking)}
-    ${renderPermissionAwareButton("task.start", "Ajouter note", "note", base, "ghost-button tiny-button", row.booking)}
+    ${renderPermissionAwareButton("task.start", "Démarrer", "start", actionBase, "primary-button tiny-button", actionBooking)}
+    ${renderPermissionAwareButton("task.block", "Signaler blocage", "block", actionBase, "ghost-button tiny-button", actionBooking)}
+    ${renderPermissionAwareButton("task.start", "Ajouter note", "note", actionBase, "ghost-button tiny-button", actionBooking)}
     ${print}
   `;
 }

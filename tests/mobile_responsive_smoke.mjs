@@ -148,7 +148,7 @@ async function main() {
         deviceScaleFactor: 1,
         mobile: viewport.width <= 520,
       }, sessionId);
-      await send("Page.navigate", { url: `${baseUrl}?mobile-smoke=22.26-${viewport.width}x${viewport.height}` }, sessionId);
+      await send("Page.navigate", { url: `${baseUrl}?mobile-smoke=22.27-${viewport.width}x${viewport.height}` }, sessionId);
       await wait(2800);
       const evaluation = await send("Runtime.evaluate", {
         awaitPromise: true,

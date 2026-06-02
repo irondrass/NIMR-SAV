@@ -735,7 +735,17 @@ function getTechnicianTaskStatus(item, booking) {
   if (booking.temporary) return "temporary";
   if (isBookingTaskBlocked(booking)) return "blocked";
   const status = getBookingOperationalStatus(booking);
-  if (status === "completed") return booking.key === "quality" && !item?.flags?.qualityApproved ? "quality_pending" : "done";
+  if (status === "completed") {
+    const family = getBookingFamily(booking);
+    const unfinished = family.filter((b) => getBookingOperationalStatus(b) !== "completed");
+    if (unfinished.length > 0) {
+      const visible = getVisibleTechnicianBookingForFamily(family);
+      if (visible.displayBooking && visible.displayBooking.id !== booking.id) {
+        return getTechnicianTaskStatus(item, visible.displayBooking);
+      }
+    }
+    return booking.key === "quality" && !item?.flags?.qualityApproved ? "quality_pending" : "done";
+  }
   if (status === "started") return "in_progress";
   if (status === "paused") return "paused";
   if (booking.key === "quality" && item?.flags?.workCompleted && !item?.flags?.qualityApproved) return "quality_pending";
@@ -768,7 +778,7 @@ function getVisibleTechnicianBookingForFamily(family = []) {
   if (started) return { displayBooking: started, actionBooking: started, pauseRemainder: false };
   const blocked = bookings.find((booking) => isBookingTaskBlocked(booking));
   if (blocked) return { displayBooking: blocked, actionBooking: blocked, pauseRemainder: Boolean(blocked.remainingFromPaused) };
-  const paused = bookings.find((booking) => getBookingOperationalStatus(booking) === "paused");
+  const paused = [...bookings].reverse().find((booking) => getBookingOperationalStatus(booking) === "paused");
   if (paused) {
     const remainder = findRemainderBookingForPausedTask(paused.id);
     return { displayBooking: paused, actionBooking: remainder || paused, pauseRemainder: Boolean(remainder) };
@@ -1158,7 +1168,6 @@ function pauseCaseBookingTask(item, bookingId, reason, meta = {}) {
   const workedMinutes = Math.min(plannedMinutes, countWorkedMinutesUntil(originalSegments, now));
   const remainingMinutes = Math.max(0, plannedMinutes - workedMinutes);
   if (workedMinutes <= 0) return { ok: false, message: "Aucune portion réalisée à conserver. Utilisez Replanifier pour déplacer toute la tâche." };
-  if (remainingMinutes < 5) return completeCaseBookingTaskNow(item, bookingId, now, { completedBy: meta.pausedBy || meta.technicianId || "", actorLabel: meta.actorLabel });
 
   const clippedSegments = truncateSegmentsAt(originalSegments, now);
   if (!applySegmentsToBooking(booking, clippedSegments)) {

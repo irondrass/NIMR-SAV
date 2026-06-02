@@ -167,4 +167,113 @@ const legacyState = app(`normalizeState({
 assert.equal(legacyState.bookings[0].businessTaskId, 'legacy-parent', 'ancien parent sans businessTaskId reste compatible');
 assert.equal(legacyState.bookings[1].businessTaskId, 'legacy-parent', 'ancien reliquat sans businessTaskId est rattaché au parent');
 
+// Test 3: Production Overdue Task Pause (Dossier OR-SRV-CH2602498, SOFIENE, 09:00 -> 09:24, pause at 09:25)
+vm.runInContext(`
+  let mockTime = null;
+  const OriginalDate = Date;
+  Date = class extends OriginalDate {
+    constructor(...args) {
+      if (args.length === 0 && mockTime) {
+        super(mockTime);
+      } else {
+        super(...args);
+      }
+    }
+    static now() {
+      return mockTime ? new OriginalDate(mockTime).getTime() : OriginalDate.now();
+    }
+  };
+`, context);
+
+function setMockTime(isoString) {
+  vm.runInContext(`mockTime = '${isoString}';`, context);
+}
+
+function clearMockTime() {
+  vm.runInContext(`mockTime = null;`, context);
+}
+
+// 1. Setup production state
+setMockTime('2026-06-02T09:00:00.000Z');
+vm.runInContext(`
+  state = normalizeState({
+    users: [{ id: 'SOFIENE', name: 'SOFIENE', role: 'technicien', resourceId: 'tech-sofiene', active: true }],
+    currentUserId: 'SOFIENE',
+    resources: [
+      { id: 'tech-sofiene', name: 'SOFIENE', role: 'mecanicien', active: true }
+    ],
+    cases: [{
+      id: 'OR-SRV-CH2602498',
+      clientName: 'Client Production',
+      vehicle: 'Peugeot Partner',
+      plate: '2498 TN 123',
+      flags: { received: true },
+      appointment: { start: '2026-06-02T09:00:00.000Z', end: '2026-06-02T09:24:00.000Z', delivery: '2026-06-02T09:39:00.000Z', marginMinutes: 15 },
+      durations: { oilService: 0.4 },
+      claims: [{ type: 'client', includeInPlanning: true, expertApproved: true, clientApproved: true, estimate: { lines: [{ phase: 'oilService', operation: 'Vidange / entretien rapide', laborHours: 0.4 }] } }]
+    }],
+    bookings: [{
+      id: 'booking-production',
+      caseId: 'OR-SRV-CH2602498',
+      key: 'oilService',
+      title: 'Vidange / entretien rapide',
+      resourceIds: ['tech-sofiene'],
+      primaryResourceId: 'tech-sofiene',
+      segments: [{ start: '2026-06-02T09:00:00.000Z', end: '2026-06-02T09:24:00.000Z' }],
+      start: '2026-06-02T09:00:00.000Z',
+      end: '2026-06-02T09:24:00.000Z',
+      plannedStart: '2026-06-02T09:00:00.000Z',
+      plannedEnd: '2026-06-02T09:24:00.000Z',
+      plannedMinutes: 24,
+      status: 'planned'
+    }]
+  });
+`, context);
+
+// 2. démarrer la tâche à 09:00
+assert.equal(app(`startTechnicianTask(state.cases[0], 'booking-production', 'tech-sofiene').ok`), true, 'la tâche prod doit démarrer');
+
+// 3. simuler le temps qui passe : pause cliquée à 09:25 (overdue)
+setMockTime('2026-06-02T09:25:00.000Z');
+const prodPauseResult = app(`pauseTechnicianTask(state.cases[0], 'booking-production', 'tech-sofiene', 'Pause café')`);
+assert.equal(prodPauseResult.ok, true, 'la pause overdue doit réussir');
+
+// 4. Vérifier que l’ancien segment est bien en pause et pas complété
+const parentBooking = app(`state.bookings.find((b) => b.id === 'booking-production')`);
+assert.equal(parentBooking.status, 'paused', 'le parent doit être marqué paused');
+assert.ok(!parentBooking.completedAt, 'le parent ne doit pas avoir de completedAt');
+assert.equal(app(`state.bookings.length`), 2, 'un reliquat a dû être créé');
+
+// 5. Vérifier que getTechnicianTaskRows() retourne une seule carte unique, statut "paused"
+let prodRows = app("getTechnicianTaskRows('tech-sofiene', todayKey(new Date('2026-06-02T09:00:00.000Z')))");
+assert.equal(prodRows.length, 1, 'Mes tâches doit afficher une seule carte pour la famille prod');
+assert.equal(prodRows[0].status, 'paused', 'la carte prod unique doit être en pause');
+assert.equal(prodRows[0].booking.id, 'booking-production', 'la carte prod montre toujours la tâche métier principale');
+
+// 6. reprendre la tâche (à 09:30 par exemple)
+setMockTime('2026-06-02T09:30:00.000Z');
+const prodRemainderId = prodRows[0].actionBookingId;
+assert.equal(app(`resumeTechnicianTask(state.cases[0], '${prodRemainderId}', 'tech-sofiene').ok`), true, 'la reprise du reliquat prod doit réussir');
+
+// 7. vérifier que la carte unique est repassée en "in_progress"
+prodRows = app("getTechnicianTaskRows('tech-sofiene', todayKey(new Date('2026-06-02T09:00:00.000Z')))");
+assert.equal(prodRows.length, 1, 'une seule carte prod après reprise');
+assert.equal(prodRows[0].status, 'in_progress', 'le statut prod est repassé en cours');
+
+// 8. terminer la tâche réelle (à 09:40)
+setMockTime('2026-06-02T09:40:00.000Z');
+assert.equal(app(`completeTechnicianTask(state.cases[0], '${prodRemainderId}', 'tech-sofiene', { skipPhotoCheck: true }).ok`), true, 'la complétion réelle doit réussir');
+
+// 9. vérifier que tout est maintenant bien terminé
+const allProdCompleted = app(`state.bookings.every((b) => b.caseId !== 'OR-SRV-CH2602498' || b.status === 'completed')`);
+assert.equal(allProdCompleted, true, 'tous les segments prod doivent être completed');
+assert.equal(app(`state.cases[0].flags.workCompleted`), true, 'le dossier prod doit avoir workCompleted à true');
+
+prodRows = app("getTechnicianTaskRows('tech-sofiene', todayKey(new Date('2026-06-02T09:00:00.000Z')))");
+assert.equal(prodRows.filter((r) => r.status !== 'done').length, 0, 'aucune carte active prod ne reste');
+
+// Rétablir Date d'origine
+clearMockTime();
+vm.runInContext(`Date = OriginalDate;`, context);
+
 console.log('Technician pause/remainder v22.27 OK');

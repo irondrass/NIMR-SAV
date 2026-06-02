@@ -235,7 +235,19 @@ function classifyLaborLine(line, options = {}) {
   const normalized = normalizeEstimateOperationText(text);
   if (isEstimateLegalOrFooterLine(normalized)) return { type: "ignored", reason: "Note client ou pied de page ignoré" };
   if (isPaintSupplyLine(normalized)) return { type: "ignored", reason: "Produit de peinture ignoré comme fourniture" };
-  const laborException = /\b(REMP|REMPL|REMPLACEMENT)\s+FEU\b/.test(normalized) || /\b(CHANG(?:EMENT)?|REMPL)\b/.test(normalized);
+
+  if (/\b(DESIGNATION|QTE|PRIX\s+UNITAIRE|MONTANT)\b/.test(normalized)) {
+    return { type: "ignored", reason: "Ligne d'en-tête ou de tableau concaténée" };
+  }
+
+  const pricingInfo = extractEstimatePricingInfo(text);
+  const isConfirmedLabor = pricingInfo.hasLaborHourlyRate;
+
+  // Bypass hardIgnored for FILTRE/HUILE if they are confirmed labor (have 33/35 PU).
+  // Also include REMP (without L) as a common labor abbreviation.
+  const isFiltreOrHuileLabor = isConfirmedLabor && /\b(FILTRE|HUILE)\b/.test(normalized);
+  const laborException = isFiltreOrHuileLabor || /\b(REMP|REMPL|REMPLACEMENT)\s+FEU\b/.test(normalized) || /\b(CHANG(?:EMENT)?|REMP|REMPL)\b/.test(normalized);
+
   const hardIgnored = [
     "FOURNITURE",
     "AGRAFE",
@@ -255,7 +267,6 @@ function classifyLaborLine(line, options = {}) {
   ].some((keyword) => normalized.includes(keyword));
   if (hardIgnored && !laborException) return { type: "ignored", reason: "Pièce, fourniture ou total ignoré" };
 
-  const pricingInfo = extractEstimatePricingInfo(text);
   if (pricingInfo.hasNumericTable && !pricingInfo.hasLaborHourlyRate) {
     return hasLaborKeyword(normalized) ? { type: "ignored", reason: "Prix unitaire non MO" } : null;
   }
@@ -264,9 +275,20 @@ function classifyLaborLine(line, options = {}) {
     return hasLaborKeyword(normalized) ? { type: "ignored", reason: "Quantité MO introuvable" } : null;
   }
   const operation = sanitizeEstimateOperation(text.slice(0, hoursInfo.index) || text);
-  const distributions = distributeLaborHours(operation, hoursInfo.hours, options);
+  let distributions = distributeLaborHours(operation, hoursInfo.hours, options);
   if (!distributions.length) {
-    return hasLaborKeyword(normalized) ? { type: "ignored", reason: "Phase planning non reconnue" } : null;
+    if (isConfirmedLabor) {
+      const defaultPhase = options.claimType === "vidange" || /\b(VIDANGE|ENTRETIEN|FILTRE)\b/.test(normalized)
+        ? "oilService"
+        : options.claimType === "electrical_client"
+        ? "electrical"
+        : options.claimType === "mechanical_client"
+        ? "mechanical"
+        : "body";
+      distributions = [makeDistribution(defaultPhase, operation, hoursInfo.hours)];
+    } else {
+      return hasLaborKeyword(normalized) ? { type: "ignored", reason: "Phase planning non reconnue" } : null;
+    }
   }
   return {
     type: "labor",
@@ -352,7 +374,7 @@ function distributeLaborHours(operation, hours, options = {}) {
     ];
   }
   if (/\b(PASSAGE\s+SUR\s+MARBRE|MARBRE)\b/.test(normalized)) return [makeDistribution("body", operation, hours)];
-  if (/\b(VIDANGE|ENTRETIEN\s+RAPIDE|SERVICE\s+RAPIDE)\b/.test(normalized)) return [makeDistribution("oilService", operation, hours)];
+  if (/\b(VIDANGE|ENTRETIEN\s+RAPIDE|SERVICE\s+RAPIDE|FILTRE|FILTRES)\b/.test(normalized)) return [makeDistribution("oilService", operation, hours)];
   const isClientOnly = typeof isClientOnlyRepairClaim === "function"
     ? isClientOnlyRepairClaim({ type: options.claimType })
     : ["client", "vidange", "mechanical_client", "electrical_client"].includes(options.claimType);
@@ -583,7 +605,7 @@ function splitEstimateSourceLines(text) {
     // be a split point; otherwise a consumable row like "PEINTURE 5 180,000
     // 900,000" can stay glued to the following "DRESSAGE ET PEINTURE ...
     // 8 33,000 ..." row and appear as a fake MO operation.
-    .replace(/\s+(?=(?:D\/P|DRESSAGE__ET__PEINTURE|DRESSAGE|PEINTURE|PRODUITS?\s+(?:DE\s+)?PEINTURE|REMP|REMPL|REMPLACEMENT|DEPOSE|DÉPOSE|DEMONTAGE|DÉMONTAGE|REMONTAGE|REPOSE|PETIT(?:E)? FOURNITURE)\b)/gi, "\n")
+    .replace(/\s+(?=(?:D\/P|DRESSAGE__ET__PEINTURE|DRESSAGE|PEINTURE|PRODUITS?\s+(?:DE\s+)?PEINTURE|REMP|REMPL|REMPLACEMENT|DEPOSE|DÉPOSE|DEMONTAGE|DÉMONTAGE|REMONTAGE|REPOSE|PETIT(?:E)? FOURNITURE|ENTRETIEN|VIDANGE|FILTRE|RONDELLE|HUILE|BOUCHON|JOINT|COLLIER)\b)/gi, "\n")
     .split(/\r?\n/)
     .map((line) => line.replace(new RegExp(dressageMarker, "g"), "DRESSAGE ET PEINTURE"))
     .map((line) => line.replace(/\s+/g, " ").trim())
@@ -815,6 +837,12 @@ function extractEstimatePricingInfo(line) {
     hoursInfo: null,
   };
   for (let index = 1; index < matches.length; index += 1) {
+    // If we have 3 or more numbers, the last number is the line total amount.
+    // In a parts line (e.g. Qty 2, PU 16.5, Total 33), the total might match 33/35 TND,
+    // but it is not the hourly rate. The hourly rate must always be the unit price (non-last match).
+    if (index === matches.length - 1 && matches.length >= 3) {
+      continue;
+    }
     const current = matches[index];
     const previous = matches[index - 1];
     if (isEstimateLaborHourlyRate(current.hours) && previous.hours > 0 && previous.hours <= ESTIMATE_LABOR_MAX_HOURS) {
@@ -845,7 +873,8 @@ function getEstimateNumberMatches(line) {
 }
 
 function isEstimateLaborHourlyRate(value) {
-  return ESTIMATE_LABOR_HOURLY_RATES.some((rate) => Math.abs(Number(value || 0) - rate) < 0.01);
+  const rates = (typeof state !== "undefined" && state?.settings?.estimateLaborHourlyRates) || ESTIMATE_LABOR_HOURLY_RATES;
+  return rates.some((rate) => Math.abs(Number(value || 0) - rate) < 0.01);
 }
 
 function extractLaborHours(line) {

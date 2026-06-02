@@ -1,4 +1,4 @@
-const CACHE_NAME = "nimr-sav-v22.31-quiet-save-ux";
+const CACHE_NAME = "nimr-sav-v22.32-activity-log-settings";
 const ASSETS = [
   "./",
   "./index.html",

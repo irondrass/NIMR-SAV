@@ -743,44 +743,118 @@ function getTechnicianTaskStatus(item, booking) {
   return "planned";
 }
 
-function getTechnicianTaskRows(technicianId, dateLike = new Date()) {
-  const { start, end } = normalizeTechnicianDateRange(dateLike);
+function getBookingBusinessTaskId(booking) {
+  return String(booking?.businessTaskId || booking?.parentBookingId || booking?.id || "");
+}
+
+function getBookingFamily(booking) {
+  if (!booking) return [];
+  const businessTaskId = getBookingBusinessTaskId(booking);
+  if (!businessTaskId) return [booking];
   return state.bookings
-    .filter((booking) => {
-      if (!booking || booking.type === "leave" || booking.temporary === true) return false;
-      if (isBookingLinkedToClosedCase(booking)) return false;
-      const humanIds = getBookingHumanResourceIds(booking);
-      if (!humanIds.length) return false;
-      if (technicianId && !humanIds.includes(technicianId)) return false;
-      return bookingIntersectsRange(booking, start, end)
-        || getBookingOperationalStatus(booking) === "started"
-        || getTechnicianTaskStatus(state.cases.find((item) => item.id === booking.caseId), booking) === "blocked";
-    })
-    .map((booking) => {
-      const item = state.cases.find((caseItem) => caseItem.id === booking.caseId);
-      const technicianIdForRow = technicianId && (booking.resourceIds || []).includes(technicianId)
+    .filter((candidate) => (
+      candidate
+      && candidate.caseId === booking.caseId
+      && candidate.type !== "leave"
+      && candidate.temporary !== true
+      && getBookingBusinessTaskId(candidate) === businessTaskId
+    ))
+    .sort((a, b) => new Date(a.start) - new Date(b.start));
+}
+
+function getVisibleTechnicianBookingForFamily(family = []) {
+  const bookings = family.filter(Boolean).sort((a, b) => new Date(a.start) - new Date(b.start));
+  const started = bookings.find((booking) => getBookingOperationalStatus(booking) === "started");
+  if (started) return { displayBooking: started, actionBooking: started, pauseRemainder: false };
+  const blocked = bookings.find((booking) => isBookingTaskBlocked(booking));
+  if (blocked) return { displayBooking: blocked, actionBooking: blocked, pauseRemainder: Boolean(blocked.remainingFromPaused) };
+  const paused = bookings.find((booking) => getBookingOperationalStatus(booking) === "paused");
+  if (paused) {
+    const remainder = findRemainderBookingForPausedTask(paused.id);
+    return { displayBooking: paused, actionBooking: remainder || paused, pauseRemainder: Boolean(remainder) };
+  }
+  const planned = bookings.find((booking) => getBookingOperationalStatus(booking) === "planned");
+  if (planned) return { displayBooking: planned, actionBooking: planned, pauseRemainder: Boolean(planned.remainingFromPaused) };
+  const completed = bookings.filter((booking) => getBookingOperationalStatus(booking) === "completed").at(-1);
+  return { displayBooking: completed || bookings[0] || null, actionBooking: completed || bookings[0] || null, pauseRemainder: false };
+}
+
+function bookingFamilyIntersectsRange(family, rangeStart, rangeEnd) {
+  return family.some((booking) => bookingIntersectsRange(booking, rangeStart, rangeEnd));
+}
+
+function getTechnicianFamilyHumanIds(family) {
+  return [...new Set(family.flatMap((booking) => getBookingHumanResourceIds(booking)))];
+}
+
+function getTechnicianFamilyLatestNote(family) {
+  return family
+    .flatMap((booking) => Array.isArray(booking.notes) ? booking.notes : [])
+    .sort((a, b) => new Date(a.at || 0) - new Date(b.at || 0))
+    .at(-1) || null;
+}
+
+function getTechnicianBusinessTaskRows(technicianId, dateLike = new Date()) {
+  const { start, end } = normalizeTechnicianDateRange(dateLike);
+  const familyMap = new Map();
+  state.bookings.forEach((booking) => {
+    if (!booking || booking.type === "leave" || booking.temporary === true) return;
+    if (isBookingLinkedToClosedCase(booking)) return;
+    const businessTaskId = getBookingBusinessTaskId(booking);
+    const familyKey = `${booking.caseId || ""}::${businessTaskId || booking.id}`;
+    if (!familyMap.has(familyKey)) familyMap.set(familyKey, []);
+    familyMap.get(familyKey).push(booking);
+  });
+
+  return [...familyMap.values()]
+    .map((family) => {
+      const item = state.cases.find((caseItem) => caseItem.id === family[0]?.caseId);
+      const humanIds = getTechnicianFamilyHumanIds(family);
+      if (!item || !humanIds.length) return null;
+      if (technicianId && !humanIds.includes(technicianId)) return null;
+      const visible = getVisibleTechnicianBookingForFamily(family);
+      const displayBooking = visible.displayBooking;
+      const actionBooking = visible.actionBooking || displayBooking;
+      if (!displayBooking || !actionBooking) return null;
+      const status = getTechnicianTaskStatus(item, displayBooking);
+      const visibleOnDate = bookingFamilyIntersectsRange(family, start, end)
+        || family.some((booking) => ["started", "paused"].includes(getBookingOperationalStatus(booking)))
+        || family.some((booking) => getTechnicianTaskStatus(item, booking) === "blocked");
+      if (!visibleOnDate) return null;
+      const technicianIdForRow = technicianId && humanIds.includes(technicianId)
         ? technicianId
-        : getBookingPrimaryTechnicianId(booking);
+        : getBookingPrimaryTechnicianId(actionBooking) || getBookingPrimaryTechnicianId(displayBooking) || humanIds[0] || "";
       const technician = getResource(technicianIdForRow) || null;
-      const status = getTechnicianTaskStatus(item, booking);
-      const endDate = new Date(booking.end);
-      const late = status !== "done" && status !== "paused" && status !== "blocked" && endDate < new Date();
-      const latestNote = (booking.notes || []).at(-1);
+      const endDates = family.map((booking) => new Date(booking.end)).filter((date) => !Number.isNaN(date.getTime()));
+      const lastEnd = endDates.length ? new Date(Math.max(...endDates.map((date) => date.getTime()))) : new Date(displayBooking.end);
+      const late = status !== "done" && status !== "paused" && status !== "blocked" && lastEnd < new Date();
+      const latestNote = getTechnicianFamilyLatestNote(family);
       return {
-        id: booking.id,
+        id: getBookingBusinessTaskId(displayBooking) || displayBooking.id,
         item,
-        booking,
+        booking: displayBooking,
+        displayBooking,
+        actionBooking,
+        actionBookingId: actionBooking.id,
+        family,
         technician,
         technicianId: technicianIdForRow,
         status,
         statusLabel: getTechnicianStatusLabel(status),
-        plannedMinutes: booking.plannedMinutes || getBookingDurationMinutes(booking),
+        plannedMinutes: getBookingPlannedMinutes(displayBooking, item) || getBookingDurationMinutes(displayBooking),
+        remainingMinutes: Math.max(...family.map((booking) => Number(booking.remainingMinutes || 0) || 0), 0),
+        workedMinutes: family.reduce((sum, booking) => sum + (Number(booking.actualWorkedMinutes || 0) || 0), 0),
         late,
         latestNote: latestNote?.text || "",
+        pauseRemainder: visible.pauseRemainder,
       };
     })
-    .filter((row) => row.item)
-    .sort((a, b) => new Date(a.booking.start) - new Date(b.booking.start));
+    .filter(Boolean)
+    .sort((a, b) => new Date(a.displayBooking.start) - new Date(b.displayBooking.start));
+}
+
+function getTechnicianTaskRows(technicianId, dateLike = new Date()) {
+  return getTechnicianBusinessTaskRows(technicianId, dateLike);
 }
 
 function getTechnicianTaskStartIssues(item, booking, technicianId, options = {}) {
@@ -1024,14 +1098,7 @@ function completeCaseBookingTaskNow(item, bookingId, completedAt = new Date(), m
   booking.actualWorkedMinutes = estimateBookingWorkedMinutes(booking, now);
   closeBookingWorkSession(booking, { completedAt: now.toISOString(), completedBy: meta.completedBy || "", pauseReason: "" });
   const { freedMinutes, removed } = completeBookingReservationAt(booking, now);
-  if (booking.remainingFromPaused && booking.parentBookingId) {
-    const parent = findCaseBooking(item, booking.parentBookingId);
-    if (parent && getBookingOperationalStatus(parent) === "paused") {
-      parent.status = "completed";
-      parent.completedAt = now.toISOString();
-      parent.completedBy = meta.completedBy || parent.completedBy || "";
-    }
-  }
+  if (booking.remainingFromPaused && booking.parentBookingId) completePausedBookingAncestors(item, booking, now, meta.completedBy || "");
   addHistory(
     item,
     "planning.task.completed",
@@ -1125,6 +1192,8 @@ function createPausedBookingRemainder(item, sourceBooking, remainingMinutes, rea
   const template = getBookingTemplate(sourceBooking);
   if (!template) throw new Error("Étape planning inconnue pour replanifier le reliquat.");
   const duration = Math.max(STEP_MINUTES, Math.round(remainingMinutes));
+  const businessTaskId = getBookingBusinessTaskId(sourceBooking) || sourceBooking.id;
+  sourceBooking.businessTaskId = businessTaskId;
   const tempBookings = state.bookings.filter((booking) => booking.id !== sourceBooking.id).map(cloneBooking);
   const match = findBestResourceSlot(template, startAfter, duration, tempBookings, isFastLaneJob(item), sourceBooking.primaryResourceId);
   if (!match) throw new Error("Aucun créneau disponible pour reporter le reliquat.");
@@ -1136,11 +1205,30 @@ function createPausedBookingRemainder(item, sourceBooking, remainingMinutes, rea
   });
   const booking = stepToBooking(item, step, false);
   booking.parentBookingId = sourceBooking.id;
+  booking.businessTaskId = businessTaskId;
   booking.remainingFromPaused = true;
   booking.pauseReason = reason;
   booking.plannedMinutes = duration;
+  sourceBooking.supersededBy = booking.id;
   state.bookings.push(booking);
   return booking;
+}
+
+function completePausedBookingAncestors(item, booking, completedAt, completedBy = "") {
+  const completedIso = completedAt instanceof Date ? completedAt.toISOString() : new Date(completedAt).toISOString();
+  const visited = new Set();
+  let parentId = booking?.parentBookingId || "";
+  while (parentId && !visited.has(parentId)) {
+    visited.add(parentId);
+    const parent = findCaseBooking(item, parentId);
+    if (!parent) break;
+    if (getBookingOperationalStatus(parent) === "paused") {
+      parent.status = "completed";
+      parent.completedAt = completedIso;
+      parent.completedBy = completedBy || parent.completedBy || "";
+    }
+    parentId = parent.parentBookingId || "";
+  }
 }
 
 function getTechnicianActorLabel(technicianId) {

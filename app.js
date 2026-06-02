@@ -100,6 +100,7 @@ function bindMainNavigation() {
         bindWorkHoursInputs();
         if (typeof renderUsersAndRoles === "function") renderUsersAndRoles();
         if (typeof refreshSupabasePanel === "function") refreshSupabasePanel();
+        if (typeof renderActivityLog === "function") renderActivityLog();
       }
       if (tab === "pilotage") {
         renderSavKpis();
@@ -762,7 +763,7 @@ function registerServiceWorker() {
   });
   window.addEventListener("load", async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=22.31", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=22.32", { updateViaCache: "none" });
       registration.update?.();
       if (registration.waiting) showUpdateAvailable(registration);
       window.setInterval(() => registration.update?.(), 10 * 60 * 1000);
@@ -771,6 +772,85 @@ function registerServiceWorker() {
       console.warn("Service worker non enregistré", error);
     }
   });
+}
+
+function renderActivityLog() {
+  const panel = $("#panel-activity-log");
+  if (!panel) return;
+
+  const allowed = hasPermission("audit.view");
+  panel.hidden = !allowed;
+  if (!allowed) return;
+
+  const filterSelect = $("#activity-log-filter");
+  const searchInput = $("#activity-log-search");
+  const tableBody = $("#activity-log-table-body");
+  const exportBtn = $("#activity-log-export");
+
+  function updateTable() {
+    const filter = filterSelect.value;
+    const search = searchInput.value.toLowerCase();
+    const logs = getAggregatedActivityLog(200);
+    
+    const filtered = logs.filter(log => {
+      if (filter !== "all") {
+        if (filter === "users" && !["users", "security", "supabase", "settings"].includes(log.category)) return false;
+        if (filter === "planning" && !["planning"].includes(log.category)) return false;
+        if (filter === "case" && !["case"].includes(log.category)) return false;
+        if (filter === "sync" && !["sync"].includes(log.category)) return false;
+        if (filter === "errors" && !["error", "warn"].includes(log.level)) return false;
+      }
+      if (search) {
+        const text = `${log.label || ""} ${log.details || ""} ${log.actorName || log.user || ""} ${log.caseNumber || ""}`.toLowerCase();
+        if (!text.includes(search)) return false;
+      }
+      return true;
+    });
+
+    tableBody.innerHTML = filtered.map(log => {
+      const time = new Date(log.at).toLocaleString();
+      let color = "inherit";
+      if (log.level === "error" || log.level === "danger") color = "var(--danger-color, #dc3545)";
+      if (log.level === "warn") color = "var(--warning-color, #f59f00)";
+      return `
+        <tr style="border-bottom: 1px solid var(--border-color);">
+          <td style="padding: 8px; color: ${color};">${escapeHtml(time)}</td>
+          <td style="padding: 8px;">${escapeHtml(log.category || log.type)}</td>
+          <td style="padding: 8px;">${escapeHtml(log.actorName || log.user || "Système")}</td>
+          <td style="padding: 8px;">${escapeHtml(log.caseNumber || "-")}</td>
+          <td style="padding: 8px;"><strong>${escapeHtml(log.label)}</strong><br/><small class="muted">${escapeHtml(log.details)}</small></td>
+        </tr>
+      `;
+    }).join("") || `<tr><td colspan="5" style="padding:16px; text-align:center;" class="muted">Aucun événement trouvé</td></tr>`;
+  }
+
+  // Bind only once
+  if (!panel.dataset.bound) {
+    filterSelect.addEventListener("change", updateTable);
+    searchInput.addEventListener("input", updateTable);
+    exportBtn.addEventListener("click", () => {
+      const logs = getAggregatedActivityLog(200);
+      const csv = ["Date;Type;Acteur;Dossier;Label;Details"];
+      logs.forEach(log => {
+        csv.push([
+          new Date(log.at).toLocaleString(),
+          log.category || log.type,
+          log.actorName || log.user || "Système",
+          log.caseNumber || "",
+          log.label,
+          log.details
+        ].map(s => `"${String(s || "").replace(/"/g, '""').replace(/\n/g, ' ')}"`).join(";"));
+      });
+      const blob = new Blob(["\\ufeff" + csv.join("\\n")], { type: "text/csv;charset=utf-8;" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `nimr_activity_log_${new Date().toISOString().slice(0,10)}.csv`;
+      a.click();
+    });
+    panel.dataset.bound = "true";
+  }
+
+  updateTable();
 }
 
 initApp();

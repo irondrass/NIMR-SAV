@@ -1,4 +1,4 @@
-const CACHE_NAME = "nimr-sav-v22.27-technician-pause-remainder-single-card";
+const CACHE_NAME = "nimr-sav-v22.28-dynamic-dependent-reschedule";
 const ASSETS = [
   "./",
   "./index.html",

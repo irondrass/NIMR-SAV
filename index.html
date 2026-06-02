@@ -16,8 +16,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <script src="js/version.js?v=22.31"></script>
-    <link rel="stylesheet" href="styles.css?v=22.31" />
+    <script src="js/version.js?v=22.32"></script>
+    <link rel="stylesheet" href="styles.css?v=22.32" />
   </head>
   <body>
     <a class="skip-link" href="#main-content">Aller au contenu principal</a>
@@ -640,6 +640,45 @@
               <p class="muted backup-status" id="supabase-status">Initialisation Supabase...</p>
               <p class="muted" id="supabase-details">Exécutez le dernier supabase-schema.sql fourni avec cette version si le test indique que cloud_backups, Realtime, app_settings ou les politiques atelier manquent.</p>
             </section>
+
+            <section class="panel activity-log-panel" id="panel-activity-log" hidden>
+              <div class="panel-heading">
+                <div>
+                  <h1>Journal d'activité</h1>
+                  <p>Consulter les événements récents de l'application</p>
+                </div>
+              </div>
+              <div class="activity-log-controls" style="display:flex; gap:12px; margin-bottom:16px; flex-wrap:wrap;">
+                <select id="activity-log-filter" style="flex:1; min-width: 200px;">
+                  <option value="all">Tous les événements</option>
+                  <option value="users">Utilisateurs & Sécurité</option>
+                  <option value="planning">Planning & Techniciens</option>
+                  <option value="case">Dossiers</option>
+                  <option value="sync">Synchronisation Cloud</option>
+                  <option value="errors">Erreurs & Avertissements</option>
+                </select>
+                <input type="search" id="activity-log-search" placeholder="Rechercher..." style="flex:1; min-width: 200px;" />
+                <button type="button" class="ghost-button" id="activity-log-export">
+                  Export CSV
+                </button>
+              </div>
+              <div class="table-container" style="max-height:400px; overflow-y:auto; border:1px solid var(--border-color); border-radius:var(--radius-sm);">
+                <table class="data-table" style="width:100%; border-collapse: collapse; font-size: 0.85rem;">
+                  <thead style="position: sticky; top: 0; background: var(--bg-color); z-index: 1;">
+                    <tr style="text-align: left; border-bottom: 2px solid var(--border-color);">
+                      <th style="padding: 8px;">Date</th>
+                      <th style="padding: 8px;">Type</th>
+                      <th style="padding: 8px;">Acteur</th>
+                      <th style="padding: 8px;">Dossier</th>
+                      <th style="padding: 8px;">Détails</th>
+                    </tr>
+                  </thead>
+                  <tbody id="activity-log-table-body">
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
           </div>
         </section>
       </main>

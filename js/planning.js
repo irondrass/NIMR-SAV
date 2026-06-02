@@ -419,6 +419,10 @@ function findConflict(slot, resourceIds, bookings) {
 
 function acceptProposal(item, proposal) {
   if (!proposal || proposal.error) return;
+  if (isCaseReadonlyArchive(item)) {
+    notifyUser(getArchivedCaseMessage(item), "error");
+    return;
+  }
   const issues = getBusinessRuleIssues(item, "appointment");
   if (issues.length) {
     notifyUser(issues.join("\n"));
@@ -500,7 +504,7 @@ function getBookingOperationalStatus(booking) {
 }
 
 function isPlanningBlockingBooking(booking) {
-  return getBookingOperationalStatus(booking) !== "completed";
+  return !isBookingLinkedToClosedCase(booking) && getBookingOperationalStatus(booking) !== "completed";
 }
 
 function getBookingStatusLabel(booking) {
@@ -516,6 +520,57 @@ function getBookingStatusLabel(booking) {
 
 function getBookingDurationMinutes(booking) {
   return Math.max(0, sumBookingSegmentsMinutes(booking?.segments || []));
+}
+
+function getBookingCase(booking) {
+  return booking?.caseId ? state.cases.find((item) => item.id === booking.caseId) || null : null;
+}
+
+function isBookingLinkedToClosedCase(booking) {
+  const item = getBookingCase(booking);
+  return typeof isCaseOperationallyClosed === "function" ? isCaseOperationallyClosed(item) : Boolean(item?.flags?.delivered || item?.flags?.invoiced || item?.closedAt);
+}
+
+function getBookingBusinessDurationMinutes(booking, item = null) {
+  const caseItem = item || getBookingCase(booking);
+  const caseDurationHours = Number(caseItem?.durations?.[booking?.key] || 0) || 0;
+  if (caseDurationHours > 0) return Math.round(caseDurationHours * 60);
+  const defaultHours = Number(DEFAULT_DURATIONS?.[booking?.key] || 0) || 0;
+  return defaultHours > 0 ? Math.round(defaultHours * 60) : 0;
+}
+
+function isDurationLikelyCalendarAmplitude(candidateMinutes, businessMinutes) {
+  if (!candidateMinutes || !businessMinutes) return false;
+  return candidateMinutes > Math.max(businessMinutes * 1.5, businessMinutes + 60);
+}
+
+function getBookingPlannedMinutes(booking, item = null) {
+  const businessMinutes = getBookingBusinessDurationMinutes(booking, item);
+  const explicit = Number(booking?.plannedMinutes || 0) || 0;
+  if (explicit > 0 && !isDurationLikelyCalendarAmplitude(explicit, businessMinutes)) return Math.round(explicit);
+  const plannedSegments = clonePlanningSegments(booking?.plannedSegments?.length ? booking.plannedSegments : []);
+  const plannedSegmentMinutes = sumBookingSegmentsMinutes(plannedSegments);
+  if (plannedSegmentMinutes > 0 && !isDurationLikelyCalendarAmplitude(plannedSegmentMinutes, businessMinutes)) {
+    return Math.max(0, Math.round(plannedSegmentMinutes));
+  }
+  if (businessMinutes > 0) return businessMinutes;
+  const fallbackSegments = clonePlanningSegments(booking?.segments || []);
+  return Math.max(0, Math.round(sumBookingSegmentsMinutes(fallbackSegments)));
+}
+
+function countBookingSegmentMinutesBetween(segments = [], rangeStart, rangeEnd) {
+  const startBoundary = new Date(rangeStart);
+  const endBoundary = new Date(rangeEnd);
+  if (!(startBoundary < endBoundary)) return 0;
+  return clonePlanningSegments(segments).reduce((sum, segment) => {
+    const start = maxDate(new Date(segment.start), startBoundary);
+    const end = minDate(new Date(segment.end), endBoundary);
+    return end > start ? sum + diffMinutes(start, end) : sum;
+  }, 0);
+}
+
+function getBookingProductiveSegments(booking) {
+  return clonePlanningSegments(booking?.plannedSegments?.length ? booking.plannedSegments : booking?.segments || []);
 }
 
 function getBookingTemplate(booking) {
@@ -693,6 +748,7 @@ function getTechnicianTaskRows(technicianId, dateLike = new Date()) {
   return state.bookings
     .filter((booking) => {
       if (!booking || booking.type === "leave" || booking.temporary === true) return false;
+      if (isBookingLinkedToClosedCase(booking)) return false;
       const humanIds = getBookingHumanResourceIds(booking);
       if (!humanIds.length) return false;
       if (technicianId && !humanIds.includes(technicianId)) return false;
@@ -789,16 +845,23 @@ function closeBookingWorkSession(booking, fields = {}) {
 }
 
 function estimateBookingWorkedMinutes(booking, fallbackEnd = new Date()) {
+  const plannedMinutes = getBookingPlannedMinutes(booking);
+  const productiveSegments = getBookingProductiveSegments(booking);
   const sessions = ensureBookingWorkSessions(booking);
   const fromSessions = sessions.reduce((sum, session) => {
     const start = new Date(session.startedAt);
     const end = new Date(session.completedAt || session.pausedAt || fallbackEnd);
-    return start < end ? sum + diffMinutes(start, end) : sum;
+    if (!(start < end)) return sum;
+    const productive = countBookingSegmentMinutesBetween(productiveSegments, start, end);
+    return sum + (productive > 0 ? productive : diffMinutes(start, end));
   }, 0);
-  if (fromSessions > 0) return Math.round(fromSessions);
+  if (fromSessions > 0) return plannedMinutes > 0 ? Math.min(Math.round(fromSessions), plannedMinutes) : Math.round(fromSessions);
   const start = new Date(booking.startedAt || booking.actualStart || booking.start);
   const end = fallbackEnd instanceof Date ? fallbackEnd : new Date(fallbackEnd);
-  return start < end ? Math.round(diffMinutes(start, end)) : 0;
+  if (!(start < end)) return 0;
+  const productive = countBookingSegmentMinutesBetween(productiveSegments, start, end);
+  const minutes = productive > 0 ? productive : diffMinutes(start, end);
+  return plannedMinutes > 0 ? Math.min(Math.round(minutes), plannedMinutes) : Math.round(minutes);
 }
 
 function truncateSegmentsAt(segments, cutoffDate) {
@@ -846,7 +909,9 @@ function completeBookingReservationAt(booking, completedAt, options = {}) {
   const actualStart = booking.actualStart || booking.startedAt || "";
   const actualStartDate = actualStart ? new Date(actualStart) : null;
   if (!keptSegments.length && actualStartDate && !Number.isNaN(actualStartDate.getTime()) && actualStartDate <= now) {
-    const safeEnd = actualStartDate < now ? now : new Date(actualStartDate.getTime() + 1000);
+    const elapsedMinutes = Math.max(1, diffMinutes(actualStartDate, now));
+    const cappedMinutes = Math.max(1, Math.min(plannedMinutes || STEP_MINUTES, elapsedMinutes));
+    const safeEnd = new Date(actualStartDate.getTime() + cappedMinutes * 60000);
     keptSegments = [{ start: actualStartDate.toISOString(), end: safeEnd.toISOString() }];
   }
   const keptMinutes = sumBookingSegmentsMinutes(keptSegments);
@@ -909,6 +974,7 @@ function refreshCaseAppointmentFromBookings(item) {
 }
 
 function startCaseBookingTask(item, bookingId, meta = {}) {
+  if (isCaseReadonlyArchive(item)) return { ok: false, message: getArchivedCaseMessage(item) };
   const booking = findCaseBooking(item, bookingId);
   if (!booking) return { ok: false, message: "Tâche introuvable dans le planning." };
   const status = getBookingOperationalStatus(booking);
@@ -938,6 +1004,7 @@ function startCaseBookingTask(item, bookingId, meta = {}) {
 }
 
 function completeCaseBookingTaskNow(item, bookingId, completedAt = new Date(), meta = {}) {
+  if (isCaseReadonlyArchive(item)) return { ok: false, message: getArchivedCaseMessage(item) };
   const booking = findCaseBooking(item, bookingId);
   if (!booking) return { ok: false, message: "Tâche introuvable dans le planning." };
   const status = getBookingOperationalStatus(booking);
@@ -954,7 +1021,7 @@ function completeCaseBookingTaskNow(item, bookingId, completedAt = new Date(), m
     booking.notes.push({ id: uid("task-note"), at: now.toISOString(), by: meta.completedBy || "", text: String(meta.note).trim() });
   }
   booking.completedBy = meta.completedBy || booking.completedBy || "";
-  booking.actualWorkedMinutes = Math.max(Number(booking.actualWorkedMinutes || 0) || 0, estimateBookingWorkedMinutes(booking, now));
+  booking.actualWorkedMinutes = estimateBookingWorkedMinutes(booking, now);
   closeBookingWorkSession(booking, { completedAt: now.toISOString(), completedBy: meta.completedBy || "", pauseReason: "" });
   const { freedMinutes, removed } = completeBookingReservationAt(booking, now);
   if (booking.remainingFromPaused && booking.parentBookingId) {
@@ -982,6 +1049,7 @@ function completeCaseBookingTaskNow(item, bookingId, completedAt = new Date(), m
 }
 
 function completeCaseWorkBookingsNow(item, completedAt = new Date(), meta = {}) {
+  if (isCaseReadonlyArchive(item)) return { completed: 0, freedMinutes: 0, removed: 0, ok: false, message: getArchivedCaseMessage(item) };
   const now = new Date(completedAt);
   const bookings = getCaseProductionBookings(item).filter((booking) => getBookingOperationalStatus(booking) !== "completed");
   if (!bookings.length) return { completed: 0, freedMinutes: 0, removed: 0 };
@@ -991,7 +1059,7 @@ function completeCaseWorkBookingsNow(item, completedAt = new Date(), meta = {}) 
     const title = booking.title || getDurationLabel(booking.key);
     booking.completedBy = meta.completedBy || booking.completedBy || "";
     booking.completedByOverride = meta.completedByOverride || booking.completedByOverride || "";
-    booking.actualWorkedMinutes = Math.max(Number(booking.actualWorkedMinutes || 0) || 0, estimateBookingWorkedMinutes(booking, now));
+    booking.actualWorkedMinutes = estimateBookingWorkedMinutes(booking, now);
     closeBookingWorkSession(booking, { completedAt: now.toISOString(), completedBy: booking.completedBy || booking.completedByOverride || "", pauseReason: "" });
     const result = completeBookingReservationAt(booking, now, { removeIfEmpty: meta.keepEmptyBookings === true ? false : undefined });
     freedMinutes += result.freedMinutes;
@@ -1010,6 +1078,7 @@ function completeCaseWorkBookingsNow(item, completedAt = new Date(), meta = {}) 
 }
 
 function pauseCaseBookingTask(item, bookingId, reason, meta = {}) {
+  if (isCaseReadonlyArchive(item)) return { ok: false, message: getArchivedCaseMessage(item) };
   const booking = findCaseBooking(item, bookingId);
   if (!booking) return { ok: false, message: "Tâche introuvable dans le planning." };
   const status = getBookingOperationalStatus(booking);
@@ -1079,6 +1148,7 @@ function getTechnicianActorLabel(technicianId) {
 }
 
 function startTechnicianTask(item, bookingId, technicianId, options = {}) {
+  if (isCaseReadonlyArchive(item)) return { ok: false, message: getArchivedCaseMessage(item) };
   const booking = findCaseBooking(item, bookingId);
   const permission = guardAction("task.start", { booking, technicianId }, { notify: false });
   if (!permission.ok) return { ok: false, message: permission.message, issues: [permission.message] };
@@ -1093,6 +1163,7 @@ function startTechnicianTask(item, bookingId, technicianId, options = {}) {
 }
 
 function pauseTechnicianTask(item, bookingId, technicianId, reason) {
+  if (isCaseReadonlyArchive(item)) return { ok: false, message: getArchivedCaseMessage(item) };
   const cleanReason = String(reason || "").trim();
   if (!cleanReason) return { ok: false, message: "Motif de pause obligatoire." };
   const booking = findCaseBooking(item, bookingId);
@@ -1111,6 +1182,7 @@ function findRemainderBookingForPausedTask(bookingId) {
 }
 
 function resumeTechnicianTask(item, bookingId, technicianId, options = {}) {
+  if (isCaseReadonlyArchive(item)) return { ok: false, message: getArchivedCaseMessage(item) };
   const booking = findCaseBooking(item, bookingId);
   if (!booking) return { ok: false, message: "Tâche introuvable dans le planning." };
   let target = booking;
@@ -1158,6 +1230,7 @@ function applyCaseBlockerFromTask(item, booking, reason, details) {
 }
 
 function blockTechnicianTask(item, bookingId, technicianId, reason, details = "") {
+  if (isCaseReadonlyArchive(item)) return { ok: false, message: getArchivedCaseMessage(item) };
   const cleanReason = String(reason || "").trim();
   if (!cleanReason) return { ok: false, message: "Motif de blocage obligatoire." };
   const booking = findCaseBooking(item, bookingId);
@@ -1188,6 +1261,7 @@ function blockTechnicianTask(item, bookingId, technicianId, reason, details = ""
 }
 
 function clearTechnicianTaskBlock(item, bookingId, technicianId, options = {}) {
+  if (isCaseReadonlyArchive(item)) return { ok: false, message: getArchivedCaseMessage(item) };
   const booking = findCaseBooking(item, bookingId);
   if (!booking) return { ok: false, message: "Tâche introuvable dans le planning." };
   const hadBlock = isBookingTaskBlocked(booking);
@@ -1218,6 +1292,7 @@ function technicianTaskRequiresCompletionPhoto(item, booking) {
 }
 
 function completeTechnicianTask(item, bookingId, technicianId, options = {}) {
+  if (isCaseReadonlyArchive(item)) return { ok: false, message: getArchivedCaseMessage(item) };
   const booking = findCaseBooking(item, bookingId);
   if (!booking) return { ok: false, message: "Tâche introuvable dans le planning." };
   const permission = guardAction("task.complete", { booking, technicianId }, { notify: false });

@@ -188,6 +188,9 @@ function getCaseNextAction(item) {
   if (!item) {
     return { code: "done", label: "Terminé", priority: "normal", reason: "Aucun dossier actif." };
   }
+  if (isCaseReadonlyArchive(item)) {
+    return { code: "done", label: "Dossier clôturé — aucune action requise", priority: "normal", reason: getArchivedCaseMessage(item) };
+  }
   if (isCaseBlocked(item)) {
     return {
       code: "resolve_blocker",
@@ -1382,6 +1385,8 @@ function isReusableEmptyClaim(claim, item = {}) {
 }
 
 async function deleteClaim(item, claimId) {
+  const permissionGuard = guardCaseEdit(item);
+  if (!permissionGuard.ok) return;
   item.claims = normalizeRepairClaims(item.claims, item);
   const claim = item.claims.find((candidate) => candidate.id === claimId);
   if (!claim) return;
@@ -1668,7 +1673,7 @@ function renderCaseDetail() {
   $("[data-field='expert-state']", detail).innerHTML = item.expertName
     ? `<span class="tag ok">Expert renseigné</span>`
     : `<span class="tag warn">À compléter</span>`;
-  const canEditCase = canRenderAction("case.edit", { item });
+  const canEditCase = canRenderAction("case.edit", { item }) && !isCaseReadonlyArchive(item);
 
   $$("[data-input]", detail).forEach((input) => {
     const field = input.dataset.input;
@@ -1849,6 +1854,7 @@ function renderCaseDetail() {
   $("#reschedule-appointment", detail)?.addEventListener("click", () => rescheduleAppointment(item));
   refreshCaseActionAvailability(detail, item);
   applyProductionLock(detail, item);
+  applyArchiveReadOnly(detail, item);
 }
 
 
@@ -2294,6 +2300,7 @@ function renderValidationAlert(root, item) {
 
 function refreshCaseActionAvailability(root, item) {
   renderValidationAlert(root, item);
+  const archiveMessage = getArchivedCaseMessage(item);
 
   const proposalButton = $("#generate-proposals", root);
   if (proposalButton) {
@@ -2324,8 +2331,8 @@ function refreshCaseActionAvailability(root, item) {
   const deleteButton = $("#delete-case", root);
   if (deleteButton) {
     const permissionGuard = guardSensitiveAction("case.delete", { item }, { notify: false });
-    deleteButton.disabled = !permissionGuard.ok;
-    deleteButton.title = permissionGuard.message;
+    deleteButton.disabled = Boolean(archiveMessage) || !permissionGuard.ok;
+    deleteButton.title = archiveMessage || permissionGuard.message;
   }
 }
 
@@ -2336,6 +2343,8 @@ function isProductionLocked(item) {
 
 function applyProductionLock(root, item) {
   if (!isProductionLocked(item)) return;
+
+  if (isCaseReadonlyArchive(item)) return;
 
   const isInvoiced = Boolean(item?.flags?.invoiced);
   const lockedPanels = isInvoiced 
@@ -2381,12 +2390,61 @@ function prependLockNotice(panel, message) {
   panel.prepend(notice);
 }
 
-function disablePanelControls(panel) {
+function disablePanelControls(panel, options = {}) {
   panel.querySelectorAll("input, select, textarea, button").forEach((control) => {
     if (control.closest(".case-subnav")) return;
-    if (control.hasAttribute("data-allow-production-action")) return;
+    if (!options.archive && control.hasAttribute("data-allow-production-action")) return;
     control.disabled = true;
     control.setAttribute("aria-disabled", "true");
+  });
+}
+
+function applyArchiveReadOnly(root, item) {
+  if (!isCaseReadonlyArchive(item)) return;
+  root.classList.add("case-archive-readonly");
+  const message = getArchivedCaseMessage(item);
+  $$("[data-case-panel]", root).forEach((panel) => {
+    panel.classList.add("production-locked-panel", "archive-readonly-panel");
+    prependLockNotice(panel, message);
+    disablePanelControls(panel, { archive: true });
+  });
+  $$("[data-case-tab]", root).forEach((button) => {
+    button.classList.add("locked-tab");
+    button.title = message;
+  });
+  const allowedActionSelectors = [
+    "#print-repair-order",
+    "#print-supplement-orders",
+    "#export-case-folder",
+    "#export-client-folder",
+    "[data-supplement-print]",
+    "[data-open-case-tab]",
+  ].join(",");
+  root.querySelectorAll(allowedActionSelectors).forEach((control) => {
+    control.disabled = false;
+    control.removeAttribute("aria-disabled");
+    control.title = control.title || "Consultation / impression disponible sur dossier clôturé.";
+  });
+  root.querySelectorAll([
+    "#generate-proposals",
+    "#mark-no-show",
+    "#reschedule-appointment",
+    "#delete-case",
+    "#print-technician-work-orders",
+    "[data-action-flag]",
+    "[data-booking-action]",
+    "[data-accept-main-proposal]",
+    "[data-accept-date-proposal]",
+    "[data-claim-delete]",
+    "[data-claim-import]",
+    "[data-claim-labor-form]",
+    "[data-remove-claim-labor-line]",
+    "[data-supplement-integrate]",
+    "[data-supplement-delete]",
+  ].join(",")).forEach((control) => {
+    control.disabled = true;
+    control.setAttribute("aria-disabled", "true");
+    control.title = message;
   });
 }
 
@@ -2412,6 +2470,7 @@ function renderHistory(root, item) {
 }
 
 function getNextWorkflowAction(item) {
+  if (isCaseReadonlyArchive(item)) return null;
   if (!hasRepairClaims(item)) return "claim";
   const claimsToCheck = getWorkflowClaims(item);
   if (!claimsToCheck.length) return "claim";
@@ -2437,6 +2496,11 @@ function getBusinessRuleIssues(item, action) {
   const issues = [];
   const hasAssignments = state.bookings.some((booking) => booking.caseId === item.id);
   const workflowClaims = getWorkflowClaims(item);
+
+  if (isCaseReadonlyArchive(item)) {
+    issues.push(getArchivedCaseMessage(item));
+    return issues;
+  }
 
   if (isCaseBlocked(item) && !["claim", "labor", "expertApproved", "clientApproved"].includes(action)) {
     issues.push(`Résoudre le blocage avant de continuer : ${getCaseBlockerLabel(item) || "dossier bloqué"}.`);
@@ -2766,9 +2830,22 @@ function getValidatedAppointmentRows(item) {
         actualEnd: booking.actualEnd || booking.completedAt || "",
         human: humanResources.map((resource) => resource.name).filter(Boolean).join(", ") || "Non affecté",
         equipment: equipmentResources.map((resource) => resource.name).filter(Boolean).join(", "),
-        minutes: Math.max(0, diffMinutes(new Date(booking.start), new Date(booking.end))),
+        minutes: typeof getBookingPlannedMinutes === "function"
+          ? getBookingPlannedMinutes(booking, item)
+          : Math.max(0, diffMinutes(new Date(booking.start), new Date(booking.end))),
+        archived: isCaseOperationallyClosed(item),
       };
     });
+}
+
+function formatBookingDateRange(start, end) {
+  return todayKey(start) === todayKey(end) ? formatDate(start) : `${formatDate(start)} → ${formatDate(end)}`;
+}
+
+function formatBookingTimeRange(start, end) {
+  return todayKey(start) === todayKey(end)
+    ? `${formatTime(start)} → ${formatTime(end)}`
+    : `${formatDateTime(start)} → ${formatDateTime(end)}`;
 }
 
 function renderValidatedAppointmentPlan(root, item) {
@@ -2828,8 +2905,8 @@ function renderValidatedAppointmentPlan(root, item) {
               ${row.details ? `<em>${escapeHtml(row.details)}</em>` : ''}
               ${row.pauseReason ? `<em>Cause pause: ${escapeHtml(row.pauseReason)}</em>` : ''}
             </strong>
-            <span>${formatDate(row.start)}</span>
-            <span>${formatTime(start)} → ${formatTime(end)}</span>
+            <span>${formatBookingDateRange(start, end)}</span>
+            <span>${formatBookingTimeRange(start, end)}</span>
             <span>${escapeHtml(row.human)}</span>
             <span>${escapeHtml(row.equipment || '-')}</span>
             <b>${formatLocalizedDecimal(row.minutes / 60)} h</b>
@@ -2855,6 +2932,7 @@ function renderBookingTaskActionButton(row, permission, action, label, className
 }
 
 function renderBookingTaskActions(row) {
+  if (row.archived) return '<span class="muted">Archive</span>';
   if (row.status === "completed") return '<span class="muted">Clôturée</span>';
   if (row.status === "paused") return '<span class="muted">Reliquat planifié</span>';
   if (row.status === "started") {
@@ -2889,6 +2967,9 @@ function getCaseIncompleteTechnicianBookings(item) {
 }
 
 async function completeCaseWorkWithChiefOverride(item, options = {}) {
+  if (isCaseReadonlyArchive(item)) {
+    return { ok: false, message: getArchivedCaseMessage(item) };
+  }
   const technicianBookings = getCaseIncompleteTechnicianBookings(item);
   if (!technicianBookings.length) {
     const result = completeCaseWorkBookingsNow(item, new Date(), {
@@ -2959,6 +3040,7 @@ function recordWorkshopChiefOverride(item, booking, action, reason) {
 }
 
 function runWorkshopChiefOverride(item, booking, action, reason, options = {}) {
+  if (isCaseReadonlyArchive(item)) return { ok: false, message: getArchivedCaseMessage(item) };
   const cleanReason = String(reason || "").trim();
   if (!cleanReason) return { ok: false, message: "Motif override chef atelier obligatoire." };
   const overrideGuard = guardAction("task.override", { booking }, { notify: false });
@@ -2997,6 +3079,7 @@ async function requestWorkshopChiefOverride(item, booking, action, failedResult,
 }
 
 async function runSecuredBookingTaskAction(item, action, bookingId, options = {}) {
+  if (isCaseReadonlyArchive(item)) return { ok: false, message: getArchivedCaseMessage(item) };
   const booking = getBookingTaskById(item, bookingId);
   if (!booking) return { ok: false, message: "Tâche introuvable dans le planning." };
   const technicianId = resolveBookingActionTechnicianId(booking, action, options);
@@ -3025,6 +3108,10 @@ async function runSecuredBookingTaskAction(item, action, bookingId, options = {}
 
 async function handleBookingTaskAction(item, action, bookingId, options = {}) {
   try {
+    if (isCaseReadonlyArchive(item)) {
+      notifyUser(getArchivedCaseMessage(item), "error");
+      return { ok: false, message: getArchivedCaseMessage(item) };
+    }
     let result = null;
     if (action === "start") {
       result = await runSecuredBookingTaskAction(item, action, bookingId, options);
@@ -3114,8 +3201,8 @@ function renderDurations(root, item) {
   const durationGrid = $("[data-field='durations']", root);
   item.stepServiceTypes = normalizeStepServiceTypes(item.stepServiceTypes);
   item.stepPreferredResources = normalizeStepPreferredResources(item.stepPreferredResources);
-  const canEditPlanning = canRenderAction("planning.edit");
-  const planningEditTitle = canEditPlanning ? "" : getPermissionDeniedMessage("planning.edit");
+  const canEditPlanning = canRenderAction("planning.edit", { item }) && !isCaseReadonlyArchive(item);
+  const planningEditTitle = canEditPlanning ? "" : (getArchivedCaseMessage(item) || getPermissionDeniedMessage("planning.edit", { item }));
   const activeCount = DURATIONS.filter(([key]) => Number(item.durations[key] ?? DEFAULT_DURATIONS[key]) > 0).length;
   durationGrid.innerHTML = `
     <div class="duration-edit-guide">
@@ -3163,7 +3250,7 @@ function renderDurations(root, item) {
           </div>
         </div>
         <div class="duration-card-body">
-          <label class="duration-hours-field"><span>${isActive ? "Temps réservé dans cette étape" : "Temps atelier"}</span><input type="text" inputmode="decimal" data-duration="${key}" value="${formatLocalizedDecimal(value)}" placeholder="Ex. 1,5" /></label>
+          <label class="duration-hours-field"><span>${isActive ? "Temps réservé dans cette étape" : "Temps atelier"}</span><input type="text" inputmode="decimal" data-duration="${key}" value="${formatLocalizedDecimal(value)}" placeholder="Ex. 1,5" ${canEditPlanning ? "" : `disabled title="${escapeAttr(planningEditTitle)}"`} /></label>
           <div class="duration-meta-grid">
             <span class="meta-pill primary-meta">Métier planning<br><strong>${effectiveHelp}</strong></span>
             <span class="meta-pill">Technicien<br><strong>${assignedNames}</strong></span>
@@ -3179,6 +3266,12 @@ function renderDurations(root, item) {
   $$("[data-duration]", durationGrid).forEach((input) => {
     input.dataset.previousDuration = String(item.durations[input.dataset.duration] || 0);
     input.addEventListener("input", () => {
+      const permission = guardAction("planning.edit", { item }, { notify: false });
+      if (!permission.ok || isCaseReadonlyArchive(item)) {
+        notifyUser(getArchivedCaseMessage(item) || permission.message, "error");
+        input.value = formatLocalizedDecimal(item.durations[input.dataset.duration] || 0);
+        return;
+      }
       const parsed = parseLocalizedDecimal(input.value);
       item.durations[input.dataset.duration] = parsed || 0;
       generatedProposals[item.id] = null;
@@ -3203,7 +3296,7 @@ function renderDurations(root, item) {
   $$('[data-preferred-technician]', durationGrid).forEach((select) => {
     select.dataset.previousPreferredTechnician = getPreferredTechnicianForStep(item, select.dataset.preferredTechnician);
     select.addEventListener('change', () => {
-      const permission = guardAction("planning.edit", {}, { notify: false });
+      const permission = guardAction("planning.edit", { item }, { notify: false });
       if (!permission.ok) {
         notifyUser(permission.message, "error");
         select.value = select.dataset.previousPreferredTechnician || "";
@@ -3226,7 +3319,7 @@ function renderDurations(root, item) {
   $$("[data-service-type]", durationGrid).forEach((select) => {
     select.dataset.previousServiceType = getStepServiceTypeValue(item, select.dataset.serviceType);
     select.addEventListener("change", () => {
-      const permission = guardAction("planning.edit", {}, { notify: false });
+      const permission = guardAction("planning.edit", { item }, { notify: false });
       if (!permission.ok) {
         notifyUser(permission.message, "error");
         select.value = select.dataset.previousServiceType || "auto";

@@ -1,4 +1,4 @@
-const CACHE_NAME = "nimr-sav-v22.25-sync-integrity";
+const CACHE_NAME = "nimr-sav-v22.26-closed-archive-duration-fixes";
 const ASSETS = [
   "./",
   "./index.html",

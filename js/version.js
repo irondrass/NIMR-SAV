@@ -1,5 +1,5 @@
-window.NIMR_BUILD = "v22.25";
-window.NIMR_CACHE_NAME = "nimr-sav-v22.25-sync-integrity";
+window.NIMR_BUILD = "v22.26";
+window.NIMR_CACHE_NAME = "nimr-sav-v22.26-closed-archive-duration-fixes";
 
 if ("caches" in window) {
   caches.keys().then((keys) => Promise.all(

@@ -1,5 +1,5 @@
-window.NIMR_BUILD = "v22.29";
-window.NIMR_CACHE_NAME = "nimr-sav-v22.29-planning-business-task-aggregation";
+window.NIMR_BUILD = "v22.30";
+window.NIMR_CACHE_NAME = "nimr-sav-v22.30-users-roles-settings";
 
 if ("caches" in window) {
   caches.keys().then((keys) => Promise.all(

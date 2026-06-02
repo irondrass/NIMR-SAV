@@ -133,6 +133,7 @@ function setupBusinessTaskState() {
 setupBusinessTaskState();
 assert.equal(app(`getBookingEffectivePlanningMinutes(state.bookings.find((booking) => booking.id === 'booking-prep-old'), state.cases[0])`), 180, 'ancien booking sans plannedMinutes doit utiliser item.durations');
 assert.equal(app(`getBookingDurationMinutes(state.bookings.find((booking) => booking.id === 'booking-prep-old'))`) > 180, true, 'le booking ancien porte bien une amplitude technique multi-jours');
+assert.equal(app(`refreshCaseAppointmentFromBookings(state.cases[0]); state.cases[0].appointment.marginMinutes`), 60, 'refreshCaseAppointmentFromBookings doit utiliser les durées productives, pas une amplitude multi-jours');
 
 const previewBefore = app(`JSON.stringify(state.bookings)`);
 const previews = app(`previewDependentBookingReschedule(state.cases[0], state.bookings.find((booking) => booking.id === 'booking-body'))`);

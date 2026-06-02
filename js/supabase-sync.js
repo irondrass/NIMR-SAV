@@ -946,6 +946,12 @@ function isProtectedCase(item) {
   return Boolean(flags.delivered || flags.invoiced || item.closedAt || item.deletedAt);
 }
 
+function isBookingProtectedByCase(booking, caseById) {
+  if (!booking?.caseId || !caseById) return false;
+  const item = caseById.get(booking.caseId);
+  return typeof isCaseOperationallyClosed === "function" ? isCaseOperationallyClosed(item) : isProtectedCase(item);
+}
+
 function shouldKeepLocalEntity(localEntity, remoteEntity) {
   if (!localEntity) return false;
   if (!remoteEntity) return true;
@@ -1035,7 +1041,7 @@ function mergeCasesById(localCases = [], remoteCases = [], stats = createEmptySy
   return { cases, stats };
 }
 
-function mergeBookingEntity(localBooking, remoteBooking, stats) {
+function mergeBookingEntity(localBooking, remoteBooking, stats, context = {}) {
   if (!localBooking) {
     stats.bookingsMerged += 1;
     return remoteBooking;
@@ -1046,6 +1052,7 @@ function mergeBookingEntity(localBooking, remoteBooking, stats) {
   }
   const localRank = getBookingStatusRank(localBooking);
   const remoteRank = getBookingStatusRank(remoteBooking);
+  const protectedByClosedCase = isBookingProtectedByCase(localBooking, context.localCaseById);
   const merged = {
     ...localBooking,
     ...remoteBooking,
@@ -1056,6 +1063,48 @@ function mergeBookingEntity(localBooking, remoteBooking, stats) {
     deletedBy: remoteBooking.deletedBy || localBooking.deletedBy || "",
     deleteReason: remoteBooking.deleteReason || localBooking.deleteReason || "",
   };
+  if (protectedByClosedCase) {
+    [
+      "status",
+      "start",
+      "end",
+      "segments",
+      "plannedStart",
+      "plannedEnd",
+      "plannedSegments",
+      "plannedMinutes",
+      "actualStart",
+      "actualEnd",
+      "startedAt",
+      "startedBy",
+      "pausedAt",
+      "pausedBy",
+      "resumedAt",
+      "resumedBy",
+      "completedAt",
+      "completedBy",
+      "completedByOverride",
+      "actualWorkedMinutes",
+      "resourceIds",
+      "remainingMinutes",
+      "parentBookingId",
+      "remainingFromPaused",
+      "pauseReason",
+    ].forEach((field) => {
+      if (localBooking[field] !== undefined) merged[field] = localBooking[field];
+    });
+    pushSyncConflict(stats, {
+      entity: "booking",
+      entityId: localBooking.id,
+      field: "case",
+      reason: "Réservation locale conservée car le dossier est livré, facturé ou clôturé.",
+      localValue: localBooking.caseId,
+      remoteValue: remoteBooking.caseId,
+    });
+    stats.protectedKept += 1;
+    stats.bookingsMerged += 1;
+    return merged;
+  }
   if (localRank > remoteRank) {
     [
       "status",
@@ -1103,18 +1152,18 @@ function mergeBookingEntity(localBooking, remoteBooking, stats) {
   return merged;
 }
 
-function mergeBookingsById(localBookings = [], remoteBookings = [], stats = createEmptySyncMergeStats()) {
+function mergeBookingsById(localBookings = [], remoteBookings = [], stats = createEmptySyncMergeStats(), context = {}) {
   const remoteById = new Map((Array.isArray(remoteBookings) ? remoteBookings : []).filter((booking) => booking?.id).map((booking) => [booking.id, booking]));
   const usedRemoteIds = new Set();
   const bookings = [];
   (Array.isArray(localBookings) ? localBookings : []).forEach((localBooking) => {
     const remoteBooking = localBooking?.id ? remoteById.get(localBooking.id) : null;
     if (remoteBooking) usedRemoteIds.add(localBooking.id);
-    bookings.push(mergeBookingEntity(localBooking, remoteBooking, stats));
+    bookings.push(mergeBookingEntity(localBooking, remoteBooking, stats, context));
   });
   (Array.isArray(remoteBookings) ? remoteBookings : []).forEach((remoteBooking) => {
     if (!remoteBooking?.id || usedRemoteIds.has(remoteBooking.id)) return;
-    bookings.push(mergeBookingEntity(null, remoteBooking, stats));
+    bookings.push(mergeBookingEntity(null, remoteBooking, stats, context));
   });
   return { bookings, stats };
 }
@@ -1135,7 +1184,9 @@ function mergeRemoteStateIntoLocal(localState, remoteState, options = {}) {
   const normalizedLocal = normalizeState(localState);
   const normalizedRemote = normalizeState(remoteState);
   const mergedCases = mergeCasesById(normalizedLocal.cases, normalizedRemote.cases, stats).cases;
-  const mergedBookings = mergeBookingsById(normalizedLocal.bookings, normalizedRemote.bookings, stats).bookings;
+  const localCaseById = new Map(normalizedLocal.cases.map((item) => [item.id, item]));
+  const remoteCaseById = new Map(normalizedRemote.cases.map((item) => [item.id, item]));
+  const mergedBookings = mergeBookingsById(normalizedLocal.bookings, normalizedRemote.bookings, stats, { localCaseById, remoteCaseById }).bookings;
   const syncLogEntry = {
     id: uid("sync-log"),
     at: new Date().toISOString(),

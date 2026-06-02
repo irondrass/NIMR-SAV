@@ -16,6 +16,16 @@ function isPrintableWorkBooking(booking) {
   );
 }
 
+function isArchivedCaseForOperationalPrint(item) {
+  return typeof isCaseOperationallyClosed === "function" ? isCaseOperationallyClosed(item) : Boolean(item?.flags?.delivered || item?.flags?.invoiced || item?.closedAt);
+}
+
+function isActivePrintableWorkBooking(booking, item = null) {
+  if (!isPrintableWorkBooking(booking)) return false;
+  const caseItem = item || state.cases.find((candidate) => candidate.id === booking.caseId);
+  return !isArchivedCaseForOperationalPrint(caseItem);
+}
+
 async function markAppointmentNoShow(item) {
   const permissionGuard = guardAppointmentSchedule(item);
   if (!permissionGuard.ok) return;
@@ -208,6 +218,10 @@ function buildClaimPdfLines(item, claim) {
 
 async function deleteActiveCase(item) {
   if (!item) return;
+  if (isCaseReadonlyArchive(item)) {
+    notifyUser(getArchivedCaseMessage(item), "error");
+    return;
+  }
   const permissionGuard = guardSensitiveAction("case.delete", { item });
   if (!permissionGuard.ok) return;
   const confirmed = await showConfirmModal("Cette action supprimera définitivement le dossier, son historique, ses photos et ses réservations planning. Continuer ?");
@@ -801,6 +815,7 @@ const CRC_TABLE = (() => {
 
 function printRepairOrder(item) {
   const title = "Ordre de réparation";
+  const archiveMode = isCaseReadonlyArchive(item);
   const assignments = state.bookings.filter((booking) => booking.caseId === item.id);
   const rows = DURATIONS.map(
     ([key, label]) => `
@@ -815,9 +830,10 @@ function printRepairOrder(item) {
   const assignmentRows = assignments
     .map((booking) => {
       const resources = booking.resourceIds.map((id) => getResource(id)?.name).filter(Boolean).join(", ");
-      const operationalStatus = typeof getBookingOperationalStatus === "function"
-        ? getBookingOperationalStatus(booking, item)?.label
-        : null;
+      const statusValue = typeof getBookingOperationalStatus === "function"
+        ? getBookingOperationalStatus(booking, item)
+        : booking.status;
+      const operationalStatus = archiveMode ? "Archive / terminé" : (statusValue ? getBookingStatusLabel(booking) : null);
       return `
         <tr>
           <td>${escapeHtml(booking.title)}</td>
@@ -868,6 +884,7 @@ function printRepairOrder(item) {
         ${renderPrintHeaderHtml(title, item, "Document interne atelier", [
           `<strong>Devis :</strong> ${escapeHtml(getClaimReferenceSummary(item, "devis"))}`,
         ])}
+        ${archiveMode ? `<section class="avoid-break"><h2>Archive lecture seule</h2><p><strong>${escapeHtml(getArchivedCaseMessage(item))}</strong> Ce document est conservé pour consultation, historique et archivage.</p></section>` : ""}
         <section class="grid">
           <div class="box">
             <h2>Client</h2>
@@ -998,6 +1015,7 @@ function printDailyPlanningGantt(dateKey = state.planningDate) {
       if (!isBookingVisibleForResource(booking, resource.id)) return;
       const item = caseById.get(booking.caseId);
       if (!item) return;
+      if (!isActivePrintableWorkBooking(booking, item)) return;
       (booking.segments || []).forEach((segment) => {
         const segmentStart = new Date(segment.start);
         const segmentEnd = new Date(segment.end);
@@ -1322,6 +1340,7 @@ function printDailyPlanning(dateKey = state.planningDate) {
       if (!isPrimaryResourceBooking(booking, resource.id)) return;
       const caseItem = state.cases.find((item) => item.id === booking.caseId);
       if (!caseItem) return;
+      if (!isActivePrintableWorkBooking(booking, caseItem)) return;
       (booking.segments || []).forEach((segment) => {
         const segmentStart = new Date(segment.start);
         const segmentEnd = new Date(segment.end);
@@ -1502,6 +1521,7 @@ function printDailyPlanning(dateKey = state.planningDate) {
 
 function printSupplementWorkOrders(item, supplementId = null) {
   item.supplements = normalizeRepairSupplements(item.supplements);
+  const archiveMode = isCaseReadonlyArchive(item);
   const supplements = supplementId ? item.supplements.filter((supplement) => supplement.id === supplementId) : item.supplements;
   if (!supplements.length) {
     notifyUser("Aucune réparation complémentaire à imprimer.", "warn");
@@ -1535,6 +1555,7 @@ function printSupplementWorkOrders(item, supplementId = null) {
             <p><strong>Statut dossier :</strong> ${escapeHtml(getPrintStatusLabel(item))}</p>
           </div>
         </header>
+        ${archiveMode ? `<section class="avoid-break"><h2>Archive lecture seule</h2><p><strong>${escapeHtml(getArchivedCaseMessage(item))}</strong> Ce document est conservé pour consultation, historique et archivage.</p></section>` : ""}
         <section class="grid">
           <div class="box"><h2>Client</h2><p><strong>Nom :</strong> ${escapeHtml(item.clientName || '-')}</p><p><strong>Téléphone :</strong> ${escapeHtml(item.phone || '-')}</p><p><strong>Assurance :</strong> ${escapeHtml(item.insurance || '-')}</p></div>
           <div class="box"><h2>Véhicule</h2><p><strong>Modèle :</strong> ${escapeHtml(item.vehicle || '-')}</p><p><strong>Immat. :</strong> ${escapeHtml(item.plate || '-')}</p><p><strong>VIN :</strong> ${escapeHtml(item.vin || '-')}</p><p><strong>Zone :</strong> ${escapeHtml(supplement.vehicleArea || '-')}</p></div>
@@ -1750,6 +1771,10 @@ function printPauseBlockSheet(item, bookingId, technicianId = "") {
 
 function printTechnicianWorkOrders(item) {
   item.expertEstimate = normalizeExpertEstimate(item.expertEstimate);
+  if (isArchivedCaseForOperationalPrint(item)) {
+    notifyUser("Dossier clôturé : les ordres techniciens opérationnels ne sont plus proposés. Imprimez l'ordre de réparation archive.", "warn");
+    return;
+  }
   const assignments = state.bookings.filter((booking) => booking.caseId === item.id && isPrintableWorkBooking(booking));
   if (!assignments.length) {
     notifyUser("Aucune tâche assignée. Calculez/validez le planning avant d'imprimer les ordres techniciens.", "error");

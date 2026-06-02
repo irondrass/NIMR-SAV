@@ -236,6 +236,10 @@ function classifyLaborLine(line, options = {}) {
   if (isEstimateLegalOrFooterLine(normalized)) return { type: "ignored", reason: "Note client ou pied de page ignoré" };
   if (isPaintSupplyLine(normalized)) return { type: "ignored", reason: "Produit de peinture ignoré comme fourniture" };
 
+  if (/\b(DESIGNATION|QTE|PRIX\s+UNITAIRE|MONTANT)\b/.test(normalized)) {
+    return { type: "ignored", reason: "Ligne d'en-tête ou de tableau concaténée" };
+  }
+
   const pricingInfo = extractEstimatePricingInfo(text);
   const isConfirmedLabor = pricingInfo.hasLaborHourlyRate;
 
@@ -370,7 +374,7 @@ function distributeLaborHours(operation, hours, options = {}) {
     ];
   }
   if (/\b(PASSAGE\s+SUR\s+MARBRE|MARBRE)\b/.test(normalized)) return [makeDistribution("body", operation, hours)];
-  if (/\b(VIDANGE|ENTRETIEN\s+RAPIDE|SERVICE\s+RAPIDE)\b/.test(normalized)) return [makeDistribution("oilService", operation, hours)];
+  if (/\b(VIDANGE|ENTRETIEN\s+RAPIDE|SERVICE\s+RAPIDE|FILTRE|FILTRES)\b/.test(normalized)) return [makeDistribution("oilService", operation, hours)];
   const isClientOnly = typeof isClientOnlyRepairClaim === "function"
     ? isClientOnlyRepairClaim({ type: options.claimType })
     : ["client", "vidange", "mechanical_client", "electrical_client"].includes(options.claimType);
@@ -601,7 +605,7 @@ function splitEstimateSourceLines(text) {
     // be a split point; otherwise a consumable row like "PEINTURE 5 180,000
     // 900,000" can stay glued to the following "DRESSAGE ET PEINTURE ...
     // 8 33,000 ..." row and appear as a fake MO operation.
-    .replace(/\s+(?=(?:D\/P|DRESSAGE__ET__PEINTURE|DRESSAGE|PEINTURE|PRODUITS?\s+(?:DE\s+)?PEINTURE|REMP|REMPL|REMPLACEMENT|DEPOSE|DÉPOSE|DEMONTAGE|DÉMONTAGE|REMONTAGE|REPOSE|PETIT(?:E)? FOURNITURE)\b)/gi, "\n")
+    .replace(/\s+(?=(?:D\/P|DRESSAGE__ET__PEINTURE|DRESSAGE|PEINTURE|PRODUITS?\s+(?:DE\s+)?PEINTURE|REMP|REMPL|REMPLACEMENT|DEPOSE|DÉPOSE|DEMONTAGE|DÉMONTAGE|REMONTAGE|REPOSE|PETIT(?:E)? FOURNITURE|ENTRETIEN|VIDANGE|FILTRE|RONDELLE|HUILE|BOUCHON|JOINT|COLLIER)\b)/gi, "\n")
     .split(/\r?\n/)
     .map((line) => line.replace(new RegExp(dressageMarker, "g"), "DRESSAGE ET PEINTURE"))
     .map((line) => line.replace(/\s+/g, " ").trim())

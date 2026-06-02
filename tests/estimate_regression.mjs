@@ -171,13 +171,8 @@ const report1343Expected = {body:7.5, prep:3, paint:3, reassembly:2.5};
 for (const [k,v] of Object.entries(report1343Expected)) if (Math.abs(report1343.allocations[k]-v)>0.00001) throw new Error(`Report1343 ${k} expected ${v} got ${report1343.allocations[k]}`);
 console.log('Report1343 split/marbre regression OK');
 
-// Test de détection par prix unitaire NIMR 33/35 TND et anti-faux positifs
-const nimrPriceDetectionDevis = `FILTRE à HUILE 1 14,365 14,365
-RONDELLE DE VIDANGE 1 1,795 1,795
-HUILE MOTEUR MOBIL SUPER 5W30 4 25,370 101,480
-FILTRE D'HABITACLE 1 47,658 47,658
-FILTRE A AIR 1 46,821 46,821
-entretien 1 33,000 33,000
+// Test de détection par prix unitaire NIMR 33/35 TND et anti-faux positifs avec ligne concaténée de production
+const nimrPriceDetectionDevis = `Désignation Qté Prix unitaire Montant FILTRE À HUILE 1 14,365 14,365 RONDELLE DE VIDANGE 1 1,795 1,795 HUILE MOTEUR MOBIL SUPER 5W30 4 25,370 101,480 FILTRE D'HABITACLE 1 47,658 47,658 FILTRE A AIR 1 46,821 46,821 entretien 1 33,000 33,000
 remp filtre a air 0,3 33,000 9,900
 remp filtre habitacle 0,3 33,000 9,900
 COLLIER DE CHAPEAU 2 16,500 33,000`;
@@ -194,10 +189,18 @@ if (nimrParsed.partsLines.length !== 6) {
   console.log(JSON.stringify(nimrParsed.partsLines, null, 2));
   throw new Error(`NIMR partsLines count expected 6 got ${nimrParsed.partsLines.length}`);
 }
+
 // S'assurer que le Collier de chapeau avec PU 16.5 et montant 33 reste une pièce et n'est pas classé en MO
 const hasCollierAsLabor = nimrParsed.laborLines.some(l => /COLLIER/i.test(l.operation));
 if (hasCollierAsLabor) {
   throw new Error('COLLIER DE CHAPEAU avec PU 16.5 et montant total 33 classé par erreur en main-d’œuvre !');
+}
+
+// S'assurer que les lignes "remp filtre a air" et "remp filtre habitacle" sont bien classées en oilService (Vidange / entretien rapide)
+const badPhases = nimrParsed.laborLines.filter(l => /filtre/i.test(l.operation) && l.distributions.some(d => d.phase !== 'oilService'));
+if (badPhases.length > 0) {
+  console.log(JSON.stringify(badPhases, null, 2));
+  throw new Error('Les filtres doivent être classés en Vidange / entretien rapide (oilService) !');
 }
 
 console.log('NIMR Labor Unit Price detection and anti-false positive regression OK');

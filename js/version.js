@@ -1,6 +1,6 @@
-window.APP_VERSION = "v22.32";
-window.NIMR_BUILD = "v22.32";
-window.NIMR_CACHE_NAME = "nimr-sav-v22.32-activity-log-settings";
+window.APP_VERSION = "v22.33";
+window.NIMR_BUILD = "v22.33";
+window.NIMR_CACHE_NAME = "nimr-sav-v22.33-activity-log-settings-patch";
 
 if ("caches" in window) {
   caches.keys().then((keys) => Promise.all(

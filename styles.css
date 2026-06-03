@@ -4202,4 +4202,81 @@ a:focus-visible {
   margin-top: 3px;
 }
 
+/* v22.34 - UX tablette atelier / ergonomie terrain */
+@media (max-width: 1024px) {
+  /* Technician action buttons height */
+  .technician-task-actions button,
+  .technician-task-actions .tiny-button,
+  .technician-task-actions .primary-button,
+  .technician-task-actions .ghost-button,
+  [data-tech-action] {
+    min-height: 48px !important;
+    font-size: 16px !important;
+    padding: 10px 16px !important;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Primary technician actions Démarrer / Pause / Reprendre / Terminer >= 56px */
+  [data-tech-action="start"],
+  [data-tech-action="pause"],
+  [data-tech-action="resume"],
+  [data-tech-action="complete"] {
+    min-height: 56px !important;
+    font-size: 17px !important;
+    font-weight: bold !important;
+  }
+
+  /* Main inputs/selects on technician view >= 48px */
+  #technician-select,
+  #technician-date,
+  #technician-today,
+  #technician-print-day,
+  .technician-toolbar select,
+  .technician-toolbar input,
+  .technician-toolbar button {
+    min-height: 48px !important;
+    font-size: 16px !important;
+  }
+
+  /* Spacing/gap for dense forms and sensitive actions to avoid accidental taps */
+  .form-grid {
+    gap: 16px !important;
+  }
+
+  .backup-actions,
+  .case-actions,
+  .resource-actions,
+  .local-lock-actions {
+    gap: 16px !important;
+  }
+
+  /* Prevent horizontal overflow on mobile/tablet viewports except for Gantt */
+  html, body {
+    max-width: 100vw;
+    overflow-x: hidden;
+  }
+  
+  /* Gantt itself needs horizontal scroll */
+  .gantt {
+    overflow-x: auto !important;
+    max-width: 100% !important;
+  }
+
+  /* Make sure container views don't cause horizontal scrolls */
+  main, .app-shell, .workbench, .planning-panel, .view-section {
+    max-width: 100vw !important;
+    overflow-x: hidden !important;
+  }
+  
+  /* Custom prompt modal inputs height */
+  .custom-modal-select,
+  .custom-modal-input {
+    min-height: 48px !important;
+    font-size: 16px !important;
+  }
+}
+
+
 

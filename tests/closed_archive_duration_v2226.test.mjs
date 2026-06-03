@@ -134,6 +134,11 @@ assert.equal(run('startTechnicianTask(state.cases[0], "booking-vidange", "tech-1
 assert.equal(run('completeTechnicianTask(state.cases[0], "booking-vidange", "tech-1", { skipPhotoCheck: true }).ok'), false, 'fin tâche archive refusée');
 assert.equal(await run('handleBookingTaskAction(state.cases[0], "start", "booking-vidange", { allowOverride: false }).then((result) => result.ok)'), false, 'handler planning refuse tâche archive');
 
+const normalizedArchiveDates = run('normalizeCase({ id: "case-closed-at", flags: {}, closedAt: "2026-06-01T10:00:00.000Z", archivedAt: "2026-06-02T10:00:00.000Z" })');
+assert.equal(normalizedArchiveDates.closedAt, '2026-06-01T10:00:00.000Z', 'normalizeCase doit conserver closedAt');
+assert.equal(normalizedArchiveDates.archivedAt, '2026-06-02T10:00:00.000Z', 'normalizeCase doit conserver archivedAt');
+assert.equal(run('isCaseReadonlyArchive(__item)', { __item: normalizedArchiveDates }), true, 'closedAt/archivedAt normalisés gardent l’archive lecture seule');
+
 const openCase = createCase({
   id: 'case-open',
   flags: { received: true, delivered: false, invoiced: false, workStarted: false, workCompleted: false, qualityApproved: false },

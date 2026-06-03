@@ -64,6 +64,47 @@ const { mergeRemoteStateIntoLocal, mergeCaseEntity, getAggregatedActivityLog, ge
   const result = mergeRemoteStateIntoLocal(localState, remoteState);
   assert.equal(result.state.cases[0].vin, "VIN123");
   assert.equal(result.state.cases[0].plate, "AB-123-CD");
+  assert.ok(result.conflicts.some(c => c.field === "vin" && c.decision === "kept_local"), "champ VIN vide distant doit créer un conflit conservant local");
+}
+
+// Test 3B: Les champs réception/concession réels sont protégés
+{
+  const localCase = {
+    id: "c3b",
+    orNavNumber: "OR-03B",
+    ownerName: "Société Alpha",
+    driverName: "Khaled",
+    driverPhone: "+216 22 333 444",
+    insurance: "Assurance locale",
+    arrivalNotes: "Rayure constatée à la réception",
+    expertPhone: "+216 55 111 222",
+    expertEmail: "expert-local@example.com",
+    flags: {}
+  };
+  const remoteCase = {
+    id: "c3b",
+    orNavNumber: "OR-03B",
+    ownerName: "Société Beta",
+    driverName: "Autre déposant",
+    driverPhone: "",
+    insurance: "Assurance distante",
+    arrivalNotes: "",
+    expertPhone: "+216 99 000 000",
+    expertEmail: "expert-cloud@example.com",
+    flags: {}
+  };
+  const result = mergeRemoteStateIntoLocal({ cases: [localCase], bookings: [], syncConflicts: [] }, { cases: [remoteCase], bookings: [], syncConflicts: [] });
+  const mergedCase = result.state.cases[0];
+  assert.equal(mergedCase.ownerName, "Société Alpha", "propriétaire/société local conservé");
+  assert.equal(mergedCase.driverName, "Khaled", "déposant local conservé");
+  assert.equal(mergedCase.driverPhone, "+216 22 333 444", "téléphone déposant non vidé par cloud");
+  assert.equal(mergedCase.insurance, "Assurance locale", "assurance locale conservée");
+  assert.equal(mergedCase.arrivalNotes, "Rayure constatée à la réception", "notes réception non vidées par cloud");
+  assert.equal(mergedCase.expertPhone, "+216 55 111 222", "téléphone expert local conservé");
+  assert.equal(mergedCase.expertEmail, "expert-local@example.com", "email expert local conservé");
+  ["ownerName", "driverName", "driverPhone", "insurance", "arrivalNotes", "expertPhone", "expertEmail"].forEach((field) => {
+    assert.ok(result.conflicts.some(c => c.field === field), `conflit attendu pour ${field}`);
+  });
 }
 
 // Test 4: Appointment local vs remote différent

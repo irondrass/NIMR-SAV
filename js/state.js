@@ -1784,6 +1784,8 @@ function normalizeCase(item) {
     appointment: item.appointment || null,
     claims: normalizeRepairClaims(item.claims, item),
     supplements: normalizeRepairSupplements(item.supplements),
+    closedAt: item.closedAt || "",
+    archivedAt: item.archivedAt || "",
     deletedAt: item.deletedAt || "",
     deletedBy: item.deletedBy || "",
     deleteReason: item.deleteReason || "",

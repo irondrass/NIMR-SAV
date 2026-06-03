@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 
-console.log("Démarrage des tests v22.32 : Journal d'activité dans Paramètres...");
+console.log("Démarrage des tests v22.33 : Journal d'activité dans Paramètres...");
 
 // 1. Lire les fichiers
 const stateJs = fs.readFileSync("./js/state.js", "utf8");
@@ -188,4 +188,4 @@ assert.ok(!searchCsv.includes("Synchronisation Supabase"), "Export recherché ne
 assert.ok(!searchCsv.includes("Utilisateur créé"), "Export recherché ne doit pas contenir users");
 assert.ok(!searchCsv.includes("Planning déplacé"), "Export recherché ne doit pas contenir planning");
 
-console.log("Tests v22.32 compilés et validés avec succès.");
+console.log("Tests v22.33 compilés et validés avec succès.");

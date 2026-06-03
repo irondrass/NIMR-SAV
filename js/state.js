@@ -306,7 +306,6 @@ const ROLE_PERMISSIONS = {
     "vehicle.receive",
     "receive_vehicle",
     "delivery.complete",
-    "case.close",
     "print.*",
   ],
   technicien: ["task.start", "task.pause", "task.resume", "task.complete", "task.block", "print.task"],
@@ -1274,7 +1273,8 @@ function getPermissionDeniedMessage(permission, context = {}) {
   if (requested === "settings.edit" || requested === "users.manage") return "Action réservée administrateur.";
   if (requested === "export.backup") return "Export sauvegarde réservé chef atelier/admin.";
   if (requested === "quality.validate" || requested === "quality.reject") return "Action réservée qualité/chef atelier/admin.";
-  if (requested === "delivery.complete" || requested === "case.close") return "Livraison réservée réception/chef atelier/admin.";
+  if (requested === "case.close") return "Clôture/Facturation réservée chef atelier/admin.";
+  if (requested === "delivery.complete") return "Livraison réservée réception/chef atelier/admin.";
   if (["case.create", "case.edit", "estimate.import", "appointment.schedule", "schedule_appointment", "vehicle.receive", "receive_vehicle"].includes(requested)) {
     return "Action réservée réception/chef atelier/admin.";
   }

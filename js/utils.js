@@ -457,6 +457,15 @@ function setupServiceWorkerUpdates(registration) {
 }
 
 function setActiveTab(tab) {
+  if (typeof canAccessTab === "function" && !canAccessTab(tab)) {
+    const allowed = getAllowedTabsForCurrentUser();
+    if (allowed.length > 0) {
+      tab = allowed[0];
+    } else {
+      return;
+    }
+  }
+
   activeTab = tab;
   $$(".nav-button").forEach((button) => {
     const active = button.dataset.tab === tab;
@@ -470,6 +479,18 @@ function setActiveTab(tab) {
     view.toggleAttribute("hidden", !active);
   });
 }
+
+function renderNavigationVisibility() {
+  if (typeof getAllowedTabsForCurrentUser !== "function") return;
+  const allowed = getAllowedTabsForCurrentUser();
+  $$(".nav-button").forEach((button) => {
+    const tabId = button.dataset.tab;
+    const isAllowed = allowed.includes(tabId);
+    button.hidden = !isAllowed;
+    button.style.display = isAllowed ? "" : "none";
+  });
+}
+
 
 function normalizeTextInputValue(value) {
   return String(value ?? "").trim().replace(/\s+/g, " ");

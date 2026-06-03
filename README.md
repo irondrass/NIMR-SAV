@@ -1,3 +1,18 @@
+# v23.0 - Production Finale
+
+Version finale validée pour déploiement atelier après la RC `v22.35-RC1`.
+
+Prérequis production obligatoires :
+
+- Supabase configuré avec le dernier `supabase-schema.sql`, RLS actives et `workshop_id` correctement appliqué sur les tables exposées.
+- Comptes utilisateurs et rôles vérifiés : admin, chef atelier, réception, technicien, qualité et lecture seule.
+- Au moins un admin de secours actif, avec procédure écrite de récupération d'accès.
+- Sauvegardes chiffrées `.nimrsecure` réalisées et testées régulièrement.
+- Export JSON non chiffré réservé aux situations contrôlées, avec stockage sécurisé.
+- Procédure de nettoyage poste connue pour les PC partagés ou remplacés.
+- Procédure incident synchronisation : vérifier `syncConflicts`, conserver le snapshot local, exporter avant toute restauration/remplacement.
+- Procédure export/restauration documentée : exporter, tester la lisibilité, restaurer uniquement avec un utilisateur autorisé.
+
 # v22.35 - Audit production et durcissement sync
 
 - Durcissement de la fusion Supabase des champs critiques dossier : client, téléphone, véhicule, immatriculation/VIN, propriétaire/société, déposant, assurance, expert, notes réception, RDV, blocage et archive.

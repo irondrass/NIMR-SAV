@@ -11,10 +11,10 @@ const syncJs = fs.readFileSync('js/supabase-sync.js', 'utf8');
 console.log("Démarrage des tests v22.32 : Notifications de sauvegarde silencieuse...");
 
 // Test 1: Versions et Caches
-assert.match(stateJs, /APP_VERSION\s*=\s*"v22\.31"/, "state.js n'a pas la bonne version");
-assert.match(swJs, /nimr-sav-v22\.31-quiet-save-ux/, "sw.js n'a pas le bon cache");
-assert.match(versionJs, /NIMR_BUILD\s*=\s*"v22\.31"/, "version.js n'a pas la bonne version");
-assert.match(appJs, /sw\.js\?v=22\.31/, "app.js n'appelle pas le bon sw.js");
+assert.match(stateJs, /APP_VERSION\s*=\s*"v22\.32"/, "state.js n'a pas la bonne version");
+assert.match(swJs, /nimr-sav-v22\.32-activity-log-settings/, "sw.js n'a pas le bon cache");
+assert.match(versionJs, /NIMR_BUILD\s*=\s*"v22\.32"/, "version.js n'a pas la bonne version");
+assert.match(appJs, /sw\.js\?v=22\.32/, "app.js n'appelle pas le bon sw.js");
 
 // Test 2: saveState normal
 assert.match(stateJs, /if \(typeof renderSyncStatusStrip === "function"\) renderSyncStatusStrip\(\);/, "saveState n'appelle pas renderSyncStatusStrip");

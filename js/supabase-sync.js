@@ -748,7 +748,13 @@ async function restoreLocalFromSupabase() {
     activeCaseDetailTab = "resume";
     generatedProposals = {};
     await clearPhotoStore();
+    if (typeof clearDocumentStore === "function") {
+      await clearDocumentStore();
+    }
     const restoredPhotos = await restorePhotoRecords(Array.isArray(data.photos) ? data.photos : []);
+    if (typeof cleanupOrphanedStorage === "function") {
+      cleanupOrphanedStorage().catch(() => null);
+    }
     addAuditLog("backup.cloud.imported", "Restauration Supabase effectuée", `${state.cases.length} dossier(s), ${restoredPhotos} photo(s).`, { actor: restoreActor });
     lastKnownCloudUpdatedAt = new Date(data.updated_at || 0).getTime() || lastKnownCloudUpdatedAt;
     if (typeof rememberKnownCloudUpdatedAt === "function" && lastKnownCloudUpdatedAt) rememberKnownCloudUpdatedAt(lastKnownCloudUpdatedAt);

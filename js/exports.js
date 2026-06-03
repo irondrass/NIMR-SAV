@@ -234,12 +234,33 @@ async function deleteActiveCase(item) {
   try {
     addAuditLog("case.deleted", "Dossier supprimé", `${item.clientName || "Client"} - ${item.plate || item.vin || item.id}`, { item });
     await Promise.all((item.photos || []).map((photo) => deletePhotoRecord(photo.id).catch(() => null)));
+    
+    // Nettoyer les documents associés dans IndexedDB
+    const docsToDelete = [];
+    if (item.expertEstimate?.sourceFile?.id) {
+      docsToDelete.push(item.expertEstimate.sourceFile.id);
+    }
+    (item.claims || []).forEach((claim) => {
+      if (claim.estimate?.sourceFile?.id) {
+        docsToDelete.push(claim.estimate.sourceFile.id);
+      }
+    });
+    if (docsToDelete.length && typeof deleteDocumentRecord === "function") {
+      await Promise.all(docsToDelete.map((docId) => deleteDocumentRecord(docId).catch(() => null)));
+    }
+
     revokePhotoUrlsForCase(item);
     state.bookings = state.bookings.filter((booking) => booking.caseId !== item.id);
     state.cases = state.cases.filter((caseItem) => caseItem.id !== item.id);
     if (activeCaseId === item.id) activeCaseId = state.cases[0]?.id || null;
     delete generatedProposals[item.id];
     delete estimateImportPreviews[item.id];
+    
+    // Déclencher un nettoyage des orphelins en arrière-plan
+    if (typeof cleanupOrphanedStorage === "function") {
+      cleanupOrphanedStorage().catch(() => null);
+    }
+
     saveState();
     if (typeof flushSupabaseBackup === "function") await flushSupabaseBackup("case-deleted");
     notifyUser("Dossier supprimé définitivement.");

@@ -1,6 +1,6 @@
-window.APP_VERSION = "v22.35";
-window.NIMR_BUILD = "v22.35";
-window.NIMR_CACHE_NAME = "nimr-sav-v22.35-production-audit-hardening";
+window.APP_VERSION = "v23.0";
+window.NIMR_BUILD = "v23.0";
+window.NIMR_CACHE_NAME = "nimr-sav-v23.0-production";
 
 if ("caches" in window) {
   caches.keys().then((keys) => Promise.all(

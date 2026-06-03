@@ -15,6 +15,7 @@ function render() {
   renderFastLaneSettings();
   renderWorkHoursSettings();
   if (typeof renderUsersAndRoles === "function") renderUsersAndRoles();
+  if (typeof renderCurrentSessionIndicator === "function") renderCurrentSessionIndicator();
 }
 
 function renderMetrics() {

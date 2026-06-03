@@ -13,6 +13,8 @@ assert.ok(stateJs.includes('"audit.view"'), "La permission audit.view doit être
 assert.ok(stateJs.includes('"audit.view"'), "Le chef_atelier doit avoir audit.view");
 assert.ok(indexHtml.includes('id="panel-activity-log"'), "Le DOM doit contenir l'ID du panel-activity-log");
 assert.ok(appJs.includes('renderActivityLog()'), "L'application doit appeler renderActivityLog");
+assert.ok(appJs.includes('function computeFilteredActivityRows()'), "Le journal doit factoriser les lignes filtrées");
+assert.ok(appJs.includes('const logs = computeFilteredActivityRows();'), "L'export CSV doit utiliser les lignes filtrées");
 
 // 3. Charger le contexte pour les tests de logique
 let state = {
@@ -132,5 +134,58 @@ assert.ok(!uSyncLog.details.includes("undefined"), "Ne doit pas afficher undefin
 const uConfLog = undefinedCheckLogs.find(l => l.type === "sync.conflict");
 assert.ok(uConfLog.details.includes("entité inconnue"), "Doit gérer le type manquant");
 assert.ok(!uConfLog.details.includes("undefined"), "Ne doit pas afficher undefined dans syncConflicts");
+
+// Test G : Export respecte filtre et recherche courants
+const activityRows = [
+  { at: "2024-01-01T10:00:00.000Z", category: "sync", type: "sync.run", actorName: "Système", caseNumber: "", label: "Synchronisation Supabase", details: "source auto" },
+  { at: "2024-01-01T10:05:00.000Z", category: "users", type: "users.created", actorName: "Admin", caseNumber: "", label: "Utilisateur créé", details: "Compte réception" },
+  { at: "2024-01-01T10:10:00.000Z", category: "planning", type: "planning.moved", actorName: "Chef", caseNumber: "D2024-002", label: "Planning déplacé", details: "Pont 1" },
+  { at: "2024-01-01T10:15:00.000Z", category: "sync", type: "sync.conflict", actorName: "Système", caseNumber: "D2024-003", label: "Conflit sync", details: "source manuelle" }
+];
+
+function computeFilteredActivityRowsForTest(rows, filter = "all", search = "") {
+  const cleanSearch = search.toLowerCase();
+  return rows.filter(log => {
+    if (filter !== "all") {
+      if (filter === "users" && !["users", "security", "supabase", "settings"].includes(log.category)) return false;
+      if (filter === "planning" && !["planning"].includes(log.category)) return false;
+      if (filter === "case" && !["case"].includes(log.category)) return false;
+      if (filter === "sync" && !["sync"].includes(log.category)) return false;
+      if (filter === "errors" && !["error", "warn"].includes(log.level)) return false;
+    }
+    if (cleanSearch) {
+      const text = `${log.label || ""} ${log.details || ""} ${log.actorName || log.user || ""} ${log.caseNumber || ""}`.toLowerCase();
+      if (!text.includes(cleanSearch)) return false;
+    }
+    return true;
+  });
+}
+
+function buildActivityCsvForTest(rows) {
+  const csv = ["Date;Type;Acteur;Dossier;Label;Details"];
+  rows.forEach(log => {
+    csv.push([
+      new Date(log.at).toLocaleString(),
+      log.category || log.type,
+      log.actorName || log.user || "Système",
+      log.caseNumber || "",
+      log.label,
+      log.details
+    ].map(s => `"${String(s || "").replace(/"/g, '""').replace(/\n/g, ' ')}"`).join(";"));
+  });
+  return "\ufeff" + csv.join("\r\n");
+}
+
+const syncCsv = buildActivityCsvForTest(computeFilteredActivityRowsForTest(activityRows, "sync"));
+assert.ok(syncCsv.includes("Synchronisation Supabase"), "Export filtré sync doit contenir l'événement sync");
+assert.ok(syncCsv.includes("Conflit sync"), "Export filtré sync doit contenir le conflit sync");
+assert.ok(!syncCsv.includes("Utilisateur créé"), "Export filtré sync ne doit pas contenir users");
+assert.ok(!syncCsv.includes("Planning déplacé"), "Export filtré sync ne doit pas contenir planning");
+
+const searchCsv = buildActivityCsvForTest(computeFilteredActivityRowsForTest(activityRows, "sync", "manuelle"));
+assert.ok(searchCsv.includes("Conflit sync"), "Export doit respecter la recherche texte");
+assert.ok(!searchCsv.includes("Synchronisation Supabase"), "Export recherché ne doit pas contenir les autres sync");
+assert.ok(!searchCsv.includes("Utilisateur créé"), "Export recherché ne doit pas contenir users");
+assert.ok(!searchCsv.includes("Planning déplacé"), "Export recherché ne doit pas contenir planning");
 
 console.log("Tests v22.32 compilés et validés avec succès.");

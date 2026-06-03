@@ -4153,3 +4153,53 @@ a:focus-visible {
   background: var(--danger);
 }
 
+/* v22.33C - Sélecteur utilisateur au démarrage */
+.user-selector-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 320px;
+  overflow-y: auto;
+  margin: 18px 0;
+  padding-right: 6px;
+  scrollbar-width: thin;
+}
+.user-selector-card {
+  display: flex;
+  flex-direction: column;
+  padding: 14px 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  cursor: pointer;
+  transition: border-color 0.2s, background-color 0.2s, box-shadow 0.2s;
+  text-align: left;
+}
+.user-selector-card:hover {
+  border-color: var(--brand);
+  background: rgba(17, 65, 95, 0.04);
+}
+.user-selector-card.active {
+  border-color: var(--brand);
+  background: rgba(17, 65, 95, 0.08);
+  outline: 2px solid var(--brand);
+  box-shadow: 0 4px 12px rgba(17, 65, 95, 0.12);
+}
+.user-selector-card strong {
+  font-size: 1rem;
+  color: var(--ink);
+  font-weight: 700;
+}
+.user-selector-card span {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-top: 4px;
+}
+.user-selector-card .user-resource {
+  font-size: 0.78rem;
+  color: #1e3a8a;
+  font-weight: 600;
+  margin-top: 3px;
+}
+
+

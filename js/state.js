@@ -613,7 +613,11 @@ async function setLocalPin(pin) {
 function hideLocalLockOverlay() {
   const overlay = $("#local-lock-overlay");
   if (overlay) overlay.hidden = true;
-  document.querySelector(".app-shell")?.removeAttribute("inert");
+  if (typeof window !== "undefined" && typeof window.checkUserSessionStartup === "function") {
+    window.checkUserSessionStartup();
+  } else {
+    document.querySelector(".app-shell")?.removeAttribute("inert");
+  }
   resetLocalSecurityIdleTimer();
 }
 
@@ -1074,7 +1078,7 @@ function resolveCurrentUserId(currentUserId, users = []) {
   const activeUsers = users.filter((user) => user.active !== false);
   const current = activeUsers.find((user) => user.id === currentUserId);
   if (current) return current.id;
-  return activeUsers.find((user) => user.role === "admin")?.id || activeUsers[0]?.id || "";
+  return "";
 }
 
 function linkResourcesToUsers(resources = [], users = []) {

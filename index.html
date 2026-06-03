@@ -29,6 +29,10 @@
           <div>
             <strong>NIMR SAV</strong>
             <span>Planning atelier global</span>
+            <div id="sidebar-user-status" style="font-size: 0.72rem; color: var(--muted); margin-top: 4px; display: flex; align-items: center; gap: 6px;">
+              <span id="sidebar-user-name">...</span>
+              <button class="link-button" id="sidebar-change-user-btn" type="button" style="background: none; border: none; padding: 0; color: var(--brand); text-decoration: underline; cursor: pointer;">Changer</button>
+            </div>
           </div>
           <span class="save-status-indicator status-saved" id="save-status-indicator" aria-live="polite">Sauvegardé</span>
         </div>
@@ -452,6 +456,13 @@
               <div class="calendar-summary">
                 <select id="current-user-selector" style="min-width: 240px;"></select>
               </div>
+              <div class="calendar-summary" style="display: flex; flex-direction: column; gap: 8px; margin-top: 10px;">
+                <label class="check-card" style="margin: 0; align-self: flex-start;">
+                  <input type="checkbox" id="always-prompt-startup" />
+                  <span>Toujours demander l'utilisateur au démarrage</span>
+                </label>
+                <button class="ghost-button" id="change-user-settings-btn" type="button" style="align-self: flex-start;">Changer d'utilisateur</button>
+              </div>
               
               <div class="section-heading compact-heading">
                 <div>
@@ -687,6 +698,17 @@
     <div class="offline-banner" id="offline-banner" role="status" hidden>
       <strong>Mode hors ligne</strong>
       <span>Les données locales restent consultables. La synchronisation Supabase reprendra automatiquement à la reconnexion.</span>
+    </div>
+    <div class="local-lock-overlay" id="user-selector-overlay" hidden>
+      <div class="local-lock-dialog user-selector-dialog" role="dialog" aria-modal="true" aria-labelledby="user-selector-title">
+        <div class="local-lock-logo">👤</div>
+        <h2 id="user-selector-title">Qui utilise l'application ?</h2>
+        <p>Sélectionnez votre profil utilisateur pour ce poste de travail partagé.</p>
+        <div class="user-selector-list" id="user-selector-list"></div>
+        <div class="local-lock-actions">
+          <button class="primary-button" id="user-selector-submit" type="button" disabled>Continuer</button>
+        </div>
+      </div>
     </div>
     <div class="local-lock-overlay" id="local-lock-overlay" hidden>
       <form class="local-lock-dialog" id="local-lock-form" role="dialog" aria-modal="true" aria-labelledby="local-lock-title">

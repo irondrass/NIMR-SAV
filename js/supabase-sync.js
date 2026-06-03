@@ -1007,9 +1007,11 @@ function mergeCaseFlags(localCase, remoteCase, stats) {
 
 const CRITICAL_CASE_SYNC_FIELDS = [
   "clientName", "phone", "vehicle", "plate", "vin", "mileage", "color",
-  "insurerName", "expertName", "damageNotes", "receptionNotes",
+  "ownerName", "driverName", "driverPhone", "insurance",
+  "expertName", "expertPhone", "expertEmail", "damageNotes", "arrivalNotes", "receptionNotes",
   "appointment", "appointmentStatus", "partsStatus",
-  "blockerReason", "blockerDetails", "orNavNumber"
+  "blockerReason", "blockerDetails", "orNavNumber", "planningColor",
+  "closedAt", "archivedAt"
 ];
 
 function isEmptySyncValue(value) {
@@ -1021,8 +1023,16 @@ function isEmptySyncValue(value) {
 
 function normalizeSyncComparableValue(value) {
   if (isEmptySyncValue(value)) return null;
-  if (typeof value === "object") return JSON.stringify(value);
+  if (typeof value === "object") return stableSyncStringify(value);
   return String(value).trim();
+}
+
+function stableSyncStringify(value) {
+  if (Array.isArray(value)) return `[${value.map(stableSyncStringify).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableSyncStringify(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
 }
 
 function pushCaseFieldConflict(stats, context) {
@@ -1053,14 +1063,36 @@ function mergeCriticalCaseField(localCase, remoteCase, field, stats) {
   const remoteIsEmpty = isEmptySyncValue(remoteVal);
 
   if (localIsEmpty && !remoteIsEmpty) return remoteVal;
-  if (!localIsEmpty && remoteIsEmpty) return localVal;
+  if (!localIsEmpty && remoteIsEmpty) {
+    pushCaseFieldConflict(stats, {
+      caseId: localCase.id,
+      caseNumber: localCase.orNavNumber || localCase.id,
+      field,
+      localValue: localVal,
+      remoteValue: remoteVal,
+      decision: "kept_local",
+      reason: "Valeur distante vide ignorée pour éviter une suppression silencieuse."
+    });
+    return localVal;
+  }
 
   const localNorm = normalizeSyncComparableValue(localVal);
   const remoteNorm = normalizeSyncComparableValue(remoteVal);
   
   if (localNorm === remoteNorm) return localVal;
 
-  if (isProtectedCase(localCase)) return localVal;
+  if (isProtectedCase(localCase)) {
+    pushCaseFieldConflict(stats, {
+      caseId: localCase.id,
+      caseNumber: localCase.orNavNumber || localCase.id,
+      field,
+      localValue: localVal,
+      remoteValue: remoteVal,
+      decision: "kept_local",
+      reason: "Dossier local livré/facturé/clôturé protégé conservé."
+    });
+    return localVal;
+  }
 
   pushCaseFieldConflict(stats, {
     caseId: localCase.id,

@@ -136,12 +136,14 @@ function setupRole(role, extra = {}) {
           delivered: false,
           invoiced: false
         },
+        appointment: { start: '2026-06-03T08:00:00.000Z', delivery: '2026-06-03T18:00:00.000Z', end: '2026-06-03T09:00:00.000Z' },
+        qualityChecklist: Object.fromEntries(DEFAULT_QUALITY_CHECKS.map(l => [l, true])),
         durations: { mechanical: 1, quality: 0.25 },
         claims: [{ type: 'client', includeInPlanning: true, clientApproved: true, expertApproved: true, estimate: { lines: [{ phase: 'mechanical', operation: 'MO', laborHours: 1 }] } }],
         history: []
       }],
       auditLog: [],
-      bookings: []
+      bookings: [{ id: 'b-rq-1', caseId: 'case-rq', resourceIds: ['tech-1'], segments: [{ start: '2026-06-03T08:00:00.000Z', end: '2026-06-03T09:00:00.000Z' }], status: 'completed' }]
     });
     state.currentUserId = '${extra.currentUserId || `u-${role}`}';
   `);
@@ -193,6 +195,7 @@ assert.equal(app(`state.auditLog[0].userId`), 'u-admin', 'audit export contient 
 assert.equal(app(`state.auditLog[1].userName`), 'Admin SAV', 'audit import contient nom acteur');
 
 setupRole('chef');
+app(`state.cases[0].flags.qualityApproved = true;`);
 assert.equal(app(`guardQualityValidate(state.cases[0]).ok`), true, 'chef atelier peut valider qualité');
 assert.equal(app(`guardDeliveryComplete(state.cases[0]).ok`), true, 'chef atelier peut livrer');
 assert.equal(app(`guardSensitiveAction('export.backup').ok`), true, 'chef atelier peut exporter backup');

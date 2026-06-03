@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 
 const root = resolve(process.cwd());
 const defaultPort = Number(process.env.NIMR_BROWSER_TEST_PORT || 8787);
-const targetUrl = process.env.NIMR_BROWSER_TEST_URL || `http://127.0.0.1:${defaultPort}/?browser-smoke=22.30`;
+const targetUrl = process.env.NIMR_BROWSER_TEST_URL || `http://127.0.0.1:${defaultPort}/?browser-smoke=22.32`;
 const chromePath = process.env.CHROME_PATH || [
   "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
   "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",

@@ -2244,7 +2244,9 @@ function getAggregatedActivityLog(limit = 200, roleOrUser = null) {
         at: conf.at,
         type: "sync.conflict",
         label: "Conflit de synchronisation",
-        details: `Conflit résolu (${conf.resolution || "manuel"}) pour ${conf.type || "entité inconnue"}`,
+        details: conf.type === "case_field_conflict"
+          ? `Conflit dossier ${conf.caseNumber || conf.caseId} — champ ${conf.field} : valeur locale conservée, ${conf.decision === "needs_review" ? "revue nécessaire" : conf.decision}.`
+          : `Conflit résolu (${conf.resolution || "manuel"}) pour ${conf.entity || conf.type || "entité inconnue"}`,
         category: "sync",
         level: "warn",
         actorName: "Système"

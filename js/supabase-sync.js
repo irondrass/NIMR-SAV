@@ -992,6 +992,75 @@ function mergeCaseFlags(localCase, remoteCase, stats) {
   return merged;
 }
 
+const CRITICAL_CASE_SYNC_FIELDS = [
+  "clientName", "phone", "vehicle", "plate", "vin", "mileage", "color",
+  "insurerName", "expertName", "damageNotes", "receptionNotes",
+  "appointment", "appointmentStatus", "partsStatus",
+  "blockerReason", "blockerDetails", "orNavNumber"
+];
+
+function isEmptySyncValue(value) {
+  if (value === null || value === undefined || value === "") return true;
+  if (Array.isArray(value) && value.length === 0) return true;
+  if (typeof value === "object" && Object.keys(value).length === 0) return true;
+  return false;
+}
+
+function normalizeSyncComparableValue(value) {
+  if (isEmptySyncValue(value)) return null;
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value).trim();
+}
+
+function pushCaseFieldConflict(stats, context) {
+  const entry = {
+    id: uid("sync-conflict"),
+    at: new Date().toISOString(),
+    type: "case_field_conflict",
+    caseId: context.caseId,
+    caseNumber: context.caseNumber,
+    field: context.field,
+    localValue: context.localValue,
+    remoteValue: context.remoteValue,
+    decision: context.decision,
+    reason: context.reason,
+    source: context.source || "supabase",
+    level: "warn",
+    actorName: "Système"
+  };
+  stats.conflictEntries.push(entry);
+  stats.conflicts += 1;
+  return entry;
+}
+
+function mergeCriticalCaseField(localCase, remoteCase, field, stats) {
+  const localVal = localCase[field];
+  const remoteVal = remoteCase[field];
+  const localIsEmpty = isEmptySyncValue(localVal);
+  const remoteIsEmpty = isEmptySyncValue(remoteVal);
+
+  if (localIsEmpty && !remoteIsEmpty) return remoteVal;
+  if (!localIsEmpty && remoteIsEmpty) return localVal;
+
+  const localNorm = normalizeSyncComparableValue(localVal);
+  const remoteNorm = normalizeSyncComparableValue(remoteVal);
+  
+  if (localNorm === remoteNorm) return localVal;
+
+  if (isProtectedCase(localCase)) return localVal;
+
+  pushCaseFieldConflict(stats, {
+    caseId: localCase.id,
+    caseNumber: localCase.orNavNumber || localCase.id,
+    field,
+    localValue: localVal,
+    remoteValue: remoteVal,
+    decision: "needs_review",
+    reason: "Valeurs conflictuelles sur champ critique."
+  });
+  return localVal;
+}
+
 function mergeCaseEntity(localCase, remoteCase, stats) {
   if (!localCase) {
     stats.casesMerged += 1;
@@ -1016,9 +1085,13 @@ function mergeCaseEntity(localCase, remoteCase, stats) {
     deletedBy: remoteCase.deletedBy || localCase.deletedBy || "",
     deleteReason: remoteCase.deleteReason || localCase.deleteReason || "",
   };
+  
+  CRITICAL_CASE_SYNC_FIELDS.forEach(field => {
+    merged[field] = mergeCriticalCaseField(localCase, remoteCase, field, stats);
+  });
+
   if (isProtectedCase(localCase) && !isProtectedCase(remoteCase)) {
-    merged.appointment = localCase.appointment || merged.appointment;
-    merged.appointmentStatus = localCase.appointmentStatus || merged.appointmentStatus;
+    // Other fields that might not be in CRITICAL_CASE_SYNC_FIELDS
     stats.protectedKept += 1;
   }
   stats.casesMerged += 1;

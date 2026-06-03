@@ -501,6 +501,30 @@ function renderUsersAndRoles() {
   const canManageUsers = typeof canRenderAction === "function" ? canRenderAction("users.manage") : false;
   const deniedTitle = canManageUsers ? "" : (typeof getPermissionDeniedMessage === "function" ? getPermissionDeniedMessage("users.manage") : "Action réservée administrateur.");
 
+  form.hidden = !canManageUsers;
+  list.hidden = !canManageUsers;
+  const summary = document.getElementById("roles-permissions-summary");
+  if (summary) {
+    summary.hidden = !canManageUsers;
+    summary.style.display = canManageUsers ? "" : "none";
+    // Also hide the header right before it if possible
+    const prevEl = summary.previousElementSibling;
+    if (prevEl && prevEl.classList.contains("section-heading")) {
+      prevEl.hidden = !canManageUsers;
+      prevEl.style.display = canManageUsers ? "" : "none";
+    }
+  }
+
+  // Also hide the h1 header of Utilisateurs & rôles if not allowed
+  const panel = form.closest(".users-roles-panel");
+  if (panel) {
+    const heading = panel.querySelector(".panel-heading");
+    if (heading) {
+      heading.hidden = !canManageUsers;
+      heading.style.display = canManageUsers ? "" : "none";
+    }
+  }
+
   Array.from(form.elements || []).forEach((control) => {
     if (control.id === "current-user-selector" || control.name === "userId") return;
     control.disabled = !canManageUsers;

@@ -2621,3 +2621,43 @@ function showInputPromptModal({
   });
 }
 
+const ROLE_TABS = {
+  admin: ["dossiers", "today", "pilotage", "planning", "technician", "atelier"],
+  chef_atelier: ["dossiers", "today", "pilotage", "planning", "technician", "atelier"],
+  reception: ["dossiers", "today", "pilotage"],
+  technicien: ["technician"],
+  qualite: ["dossiers", "today"],
+  readonly: ["dossiers", "today", "pilotage", "planning"],
+};
+
+function getAllowedTabsForRole(role) {
+  return ROLE_TABS[role] || [];
+}
+
+function getAllowedTabsForCurrentUser() {
+  const user = getCurrentUser();
+  if (!user) {
+    const activeUsers = (state?.users || []).filter((u) => u.active !== false);
+    if (activeUsers.length === 0) {
+      return ["dossiers", "today", "pilotage", "planning", "technician", "atelier"];
+    }
+    return [];
+  }
+  const role = user.role || "readonly";
+  return getAllowedTabsForRole(role);
+}
+
+function canAccessTab(tabId) {
+  return getAllowedTabsForCurrentUser().includes(tabId);
+}
+
+function ensureCurrentTabAllowed() {
+  if (!canAccessTab(activeTab)) {
+    const allowed = getAllowedTabsForCurrentUser();
+    if (allowed.length > 0) {
+      setActiveTab(allowed[0]);
+      return true;
+    }
+  }
+  return false;
+}

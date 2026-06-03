@@ -630,77 +630,122 @@ function renderWorkshopChiefSummary(dateKey) {
   `;
 }
 
+let isTechnicianActionProcessing = false;
+
 async function handleTechnicianTaskAction(action, bookingId, technicianId) {
-  const booking = state.bookings.find((candidate) => candidate.id === bookingId);
-  const item = state.cases.find((caseItem) => caseItem.id === booking?.caseId);
-  if (!item || !booking) {
-    notifyUser("Tâche introuvable.", "error");
+  if (isTechnicianActionProcessing) {
+    console.log("Technician action ignored: processing in progress");
     return;
   }
-  let result = null;
-  if (action === "start") {
-    result = startTechnicianTask(item, bookingId, technicianId);
-  } else if (action === "pause") {
-    const reason = window.prompt(`Motif de pause obligatoire :\n${TECHNICIAN_PAUSE_REASONS.join(" / ")}`, booking.pauseReason || "attente pièces");
-    if (reason === null) return;
-    result = pauseTechnicianTask(item, bookingId, technicianId, reason);
-  } else if (action === "resume") {
-    result = resumeTechnicianTask(item, bookingId, technicianId, { allowConcurrent: false });
-  } else if (action === "block") {
-    const reason = window.prompt("Motif de blocage : attente pièces, attente accord, attente chef atelier, panne outil / ressource, autre", booking.blockReason || "attente pièces");
-    if (reason === null) return;
-    const details = window.prompt("Commentaire blocage (optionnel)", booking.blockDetails || "");
-    if (details === null) return;
-    result = blockTechnicianTask(item, bookingId, technicianId, reason, details);
-  } else if (action === "note") {
-    const note = window.prompt("Note technicien à ajouter à cette tâche :");
-    if (note === null) return;
-    result = addTechnicianTaskNote(item, bookingId, technicianId, note);
-  } else if (action === "photo") {
-    await addTechnicianTaskPhotoFromInput(item, bookingId, technicianId);
-    return;
-  } else if (action === "complete") {
-    const confirmed = await showConfirmModal("Terminer cette tâche maintenant ? Le temps restant sera libéré dans le planning si la tâche finit en avance.");
-    if (!confirmed) return;
-    const note = window.prompt("Note de fin de tâche (optionnel)", "");
-    if (note === null) return;
-    result = completeTechnicianTask(item, bookingId, technicianId, { note, skipPhotoCheck: false });
-    if (!result.ok && /photo/i.test(result.message || "")) {
-      notifyUser(result.message, "error");
+  isTechnicianActionProcessing = true;
+
+  const buttons = document.querySelectorAll("[data-tech-action]");
+  buttons.forEach((btn) => btn.setAttribute("disabled", "true"));
+
+  try {
+    const booking = state.bookings.find((candidate) => candidate.id === bookingId);
+    const item = state.cases.find((caseItem) => caseItem.id === booking?.caseId);
+    if (!item || !booking) {
+      notifyUser("Tâche introuvable.", "error");
       return;
     }
-    if (result.ok && result.booking) {
-      const currentUser = typeof getCurrentUser === "function" ? getCurrentUser() : null;
-      const isManager = !currentUser || currentUser.role === "admin" || currentUser.role === "chef_atelier";
-      if (isManager) {
-        const previews = previewDependentBookingReschedule(item, result.booking);
-        if (previews.length > 0) {
-          const advanceConfirmed = await showConfirmModal(
-            `Tâche terminée. ${previews.length} tâche(s) suivante(s) peuve(nt) être avancée(s).\n\nVoulez-vous recaler ces tâches automatiquement ?`
-          );
-          if (advanceConfirmed) {
-            const res = applyDependentBookingReschedule(item, previews, currentUser?.name || "Chef Atelier");
-            if (res.ok) {
-              result.message = `${result.message || "Tâche terminée."} ${res.rescheduled} tâche(s) suivante(s) recalée(s) avec succès.`;
+    let result = null;
+    if (action === "start") {
+      result = startTechnicianTask(item, bookingId, technicianId);
+    } else if (action === "pause") {
+      const reason = await showInputPromptModal({
+        title: "Pause de la tâche",
+        message: "Motif de pause obligatoire :",
+        defaultValue: booking.pauseReason || "attente pièces",
+        options: TECHNICIAN_PAUSE_REASONS.map((r) => [r, r]),
+      });
+      if (reason === null) return;
+      result = pauseTechnicianTask(item, bookingId, technicianId, reason);
+    } else if (action === "resume") {
+      result = resumeTechnicianTask(item, bookingId, technicianId, { allowConcurrent: false });
+    } else if (action === "block") {
+      const reason = await showInputPromptModal({
+        title: "Bloquer la tâche",
+        message: "Sélectionnez le motif de blocage :",
+        defaultValue: booking.blockReason || "attente pièces",
+        options: [
+          ["attente pièces", "Attente pièces"],
+          ["attente accord", "Attente accord"],
+          ["attente chef atelier", "Attente chef atelier"],
+          ["panne outil / ressource", "Panne outil / ressource"],
+          ["autre", "Autre"]
+        ]
+      });
+      if (reason === null) return;
+      const details = await showInputPromptModal({
+        title: "Détails du blocage",
+        message: "Commentaire blocage (optionnel) :",
+        defaultValue: booking.blockDetails || ""
+      });
+      if (details === null) return;
+      result = blockTechnicianTask(item, bookingId, technicianId, reason, details);
+    } else if (action === "note") {
+      const note = await showInputPromptModal({
+        title: "Ajouter une note",
+        message: "Note technicien à ajouter à cette tâche :",
+        defaultValue: ""
+      });
+      if (note === null) return;
+      result = addTechnicianTaskNote(item, bookingId, technicianId, note);
+    } else if (action === "photo") {
+      await addTechnicianTaskPhotoFromInput(item, bookingId, technicianId);
+      return;
+    } else if (action === "complete") {
+      const confirmed = await showConfirmModal("Terminer cette tâche maintenant ? Le temps restant sera libéré dans le planning si la tâche finit en avance.");
+      if (!confirmed) return;
+      const note = await showInputPromptModal({
+        title: "Terminer la tâche",
+        message: "Note de fin de tâche (optionnel) :",
+        defaultValue: ""
+      });
+      if (note === null) return;
+      result = completeTechnicianTask(item, bookingId, technicianId, { note, skipPhotoCheck: false });
+      if (!result.ok && /photo/i.test(result.message || "")) {
+        notifyUser(result.message, "error");
+        return;
+      }
+      if (result.ok && result.booking) {
+        const currentUser = typeof getCurrentUser === "function" ? getCurrentUser() : null;
+        const isManager = !currentUser || currentUser.role === "admin" || currentUser.role === "chef_atelier";
+        if (isManager) {
+          const previews = previewDependentBookingReschedule(item, result.booking);
+          if (previews.length > 0) {
+            const advanceConfirmed = await showConfirmModal(
+              `Tâche terminée. ${previews.length} tâche(s) suivante(s) peuve(nt) être avancée(s).\n\nVoulez-vous recaler ces tâches automatiquement ?`
+            );
+            if (advanceConfirmed) {
+              const res = applyDependentBookingReschedule(item, previews, currentUser?.name || "Chef Atelier");
+              if (res.ok) {
+                result.message = `${result.message || "Tâche terminée."} ${res.rescheduled} tâche(s) suivante(s) recalée(s) avec succès.`;
+              }
             }
           }
         }
       }
+    } else if (action === "print") {
+      printTechnicianTaskSheet(item, bookingId, technicianId);
+      return;
+    } else if (action === "print-block") {
+      printPauseBlockSheet(item, bookingId, technicianId);
+      return;
     }
-  } else if (action === "print") {
-    printTechnicianTaskSheet(item, bookingId, technicianId);
-    return;
-  } else if (action === "print-block") {
-    printPauseBlockSheet(item, bookingId, technicianId);
-    return;
+    if (!result?.ok) {
+      notifyUser(result?.message || "Action impossible.", "error");
+      return;
+    }
+    saveState({ flushCloud: true, cloudReason: `technician-${action}` });
+    quietNotify(result.message || "Action enregistrée.", "success");
+    render();
+  } finally {
+    isTechnicianActionProcessing = false;
+    const reenableButtons = document.querySelectorAll("[data-tech-action]");
+    reenableButtons.forEach((btn) => btn.removeAttribute("disabled"));
   }
-  if (!result?.ok) {
-    notifyUser(result?.message || "Action impossible.", "error");
-    return;
-  }
-  saveState({ flushCloud: true, cloudReason: `technician-${action}` });
-  quietNotify(result.message || "Action enregistrée.", "success");
-  render();
 }
 
 async function addTechnicianTaskPhotoFromInput(item, bookingId, technicianId) {

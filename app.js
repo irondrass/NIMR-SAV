@@ -11,6 +11,7 @@ function initApp() {
     bindPlanningToolbar();
     bindWorkshopForms();
     bindBackupActions();
+    if (typeof bindUserSessionActions === "function") bindUserSessionActions();
     if (typeof bindLocalSecurityControls === "function") bindLocalSecurityControls();
     bindOfflineStatus();
     if (typeof bindSupabaseActions === "function") bindSupabaseActions();
@@ -23,6 +24,7 @@ function initApp() {
     setActiveTab(activeTab || "dossiers");
     render();
     if (typeof initLocalSecurityGate === "function") initLocalSecurityGate();
+    if (typeof checkUserSessionStartup === "function") checkUserSessionStartup();
     bindWorkHoursInputs();
     loadBundledVehicleDatabase();
     migrateLegacyPhotos();
@@ -859,6 +861,221 @@ function renderActivityLog() {
 
   updateTable();
 }
+
+
+// --- DEBUT v22.33C User Selector Startup / Shared Session ---
+window.selectedUserIdForStartup = "";
+
+function checkUserSessionStartup() {
+  if (typeof isLocalSessionUnlocked === "function" && !isLocalSessionUnlocked()) {
+    // PIN local activé et verrouillé -> priorité au PIN, on attend le déverrouillage
+    return;
+  }
+
+  const activeUsers = (state.users || []).filter(user => user.active !== false);
+  const alwaysPrompt = state.settings.alwaysPromptUserStartup !== false && 
+                       (state.settings.alwaysPromptUserStartup === true || activeUsers.length > 1);
+
+  const currentUser = getCurrentUser();
+  const isCurrentActive = currentUser && activeUsers.some(user => user.id === state.currentUserId);
+
+  if (alwaysPrompt || !isCurrentActive) {
+    showUserSelectorOverlay();
+  } else {
+    hideUserSelectorOverlay();
+    if (!state.currentUserId && currentUser) {
+      state.currentUserId = currentUser.id;
+    }
+  }
+}
+
+function showUserSelectorOverlay() {
+  const overlay = document.getElementById("user-selector-overlay");
+  if (overlay) {
+    overlay.hidden = false;
+    document.querySelector(".app-shell")?.setAttribute("inert", "");
+    renderUserSelectorScreen();
+  }
+}
+
+function hideUserSelectorOverlay() {
+  const overlay = document.getElementById("user-selector-overlay");
+  if (overlay) {
+    overlay.hidden = true;
+    const pinOverlay = document.getElementById("local-lock-overlay");
+    if (!pinOverlay || pinOverlay.hidden) {
+      document.querySelector(".app-shell")?.removeAttribute("inert");
+    }
+  }
+}
+
+function renderUserSelectorScreen() {
+  const listContainer = document.getElementById("user-selector-list");
+  const submitButton = document.getElementById("user-selector-submit");
+  if (!listContainer || !submitButton) return;
+
+  const activeUsers = (state.users || []).filter(user => user.active !== false);
+
+  listContainer.innerHTML = activeUsers.map(user => {
+    const roleLabel = {
+      admin: "Administrateur",
+      chef_atelier: "Chef d'atelier",
+      reception: "Réception",
+      technicien: "Technicien",
+      qualite: "Qualité",
+      readonly: "Lecture seule"
+    }[user.role] || user.role;
+
+    let resourceText = "";
+    if (user.role === "technicien" && user.resourceId) {
+      const res = (state.resources || []).find(r => r.id === user.resourceId);
+      if (res) {
+        resourceText = `<div class="user-resource">Ressource : ${escapeHtml(res.name)}</div>`;
+      }
+    }
+
+    const isActiveClass = window.selectedUserIdForStartup === user.id ? "active" : "";
+
+    return `
+      <div class="user-selector-card ${isActiveClass}" data-user-id="${user.id}">
+        <strong>${escapeHtml(user.name)}</strong>
+        <span>Rôle : ${escapeHtml(roleLabel)}</span>
+        ${resourceText}
+      </div>
+    `;
+  }).join("") || `<div class="muted">Aucun utilisateur actif trouvé.</div>`;
+
+  // Bind click & double click events
+  const cards = listContainer.querySelectorAll(".user-selector-card");
+  cards.forEach(card => {
+    card.addEventListener("click", () => {
+      window.selectedUserIdForStartup = card.dataset.userId;
+      cards.forEach(c => c.classList.remove("active"));
+      card.classList.add("active");
+      submitButton.disabled = false;
+    });
+
+    card.addEventListener("dblclick", () => {
+      window.selectedUserIdForStartup = card.dataset.userId;
+      submitButton.disabled = false;
+      submitButton.click();
+    });
+  });
+
+  // Highlight previously selected user if any
+  if (window.selectedUserIdForStartup) {
+    const activeCard = listContainer.querySelector(`[data-user-id="${window.selectedUserIdForStartup}"]`);
+    if (activeCard) {
+      activeCard.classList.add("active");
+      submitButton.disabled = false;
+    }
+  }
+}
+
+function triggerUserChangeScreen() {
+  const currentUser = getCurrentUser();
+  window.selectedUserIdForStartup = currentUser ? currentUser.id : "";
+  const submitButton = document.getElementById("user-selector-submit");
+  if (submitButton) {
+    submitButton.disabled = !window.selectedUserIdForStartup;
+  }
+  showUserSelectorOverlay();
+}
+
+function renderCurrentSessionIndicator() {
+  const currentUser = getCurrentUser();
+  const sidebarUserName = document.getElementById("sidebar-user-name");
+  if (sidebarUserName) {
+    sidebarUserName.textContent = currentUser ? `${currentUser.name} (${currentUser.role === "admin" ? "Admin" : currentUser.role})` : "Atelier";
+  }
+
+  // Mettre à jour l'option checkbox dans les Paramètres
+  const alwaysPromptCheckbox = document.getElementById("always-prompt-startup");
+  if (alwaysPromptCheckbox) {
+    const activeUsers = (state.users || []).filter(user => user.active !== false);
+    // Cochée par défaut si non définie et plusieurs utilisateurs, ou si configurée explicitement à vrai
+    const isChecked = state.settings.alwaysPromptUserStartup === true || 
+                      (state.settings.alwaysPromptUserStartup !== false && activeUsers.length > 1);
+    alwaysPromptCheckbox.checked = isChecked;
+
+    // Seul l'admin peut modifier cette option
+    const isAdmin = currentUser && currentUser.role === "admin";
+    alwaysPromptCheckbox.disabled = !isAdmin;
+    const container = alwaysPromptCheckbox.closest(".check-card");
+    if (container) {
+      container.style.opacity = isAdmin ? "1" : "0.6";
+      container.title = isAdmin ? "" : "Action réservée administrateur.";
+    }
+  }
+}
+
+function bindUserSessionActions() {
+  // Option checkbox dans Paramètres
+  const alwaysPromptCheckbox = document.getElementById("always-prompt-startup");
+  alwaysPromptCheckbox?.addEventListener("change", (event) => {
+    const currentUser = getCurrentUser();
+    if (!currentUser || currentUser.role !== "admin") {
+      notifyUser("Action réservée administrateur.", "error");
+      renderCurrentSessionIndicator();
+      return;
+    }
+    state.settings.alwaysPromptUserStartup = event.currentTarget.checked;
+    saveState();
+    quietNotify("Paramètre de session mis à jour.", "success");
+  });
+
+  // Boutons pour changer d'utilisateur
+  document.getElementById("sidebar-change-user-btn")?.addEventListener("click", triggerUserChangeScreen);
+  document.getElementById("change-user-settings-btn")?.addEventListener("click", triggerUserChangeScreen);
+
+  // Soumission du sélecteur d'utilisateur au démarrage
+  const submitButton = document.getElementById("user-selector-submit");
+  submitButton?.addEventListener("click", () => {
+    if (!window.selectedUserIdForStartup) return;
+    const targetUser = (state.users || []).find(user => user.id === window.selectedUserIdForStartup);
+    if (!targetUser || targetUser.active === false) {
+      notifyUser("Utilisateur invalide ou inactif.", "error");
+      return;
+    }
+
+    const previousUser = (state.users || []).find(user => user.id === state.currentUserId && user.active !== false);
+    const previousActor = previousUser ? {
+      userId: previousUser.id,
+      userName: previousUser.name || previousUser.email || "Utilisateur",
+      userRole: previousUser.role || "readonly",
+      resourceId: previousUser.resourceId || ""
+    } : null;
+
+    if (setCurrentUser(window.selectedUserIdForStartup)) {
+      if (!previousUser) {
+        addAuditLog("users.session_selected", `Session utilisateur démarrée : ${targetUser.name}`, "Sélection initiale au démarrage", {
+          actor: { userId: targetUser.id, userName: targetUser.name, userRole: targetUser.role, resourceId: targetUser.resourceId || "" }
+        });
+      } else if (previousUser.id !== window.selectedUserIdForStartup) {
+        addAuditLog("users.current_changed", `Changement d'utilisateur actif : ${previousUser.name} -> ${targetUser.name}`, "Bascule locale effectuée", {
+          actor: previousActor
+        });
+      }
+      
+      saveState();
+      hideUserSelectorOverlay();
+      render();
+
+      if (targetUser.role === "technicien" && !targetUser.resourceId) {
+        notifyUser("Avertissement : Aucun technicien / ressource n'est lié à votre profil. Certaines fonctionnalités seront restreintes.", "warn");
+      } else {
+        quietNotify(`Bienvenue, ${targetUser.name} !`, "success");
+      }
+    } else {
+      notifyUser("Impossible d'appliquer l'utilisateur.", "error");
+    }
+  });
+}
+
+// Rendre ces fonctions globales pour y avoir accès depuis d'autres scripts/tests
+window.checkUserSessionStartup = checkUserSessionStartup;
+window.renderCurrentSessionIndicator = renderCurrentSessionIndicator;
+// --- FIN v22.33C User Selector Startup / Shared Session ---
 
 initApp();
 

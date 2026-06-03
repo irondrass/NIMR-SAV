@@ -787,12 +787,12 @@ function renderActivityLog() {
   const tableBody = $("#activity-log-table-body");
   const exportBtn = $("#activity-log-export");
 
-  function updateTable() {
+  function computeFilteredActivityRows() {
     const filter = filterSelect.value;
     const search = searchInput.value.toLowerCase();
     const logs = getAggregatedActivityLog(200);
-    
-    const filtered = logs.filter(log => {
+
+    return logs.filter(log => {
       if (filter !== "all") {
         if (filter === "users" && !["users", "security", "supabase", "settings"].includes(log.category)) return false;
         if (filter === "planning" && !["planning"].includes(log.category)) return false;
@@ -806,6 +806,10 @@ function renderActivityLog() {
       }
       return true;
     });
+  }
+
+  function updateTable() {
+    const filtered = computeFilteredActivityRows();
 
     tableBody.innerHTML = filtered.map(log => {
       const time = new Date(log.at).toLocaleString();
@@ -829,7 +833,7 @@ function renderActivityLog() {
     filterSelect.addEventListener("change", updateTable);
     searchInput.addEventListener("input", updateTable);
     exportBtn.addEventListener("click", () => {
-      const logs = getAggregatedActivityLog(200);
+      const logs = computeFilteredActivityRows();
       const csv = ["Date;Type;Acteur;Dossier;Label;Details"];
       logs.forEach(log => {
         csv.push([

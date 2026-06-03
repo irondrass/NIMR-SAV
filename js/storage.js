@@ -391,11 +391,16 @@ async function exportBackup() {
     }
   }
 
-  const confirmed = confirm(
-    "Exporter une sauvegarde JSON non chiffrée ?\n\n" +
-      "Ce fichier contient des données clients, photos, téléphones, VIN, immatriculations et historique. " +
-      "Utilisez plutôt l’export chiffré pour archiver ou transférer une sauvegarde.",
-  );
+  const warningMsg = `<strong>Attention : Exportation non chiffrée (Format JSON)</strong><br><br>` +
+    `Ce fichier contient toutes les données personnelles (noms clients, téléphones, VIN, immatriculations, photos, historique) EN CLAIR.<br>` +
+    `Transmettre ou stocker ce fichier sans chiffrement présente un risque de sécurité et de conformité RGPD.<br><br>` +
+    `Pour archiver ou transférer une sauvegarde, utilisez de préférence <strong>l’export chiffré (.nimrsecure)</strong>.<br><br>` +
+    `Voulez-vous vraiment générer l'export JSON non chiffré ?`;
+
+  const confirmed = (typeof showConfirmModal === "function")
+    ? await showConfirmModal(warningMsg)
+    : confirm("Exporter une sauvegarde JSON non chiffrée ? Contient des données sensibles en clair.");
+
   if (!confirmed) {
     showBackupStatus("Export JSON non chiffré annulé.");
     return;
@@ -527,7 +532,14 @@ async function importBackup(event) {
     const { importedState, photos, isLegacy, metadata } = validateBackupPayload(payload);
     const documents = Array.isArray(payload.documents) ? payload.documents : [];
     const versionLabel = isLegacy ? "format ancien" : `${metadata.appVersion}, exportée le ${metadata.exportedAt}`;
-    const confirmed = await showConfirmModal(`Importer cette sauvegarde (${versionLabel}) remplacera les dossiers, le planning, les paramètres et les photos locales. Une copie de sécurité de l'état actuel sera téléchargée avant remplacement.<br><br>Êtes-vous sûr de vouloir continuer ?`);
+    const importWarning = `Importer cette sauvegarde (${versionLabel}) remplacera l'intégralité de l'état local actuel (dossiers, planning, paramètres, photos). Une copie de sécurité de l'état actuel sera téléchargée avant remplacement.<br><br>` +
+      `<strong>Attention :</strong> Assurez-vous de n'importer que des fichiers de confiance contenant des informations RGPD sensibles (données clients/véhicules).<br><br>` +
+      `Êtes-vous sûr de vouloir continuer ?`;
+
+    const confirmed = (typeof showConfirmModal === "function")
+      ? await showConfirmModal(importWarning)
+      : confirm("Importer cette sauvegarde ? Écrase les données locales.");
+
     if (!confirmed) {
       showBackupStatus("Import annulé.");
       return;

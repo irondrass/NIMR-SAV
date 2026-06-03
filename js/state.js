@@ -2527,3 +2527,95 @@ function showPromptModal(htmlMessage, expectedText) {
     confirmBtn.addEventListener("click", onConfirm);
   });
 }
+
+function showInputPromptModal({
+  title = "Saisie",
+  message = "",
+  defaultValue = "",
+  options = null,
+  confirmLabel = "Confirmer",
+  cancelLabel = "Annuler",
+} = {}) {
+  return new Promise((resolve) => {
+    const overlay = document.getElementById("custom-modal-overlay");
+    const titleEl = document.getElementById("custom-modal-title");
+    const body = document.getElementById("custom-modal-body");
+    const cancelBtn = document.getElementById("custom-modal-cancel");
+    const confirmBtn = document.getElementById("custom-modal-confirm");
+    
+    if (!overlay || !body || !cancelBtn || !confirmBtn) {
+      if (options && Array.isArray(options)) {
+        const text = options.map(([val, lbl]) => `${val}: ${lbl}`).join("\n");
+        resolve(prompt(`${message}\n\n${text}`, defaultValue));
+      } else {
+        resolve(prompt(message, defaultValue));
+      }
+      return;
+    }
+
+    const previousTitle = titleEl ? titleEl.textContent : "Confirmation";
+    const previousCancelText = cancelBtn.textContent;
+    const previousConfirmText = confirmBtn.textContent;
+
+    if (titleEl) titleEl.textContent = title;
+    cancelBtn.textContent = cancelLabel;
+    confirmBtn.textContent = confirmLabel;
+
+    let inputHtml = "";
+    if (options && Array.isArray(options)) {
+      const selectOptions = options
+        .map(([val, lbl]) => `<option value="${escapeHtml(val)}" ${val === defaultValue ? "selected" : ""}>${escapeHtml(lbl)}</option>`)
+        .join("");
+      inputHtml = `<select id="prompt-modal-input" class="custom-modal-select" style="width: 100%; padding: 10px; margin-top: 12px; border: 1px solid #cfe0e8; border-radius: 8px; font-size: 16px; min-height: 48px;">${selectOptions}</select>`;
+    } else {
+      inputHtml = `<input type="text" id="prompt-modal-input" class="custom-modal-input" style="width: 100%; padding: 10px; margin-top: 12px; border: 1px solid #cfe0e8; border-radius: 8px; font-size: 16px; min-height: 48px;" value="${escapeHtml(defaultValue)}" autocomplete="off" />`;
+    }
+
+    body.innerHTML = `<div>${message}</div>${inputHtml}`;
+    overlay.hidden = false;
+
+    const input = document.getElementById("prompt-modal-input");
+    if (input) {
+      input.focus();
+      if (input.tagName === "INPUT") {
+        input.select();
+      }
+    }
+
+    const cleanup = () => {
+      overlay.hidden = true;
+      if (titleEl) titleEl.textContent = previousTitle;
+      cancelBtn.textContent = previousCancelText;
+      confirmBtn.textContent = previousConfirmText;
+      cancelBtn.removeEventListener("click", onCancel);
+      confirmBtn.removeEventListener("click", onConfirm);
+      input?.removeEventListener("keydown", onKeyDown);
+    };
+
+    const onCancel = () => {
+      cleanup();
+      resolve(null);
+    };
+
+    const onConfirm = () => {
+      const val = input ? input.value : "";
+      cleanup();
+      resolve(val);
+    };
+
+    const onKeyDown = (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        onConfirm();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        onCancel();
+      }
+    };
+
+    cancelBtn.addEventListener("click", onCancel);
+    confirmBtn.addEventListener("click", onConfirm);
+    input?.addEventListener("keydown", onKeyDown);
+  });
+}
+

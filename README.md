@@ -1,3 +1,10 @@
+# v22.35 - Audit production et durcissement sync
+
+- Durcissement de la fusion Supabase des champs critiques dossier : client, téléphone, véhicule, immatriculation/VIN, propriétaire/société, déposant, assurance, expert, notes réception, RDV, blocage et archive.
+- Une valeur cloud vide ne peut plus effacer silencieusement une valeur locale importante ; un conflit `syncConflict` lisible est créé et la valeur locale est conservée par défaut.
+- `closedAt` et `archivedAt` sont conservés par la normalisation des anciens dossiers, afin de maintenir les archives en lecture seule après sauvegarde/restauration.
+- Cache PWA incrémenté en `nimr-sav-v22.35-production-audit-hardening` pour forcer le chargement réel des correctifs sur les postes atelier.
+
 # v22.33D - Sécurité locale / RGPD / procédures
 
 - Clarification des limites du verrouillage par PIN local : le PIN bloque l'accès à l'interface graphique mais ne chiffre pas les données stockées localement dans le navigateur (`localStorage`, `sessionStorage`, `IndexedDB`).

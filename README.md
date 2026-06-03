@@ -1,3 +1,24 @@
+# v22.33D - Sécurité locale / RGPD / procédures
+
+- Clarification des limites du verrouillage par PIN local : le PIN bloque l'accès à l'interface graphique mais ne chiffre pas les données stockées localement dans le navigateur (`localStorage`, `sessionStorage`, `IndexedDB`).
+- Ajout d'une mise en garde explicite sur l'overlay de déverrouillage : « Le PIN protège l'accès à l'interface, mais ne chiffre pas les données stockées sur ce poste ».
+- Remplacement du dialogue natif d'exportation non chiffrée par une modale d'avertissement RGPD asynchrone détaillant les risques de fuite de données personnelles en clair (noms clients, téléphones, VIN, immatriculations).
+- Ajout d'avertissements de sécurité et de conformité RGPD lors de l'import d'une sauvegarde locale ou de la restauration cloud Supabase.
+- Consolidation des procédures de sécurité de l'atelier pour la gestion des postes de travail partagés.
+
+## Procédures de sécurité et conformité RGPD de l'atelier
+
+Pour protéger les données personnelles des clients et des véhicules stockées sur les postes de travail partagés (tablettes, ordinateurs d'accueil/atelier) :
+1. **Sessions système protégées** : Utilisez des sessions Windows ou OS distinctes et protégées par mot de passe pour chaque poste de travail.
+2. **Verrouillage de session** : Verrouillez systématiquement la session Windows/OS ou fermez le navigateur lorsque vous quittez le poste de travail (par exemple, à l'accueil client).
+3. **Sélection de session utilisateur** : Ne partagez jamais un poste de travail sous un profil actif erroné (utilisez le bouton "Changer d'utilisateur" pour ré-afficher le sélecteur v22.33C).
+4. **Verrouillage PIN local** : Activez le PIN local dans *Paramètres > Sécurité du poste* pour empêcher un accès rapide non autorisé à l'application. N'oubliez pas que ce verrouillage est uniquement logique (UI) et ne constitue pas un chiffrement matériel.
+5. **Préférence d'exportation chiffrée** : Utilisez systématiquement l'exportation chiffrée (`.nimrsecure`) protégée par un mot de passe fort pour archiver ou transférer des sauvegardes.
+6. **Pas de transmission en clair** : Ne transmettez jamais de fichiers d'export JSON non chiffrés par e-mail ou sur des supports de stockage non sécurisés.
+7. **Nettoyage complet avant transfert** : Utilisez obligatoirement le bouton **"Nettoyer ce poste"** (en confirmant par le mot de passe "NETTOYER") avant de céder une machine, de l'envoyer en réparation ou de changer son affectation en atelier. Cette action supprime définitivement l'ensemble des données locales en clair du navigateur.
+8. **Administrateur de secours** : Conservez au moins un compte administrateur actif et notez son mot de passe de secours afin de ne pas perdre l'accès à l'administration locale.
+9. **Sauvegardes sécurisées externes** : Stockez les sauvegardes chiffrées sur des supports sécurisés et déconnectés du réseau de l'atelier.
+
 # v22.27 - Pause / reprise technicien sans doublons
 
 - Ajout d’un identifiant métier `businessTaskId` sur les bookings pour relier tâche parent et reliquats techniques sans supprimer les segments planning.

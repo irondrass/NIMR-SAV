@@ -718,7 +718,14 @@ async function restoreLocalFromSupabase() {
     setSupabaseStatus("Connectez-vous avant de restaurer.", "warn");
     return;
   }
-  const confirmed = await showConfirmModal("Restaurer les données depuis Supabase ? Une sauvegarde JSON locale sera téléchargée avant remplacement.<br><br>Êtes-vous sûr de vouloir continuer ?");
+  const restoreWarning = `Restaurer les données depuis Supabase ? Une sauvegarde JSON locale sera téléchargée avant remplacement.<br><br>` +
+    `<strong>Attention :</strong> Restaurer depuis le Cloud écrase et remplace les données locales de ce poste avec les données partagées de Supabase.<br><br>` +
+    `Êtes-vous sûr de vouloir continuer ?`;
+
+  const confirmed = (typeof showConfirmModal === "function")
+    ? await showConfirmModal(restoreWarning)
+    : confirm("Restaurer les données depuis Supabase ? Écrase les données locales.");
+
   if (!confirmed) return;
 
   try {

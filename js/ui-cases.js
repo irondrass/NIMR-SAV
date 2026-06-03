@@ -1,22 +1,85 @@
 function render() {
+  if (typeof ensureCurrentTabAllowed === "function") {
+    ensureCurrentTabAllowed();
+  }
+  if (typeof renderNavigationVisibility === "function") {
+    renderNavigationVisibility();
+  }
+
+  // Block unauthorized view content from rendering to prevent leaks in DOM
+  const tabs = ["dossiers", "today", "pilotage", "planning", "technician", "atelier"];
+  tabs.forEach((tab) => {
+    const view = document.getElementById(`view-${tab}`);
+    if (!view) return;
+    
+    let blockedMessage = view.querySelector(".unauthorized-blocked-message");
+    
+    if (typeof canAccessTab === "function" && !canAccessTab(tab)) {
+      Array.from(view.children).forEach((child) => {
+        if (child !== blockedMessage) {
+          child.style.display = "none";
+          child.setAttribute("hidden", "true");
+        }
+      });
+      
+      if (!blockedMessage) {
+        blockedMessage = document.createElement("div");
+        blockedMessage.className = "unauthorized-blocked-message empty-inline";
+        blockedMessage.style.cssText = "padding: 40px; text-align: center; margin: 20px auto; max-width: 600px; display: block;";
+        blockedMessage.innerHTML = `<strong>Accès non autorisé</strong><br>Vous n'avez pas les permissions pour consulter cet onglet.`;
+        view.appendChild(blockedMessage);
+      }
+      blockedMessage.style.display = "block";
+      blockedMessage.removeAttribute("hidden");
+    } else {
+      if (blockedMessage) {
+        blockedMessage.style.display = "none";
+        blockedMessage.setAttribute("hidden", "true");
+      }
+      Array.from(view.children).forEach((child) => {
+        if (child !== blockedMessage) {
+          if (child.style.display === "none") {
+            child.style.display = "";
+          }
+          child.removeAttribute("hidden");
+        }
+      });
+    }
+  });
+
+  // Call the sub-renderers only if their corresponding tabs are allowed
+  if (typeof canAccessTab !== "function" || canAccessTab("dossiers")) {
+    renderCases();
+    renderCaseDetail();
+  }
+  if (typeof canAccessTab !== "function" || canAccessTab("today")) {
+    renderTodayWorkshop();
+  }
+  if (typeof canAccessTab !== "function" || canAccessTab("pilotage")) {
+    renderSavKpis();
+    renderPilotageAlerts();
+    renderKanban();
+  }
+  if (typeof canAccessTab !== "function" || canAccessTab("planning")) {
+    renderPlanning();
+  }
+  if (typeof canAccessTab !== "function" || canAccessTab("technician")) {
+    renderTechnicianDashboard();
+  }
+  if (typeof canAccessTab !== "function" || canAccessTab("atelier")) {
+    renderResources();
+    renderHolidays();
+    renderResourceLeaves();
+    renderFastLaneSettings();
+    renderWorkHoursSettings();
+    if (typeof renderUsersAndRoles === "function") renderUsersAndRoles();
+  }
+
   renderSyncStatusStrip();
   renderMetrics();
-  renderSavKpis();
-  renderTodayWorkshop();
-  renderCases();
-  renderCaseDetail();
-  renderPilotageAlerts();
-  renderKanban();
-  renderPlanning();
-  renderTechnicianDashboard();
-  renderResources();
-  renderHolidays();
-  renderResourceLeaves();
-  renderFastLaneSettings();
-  renderWorkHoursSettings();
-  if (typeof renderUsersAndRoles === "function") renderUsersAndRoles();
   if (typeof renderCurrentSessionIndicator === "function") renderCurrentSessionIndicator();
 }
+
 
 function renderMetrics() {
   const active = state.cases.filter((item) => !item.flags.delivered).length;
@@ -1927,10 +1990,36 @@ function renderCaseDetail() {
 
 
 function setupCaseDetailTabs(root, item) {
-  const allowedTabs = $$(`[data-case-tab]`, root).map((button) => button.dataset.caseTab);
-  if (!allowedTabs.includes(activeCaseDetailTab)) activeCaseDetailTab = "claims";
+  const user = getCurrentUser();
+  const role = user?.role || "readonly";
+
+  let allowedSubTabs = ["claims", "photos", "planning", "atelier", "livraison"];
+  if (role === "qualite") {
+    allowedSubTabs = ["claims", "photos", "livraison"];
+  } else if (role === "technicien") {
+    allowedSubTabs = [];
+  }
+
+  // Filter case tab buttons visibility in DOM
+  $$(`[data-case-tab]`, root).forEach((button) => {
+    const tabId = button.dataset.caseTab;
+    const isAllowed = allowedSubTabs.includes(tabId);
+    button.hidden = !isAllowed;
+    button.style.display = isAllowed ? "" : "none";
+  });
+
+  const allowedTabs = $$(`[data-case-tab]`, root)
+    .filter((button) => allowedSubTabs.includes(button.dataset.caseTab))
+    .map((button) => button.dataset.caseTab);
+
+  if (!allowedTabs.includes(activeCaseDetailTab)) {
+    activeCaseDetailTab = allowedTabs[0] || "claims";
+  }
 
   const activateTab = (tab) => {
+    if (!allowedSubTabs.includes(tab)) {
+      tab = allowedSubTabs[0] || "claims";
+    }
     activeCaseDetailTab = tab;
     $$(`[data-case-tab]`, root).forEach((button) => {
       const active = button.dataset.caseTab === tab;
@@ -1951,7 +2040,10 @@ function setupCaseDetailTabs(root, item) {
   $(`[data-next-action-tab]`, root)?.addEventListener("click", () => {
     const action = getNextWorkflowAction(item);
     const nextAction = getCaseNextAction(item);
-    const targetTab = nextAction?.code ? getCaseNextActionTab(nextAction.code) : (action ? getTabForAction(action) : "planning");
+    let targetTab = nextAction?.code ? getCaseNextActionTab(nextAction.code) : (action ? getTabForAction(action) : "planning");
+    if (!allowedSubTabs.includes(targetTab)) {
+      targetTab = allowedSubTabs[0] || "claims";
+    }
     activateTab(targetTab);
     // Scroll vers l'élément d'action correspondant (même si l'onglet était déjà actif)
     if (action) {
@@ -1974,6 +2066,7 @@ function setupCaseDetailTabs(root, item) {
 
   activateTab(activeCaseDetailTab);
 }
+
 
 function getTabForAction(action) {
   if (action === "claim") return "claims";

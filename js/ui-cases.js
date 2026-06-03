@@ -2091,6 +2091,12 @@ function recordReleasedCapacityIfNeeded(item, freedMinutes) {
 function applyWorkflowAction(item, action) {
   const permissionGuard = guardWorkflowAction(action, item, true);
   if (!permissionGuard.ok) return { ok: false, message: permissionGuard.message };
+
+  const issues = getBusinessRuleIssues(item, action);
+  if (issues.length) {
+    return { ok: false, message: issues.join("\n") };
+  }
+
   const workflowClaimIds = new Set(getWorkflowClaims(item).map((claim) => claim.id));
   const claims = Array.isArray(item.claims) ? item.claims : [];
   const now = new Date().toISOString();
@@ -2105,7 +2111,7 @@ function applyWorkflowAction(item, action) {
     });
     refreshCaseApprovalFlagsFromClaims(item);
     recordFlagHistory(item, "expertApproved", item.flags.expertApproved);
-    return;
+    return { ok: true };
   }
 
   if (action === "clientApproved") {
@@ -2117,7 +2123,7 @@ function applyWorkflowAction(item, action) {
     });
     refreshCaseApprovalFlagsFromClaims(item);
     recordFlagHistory(item, "clientApproved", item.flags.clientApproved);
-    return;
+    return { ok: true };
   }
 
   if (action === "workCompleted") {
@@ -2144,6 +2150,7 @@ function applyWorkflowAction(item, action) {
   item.flags[action] = true;
   if (action === "workStarted") item.flags.workCompleted = false;
   recordFlagHistory(item, action, true);
+  return { ok: true };
 }
 
 
@@ -2727,7 +2734,21 @@ function getBusinessRuleIssues(item, action) {
   }
 
   if (action === "invoiced") {
+    if (!item.flags.qualityApproved) issues.push("Le contrôle qualité doit être validé.");
     if (!item.flags.delivered) issues.push("Livrer le véhicule avant de facturer le dossier.");
+    if (workflowClaims.some((claim) => !claim.clientApproved)) {
+      issues.push("La validation client/interne doit être enregistrée.");
+    }
+    if (workflowClaims.some((claim) => !isClientOnlyRepairClaim(claim) && !claim.expertApproved)) {
+      issues.push("L'accord expert sur les ordres assurance doit être validé.");
+    }
+    if (isCaseBlocked(item)) {
+      issues.push("Le dossier ne doit pas présenter de blocage actif.");
+    }
+    const technicianBookings = getCaseIncompleteTechnicianBookings(item);
+    if (technicianBookings.length > 0) {
+      issues.push("Toutes les tâches atelier et reliquats doivent être terminés.");
+    }
   }
 
   return issues;

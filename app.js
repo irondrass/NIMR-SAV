@@ -26,6 +26,9 @@ function initApp() {
     bindWorkHoursInputs();
     loadBundledVehicleDatabase();
     migrateLegacyPhotos();
+    if (typeof cleanupOrphanedStorage === "function") {
+      cleanupOrphanedStorage().catch(() => null);
+    }
     registerServiceWorker();
   } catch (error) {
     console.error("Initialisation impossible", error);

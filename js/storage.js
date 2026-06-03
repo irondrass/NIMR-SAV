@@ -378,6 +378,19 @@ function isEncryptedBackupPayload(payload) {
 async function exportBackup() {
   const permissionGuard = guardSensitiveAction("export.backup");
   if (!permissionGuard.ok) return;
+
+  const estimatedSize = estimateBackupSize();
+  if (estimatedSize > 15 * 1024 * 1024) {
+    const sizeMb = (estimatedSize / (1024 * 1024)).toFixed(1);
+    const confirmed = await showConfirmModal(
+      `La taille de la sauvegarde est estimée à ${sizeMb} Mo. L'exportation d'un fichier volumineux peut ralentir ou planter votre navigateur. Continuer ?`
+    );
+    if (!confirmed) {
+      showBackupStatus("Export annulé (fichier trop volumineux).");
+      return;
+    }
+  }
+
   const confirmed = confirm(
     "Exporter une sauvegarde JSON non chiffrée ?\n\n" +
       "Ce fichier contient des données clients, photos, téléphones, VIN, immatriculations et historique. " +
@@ -405,6 +418,19 @@ async function exportBackup() {
 async function exportEncryptedBackup() {
   const permissionGuard = guardSensitiveAction("export.backup");
   if (!permissionGuard.ok) return;
+
+  const estimatedSize = estimateBackupSize();
+  if (estimatedSize > 15 * 1024 * 1024) {
+    const sizeMb = (estimatedSize / (1024 * 1024)).toFixed(1);
+    const confirmed = await showConfirmModal(
+      `La taille de la sauvegarde est estimée à ${sizeMb} Mo. L'exportation d'un fichier volumineux peut ralentir ou planter votre navigateur. Continuer ?`
+    );
+    if (!confirmed) {
+      showBackupStatus("Export annulé (fichier trop volumineux).");
+      return;
+    }
+  }
+
   showBackupStatus("Préparation de la sauvegarde chiffrée...");
   const password = await getBackupPasswordFromUser(
     "Exporter une sauvegarde chiffrée",
@@ -514,9 +540,21 @@ async function importBackup(event) {
     state = normalizeState(importedState);
     activeCaseId = state.cases[0]?.id ?? null;
     generatedProposals = {};
+    
+    // Nettoyer à la fois les photos et les documents
     await clearPhotoStore();
+    if (typeof clearDocumentStore === "function") {
+      await clearDocumentStore();
+    }
+    
     const restoredPhotos = await restorePhotoRecords(photos);
     const restoredDocuments = typeof restoreDocumentRecords === "function" ? await restoreDocumentRecords(documents) : 0;
+    
+    // Déclencher le nettoyage des orphelins
+    if (typeof cleanupOrphanedStorage === "function") {
+      await cleanupOrphanedStorage().catch(() => null);
+    }
+
     addAuditLog("backup.imported", "Sauvegarde importée", `${importedState.cases.length} dossier(s), ${photos.length} photo(s), ${restoredDocuments} document(s).`, { actor: importActor });
     saveState();
     render();
@@ -831,3 +869,34 @@ function syncCaseInputs(root, item) {
     if (field in item) input.value = item[field] || "";
   });
 }
+
+function estimateBackupSize() {
+  let totalBytes = 0;
+  try {
+    totalBytes += JSON.stringify(state).length;
+  } catch (e) {
+    totalBytes += 1024 * 1024;
+  }
+  if (Array.isArray(state.cases)) {
+    state.cases.forEach((item) => {
+      if (Array.isArray(item.photos)) {
+        item.photos.forEach((photo) => {
+          totalBytes += Number(photo.size || 0);
+        });
+      }
+      if (item.expertEstimate?.sourceFile?.size) {
+        totalBytes += Number(item.expertEstimate.sourceFile.size);
+      }
+      if (Array.isArray(item.claims)) {
+        item.claims.forEach((claim) => {
+          if (claim.estimate?.sourceFile?.size) {
+            totalBytes += Number(claim.estimate.sourceFile.size);
+          }
+        });
+      }
+    });
+  }
+  return Math.round(totalBytes * 1.37);
+}
+
+window.estimateBackupSize = estimateBackupSize;

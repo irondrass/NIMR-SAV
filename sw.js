@@ -1,4 +1,4 @@
-const CACHE_NAME = "nimr-sav-v23.0.4-sync-conflict-resolution";
+const CACHE_NAME = "nimr-sav-v23.0.6-appointment-status-canonical-sync";
 const ASSETS = [
   "./",
   "./index.html",

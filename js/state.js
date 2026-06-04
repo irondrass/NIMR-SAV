@@ -20,7 +20,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v23.0.4";
+const APP_VERSION = "v23.0.6";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const WORKSHOP_NAME = "NIMR SAV";
@@ -1486,7 +1486,7 @@ function normalizeState(raw) {
   const currentUserId = resolveCurrentUserId(raw.currentUserId, users);
   linkResourcesToUsers(resources, users);
   return {
-    cases: Array.isArray(raw.cases) ? raw.cases.map(normalizeCase) : seed.cases,
+    cases: Array.isArray(raw.cases) ? raw.cases.map((c) => normalizeCase(c, raw.bookings)) : seed.cases,
     resources,
     users,
     currentUserId,
@@ -1728,16 +1728,52 @@ function normalizeResource(resource) {
   };
 }
 
-function normalizeCase(item) {
+function hasRealBooking(caseId, bookings) {
+  if (!caseId) return false;
+  let list = [];
+  if (Array.isArray(bookings) && bookings.length > 0) {
+    list = bookings;
+  } else {
+    try {
+      if (typeof state !== "undefined" && state && Array.isArray(state.bookings)) {
+        list = state.bookings;
+      }
+    } catch (e) {
+      // state is in Temporal Dead Zone during startup
+    }
+  }
+  return list.some((b) => {
+    if (b.caseId !== caseId) return false;
+    if (b.type === "leave" || b.type === "absence" || b.caseId === "__leave__") return false;
+    if (b.temporary === true) return false;
+    if (b.status === "cancelled" || b.status === "deleted") return false;
+    if (b.deletedAt && b.deletedAt !== "") return false;
+    return true;
+  });
+}
+
+function normalizeCase(item, bookings) {
   item = item && typeof item === "object" ? item : {};
+  const caseId = item.id || "";
   const normalizedPartsStatus = normalizePartsStatus(item.partsStatus);
   const normalizedBlockerReason = normalizeBlockerReason(item.blockerReason);
   const hasLegacyBlocker = BLOCKING_PARTS_STATUSES.has(normalizedPartsStatus) || Boolean(normalizedBlockerReason);
   const blockerSource = ["manual", "task"].includes(item.blockerSource)
     ? item.blockerSource
     : (hasLegacyBlocker ? "manual" : "");
+
+  let appointmentStatus = item.appointmentStatus;
+  const hasBooking = hasRealBooking(caseId, bookings);
+  if (hasBooking) {
+    appointmentStatus = "scheduled";
+  } else {
+    if (appointmentStatus === "scheduled" || !appointmentStatus) {
+      appointmentStatus = "none";
+    }
+  }
+
   return {
-    id: item.id || uid("case"),
+    id: caseId || uid("case"),
     clientName: item.clientName || "Client",
     phone: item.phone || "",
     ownerName: item.ownerName || item.companyName || item.owner || "",
@@ -1779,7 +1815,7 @@ function normalizeCase(item) {
       invoiced: false,
       ...(item.flags || {}),
     },
-    appointmentStatus: item.appointmentStatus || (item.appointment ? "scheduled" : "none"),
+    appointmentStatus,
     qualityChecklist: normalizeQualityChecklist(item.qualityChecklist),
     appointment: item.appointment || null,
     claims: normalizeRepairClaims(item.claims, item),
@@ -2133,10 +2169,18 @@ function makeSyncConflictValueHash(value) {
 }
 
 function buildSyncConflictKey(entry = {}) {
+  const field = entry.field || "";
+  if (field) {
+    const entityType = entry.entityType || entry.entity || "case";
+    const entityId = entry.entityId || entry.caseId || "";
+    const localHash = entry.localValueHash || makeSyncConflictValueHash(entry.localValue);
+    const remoteHash = entry.remoteValueHash || makeSyncConflictValueHash(entry.remoteValue);
+    const sorted = [localHash, remoteHash].sort();
+    return [entityType, entityId, field, sorted[0], sorted[1]].map((part) => String(part || "-")).join(":");
+  }
   if (entry.conflictKey) return String(entry.conflictKey);
   const entityType = entry.entityType || entry.entity || "case";
   const entityId = entry.entityId || entry.caseId || "";
-  const field = entry.field || "";
   const localHash = entry.localValueHash || makeSyncConflictValueHash(entry.localValue);
   const remoteHash = entry.remoteValueHash || makeSyncConflictValueHash(entry.remoteValue);
   return [entityType, entityId, field, localHash, remoteHash].map((part) => String(part || "-")).join(":");
@@ -2179,6 +2223,40 @@ function normalizeSyncConflictEntry(entry = {}) {
     }
   }
 
+  if (entry.field === "appointmentStatus" && status === "open") {
+    const caseId = entry.entityId || entry.caseId || "";
+    const caseItem = typeof state !== "undefined" && state.cases ? state.cases.find(c => c.id === caseId) : null;
+    const hasBooking = caseItem ? hasRealBooking(caseId, state.bookings) : false;
+    const canonicalVal = hasBooking ? "scheduled" : "none";
+    if (localNorm === canonicalVal || remoteNorm === canonicalVal) {
+      status = "resolved";
+      decision = "kept_canonical";
+      if (!resolvedAt) {
+        resolvedAt = new Date().toISOString();
+        resolvedBy = "Système (Sync)";
+      }
+    }
+  }
+
+  let label = entry.label;
+  if (!label) {
+    if (entry.field === "appointmentStatus") {
+      label = "Conflit statut RDV";
+    } else {
+      label = `Conflit ${entityType}`;
+    }
+  }
+
+  let details = entry.details || entry.reason;
+  if (!details) {
+    if (entry.field === "appointmentStatus") {
+      const caseNum = entry.caseNumber || "";
+      details = `Conflit sur le statut RDV pour le dossier ${caseNum || entityId || ""}.`;
+    } else {
+      details = "Conflit de synchronisation détecté.";
+    }
+  }
+
   const normalized = {
     id: entry.id || uid("sync-conflict"),
     at: entry.at || createdAt,
@@ -2205,8 +2283,8 @@ function normalizeSyncConflictEntry(entry = {}) {
     source: entry.source || "supabase",
     level: entry.level || "warn",
     actorName: entry.actorName || "Système",
-    label: entry.label || `Conflit ${entityType}`,
-    details: entry.details || entry.reason || "Conflit de synchronisation détecté.",
+    label,
+    details,
   };
   normalized.conflictKey = buildSyncConflictKey({ ...entry, ...normalized });
   return normalized;
@@ -2450,6 +2528,7 @@ if (typeof window !== "undefined") {
   window.getOpenSyncConflicts = getOpenSyncConflicts;
   window.resolveSyncConflict = resolveSyncConflict;
   window.resolveKeptConflictsAfterPush = resolveKeptConflictsAfterPush;
+  window.hasRealBooking = hasRealBooking;
 }
 
 function recordFlagHistory(item, flag, checked) {

@@ -1205,17 +1205,41 @@ function executeUserLogin(targetUser) {
   }
 }
 
+function finishUserUnlockAndActivateApp(targetUser) {
+  // 1. Retirer inert de l'app-shell EN PREMIER pour débloquer les clics
+  const appShell = document.querySelector(".app-shell");
+  if (appShell) {
+    appShell.removeAttribute("inert");
+    appShell.removeAttribute("aria-hidden");
+    appShell.style.pointerEvents = "";
+  }
+  // 2. Fermer overlay PIN
+  const pinOverlay = document.getElementById("user-pin-overlay");
+  if (pinOverlay) {
+    pinOverlay.hidden = true;
+    pinOverlay.style.display = "none";
+    pinOverlay.style.pointerEvents = "none";
+  }
+  // 3. Fermer overlay sélecteur (executeUserLogin appellera hideUserSelectorOverlay
+  //    mais on le fait ici aussi pour garantir l'état avant)
+  const selectorOverlay = document.getElementById("user-selector-overlay");
+  if (selectorOverlay) {
+    selectorOverlay.hidden = true;
+  }
+  // 4. Rendre le focus à l'application
+  if (document.body) document.body.focus();
+  // 5. Déclencher le login (qui appelle render() via hideUserSelectorOverlay + render)
+  executeUserLogin(targetUser);
+}
+
 async function promptUserPinAndLogin(targetUser) {
   if (!targetUser.pinRequired) {
-    executeUserLogin(targetUser);
+    finishUserUnlockAndActivateApp(targetUser);
     return;
   }
-  
-  const isUnlocked = sessionStorage.getItem("unlocked_user_" + targetUser.id) === "true";
-  if (isUnlocked) {
-    executeUserLogin(targetUser);
-    return;
-  }
+  // NOTE: Pas de bypass sessionStorage ici — le PIN est TOUJOURS demandé
+  // lors d'une sélection depuis le sélecteur. La clé sessionStorage sert
+  // uniquement au lock/unlock interne, pas à court-circuiter la saisie PIN.
   
   const overlay = document.getElementById("user-pin-overlay");
   const form = document.getElementById("user-pin-form");
@@ -1237,6 +1261,7 @@ async function promptUserPinAndLogin(targetUser) {
   overlay.hidden = false;
   document.querySelector(".app-shell")?.setAttribute("inert", "");
   
+  // Masquer le sélecteur pendant la saisie PIN
   const userSelectorOverlay = document.getElementById("user-selector-overlay");
   if (userSelectorOverlay) {
     userSelectorOverlay.hidden = true;
@@ -1257,6 +1282,11 @@ async function promptUserPinAndLogin(targetUser) {
     if (confirmInput) confirmInput.required = false;
   }
   
+  const cleanupPinListeners = () => {
+    form.removeEventListener("submit", onSubmit);
+    cancelBtn?.removeEventListener("click", onCancel);
+  };
+
   const onSubmit = async (e) => {
     e.preventDefault();
     status.textContent = "";
@@ -1282,15 +1312,13 @@ async function promptUserPinAndLogin(targetUser) {
         status.textContent = res.message || "Erreur de configuration du PIN.";
         return;
       }
-      sessionStorage.setItem("unlocked_user_" + targetUser.id, "true");
-      cleanup();
-      executeUserLogin(targetUser);
+      cleanupPinListeners();
+      finishUserUnlockAndActivateApp(targetUser);
     } else {
       const success = await verifyUserPin(targetUser.id, pin);
       if (success) {
-        sessionStorage.setItem("unlocked_user_" + targetUser.id, "true");
-        cleanup();
-        executeUserLogin(targetUser);
+        cleanupPinListeners();
+        finishUserUnlockAndActivateApp(targetUser);
       } else {
         status.textContent = "Code PIN incorrect.";
         pinInput.focus();
@@ -1300,18 +1328,8 @@ async function promptUserPinAndLogin(targetUser) {
   };
   
   const onCancel = () => {
-    cleanup();
+    cleanupPinListeners();
     showUserSelectorOverlay();
-  };
-  
-  const cleanup = () => {
-    overlay.hidden = true;
-    form.removeEventListener("submit", onSubmit);
-    cancelBtn?.removeEventListener("click", onCancel);
-    const userSelectorOverlay = document.getElementById("user-selector-overlay");
-    if (userSelectorOverlay && userSelectorOverlay.hidden) {
-      document.querySelector(".app-shell")?.removeAttribute("inert");
-    }
   };
   
   form.addEventListener("submit", onSubmit);

@@ -602,6 +602,8 @@ function renderUsersAndRoles() {
       form.elements.email.value = user.email || "";
       form.elements.resourceId.value = user.resourceId || "";
       form.elements.active.checked = user.active !== false;
+      if (form.elements.pinRequired) form.elements.pinRequired.checked = user.pinRequired === true;
+      if (form.elements.pin) form.elements.pin.value = "";
       
       const submitLabel = document.getElementById("user-submit-label");
       if (submitLabel) submitLabel.textContent = "Enregistrer les modifications";

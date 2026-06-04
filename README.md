@@ -1,4 +1,12 @@
-# v23.0.3 - Hotfix matrice rôles et purge DOM
+# v23.0.4 - Hotfix résolution conflits sync
+
+- Les conflits Supabase entrants reçoivent maintenant une clé stable et un statut `open/resolved/ignored`.
+- Un conflit déjà connu ne redéclenche plus en boucle le toast “Conflit de synchronisation détecté — données locales conservées”.
+- Le bandeau Cloud affiche les conflits ouverts à résoudre au lieu de laisser croire que tout est simplement synchronisé.
+- Le Journal d'activité propose une résolution simple : garder local, accepter cloud ou marquer résolu.
+- Cache PWA incrémenté en `nimr-sav-v23.0.4-sync-conflict-resolution`.
+
+## v23.0.3 - Hotfix matrice rôles et purge DOM
 
 - Renforce la matrice d'accès par rôle après changement d'utilisateur : les vues non autorisées ne gardent plus leurs anciens contenus dynamiques dans le DOM.
 - Cache PWA incrémenté en `nimr-sav-v23.0.3-role-access-dom-scrub` pour forcer le chargement du correctif sur les postes atelier.

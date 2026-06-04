@@ -1148,7 +1148,7 @@ async function verifyUserPin(userId, pin) {
   const hash = await hashUserPin(pin, user.pinSalt);
   const success = hash === user.pinHash;
   if (!success) {
-    addAuditLog("users.pin_failed", `Échec de validation PIN pour ${user.name}`, `Mauvais PIN saisi pour l'utilisateur ${user.name}`);
+    addAuditLog("users.pin_incorrect", `Échec de validation PIN pour ${user.name}`, `Mauvais PIN saisi pour l'utilisateur ${user.name}`);
   }
   return success;
 }

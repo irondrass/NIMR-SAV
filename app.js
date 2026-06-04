@@ -977,6 +977,9 @@ function checkUserSessionStartup() {
 }
 
 function showUserSelectorOverlay() {
+  if (typeof clearUnlockedUserSessions === "function") {
+    clearUnlockedUserSessions();
+  }
   const overlay = document.getElementById("user-selector-overlay");
   if (overlay) {
     overlay.hidden = false;
@@ -1107,12 +1110,41 @@ function resetInactivityTimer() {
   inactivityTimer = setTimeout(lockSessionDueToInactivity, INACTIVITY_LIMIT);
 }
 
+function clearUnlockedUserSessions(keepUserId = null) {
+  if (typeof sessionStorage === "undefined") return;
+  const user = keepUserId ? (typeof getUserById === "function" ? getUserById(keepUserId) : null) : null;
+  const keepSensitive = user && (typeof isSensitiveUser === "function" ? isSensitiveUser(user) : false);
+  
+  const keys = [];
+  if (sessionStorage.storage && typeof sessionStorage.storage.keys === "function") {
+    // Test environment mock storage
+    for (const key of sessionStorage.storage.keys()) {
+      keys.push(key);
+    }
+  } else {
+    // Real browser storage
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const key = sessionStorage.key(i);
+      if (key) keys.push(key);
+    }
+  }
+
+  const keysToRemove = [];
+  keys.forEach(key => {
+    if (key.startsWith("unlocked_user_")) {
+      const userId = key.substring("unlocked_user_".length);
+      if (!keepSensitive || userId !== keepUserId) {
+        keysToRemove.push(key);
+      }
+    }
+  });
+
+  keysToRemove.forEach(key => sessionStorage.removeItem(key));
+}
+
 function lockSessionDueToInactivity() {
   console.log("Locking session due to 15 minutes of inactivity.");
-  const currentUser = getCurrentUser();
-  if (currentUser) {
-    sessionStorage.removeItem("unlocked_user_" + currentUser.id);
-  }
+  clearUnlockedUserSessions();
   showUserSelectorOverlay();
   quietNotify("Session verrouillée pour inactivité.", "warn");
 }
@@ -1127,6 +1159,7 @@ function initInactivityMonitor() {
 }
 
 function executeUserLogin(targetUser) {
+  clearUnlockedUserSessions(targetUser.id);
   const previousUser = (state.users || []).find(user => user.id === state.currentUserId && user.active !== false);
   const previousActor = previousUser ? {
     userId: previousUser.id,

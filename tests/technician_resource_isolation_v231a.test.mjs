@@ -350,3 +350,49 @@ assert.equal(alaaOwnCompleteRes.ok, true);
 
 console.log('All 12 technician resource isolation tests passed successfully!');
 
+// 13. PIN Security - Session purges and validation tests
+console.log('Test 13: PIN Security - sessionStorage purges & incorrect logs...');
+
+// 1. Admin incorrect PIN audit log
+setupTestState();
+await app('setUserPin("u-admin", "1234")');
+await app('verifyUserPin("u-admin", "4321")');
+const pinIncorrectLog = app('state.auditLog.filter(log => log.type === "users.pin_incorrect")');
+assert.equal(pinIncorrectLog.length, 1);
+console.log('-> Audit log for users.pin_incorrect verified.');
+
+// 2. Admin connects with correct PIN
+const correctPinResult = await app('verifyUserPin("u-admin", "1234")');
+assert.equal(correctPinResult, true);
+app('sessionStorage.setItem("unlocked_user_u-admin", "true")');
+assert.equal(app('sessionStorage.getItem("unlocked_user_u-admin")'), "true");
+
+// 3. Admin switches to Karim (non-sensitive) -> unlocked_user_u-admin is purged
+app('executeUserLogin(state.users.find(u => u.id === "u-karim"))');
+assert.equal(app('sessionStorage.getItem("unlocked_user_u-admin")'), null);
+console.log('-> Switch to Karim purges admin session.');
+
+// 4. Karim switches to Admin -> PIN must be requested again
+const adminSession = app('sessionStorage.getItem("unlocked_user_u-admin")');
+assert.equal(adminSession, null);
+console.log('-> Karim cannot switch back to admin without PIN.');
+
+// 5. Inactivity timeout purges all sessions
+app('sessionStorage.setItem("unlocked_user_u-admin", "true")');
+app('sessionStorage.setItem("unlocked_user_u-chef", "true")');
+app('lockSessionDueToInactivity()');
+assert.equal(app('sessionStorage.getItem("unlocked_user_u-admin")'), null);
+assert.equal(app('sessionStorage.getItem("unlocked_user_u-chef")'), null);
+console.log('-> Inactivity timeout purges all sensitive sessions.');
+
+// 6. Logout / Selector show purges all sessions
+app('sessionStorage.setItem("unlocked_user_u-admin", "true")');
+app('sessionStorage.setItem("unlocked_user_u-chef", "true")');
+app('showUserSelectorOverlay()');
+assert.equal(app('sessionStorage.getItem("unlocked_user_u-admin")'), null);
+assert.equal(app('sessionStorage.getItem("unlocked_user_u-chef")'), null);
+console.log('-> User selector show / logout purges all sensitive sessions.');
+
+console.log('All tests passed successfully!');
+
+

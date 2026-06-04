@@ -1035,17 +1035,46 @@ function stableSyncStringify(value) {
   return JSON.stringify(value);
 }
 
+function makeSupabaseConflictHash(value) {
+  const text = stableSyncStringify(value ?? "");
+  let hash = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    hash = ((hash << 5) - hash + text.charCodeAt(index)) | 0;
+  }
+  return Math.abs(hash).toString(36);
+}
+
+function buildSupabaseConflictKey(context = {}) {
+  const entityType = context.entityType || context.entity || "case";
+  const entityId = context.entityId || context.caseId || "";
+  const field = context.field || "";
+  const localHash = context.localValueHash || makeSupabaseConflictHash(context.localValue);
+  const remoteHash = context.remoteValueHash || makeSupabaseConflictHash(context.remoteValue);
+  return [entityType, entityId, field, localHash, remoteHash].map((part) => String(part || "-")).join(":");
+}
+
 function pushCaseFieldConflict(stats, context) {
+  const now = new Date().toISOString();
+  const localValueHash = makeSupabaseConflictHash(context.localValue);
+  const remoteValueHash = makeSupabaseConflictHash(context.remoteValue);
   const entry = {
     id: uid("sync-conflict"),
-    at: new Date().toISOString(),
+    at: now,
+    createdAt: now,
     type: "case_field_conflict",
+    entityType: "case",
+    entity: "case",
+    entityId: context.caseId,
     caseId: context.caseId,
     caseNumber: context.caseNumber,
     field: context.field,
     localValue: context.localValue,
     remoteValue: context.remoteValue,
+    localValueHash,
+    remoteValueHash,
+    conflictKey: buildSupabaseConflictKey({ ...context, entityType: "case", entityId: context.caseId, localValueHash, remoteValueHash }),
     decision: context.decision,
+    status: "open",
     reason: context.reason,
     source: context.source || "supabase",
     level: "warn",
@@ -1292,8 +1321,30 @@ function createEmptySyncMergeStats() {
     bookingsMerged: 0,
     historyMerged: 0,
     conflicts: 0,
+    newConflicts: 0,
     protectedKept: 0,
     conflictEntries: [],
+  };
+}
+
+function mergeSyncConflictsForRemoteMerge(localConflicts = [], remoteConflicts = [], generatedConflicts = []) {
+  const existing = normalizeSyncConflicts([...(localConflicts || []), ...(remoteConflicts || [])]);
+  const existingByKey = new Map(existing.map((conflict) => [conflict.conflictKey || conflict.id, conflict]));
+  const newEntries = [];
+  normalizeSyncConflicts(generatedConflicts).forEach((conflict) => {
+    const key = conflict.conflictKey || conflict.id;
+    const previous = existingByKey.get(key);
+    if (previous) {
+      existingByKey.set(key, previous);
+      return;
+    }
+    conflict.lastNotifiedAt = conflict.lastNotifiedAt || new Date().toISOString();
+    newEntries.push(conflict);
+    existingByKey.set(key, conflict);
+  });
+  return {
+    conflicts: normalizeSyncConflicts(Array.from(existingByKey.values())),
+    newEntries,
   };
 }
 
@@ -1305,6 +1356,13 @@ function mergeRemoteStateIntoLocal(localState, remoteState, options = {}) {
   const localCaseById = new Map(normalizedLocal.cases.map((item) => [item.id, item]));
   const remoteCaseById = new Map(normalizedRemote.cases.map((item) => [item.id, item]));
   const mergedBookings = mergeBookingsById(normalizedLocal.bookings, normalizedRemote.bookings, stats, { localCaseById, remoteCaseById }).bookings;
+  const conflictMerge = mergeSyncConflictsForRemoteMerge(
+    normalizedLocal.syncConflicts,
+    normalizedRemote.syncConflicts,
+    stats.conflictEntries,
+  );
+  stats.conflicts = conflictMerge.newEntries.length;
+  stats.newConflicts = conflictMerge.newEntries.length;
   const syncLogEntry = {
     id: uid("sync-log"),
     at: new Date().toISOString(),
@@ -1328,7 +1386,7 @@ function mergeRemoteStateIntoLocal(localState, remoteState, options = {}) {
     resources: mergeArrayById(normalizedLocal.resources, normalizedRemote.resources, { fallbackPrefix: "resource", preferRemote: true }),
     users: mergeArrayById(normalizedLocal.users, normalizedRemote.users, { fallbackPrefix: "user", preferRemote: true }),
     auditLog: mergeArrayById(normalizedLocal.auditLog, normalizedRemote.auditLog, { fallbackPrefix: "audit", preferRemote: false }),
-    syncConflicts: [...stats.conflictEntries, ...(normalizedLocal.syncConflicts || []), ...(normalizedRemote.syncConflicts || [])],
+    syncConflicts: conflictMerge.conflicts,
     syncLog: [syncLogEntry, ...(normalizedLocal.syncLog || []), ...(normalizedRemote.syncLog || [])],
     settings: {
       ...(normalizedLocal.settings || {}),
@@ -1341,7 +1399,7 @@ function mergeRemoteStateIntoLocal(localState, remoteState, options = {}) {
     state: normalizeState(mergedRaw),
     stats,
     log: syncLogEntry,
-    conflicts: stats.conflictEntries,
+    conflicts: conflictMerge.newEntries,
   };
 }
 
@@ -1454,17 +1512,21 @@ async function applyRemoteSupabaseBackup(data, reason = "cloud") {
     }
     lastKnownCloudUpdatedAt = getTimestampMs(data.updated_at) || Date.now();
     if (typeof rememberKnownCloudUpdatedAt === "function") rememberKnownCloudUpdatedAt(lastKnownCloudUpdatedAt);
-    if (mergeResult.stats.conflicts > 0) {
+    const openConflicts = typeof getOpenSyncConflicts === "function" ? getOpenSyncConflicts().length : 0;
+    if (mergeResult.stats.newConflicts > 0) {
       if (typeof rememberLocalUserChangeAt === "function") rememberLocalUserChangeAt(new Date());
-    } else if (typeof clearLocalUserChangeAt === "function") {
+    } else if (!openConflicts && typeof clearLocalUserChangeAt === "function") {
       clearLocalUserChangeAt();
     }
     saveState({ skipCloud: true });
     render();
-    if (mergeResult.stats.conflicts > 0) {
+    if (mergeResult.stats.newConflicts > 0) {
       setSupabaseStatus("Conflit de synchronisation détecté.", "warn");
-      setSupabaseDetails(`Données locales protégées conservées : ${mergeResult.stats.conflicts} conflit(s), ${mergeResult.stats.protectedKept} élément(s) protégé(s).`);
+      setSupabaseDetails(`Données locales protégées conservées : ${mergeResult.stats.newConflicts} nouveau(x) conflit(s), ${mergeResult.stats.protectedKept} élément(s) protégé(s).`);
       notifyUser("Conflit de synchronisation détecté — données locales conservées.", "warn");
+    } else if (openConflicts) {
+      setSupabaseStatus("Synchronisé avec conflit à résoudre.", "warn");
+      setSupabaseDetails(`${openConflicts} conflit(s) de synchronisation déjà signalé(s) restent à traiter. Aucune nouvelle alerte répétée.`);
     } else {
       setSupabaseStatus("Synchronisation atelier à jour.", "ok");
       setSupabaseDetails(`Dernière mise à jour reçue (${reason}) : ${new Date(lastKnownCloudUpdatedAt).toLocaleTimeString()} · ${mergeResult.stats.casesMerged} dossier(s), ${mergeResult.stats.bookingsMerged} tâche(s) fusionné(s).`);

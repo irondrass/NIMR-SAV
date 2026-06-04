@@ -988,6 +988,48 @@ select:focus {
   background: var(--soft);
 }
 
+.sync-conflict-panel {
+  margin: 0 0 16px;
+  padding: 12px;
+  border: 1px solid #f7c66b;
+  border-radius: var(--radius-sm);
+  background: #fff8e7;
+}
+
+.sync-conflict-list {
+  display: grid;
+  gap: 10px;
+}
+
+.sync-conflict-card {
+  display: grid;
+  gap: 7px;
+  padding: 10px;
+  border: 1px solid rgba(124, 74, 11, 0.22);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.sync-conflict-values {
+  display: grid;
+  gap: 4px;
+}
+
+.sync-conflict-values code {
+  white-space: normal;
+  word-break: break-word;
+  color: #56320a;
+  background: #fff4d6;
+  border-radius: 6px;
+  padding: 4px 6px;
+}
+
+.sync-conflict-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .tag.next-action-tag {
   white-space: normal;
 }

@@ -981,15 +981,27 @@ function shouldKeepLocalEntity(localEntity, remoteEntity) {
 
 function pushSyncConflict(stats, conflict) {
   const entityType = conflict.entityType || conflict.entity || "case";
+  let label = conflict.label;
+  if (!label) {
+    label = conflict.field === "appointmentStatus" ? "Conflit statut RDV" : `Conflit ${entityType}`;
+  }
+  let details = conflict.details || conflict.reason;
+  if (!details) {
+    if (conflict.field === "appointmentStatus") {
+      details = `Conflit sur le statut RDV pour le dossier ${conflict.caseNumber || conflict.caseId || ""}.`;
+    } else {
+      details = "Données locales protégées conservées.";
+    }
+  }
   const entry = {
     id: uid("sync-conflict"),
     at: new Date().toISOString(),
     resolution: "kept_local",
     decision: "kept_local",
     status: "open",
-    label: conflict.label || `Conflit ${entityType}`,
-    details: conflict.details || conflict.reason || "Données locales protégées conservées.",
     ...conflict,
+    label,
+    details,
   };
   stats.conflictEntries.push(entry);
   stats.conflicts += 1;
@@ -1061,6 +1073,10 @@ function buildSupabaseConflictKey(context = {}) {
   const field = context.field || "";
   const localHash = context.localValueHash || makeSupabaseConflictHash(context.localValue);
   const remoteHash = context.remoteValueHash || makeSupabaseConflictHash(context.remoteValue);
+  if (field) {
+    const sorted = [localHash, remoteHash].sort();
+    return [entityType, entityId, field, sorted[0], sorted[1]].map((part) => String(part || "-")).join(":");
+  }
   return [entityType, entityId, field, localHash, remoteHash].map((part) => String(part || "-")).join(":");
 }
 
@@ -1068,6 +1084,21 @@ function pushCaseFieldConflict(stats, context) {
   const now = new Date().toISOString();
   const localValueHash = makeSupabaseConflictHash(context.localValue);
   const remoteValueHash = makeSupabaseConflictHash(context.remoteValue);
+  
+  let label = context.label;
+  if (!label) {
+    label = context.field === "appointmentStatus" ? "Conflit statut RDV" : "Conflit dossier";
+  }
+  
+  let details = context.details || context.reason;
+  if (!details) {
+    if (context.field === "appointmentStatus") {
+      details = `Conflit sur le statut RDV pour le dossier ${context.caseNumber || context.caseId || ""}.`;
+    } else {
+      details = "Valeurs locales et cloud différentes sur champ critique.";
+    }
+  }
+
   const entry = {
     id: uid("sync-conflict"),
     at: now,
@@ -1085,20 +1116,74 @@ function pushCaseFieldConflict(stats, context) {
     remoteValueHash,
     conflictKey: buildSupabaseConflictKey({ ...context, entityType: "case", entityId: context.caseId, localValueHash, remoteValueHash }),
     decision: context.decision,
-    status: "open",
+    status: context.status || "open",
     reason: context.reason,
     source: context.source || "supabase",
     level: "warn",
     actorName: "Système",
-    label: context.label || "Conflit dossier",
-    details: context.details || context.reason || "Valeurs locales et cloud différentes sur champ critique."
+    label,
+    details
   };
   stats.conflictEntries.push(entry);
-  stats.conflicts += 1;
+  if (entry.status === "open") {
+    stats.conflicts += 1;
+  }
   return entry;
 }
 
-function mergeCriticalCaseField(localCase, remoteCase, field, stats) {
+function hasRealBooking(caseId, bookings) {
+  if (!caseId) return false;
+  let list = [];
+  if (Array.isArray(bookings) && bookings.length > 0) {
+    list = bookings;
+  } else {
+    try {
+      if (typeof state !== "undefined" && state && Array.isArray(state.bookings)) {
+        list = state.bookings;
+      }
+    } catch (e) {
+      // state is in Temporal Dead Zone during startup
+    }
+  }
+  return list.some((b) => {
+    if (b.caseId !== caseId) return false;
+    if (b.type === "leave" || b.type === "absence" || b.caseId === "__leave__") return false;
+    if (b.temporary === true) return false;
+    if (b.status === "cancelled" || b.status === "deleted") return false;
+    if (b.deletedAt && b.deletedAt !== "") return false;
+    return true;
+  });
+}
+
+function resolveCanonicalAppointmentStatus(localCase, remoteCase, localState, remoteState) {
+  const localVal = localCase?.appointmentStatus || "none";
+  const remoteVal = remoteCase?.appointmentStatus || "none";
+  
+  if (localVal === remoteVal) return null;
+  
+  const localHas = hasRealBooking(localCase?.id, localState?.bookings);
+  const remoteHas = hasRealBooking(remoteCase?.id, remoteState?.bookings);
+  const hasPlanning = localHas || remoteHas;
+  
+  if (hasPlanning) {
+    return "scheduled";
+  }
+  
+  // If neither has planning:
+  if ((localVal === "scheduled" && remoteVal === "none") || (localVal === "none" && remoteVal === "scheduled")) {
+    return "none";
+  }
+  if ((localVal === "scheduled" && remoteVal === "no_show") || (localVal === "no_show" && remoteVal === "scheduled")) {
+    return "no_show";
+  }
+  if ((localVal === "scheduled" && remoteVal === "reschedule_pending") || (localVal === "reschedule_pending" && remoteVal === "scheduled")) {
+    return "reschedule_pending";
+  }
+  
+  return null;
+}
+
+function mergeCriticalCaseField(localCase, remoteCase, field, stats, localState = {}, remoteState = {}) {
   const localVal = localCase[field];
   const remoteVal = remoteCase[field];
   const localIsEmpty = isEmptySyncValue(localVal);
@@ -1122,6 +1207,25 @@ function mergeCriticalCaseField(localCase, remoteCase, field, stats) {
   const remoteNorm = normalizeSyncComparableValue(remoteVal);
   
   if (localNorm === remoteNorm) return localVal;
+
+  if (field === "appointmentStatus") {
+    const canonicalValue = resolveCanonicalAppointmentStatus(localCase, remoteCase, localState, remoteState);
+    if (canonicalValue !== null) {
+      pushCaseFieldConflict(stats, {
+        caseId: localCase.id,
+        caseNumber: localCase.orNavNumber || localCase.id,
+        field,
+        localValue: localVal,
+        remoteValue: remoteVal,
+        decision: "kept_canonical",
+        status: "resolved",
+        reason: "Auto-résolution du statut RDV basé sur les données de planning réelles.",
+        label: "Conflit statut RDV",
+        details: `Auto-résolution : valeur '${canonicalValue}' choisie pour le dossier ${localCase.orNavNumber || localCase.id} car le planning réel ${hasRealBooking(localCase.id, localState?.bookings) || hasRealBooking(remoteCase.id, remoteState?.bookings) ? "existe" : "n'existe pas"}.`
+      });
+      return canonicalValue;
+    }
+  }
 
   if (isProtectedCase(localCase)) {
     pushCaseFieldConflict(stats, {
@@ -1148,7 +1252,7 @@ function mergeCriticalCaseField(localCase, remoteCase, field, stats) {
   return localVal;
 }
 
-function mergeCaseEntity(localCase, remoteCase, stats) {
+function mergeCaseEntity(localCase, remoteCase, stats, localState = {}, remoteState = {}) {
   if (!localCase) {
     stats.casesMerged += 1;
     return remoteCase;
@@ -1174,7 +1278,7 @@ function mergeCaseEntity(localCase, remoteCase, stats) {
   };
   
   CRITICAL_CASE_SYNC_FIELDS.forEach(field => {
-    merged[field] = mergeCriticalCaseField(localCase, remoteCase, field, stats);
+    merged[field] = mergeCriticalCaseField(localCase, remoteCase, field, stats, localState, remoteState);
   });
 
   if (isProtectedCase(localCase) && !isProtectedCase(remoteCase)) {
@@ -1185,18 +1289,18 @@ function mergeCaseEntity(localCase, remoteCase, stats) {
   return merged;
 }
 
-function mergeCasesById(localCases = [], remoteCases = [], stats = createEmptySyncMergeStats()) {
+function mergeCasesById(localCases = [], remoteCases = [], stats = createEmptySyncMergeStats(), localState = {}, remoteState = {}) {
   const remoteById = new Map((Array.isArray(remoteCases) ? remoteCases : []).filter((item) => item?.id).map((item) => [item.id, item]));
   const usedRemoteIds = new Set();
   const cases = [];
   (Array.isArray(localCases) ? localCases : []).forEach((localCase) => {
     const remoteCase = localCase?.id ? remoteById.get(localCase.id) : null;
     if (remoteCase) usedRemoteIds.add(localCase.id);
-    cases.push(mergeCaseEntity(localCase, remoteCase, stats));
+    cases.push(mergeCaseEntity(localCase, remoteCase, stats, localState, remoteState));
   });
   (Array.isArray(remoteCases) ? remoteCases : []).forEach((remoteCase) => {
     if (!remoteCase?.id || usedRemoteIds.has(remoteCase.id)) return;
-    cases.push(mergeCaseEntity(null, remoteCase, stats));
+    cases.push(mergeCaseEntity(null, remoteCase, stats, localState, remoteState));
   });
   return { cases, stats };
 }
@@ -1365,7 +1469,7 @@ function mergeRemoteStateIntoLocal(localState, remoteState, options = {}) {
   const stats = createEmptySyncMergeStats();
   const normalizedLocal = normalizeState(localState);
   const normalizedRemote = normalizeState(remoteState);
-  const mergedCases = mergeCasesById(normalizedLocal.cases, normalizedRemote.cases, stats).cases;
+  const mergedCases = mergeCasesById(normalizedLocal.cases, normalizedRemote.cases, stats, normalizedLocal, normalizedRemote).cases;
   const localCaseById = new Map(normalizedLocal.cases.map((item) => [item.id, item]));
   const remoteCaseById = new Map(normalizedRemote.cases.map((item) => [item.id, item]));
   const mergedBookings = mergeBookingsById(normalizedLocal.bookings, normalizedRemote.bookings, stats, { localCaseById, remoteCaseById }).bookings;
@@ -1453,15 +1557,27 @@ async function createSyncSafetySnapshot(reason = "remote-sync", metadata = {}) {
 
 function recordSyncConflict(conflict) {
   const entityType = conflict.entityType || conflict.entity || "case";
+  let label = conflict.label;
+  if (!label) {
+    label = conflict.field === "appointmentStatus" ? "Conflit statut RDV" : `Conflit ${entityType}`;
+  }
+  let details = conflict.details || conflict.reason;
+  if (!details) {
+    if (conflict.field === "appointmentStatus") {
+      details = `Conflit sur le statut RDV pour le dossier ${conflict.caseNumber || conflict.caseId || ""}.`;
+    } else {
+      details = "Conflit mémorisé.";
+    }
+  }
   const entry = {
     id: uid("sync-conflict"),
     at: new Date().toISOString(),
     resolution: "kept_local",
     decision: "kept_local",
     status: "open",
-    label: conflict.label || `Conflit ${entityType}`,
-    details: conflict.details || conflict.reason || "Conflit mémorisé.",
     ...conflict,
+    label,
+    details,
   };
   state.syncConflicts = normalizeSyncConflicts([entry, ...(state.syncConflicts || [])]);
   return entry;

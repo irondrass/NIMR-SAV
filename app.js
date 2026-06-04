@@ -768,7 +768,7 @@ function registerServiceWorker() {
   });
   window.addEventListener("load", async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=23.0.3", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=23.0.4", { updateViaCache: "none" });
       registration.update?.();
       if (registration.waiting) showUpdateAvailable(registration);
       window.setInterval(() => registration.update?.(), 10 * 60 * 1000);
@@ -791,6 +791,7 @@ function renderActivityLog() {
   const searchInput = $("#activity-log-search");
   const tableBody = $("#activity-log-table-body");
   const exportBtn = $("#activity-log-export");
+  const conflictPanel = $("#sync-conflict-panel");
 
   function computeFilteredActivityRows() {
     const filter = filterSelect.value;
@@ -833,6 +834,59 @@ function renderActivityLog() {
     }).join("") || `<tr><td colspan="5" style="padding:16px; text-align:center;" class="muted">Aucun événement trouvé</td></tr>`;
   }
 
+  function formatConflictValue(value) {
+    if (value === null || value === undefined || value === "") return "(vide)";
+    if (typeof value === "object") return JSON.stringify(value);
+    return String(value);
+  }
+
+  function renderConflictPanel() {
+    if (!conflictPanel) return;
+    const conflicts = typeof getOpenSyncConflicts === "function" ? getOpenSyncConflicts() : [];
+    conflictPanel.hidden = conflicts.length === 0;
+    if (!conflicts.length) {
+      conflictPanel.innerHTML = "";
+      return;
+    }
+    conflictPanel.innerHTML = `
+      <div class="panel-heading compact">
+        <div>
+          <h2>Conflits de synchronisation à résoudre</h2>
+          <p>${conflicts.length} conflit(s) détecté(s). Les données locales restent conservées jusqu'à décision.</p>
+        </div>
+      </div>
+      <div class="sync-conflict-list">
+        ${conflicts.map((conflict) => `
+          <article class="sync-conflict-card">
+            <strong>${escapeHtml(conflict.caseNumber || conflict.caseId || conflict.entityId || "Dossier inconnu")}</strong>
+            <span>Champ : ${escapeHtml(conflict.field || "inconnu")}</span>
+            <small>${escapeHtml(conflict.reason || "Valeurs locales et cloud différentes.")}</small>
+            <div class="sync-conflict-values">
+              <code>Local : ${escapeHtml(formatConflictValue(conflict.localValue))}</code>
+              <code>Cloud : ${escapeHtml(formatConflictValue(conflict.remoteValue))}</code>
+            </div>
+            <div class="sync-conflict-actions">
+              <button type="button" class="tiny-button" data-sync-conflict-action="keep_local" data-sync-conflict-id="${escapeAttr(conflict.id)}">Garder local</button>
+              <button type="button" class="tiny-button" data-sync-conflict-action="accept_cloud" data-sync-conflict-id="${escapeAttr(conflict.id)}">Accepter cloud</button>
+              <button type="button" class="tiny-button ghost" data-sync-conflict-action="mark_resolved" data-sync-conflict-id="${escapeAttr(conflict.id)}">Marquer résolu</button>
+            </div>
+          </article>
+        `).join("")}
+      </div>
+    `;
+    conflictPanel.querySelectorAll("[data-sync-conflict-action]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const result = typeof resolveSyncConflict === "function"
+          ? resolveSyncConflict(button.dataset.syncConflictId, button.dataset.syncConflictAction)
+          : { ok: false, message: "Résolution indisponible." };
+        notifyUser(result.ok ? "Conflit de synchronisation mis à jour." : result.message, result.ok ? "success" : "warn");
+        renderConflictPanel();
+        updateTable();
+        if (typeof renderSyncStatusStrip === "function") renderSyncStatusStrip();
+      });
+    });
+  }
+
   // Bind only once
   if (!panel.dataset.bound) {
     filterSelect.addEventListener("change", updateTable);
@@ -859,6 +913,7 @@ function renderActivityLog() {
     panel.dataset.bound = "true";
   }
 
+  renderConflictPanel();
   updateTable();
 }
 

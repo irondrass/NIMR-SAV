@@ -20,7 +20,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v23.0.3";
+const APP_VERSION = "v23.0.4";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const WORKSHOP_NAME = "NIMR SAV";
@@ -2115,21 +2115,139 @@ function normalizeSyncLog(entries) {
     .slice(0, 300);
 }
 
+function stableConflictStringify(value) {
+  if (Array.isArray(value)) return `[${value.map(stableConflictStringify).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableConflictStringify(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function makeSyncConflictValueHash(value) {
+  const text = stableConflictStringify(value ?? "");
+  let hash = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    hash = ((hash << 5) - hash + text.charCodeAt(index)) | 0;
+  }
+  return Math.abs(hash).toString(36);
+}
+
+function buildSyncConflictKey(entry = {}) {
+  if (entry.conflictKey) return String(entry.conflictKey);
+  const entityType = entry.entityType || entry.entity || "case";
+  const entityId = entry.entityId || entry.caseId || "";
+  const field = entry.field || "";
+  const localHash = entry.localValueHash || makeSyncConflictValueHash(entry.localValue);
+  const remoteHash = entry.remoteValueHash || makeSyncConflictValueHash(entry.remoteValue);
+  return [entityType, entityId, field, localHash, remoteHash].map((part) => String(part || "-")).join(":");
+}
+
+function normalizeSyncConflictEntry(entry = {}) {
+  const createdAt = entry.createdAt || entry.at || new Date().toISOString();
+  const entityType = entry.entityType || entry.entity || (entry.caseId ? "case" : "unknown");
+  const entityId = entry.entityId || entry.caseId || "";
+  const localValueHash = entry.localValueHash || makeSyncConflictValueHash(entry.localValue);
+  const remoteValueHash = entry.remoteValueHash || makeSyncConflictValueHash(entry.remoteValue);
+  const normalized = {
+    id: entry.id || uid("sync-conflict"),
+    at: entry.at || createdAt,
+    createdAt,
+    type: entry.type || "sync_conflict",
+    entityType,
+    entity: entry.entity || entityType,
+    entityId,
+    caseId: entry.caseId || (entityType === "case" ? entityId : ""),
+    caseNumber: entry.caseNumber || "",
+    field: entry.field || "",
+    reason: entry.reason || "",
+    localValue: entry.localValue ?? "",
+    remoteValue: entry.remoteValue ?? "",
+    localValueHash,
+    remoteValueHash,
+    conflictKey: "",
+    decision: entry.decision || entry.resolution || "kept_local",
+    status: ["open", "resolved", "ignored"].includes(entry.status) ? entry.status : "open",
+    resolution: entry.resolution || entry.decision || "kept_local",
+    resolvedAt: entry.resolvedAt || "",
+    resolvedBy: entry.resolvedBy || "",
+    lastNotifiedAt: entry.lastNotifiedAt || "",
+    source: entry.source || "supabase",
+    level: entry.level || "warn",
+    actorName: entry.actorName || "Système",
+  };
+  normalized.conflictKey = buildSyncConflictKey({ ...entry, ...normalized });
+  return normalized;
+}
+
+function choosePreferredSyncConflict(current, incoming) {
+  if (!current) return incoming;
+  const currentResolved = current.status === "resolved" || current.status === "ignored";
+  const incomingResolved = incoming.status === "resolved" || incoming.status === "ignored";
+  if (currentResolved && !incomingResolved) return current;
+  if (incomingResolved && !currentResolved) return incoming;
+  if (current.lastNotifiedAt && !incoming.lastNotifiedAt) return current;
+  if (incoming.lastNotifiedAt && !current.lastNotifiedAt) return incoming;
+  return new Date(incoming.at || incoming.createdAt) > new Date(current.at || current.createdAt) ? incoming : current;
+}
+
 function normalizeSyncConflicts(entries) {
-  return (Array.isArray(entries) ? entries : [])
-    .map((entry) => ({
-      id: entry.id || uid("sync-conflict"),
-      at: entry.at || new Date().toISOString(),
-      entity: entry.entity || "unknown",
-      entityId: entry.entityId || "",
-      field: entry.field || "",
-      reason: entry.reason || "",
-      localValue: entry.localValue ?? "",
-      remoteValue: entry.remoteValue ?? "",
-      resolution: entry.resolution || "kept_local",
-    }))
-    .sort((a, b) => new Date(b.at) - new Date(a.at))
+  const byKey = new Map();
+  (Array.isArray(entries) ? entries : []).forEach((entry) => {
+    const normalized = normalizeSyncConflictEntry(entry);
+    const key = normalized.conflictKey || normalized.id;
+    byKey.set(key, choosePreferredSyncConflict(byKey.get(key), normalized));
+  });
+  return Array.from(byKey.values())
+    .sort((a, b) => new Date(b.at || b.createdAt) - new Date(a.at || a.createdAt))
     .slice(0, 500);
+}
+
+function getOpenSyncConflicts() {
+  return normalizeSyncConflicts(state.syncConflicts).filter((conflict) => conflict.status === "open");
+}
+
+function applySyncConflictRemoteValue(item, field, value) {
+  if (!item || !field) return false;
+  if (field.startsWith("flags.")) {
+    const flag = field.slice("flags.".length);
+    item.flags = item.flags && typeof item.flags === "object" ? item.flags : {};
+    item.flags[flag] = value;
+    return true;
+  }
+  item[field] = value;
+  return true;
+}
+
+function resolveSyncConflict(conflictIdOrKey, action = "mark_resolved") {
+  const conflicts = normalizeSyncConflicts(state.syncConflicts);
+  const index = conflicts.findIndex((conflict) => conflict.id === conflictIdOrKey || conflict.conflictKey === conflictIdOrKey);
+  if (index < 0) return { ok: false, message: "Conflit introuvable." };
+  const conflict = { ...conflicts[index] };
+  const actor = typeof getCurrentActor === "function" ? getCurrentActor() : { userName: "Atelier", userRole: "", resourceId: "" };
+  if (action === "accept_cloud") {
+    const item = state.cases.find((caseItem) => caseItem.id === (conflict.caseId || conflict.entityId));
+    if (!item || !conflict.field) return { ok: false, message: "Dossier ou champ introuvable." };
+    applySyncConflictRemoteValue(item, conflict.field, conflict.remoteValue);
+    addHistoryWithActor(item, "sync.conflict.accept_cloud", "Conflit synchronisation résolu", `Champ ${conflict.field} : valeur cloud acceptée.`, actor);
+    conflict.decision = "accepted_cloud";
+    conflict.resolution = "accepted_cloud";
+  } else if (action === "keep_local") {
+    const item = state.cases.find((caseItem) => caseItem.id === (conflict.caseId || conflict.entityId));
+    if (item) addHistoryWithActor(item, "sync.conflict.keep_local", "Conflit synchronisation résolu", `Champ ${conflict.field || "inconnu"} : valeur locale conservée.`, actor);
+    conflict.decision = "kept_local";
+    conflict.resolution = "kept_local";
+  } else {
+    conflict.decision = "marked_resolved";
+    conflict.resolution = "manual";
+  }
+  conflict.status = "resolved";
+  conflict.resolvedAt = new Date().toISOString();
+  conflict.resolvedBy = actor.userName || actor.name || "Atelier";
+  conflicts[index] = conflict;
+  state.syncConflicts = normalizeSyncConflicts(conflicts);
+  if (action === "keep_local" && typeof rememberLocalUserChangeAt === "function") rememberLocalUserChangeAt(new Date());
+  saveState({ flushCloud: action !== "mark_resolved" });
+  return { ok: true, conflict };
 }
 
 function makeHistoryEntry(type, label, at = new Date().toISOString(), details = "", actor = null) {
@@ -2244,17 +2362,23 @@ function getAggregatedActivityLog(limit = 200, roleOrUser = null) {
 
   // 4. Sync Conflicts
   if (Array.isArray(state.syncConflicts)) {
-    state.syncConflicts.forEach(conf => {
+    const syncConflicts = typeof normalizeSyncConflicts === "function"
+      ? normalizeSyncConflicts(state.syncConflicts)
+      : state.syncConflicts;
+    syncConflicts.forEach(conf => {
+      const conflictStatus = conf.status || "open";
+      const statusLabel = conflictStatus === "open" ? "à résoudre" : conflictStatus === "ignored" ? "ignoré" : "résolu";
+      const decisionLabel = conf.decision === "needs_review" ? "revue nécessaire" : (conf.decision || conf.resolution || "local conservé");
       events.push({
         id: conf.id,
-        at: conf.at,
+        at: conf.at || conf.createdAt,
         type: "sync.conflict",
         label: "Conflit de synchronisation",
         details: conf.type === "case_field_conflict"
-          ? `Conflit dossier ${conf.caseNumber || conf.caseId} — champ ${conf.field} : valeur locale conservée, ${conf.decision === "needs_review" ? "revue nécessaire" : conf.decision}.`
-          : `Conflit résolu (${conf.resolution || "manuel"}) pour ${conf.entity || conf.type || "entité inconnue"}`,
+          ? `Conflit dossier ${conf.caseNumber || conf.caseId || conf.entityId || "dossier inconnu"} — champ ${conf.field || "inconnu"} : ${statusLabel}, ${decisionLabel}.`
+          : `Conflit ${statusLabel} (${conf.resolution || "manuel"}) pour ${conf.entity || conf.type || "entité inconnue"}`,
         category: "sync",
-        level: "warn",
+        level: conflictStatus === "open" ? "warn" : "info",
         actorName: "Système"
       });
     });
@@ -2265,7 +2389,11 @@ function getAggregatedActivityLog(limit = 200, roleOrUser = null) {
   return events.slice(0, limit);
 }
 
-window.getAggregatedActivityLog = getAggregatedActivityLog;
+if (typeof window !== "undefined") {
+  window.getAggregatedActivityLog = getAggregatedActivityLog;
+  window.getOpenSyncConflicts = getOpenSyncConflicts;
+  window.resolveSyncConflict = resolveSyncConflict;
+}
 
 function recordFlagHistory(item, flag, checked) {
   const event = FLAG_HISTORY_EVENTS[flag]?.[checked ? "on" : "off"];

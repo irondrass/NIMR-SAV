@@ -425,17 +425,20 @@ function renderSyncStatusStrip() {
   const pending = localChangeAt && (!cloudAt || localChangeAt > cloudAt) ? 1 : 0;
   const configured = typeof isSupabaseConfigured === "function" ? isSupabaseConfigured() : false;
   const online = typeof navigator === "undefined" ? true : navigator.onLine !== false;
+  const openConflicts = typeof getOpenSyncConflicts === "function" ? getOpenSyncConflicts().length : 0;
   const cloudLabel = !configured
     ? "Non configuré"
     : cloudError
       ? "Erreur"
-      : pending
-        ? "En attente"
-        : cloudOk
-          ? "Synchronisé"
-          : "Prêt";
+      : openConflicts
+        ? `Conflit à résoudre (${openConflicts})`
+        : pending
+          ? "En attente"
+          : cloudOk
+            ? "Synchronisé"
+            : "Prêt";
   setSyncItem(target, "local", localOk ? "OK" : "À vérifier", localOk ? "ok" : "warn");
-  setSyncItem(target, "cloud", cloudLabel, !configured ? "muted" : cloudError ? "error" : pending ? "warn" : "ok");
+  setSyncItem(target, "cloud", cloudLabel, !configured ? "muted" : cloudError ? "error" : openConflicts || pending ? "warn" : "ok");
   setSyncItem(target, "connection", online ? "En ligne" : "Hors ligne", online ? "ok" : "warn");
   setSyncItem(target, "last-save", formatSyncDate(health.lastSavedAt || safeReadStorageMeta()?.savedAt || ""));
   setSyncItem(target, "pending", String(pending), pending ? "warn" : "ok");

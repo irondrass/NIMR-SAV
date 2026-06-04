@@ -82,12 +82,12 @@ const appSource = fs.readFileSync('app.js', 'utf8');
 const swSource = fs.readFileSync('sw.js', 'utf8');
 const versionSource = fs.readFileSync('js/version.js', 'utf8');
 const indexSource = fs.readFileSync('index.html', 'utf8');
-assert.match(stateSource, /APP_VERSION\s*=\s*"v23\.0"/, 'APP_VERSION doit être en v23.0');
-assert.match(appSource, /serviceWorker\.register\("sw\.js\?v=23\.0"/, 'le service worker doit pointer vers sw.js?v=23.0');
-assert.match(swSource, /nimr-sav-v23\.0-production/, 'le cache PWA doit être en v23.0');
-assert.match(versionSource, /NIMR_BUILD\s*=\s*"v23\.0"/, 'js/version.js doit exposer v23.0');
-[...indexSource.matchAll(/\?v=(\d+\.\d+)/g)].forEach((match) => {
-  assert.equal(match[1], '23.0', `référence index.html incohérente: ?v=${match[1]}`);
+assert.match(stateSource, /APP_VERSION\s*=\s*"v23\.0\.3"/, 'APP_VERSION doit être en v23.0.3');
+assert.match(appSource, /serviceWorker\.register\("sw\.js\?v=23\.0\.3"/, 'le service worker doit pointer vers sw.js?v=23.0.3');
+assert.match(swSource, /nimr-sav-v23\.0\.3-role-access-dom-scrub/, 'le cache PWA doit être en v23.0.3');
+assert.match(versionSource, /NIMR_BUILD\s*=\s*"v23\.0\.3"/, 'js/version.js doit exposer v23.0.3');
+[...indexSource.matchAll(/\?v=(\d+\.\d+(?:\.\d+)?)/g)].forEach((match) => {
+  assert.equal(match[1], '23.0.3', `référence index.html incohérente: ?v=${match[1]}`);
 });
 
 function setupSafetyState(extraBookings = '') {

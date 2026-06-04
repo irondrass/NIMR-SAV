@@ -15,6 +15,7 @@ function render() {
     let blockedMessage = view.querySelector(".unauthorized-blocked-message");
     
     if (typeof canAccessTab === "function" && !canAccessTab(tab)) {
+      scrubUnauthorizedViewContent(tab, view);
       Array.from(view.children).forEach((child) => {
         if (child !== blockedMessage) {
           child.style.display = "none";
@@ -78,6 +79,31 @@ function render() {
   renderSyncStatusStrip();
   renderMetrics();
   if (typeof renderCurrentSessionIndicator === "function") renderCurrentSessionIndicator();
+}
+
+const UNAUTHORIZED_VIEW_SCRUB_SELECTORS = {
+  dossiers: ["#case-list", "#case-detail"],
+  today: ["#today-workshop-board"],
+  pilotage: ["#kanban-board"],
+  planning: ["#gantt", "#mobile-planning-list"],
+  technician: ["#technician-task-list", "#technician-manager-board"],
+  atelier: [
+    "#resource-list",
+    "#users-list",
+    "#work-hours-list",
+    "#holiday-list",
+    "#resource-leave-list",
+    "#activity-log-table-body",
+  ],
+};
+
+function scrubUnauthorizedViewContent(tab, view) {
+  const selectors = UNAUTHORIZED_VIEW_SCRUB_SELECTORS[tab] || [];
+  selectors.forEach((selector) => {
+    const target = view.querySelector(selector);
+    if (!target) return;
+    target.innerHTML = "";
+  });
 }
 
 

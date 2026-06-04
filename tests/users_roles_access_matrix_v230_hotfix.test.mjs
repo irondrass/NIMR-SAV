@@ -324,6 +324,10 @@ setupUserState('u-admin', 'admin');
 app('activeTab = "planning"');
 app('render()');
 assert.equal(app('activeTab'), 'planning');
+app(`
+  document.getElementById("case-detail").innerHTML = "<strong>SECRET_DOSSIER_ADMIN</strong>";
+  document.getElementById("gantt").innerHTML = "<strong>SECRET_PLANNING_ADMIN</strong>";
+`);
 
 // Switch active user using select change handler
 app(`
@@ -338,6 +342,8 @@ app('setCurrentUser("u-tech")');
 resetSpies();
 app('render()');
 assert.equal(app('activeTab'), 'technician', 'La bascule utilisateur vers technicien doit forcer la redirection immédiate');
+assert.equal(app('document.getElementById("case-detail").innerHTML.includes("SECRET_DOSSIER_ADMIN")'), false, 'Le détail dossier ancien ne doit pas rester dans le DOM pour un technicien');
+assert.equal(app('document.getElementById("gantt").innerHTML.includes("SECRET_PLANNING_ADMIN")'), false, 'Le planning ancien ne doit pas rester dans le DOM pour un technicien');
 
 // 12. Non-regression check on legacy roles tests
 console.log('Test 12: Non-regression checks...');

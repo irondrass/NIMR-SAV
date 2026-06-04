@@ -1,3 +1,8 @@
+# v23.0.3 - Hotfix matrice rôles et purge DOM
+
+- Renforce la matrice d'accès par rôle après changement d'utilisateur : les vues non autorisées ne gardent plus leurs anciens contenus dynamiques dans le DOM.
+- Cache PWA incrémenté en `nimr-sav-v23.0.3-role-access-dom-scrub` pour forcer le chargement du correctif sur les postes atelier.
+
 # v23.0 - Production Finale
 
 Version finale validée pour déploiement atelier après la RC `v22.35-RC1`.

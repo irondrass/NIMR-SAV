@@ -136,7 +136,7 @@ const { mergeRemoteStateIntoLocal, mergeCaseEntity, getAggregatedActivityLog, ge
 // Test 8: syncConflict visible via getAggregatedActivityLog()
 {
   setState({ syncConflicts: [
-    { id: "c1", at: new Date().toISOString(), type: "case_field_conflict", caseNumber: "OR-99", field: "phone", decision: "needs_review" }
+    { id: "c1", at: new Date().toISOString(), type: "case_field_conflict", caseNumber: "OR-99", field: "phone", decision: "needs_review", localValue: "111", remoteValue: "222" }
   ] });
   const logs = getAggregatedActivityLog(10, "admin");
   const phoneLog = logs.find(l => l.details.includes("champ phone") && l.details.includes("revue nécessaire"));

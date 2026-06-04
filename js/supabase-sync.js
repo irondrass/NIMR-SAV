@@ -692,6 +692,9 @@ async function saveLocalToSupabase() {
 
     setSupabaseStatus("Remplissage des tables métier...");
     const stats = await syncBusinessTablesToSupabase(payload, user);
+    if (typeof resolveKeptConflictsAfterPush === "function") {
+      resolveKeptConflictsAfterPush();
+    }
     addAuditLog("backup.cloud.exported", "Sauvegarde Supabase envoyée", `${payload.state.cases.length} dossier(s), ${payload.photos.length} photo(s).`);
     saveState({ skipCloud: true, skipSnapshot: true });
 
@@ -842,6 +845,9 @@ async function autoBackupToSupabase(reason = "autosave", options = {}) {
       updated_at: updatedAt,
     });
     const stats = await syncBusinessTablesToSupabase(payload, user);
+    if (typeof resolveKeptConflictsAfterPush === "function") {
+      resolveKeptConflictsAfterPush();
+    }
     lastAutoSupabaseBackupAt = Date.now();
     lastKnownCloudUpdatedAt = new Date(updatedAt).getTime();
     if (typeof rememberKnownCloudUpdatedAt === "function") rememberKnownCloudUpdatedAt(updatedAt);
@@ -974,10 +980,15 @@ function shouldKeepLocalEntity(localEntity, remoteEntity) {
 }
 
 function pushSyncConflict(stats, conflict) {
+  const entityType = conflict.entityType || conflict.entity || "case";
   const entry = {
     id: uid("sync-conflict"),
     at: new Date().toISOString(),
     resolution: "kept_local",
+    decision: "kept_local",
+    status: "open",
+    label: conflict.label || `Conflit ${entityType}`,
+    details: conflict.details || conflict.reason || "Données locales protégées conservées.",
     ...conflict,
   };
   stats.conflictEntries.push(entry);
@@ -1078,7 +1089,9 @@ function pushCaseFieldConflict(stats, context) {
     reason: context.reason,
     source: context.source || "supabase",
     level: "warn",
-    actorName: "Système"
+    actorName: "Système",
+    label: context.label || "Conflit dossier",
+    details: context.details || context.reason || "Valeurs locales et cloud différentes sur champ critique."
   };
   stats.conflictEntries.push(entry);
   stats.conflicts += 1;
@@ -1439,10 +1452,15 @@ async function createSyncSafetySnapshot(reason = "remote-sync", metadata = {}) {
 }
 
 function recordSyncConflict(conflict) {
+  const entityType = conflict.entityType || conflict.entity || "case";
   const entry = {
     id: uid("sync-conflict"),
     at: new Date().toISOString(),
     resolution: "kept_local",
+    decision: "kept_local",
+    status: "open",
+    label: conflict.label || `Conflit ${entityType}`,
+    details: conflict.details || conflict.reason || "Conflit mémorisé.",
     ...conflict,
   };
   state.syncConflicts = normalizeSyncConflicts([entry, ...(state.syncConflicts || [])]);

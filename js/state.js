@@ -2142,12 +2142,43 @@ function buildSyncConflictKey(entry = {}) {
   return [entityType, entityId, field, localHash, remoteHash].map((part) => String(part || "-")).join(":");
 }
 
+function isEmptySyncValue(value) {
+  if (value === null || value === undefined || value === "") return true;
+  if (Array.isArray(value) && value.length === 0) return true;
+  if (typeof value === "object" && Object.keys(value).length === 0) return true;
+  return false;
+}
+
+function normalizeSyncComparableValue(value) {
+  if (isEmptySyncValue(value)) return null;
+  if (typeof value === "object") return stableConflictStringify(value);
+  return String(value).trim();
+}
+
 function normalizeSyncConflictEntry(entry = {}) {
   const createdAt = entry.createdAt || entry.at || new Date().toISOString();
   const entityType = entry.entityType || entry.entity || (entry.caseId ? "case" : "unknown");
   const entityId = entry.entityId || entry.caseId || "";
   const localValueHash = entry.localValueHash || makeSyncConflictValueHash(entry.localValue);
   const remoteValueHash = entry.remoteValueHash || makeSyncConflictValueHash(entry.remoteValue);
+
+  const localNorm = normalizeSyncComparableValue(entry.localValue);
+  const remoteNorm = normalizeSyncComparableValue(entry.remoteValue);
+
+  let status = ["open", "resolved", "ignored"].includes(entry.status) ? entry.status : "open";
+  let decision = entry.decision || entry.resolution || "kept_local";
+  let resolvedAt = entry.resolvedAt || "";
+  let resolvedBy = entry.resolvedBy || "";
+
+  if (localNorm === remoteNorm) {
+    status = "resolved";
+    decision = "auto_resolved";
+    if (!resolvedAt) {
+      resolvedAt = new Date().toISOString();
+      resolvedBy = "Système (Sync)";
+    }
+  }
+
   const normalized = {
     id: entry.id || uid("sync-conflict"),
     at: entry.at || createdAt,
@@ -2165,19 +2196,44 @@ function normalizeSyncConflictEntry(entry = {}) {
     localValueHash,
     remoteValueHash,
     conflictKey: "",
-    decision: entry.decision || entry.resolution || "kept_local",
-    status: ["open", "resolved", "ignored"].includes(entry.status) ? entry.status : "open",
-    resolution: entry.resolution || entry.decision || "kept_local",
-    resolvedAt: entry.resolvedAt || "",
-    resolvedBy: entry.resolvedBy || "",
+    decision,
+    status,
+    resolution: entry.resolution || decision,
+    resolvedAt,
+    resolvedBy,
     lastNotifiedAt: entry.lastNotifiedAt || "",
     source: entry.source || "supabase",
     level: entry.level || "warn",
     actorName: entry.actorName || "Système",
+    label: entry.label || `Conflit ${entityType}`,
+    details: entry.details || entry.reason || "Conflit de synchronisation détecté.",
   };
   normalized.conflictKey = buildSyncConflictKey({ ...entry, ...normalized });
   return normalized;
 }
+
+function resolveKeptConflictsAfterPush() {
+  if (!state.syncConflicts) return;
+  let changed = false;
+  const now = new Date().toISOString();
+  
+  const updated = state.syncConflicts.map((entry) => {
+    const normalized = normalizeSyncConflictEntry(entry);
+    if (normalized.status === "open" && ["kept_local", "kept_remote"].includes(normalized.decision)) {
+      normalized.status = "resolved";
+      normalized.resolvedAt = normalized.resolvedAt || now;
+      normalized.resolvedBy = normalized.resolvedBy || "Système (Sync)";
+      changed = true;
+    }
+    return normalized;
+  });
+  
+  if (changed) {
+    state.syncConflicts = normalizeSyncConflicts(updated);
+    saveState({ skipCloud: true });
+  }
+}
+
 
 function choosePreferredSyncConflict(current, incoming) {
   if (!current) return incoming;
@@ -2393,6 +2449,7 @@ if (typeof window !== "undefined") {
   window.getAggregatedActivityLog = getAggregatedActivityLog;
   window.getOpenSyncConflicts = getOpenSyncConflicts;
   window.resolveSyncConflict = resolveSyncConflict;
+  window.resolveKeptConflictsAfterPush = resolveKeptConflictsAfterPush;
 }
 
 function recordFlagHistory(item, flag, checked) {

@@ -529,6 +529,15 @@ function renderTechnicianDashboard() {
     state.ui.technicianId = currentUser?.role === "technicien" ? (currentUser.resourceId || "") : (technicians[0]?.id || "");
   }
 
+  const labelParent = select.closest("label");
+  if (currentUser?.role === "technicien") {
+    if (labelParent) labelParent.style.display = "none";
+    else select.style.display = "none";
+  } else {
+    if (labelParent) labelParent.style.display = "";
+    else select.style.display = "";
+  }
+
   select.innerHTML = technicians.length
     ? technicians.map((resource) => `<option value="${escapeAttr(resource.id)}">${escapeHtml(resource.name)} · ${escapeHtml(ROLE_LABELS[resource.role] || resource.role)}</option>`).join("")
     : `<option value="">${currentUser?.role === "technicien" ? "Aucune ressource liée" : "Aucun technicien actif"}</option>`;
@@ -603,13 +612,27 @@ function renderTechnicianTaskCard(row) {
     .join(", ");
   const orderRef = getPrintOrderReference(item);
   const note = row.latestNote ? `<p class="technician-note">Note : ${escapeHtml(row.latestNote)}</p>` : "";
+
+  const currentUser = typeof getCurrentUser === "function" ? getCurrentUser() : null;
+  const isTech = (currentUser?.role === "technicien");
+  const titleHtml = isTech
+    ? `
+      <div class="technician-task-title no-click">
+        <strong>${escapeHtml(item.vehicle || "Véhicule non renseigné")}</strong>
+        <span>${escapeHtml(item.plate || item.vin || "Sans immatriculation")} · ${escapeHtml(item.clientName || "Client")}</span>
+      </div>
+    `
+    : `
+      <button type="button" class="technician-task-title" data-tech-open-case="${escapeAttr(item.id)}">
+        <strong>${escapeHtml(item.vehicle || "Véhicule non renseigné")}</strong>
+        <span>${escapeHtml(item.plate || item.vin || "Sans immatriculation")} · ${escapeHtml(item.clientName || "Client")}</span>
+      </button>
+    `;
+
   return `
     <article class="technician-task-card task-status-${escapeAttr(row.status)} ${row.late ? "is-late" : ""}">
       <div class="technician-task-main">
-        <button type="button" class="technician-task-title" data-tech-open-case="${escapeAttr(item.id)}">
-          <strong>${escapeHtml(item.vehicle || "Véhicule non renseigné")}</strong>
-          <span>${escapeHtml(item.plate || item.vin || "Sans immatriculation")} · ${escapeHtml(item.clientName || "Client")}</span>
-        </button>
+        ${titleHtml}
         <div class="technician-task-tags">
           <span class="tag">${escapeHtml(row.statusLabel)}</span>
           ${row.late ? '<span class="tag danger">Retard</span>' : ''}

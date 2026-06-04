@@ -422,6 +422,7 @@
                 <select name="role" required>
                   <option value="admin">Administrateur</option>
                   <option value="chef_atelier">Chef atelier</option>
+                  <option value="directeur_sav">Directeur SAV</option>
                   <option value="reception">Réception</option>
                   <option value="technicien">Technicien</option>
                   <option value="qualite">Qualité</option>
@@ -435,6 +436,19 @@
                   <input type="checkbox" name="active" checked />
                   <span>Utilisateur actif</span>
                 </label>
+                <label class="check-card">
+                  <input type="checkbox" name="pinRequired" />
+                  <span>PIN obligatoire</span>
+                </label>
+                <div id="user-pin-edit-section" style="width: 100%; display: grid; gap: 8px; margin-top: 8px; padding: 12px; border: 1px dashed var(--border-color, #ccc); border-radius: var(--radius-medium, 8px);">
+                  <label style="margin: 0;">
+                    Définir / Modifier le code PIN
+                    <input name="pin" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="new-password" placeholder="4+ chiffres (laisser vide pour inchangé)" style="margin-top: 4px;" />
+                  </label>
+                  <button class="ghost-button" type="button" id="user-reset-pin-btn" style="width: fit-content; padding: 4px 12px; font-size: 0.85rem;">
+                    Réinitialiser le code PIN
+                  </button>
+                </div>
                 <div class="backup-actions wide">
                   <button class="primary-button" type="submit" id="user-submit-btn">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
@@ -724,7 +738,30 @@
         <button class="primary-button" type="submit">Déverrouiller</button>
         <p class="muted" id="local-lock-status"></p>
       </form>
+    <div class="local-lock-overlay" id="user-pin-overlay" hidden>
+      <form class="local-lock-dialog" id="user-pin-form" role="dialog" aria-modal="true" aria-labelledby="user-pin-title">
+        <div class="local-lock-logo">🔑</div>
+        <h2 id="user-pin-title">Validation du code PIN</h2>
+        <p id="user-pin-desc">Veuillez saisir votre code PIN pour accéder à ce profil.</p>
+        <label>
+          Code PIN
+          <input name="pin" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="current-password" required autofocus />
+        </label>
+        <div id="user-pin-setup-fields" hidden>
+          <label>
+            Confirmer le code PIN
+            <input name="pin_confirm" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="new-password" />
+          </label>
+        </div>
+        <div class="local-lock-actions">
+          <button class="primary-button" type="submit">Valider</button>
+          <button class="ghost-button" id="user-pin-cancel" type="button">Annuler</button>
+        </div>
+        <p class="muted danger-text" id="user-pin-status" style="color: var(--danger-color, #e05638); font-weight: bold; margin-top: 10px;"></p>
+      </form>
     </div>
+    
+
 
     <template id="case-detail-template">
       <div class="case-header">

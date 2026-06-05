@@ -153,12 +153,7 @@ vm.runInThisContext(utilsJs);
 vm.runInThisContext(stateJs);
 
 // Pour app.js, on retire l'appel direct initApp(); à la fin pour contrôler manuellement l'initialisation
-const appJsClean = appJs
-  .replace("initApp();", "/* initApp(); */")
-  .replace(
-    /function resetInactivityTimer\(\) \{\s*if \(inactivityTimer\) \{\s*clearTimeout\(inactivityTimer\);\s*\}\s*inactivityTimer = setTimeout\(lockSessionDueToInactivity, INACTIVITY_LIMIT\);\s*\}/,
-    "function resetInactivityTimer() {}"
-  );
+const appJsClean = appJs.replace("initApp();", "/* initApp(); */");
 vm.runInThisContext(appJsClean);
 
 // Re-override mock functions that might have been defined in scripts

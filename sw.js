@@ -1,4 +1,4 @@
-const CACHE_NAME = "nimr-sav-v23.1a.1-pin-overlay-click-fix";
+const CACHE_NAME = "nimr-sav-v23.0.6-appointment-status-canonical-sync";
 const ASSETS = [
   "./",
   "./index.html",

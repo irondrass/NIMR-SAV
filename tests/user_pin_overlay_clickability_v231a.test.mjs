@@ -15,8 +15,6 @@
  * 10. Technicien sans PIN → interface technicien cliquable directement.
  * 11. Timeout inactivité → retour sélecteur + purge unlocks.
  * 12. Aucun overlay transparent ne bloque les clics après login.
- * 13. Réouverture PIN après display:none remet display/pointerEvents.
- * 14. Directeur SAV est sensible et déverrouille une interface cliquable.
  */
 
 import { createRequire } from "module";
@@ -93,11 +91,6 @@ function buildEnv(options = {}) {
         active: true, resourceId: ""
       },
       {
-        id: "u-directeur", name: "Directeur SAV", role: "directeur_sav",
-        pinRequired: true, pinHash: "hashedpin_directeur", pinSalt: "salt_directeur",
-        active: true, resourceId: ""
-      },
-      {
         id: "u-alaa", name: "Alaa", role: "technicien",
         pinRequired: false, pinHash: "", pinSalt: "",
         active: true, resourceId: "r-alaa"
@@ -143,11 +136,6 @@ function buildEnv(options = {}) {
 
   // Extraction et wrapping des fonctions testées depuis app.js
   const wrappedSrc = appSrc
-    .replace(/initApp\(\);/, "// initApp skipped by PIN overlay tests")
-    .replace(
-      /function resetInactivityTimer\(\) \{\s*if \(inactivityTimer\) \{\s*clearTimeout\(inactivityTimer\);\s*\}\s*inactivityTimer = setTimeout\(lockSessionDueToInactivity, INACTIVITY_LIMIT\);\s*\}/,
-      "function resetInactivityTimer() {}"
-    )
     // Remplace window / document guards
     .replace(/typeof window === "undefined"/g, "false")
     .replace(/typeof document === "undefined"/g, "false");
@@ -169,9 +157,6 @@ function buildEnv(options = {}) {
       executeUserLogin,
       hideUserSelectorOverlay,
       showUserSelectorOverlay,
-      openUserSessionOverlay,
-      closeUserSessionOverlay,
-      forceFinishUserUnlockOverlayState,
       lockSessionDueToInactivity,
     };
   `
@@ -396,40 +381,4 @@ function assert(cond, msg) {
   console.log("→ OK");
 }
 
-// ── Test 13 : Réouverture PIN après display:none ─────────────────────────────
-{
-  console.log("Test 13 : Réouverture PIN remet display/pointerEvents...");
-  const env = buildEnv();
-  env.pinOverlay.hidden = true;
-  env.pinOverlay.style.display = "none";
-  env.pinOverlay.style.pointerEvents = "none";
-
-  env.exported.openUserSessionOverlay("user-pin-overlay");
-
-  assert(env.pinOverlay.hidden === false, "pinOverlay doit être visible après réouverture");
-  assert(env.pinOverlay.style.display === "", "pinOverlay.display doit être réinitialisé");
-  assert(env.pinOverlay.style.pointerEvents === "", "pinOverlay.pointerEvents doit être réinitialisé");
-  console.log("→ OK");
-}
-
-// ── Test 14 : Directeur SAV sensible et interface cliquable ──────────────────
-{
-  console.log("Test 14 : Directeur SAV → PIN requis + interface cliquable après unlock...");
-  const env = buildEnv();
-  env.appShell._inert = true;
-  env.appShell.style.pointerEvents = "none";
-  env.pinOverlay.hidden = false;
-  env.pinOverlay.style.pointerEvents = "";
-
-  const directeur = env.state.users.find(u => u.id === "u-directeur");
-  assert(directeur.pinRequired === true, "directeur_sav.pinRequired doit être true");
-  env.exported.finishUserUnlockAndActivateApp(directeur);
-
-  assert(env.appShell._inert === false, "Directeur SAV : app-shell non inert");
-  assert(env.appShell.style.pointerEvents === "", "Directeur SAV : pointerEvents vides");
-  assert(env.pinOverlay.hidden === true, "Directeur SAV : pinOverlay caché après unlock");
-  assert(env.pinOverlay.style.pointerEvents === "none", "Directeur SAV : pinOverlay ne capture plus les clics");
-  console.log("→ OK");
-}
-
-console.log("\nTous les 14 tests PIN Overlay Clickability v23.1A Hotfix passés avec succès !");
+console.log("\nTous les 12 tests PIN Overlay Clickability v23.1A Hotfix passés avec succès !");

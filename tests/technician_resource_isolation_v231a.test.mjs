@@ -23,10 +23,6 @@ const source = scriptFiles
   .map((file) => fs.readFileSync(file, 'utf8'))
   .join('\n')
   .replace(/initApp\(\);/, '// initApp skipped by tests')
-  .replace(
-    /function resetInactivityTimer\(\) \{\s*if \(inactivityTimer\) \{\s*clearTimeout\(inactivityTimer\);\s*\}\s*inactivityTimer = setTimeout\(lockSessionDueToInactivity, INACTIVITY_LIMIT\);\s*\}/,
-    'function resetInactivityTimer() {}'
-  )
   .replace(/if \("serviceWorker" in navigator[\s\S]*$/u, '');
 
 // Mock elements and DOM

@@ -270,7 +270,6 @@ const ROLE_LABELS = {
 const USER_ROLES = {
   admin: "Administrateur",
   chef_atelier: "Chef atelier",
-  directeur_sav: "Directeur SAV",
   reception: "Réception",
   technicien: "Technicien",
   qualite: "Qualité",
@@ -298,10 +297,6 @@ const ROLE_PERMISSIONS = {
     "export.backup",
     "print.*",
   ],
-  directeur_sav: [
-    "audit.view",
-    "print.*",
-  ],
   reception: [
     "case.create",
     "case.edit",
@@ -313,7 +308,7 @@ const ROLE_PERMISSIONS = {
     "delivery.complete",
     "print.*",
   ],
-  technicien: ["task.start", "task.pause", "task.resume", "task.complete", "task.block", "task.edit", "print.task"],
+  technicien: ["task.start", "task.pause", "task.resume", "task.complete", "task.block", "print.task"],
   qualite: ["quality.validate", "quality.reject", "print.quality"],
   readonly: ["print.*"],
 };
@@ -1050,10 +1045,6 @@ function normalizeUser(user = {}, resources = []) {
   const role = normalizeUserRole(user.role || user.userRole || (user.isAdmin ? "admin" : ""));
   const createdAt = user.createdAt || new Date().toISOString();
   const resourceId = String(user.resourceId || user.technicianId || "").trim();
-  
-  const roleIsSensitive = (role === "admin" || role === "chef_atelier" || role === "directeur_sav");
-  const pinRequired = user.pinRequired !== undefined ? Boolean(user.pinRequired) : roleIsSensitive;
-
   return {
     id: String(user.id || user.userId || uid("user")).trim(),
     authUserId: String(user.authUserId || user.auth_user_id || user.supabaseUserId || "").trim(),
@@ -1064,93 +1055,7 @@ function normalizeUser(user = {}, resources = []) {
     active: user.active !== false,
     createdAt,
     updatedAt: user.updatedAt || createdAt,
-    pinRequired,
-    pinHash: user.pinHash || "",
-    pinSalt: user.pinSalt || "",
   };
-}
-
-function generateSalt() {
-  const arr = new Uint8Array(16);
-  globalThis.crypto.getRandomValues(arr);
-  let hex = "";
-  for (let i = 0; i < arr.length; i++) {
-    hex += arr[i].toString(16).padStart(2, "0");
-  }
-  return hex;
-}
-
-async function hashUserPin(pin, salt) {
-  if (!pin) return "";
-  const encoder = new TextEncoder();
-  const pinBuffer = encoder.encode(pin);
-  const saltBuffer = encoder.encode(salt);
-  const baseKey = await globalThis.crypto.subtle.importKey(
-    "raw",
-    pinBuffer,
-    "PBKDF2",
-    false,
-    ["deriveBits", "deriveKey"]
-  );
-  const derivedBits = await globalThis.crypto.subtle.deriveBits(
-    {
-      name: "PBKDF2",
-      salt: saltBuffer,
-      iterations: 1000,
-      hash: "SHA-256"
-    },
-    baseKey,
-    256
-  );
-  const byteArray = new Uint8Array(derivedBits);
-  let hexString = "";
-  for (let i = 0; i < byteArray.length; i++) {
-    hexString += byteArray[i].toString(16).padStart(2, "0");
-  }
-  return hexString;
-}
-
-function isSensitiveUser(user) {
-  const resolved = resolvePermissionUser(user);
-  if (!resolved) return false;
-  const role = resolved.role || "";
-  return role === "admin" || role === "chef_atelier" || role === "directeur_sav";
-}
-
-async function setUserPin(userId, pin) {
-  const user = getUserById(userId);
-  if (!user) return { ok: false, message: "Utilisateur introuvable." };
-  
-  if (pin) {
-    const salt = generateSalt();
-    const hash = await hashUserPin(pin, salt);
-    user.pinHash = hash;
-    user.pinSalt = salt;
-    user.pinRequired = true;
-  } else {
-    user.pinHash = "";
-    user.pinSalt = "";
-    user.pinRequired = isSensitiveUser(user);
-  }
-  
-  user.updatedAt = new Date().toISOString();
-  addAuditLog("users.pin_changed", `Code PIN mis à jour pour ${user.name}`, "", { actor: getCurrentActor() });
-  saveState();
-  return { ok: true, user };
-}
-
-async function verifyUserPin(userId, pin) {
-  const user = getUserById(userId);
-  if (!user) return false;
-  if (!user.pinHash) {
-    return !pin;
-  }
-  const hash = await hashUserPin(pin, user.pinSalt);
-  const success = hash === user.pinHash;
-  if (!success) {
-    addAuditLog("users.pin_incorrect", `Échec de validation PIN pour ${user.name}`, `Mauvais PIN saisi pour l'utilisateur ${user.name}`);
-  }
-  return success;
 }
 
 function normalizeUsers(users, resources = []) {
@@ -1254,7 +1159,6 @@ function createUserLocal(userData, actor = null) {
     resourceId: userData.resourceId || "",
     active: userData.active !== false,
     authUserId: userData.authUserId || "",
-    pinRequired: userData.pinRequired !== undefined ? Boolean(userData.pinRequired) : undefined,
   }, state.resources || []);
   
   if (!state.users) state.users = [];
@@ -1292,9 +1196,6 @@ function updateUserLocal(userId, userData, actor = null) {
   user.email = String(userData.email || "").trim().toLowerCase();
   user.resourceId = String(userData.resourceId || "").trim();
   user.active = newActive;
-  if (userData.pinRequired !== undefined) {
-    user.pinRequired = Boolean(userData.pinRequired);
-  }
   user.updatedAt = new Date().toISOString();
   if (userData.authUserId !== undefined) {
     user.authUserId = String(userData.authUserId || "").trim();
@@ -1549,13 +1450,7 @@ function canActOnTechnicianTask(user, booking) {
   if (!resolvedUser || !booking || resolvedUser.active === false) return false;
   if (isWorkshopManager(resolvedUser)) return true;
   if (resolvedUser.role !== "technicien" || !resolvedUser.resourceId) return false;
-  
-  const resourceIds = Array.isArray(booking.resourceIds) ? booking.resourceIds : [];
-  const primaryId = booking.primaryResourceId || booking.resourceId;
-  const allIds = [...resourceIds];
-  if (primaryId) allIds.push(primaryId);
-  
-  return allIds.includes(resolvedUser.resourceId);
+  return (booking.resourceIds || []).includes(resolvedUser.resourceId);
 }
 
 function syncCurrentUserWithSupabaseAuth(authUser) {
@@ -2993,7 +2888,6 @@ function showInputPromptModal({
 const ROLE_TABS = {
   admin: ["dossiers", "today", "pilotage", "planning", "technician", "atelier"],
   chef_atelier: ["dossiers", "today", "pilotage", "planning", "technician", "atelier"],
-  directeur_sav: ["dossiers", "today", "pilotage", "planning"],
   reception: ["dossiers", "today", "pilotage"],
   technicien: ["technician"],
   qualite: ["dossiers", "today"],

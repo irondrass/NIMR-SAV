@@ -25,7 +25,6 @@ function initApp() {
     render();
     if (typeof initLocalSecurityGate === "function") initLocalSecurityGate();
     if (typeof checkUserSessionStartup === "function") checkUserSessionStartup();
-    if (typeof initInactivityMonitor === "function") initInactivityMonitor();
     bindWorkHoursInputs();
     loadBundledVehicleDatabase();
     migrateLegacyPhotos();
@@ -607,7 +606,7 @@ function bindWorkshopForms() {
     renderMetrics();
   });
 
-  $("#user-form")?.addEventListener("submit", async (event) => {
+  $("#user-form")?.addEventListener("submit", (event) => {
     event.preventDefault();
     const form = event.currentTarget;
     const data = new FormData(form);
@@ -617,26 +616,16 @@ function bindWorkshopForms() {
     const email = normalizeTextInputValue(data.get("email"));
     const resourceId = data.get("resourceId") || "";
     const active = form.elements.active.checked;
-    const pinRequired = form.elements.pinRequired ? form.elements.pinRequired.checked : undefined;
-    const pin = form.elements.pin ? form.elements.pin.value : "";
     
     let result;
     if (userId) {
-      result = updateUserLocal(userId, { name, role, email, resourceId, active, pinRequired });
+      result = updateUserLocal(userId, { name, role, email, resourceId, active });
     } else {
-      result = createUserLocal({ name, role, email, resourceId, active, pinRequired });
+      result = createUserLocal({ name, role, email, resourceId, active });
     }
     
     if (!result.ok) {
       return notifyUser(result.message, "error");
-    }
-    
-    const targetUserId = userId || result.user.id;
-    if (pin) {
-      const pinResult = await setUserPin(targetUserId, pin);
-      if (!pinResult.ok) {
-        return notifyUser(pinResult.message, "error");
-      }
     }
     
     saveState();
@@ -651,27 +640,6 @@ function bindWorkshopForms() {
     
     render();
     quietNotify(userId ? "Utilisateur mis à jour." : "Utilisateur créé.", "success");
-  });
-
-  $("#user-reset-pin-btn")?.addEventListener("click", async () => {
-    const form = document.getElementById("user-form");
-    const userId = form?.elements.userId.value;
-    if (!userId) {
-      notifyUser("Sélectionnez d'abord un utilisateur à modifier pour réinitialiser son PIN.", "error");
-      return;
-    }
-    const user = getUserById(userId);
-    if (!user) return;
-    if (confirm(`Réinitialiser le code PIN pour ${user.name} ?`)) {
-      const res = await setUserPin(userId, "");
-      if (res.ok) {
-        quietNotify("Code PIN réinitialisé.", "success");
-        if (form.elements.pin) form.elements.pin.value = "";
-        render();
-      } else {
-        notifyUser(res.message, "error");
-      }
-    }
   });
 
   $("#user-cancel-btn")?.addEventListener("click", () => {
@@ -977,9 +945,6 @@ function checkUserSessionStartup() {
 }
 
 function showUserSelectorOverlay() {
-  if (typeof clearUnlockedUserSessions === "function") {
-    clearUnlockedUserSessions();
-  }
   const overlay = document.getElementById("user-selector-overlay");
   if (overlay) {
     overlay.hidden = false;
@@ -1010,7 +975,6 @@ function renderUserSelectorScreen() {
     const roleLabel = {
       admin: "Administrateur",
       chef_atelier: "Chef d'atelier",
-      directeur_sav: "Directeur SAV",
       reception: "Réception",
       technicien: "Technicien",
       qualite: "Qualité",
@@ -1100,224 +1064,6 @@ function renderCurrentSessionIndicator() {
   }
 }
 
-let inactivityTimer = null;
-const INACTIVITY_LIMIT = 15 * 60 * 1000; // 15 minutes
-
-function resetInactivityTimer() {
-  if (inactivityTimer) {
-    clearTimeout(inactivityTimer);
-  }
-  inactivityTimer = setTimeout(lockSessionDueToInactivity, INACTIVITY_LIMIT);
-}
-
-function clearUnlockedUserSessions(keepUserId = null) {
-  if (typeof sessionStorage === "undefined") return;
-  const user = keepUserId ? (typeof getUserById === "function" ? getUserById(keepUserId) : null) : null;
-  const keepSensitive = user && (typeof isSensitiveUser === "function" ? isSensitiveUser(user) : false);
-  
-  const keys = [];
-  if (sessionStorage.storage && typeof sessionStorage.storage.keys === "function") {
-    // Test environment mock storage
-    for (const key of sessionStorage.storage.keys()) {
-      keys.push(key);
-    }
-  } else {
-    // Real browser storage
-    for (let i = 0; i < sessionStorage.length; i++) {
-      const key = sessionStorage.key(i);
-      if (key) keys.push(key);
-    }
-  }
-
-  const keysToRemove = [];
-  keys.forEach(key => {
-    if (key.startsWith("unlocked_user_")) {
-      const userId = key.substring("unlocked_user_".length);
-      if (!keepSensitive || userId !== keepUserId) {
-        keysToRemove.push(key);
-      }
-    }
-  });
-
-  keysToRemove.forEach(key => sessionStorage.removeItem(key));
-}
-
-function lockSessionDueToInactivity() {
-  console.log("Locking session due to 15 minutes of inactivity.");
-  clearUnlockedUserSessions();
-  showUserSelectorOverlay();
-  quietNotify("Session verrouillée pour inactivité.", "warn");
-}
-
-function initInactivityMonitor() {
-  if (typeof window === "undefined") return;
-  const events = ["mousedown", "mousemove", "keypress", "scroll", "touchstart"];
-  events.forEach(name => {
-    window.addEventListener(name, resetInactivityTimer, { passive: true });
-  });
-  resetInactivityTimer();
-}
-
-function executeUserLogin(targetUser) {
-  clearUnlockedUserSessions(targetUser.id);
-  const previousUser = (state.users || []).find(user => user.id === state.currentUserId && user.active !== false);
-  const previousActor = previousUser ? {
-    userId: previousUser.id,
-    userName: previousUser.name || previousUser.email || "Utilisateur",
-    userRole: previousUser.role || "readonly",
-    resourceId: previousUser.resourceId || ""
-  } : null;
-
-  if (setCurrentUser(targetUser.id)) {
-    if (!previousUser) {
-      addAuditLog("users.session_selected", `Session utilisateur démarrée : ${targetUser.name}`, "Sélection initiale au démarrage", {
-        actor: { userId: targetUser.id, userName: targetUser.name, userRole: targetUser.role, resourceId: targetUser.resourceId || "" }
-      });
-    } else if (previousUser.id !== targetUser.id) {
-      addAuditLog("users.current_changed", `Changement d'utilisateur actif : ${previousUser.name} -> ${targetUser.name}`, "Bascule locale effectuée", {
-        actor: previousActor
-      });
-    }
-    
-    if (targetUser.role === "technicien") {
-      state.ui.technicianId = targetUser.resourceId || "";
-    }
-    
-    saveState();
-    hideUserSelectorOverlay();
-    
-    if (typeof ensureCurrentTabAllowed === "function") {
-      ensureCurrentTabAllowed();
-    }
-    if (typeof render === "function") {
-      render();
-    }
-
-    if (targetUser.role === "technicien" && !targetUser.resourceId) {
-      notifyUser("Avertissement : Aucun technicien / ressource n'est lié à votre profil. Certaines fonctionnalités seront restreintes.", "warn");
-    } else {
-      quietNotify(`Bienvenue, ${targetUser.name} !`, "success");
-    }
-    
-    resetInactivityTimer();
-  } else {
-    notifyUser("Impossible d'appliquer l'utilisateur.", "error");
-  }
-}
-
-async function promptUserPinAndLogin(targetUser) {
-  if (!targetUser.pinRequired) {
-    executeUserLogin(targetUser);
-    return;
-  }
-  
-  const isUnlocked = sessionStorage.getItem("unlocked_user_" + targetUser.id) === "true";
-  if (isUnlocked) {
-    executeUserLogin(targetUser);
-    return;
-  }
-  
-  const overlay = document.getElementById("user-pin-overlay");
-  const form = document.getElementById("user-pin-form");
-  const title = document.getElementById("user-pin-title");
-  const desc = document.getElementById("user-pin-desc");
-  const status = document.getElementById("user-pin-status");
-  const setupFields = document.getElementById("user-pin-setup-fields");
-  const pinInput = form?.querySelector('input[name="pin"]');
-  const confirmInput = form?.querySelector('input[name="pin_confirm"]');
-  const cancelBtn = document.getElementById("user-pin-cancel");
-  
-  if (!overlay || !form) {
-    executeUserLogin(targetUser);
-    return;
-  }
-  
-  form.reset();
-  status.textContent = "";
-  overlay.hidden = false;
-  document.querySelector(".app-shell")?.setAttribute("inert", "");
-  
-  const userSelectorOverlay = document.getElementById("user-selector-overlay");
-  if (userSelectorOverlay) {
-    userSelectorOverlay.hidden = true;
-  }
-  
-  pinInput.focus();
-  
-  const hasPin = Boolean(targetUser.pinHash);
-  if (!hasPin) {
-    title.textContent = "Créer votre code PIN";
-    desc.textContent = "Ce profil est sensible. Veuillez configurer un code PIN à 4 chiffres ou plus pour sécuriser votre session.";
-    setupFields.hidden = false;
-    if (confirmInput) confirmInput.required = true;
-  } else {
-    title.textContent = "Validation du code PIN";
-    desc.textContent = `Veuillez saisir votre code PIN pour accéder au profil ${targetUser.name}.`;
-    setupFields.hidden = true;
-    if (confirmInput) confirmInput.required = false;
-  }
-  
-  const onSubmit = async (e) => {
-    e.preventDefault();
-    status.textContent = "";
-    
-    const pin = pinInput.value;
-    if (!pin || pin.length < 4) {
-      status.textContent = "Le code PIN doit comporter au moins 4 chiffres.";
-      return;
-    }
-    if (!/^\d+$/.test(pin)) {
-      status.textContent = "Le code PIN doit contenir uniquement des chiffres.";
-      return;
-    }
-    
-    if (!hasPin) {
-      const confirmPin = confirmInput?.value;
-      if (pin !== confirmPin) {
-        status.textContent = "Les codes PIN ne correspondent pas.";
-        return;
-      }
-      const res = await setUserPin(targetUser.id, pin);
-      if (!res.ok) {
-        status.textContent = res.message || "Erreur de configuration du PIN.";
-        return;
-      }
-      sessionStorage.setItem("unlocked_user_" + targetUser.id, "true");
-      cleanup();
-      executeUserLogin(targetUser);
-    } else {
-      const success = await verifyUserPin(targetUser.id, pin);
-      if (success) {
-        sessionStorage.setItem("unlocked_user_" + targetUser.id, "true");
-        cleanup();
-        executeUserLogin(targetUser);
-      } else {
-        status.textContent = "Code PIN incorrect.";
-        pinInput.focus();
-        pinInput.select();
-      }
-    }
-  };
-  
-  const onCancel = () => {
-    cleanup();
-    showUserSelectorOverlay();
-  };
-  
-  const cleanup = () => {
-    overlay.hidden = true;
-    form.removeEventListener("submit", onSubmit);
-    cancelBtn?.removeEventListener("click", onCancel);
-    const userSelectorOverlay = document.getElementById("user-selector-overlay");
-    if (userSelectorOverlay && userSelectorOverlay.hidden) {
-      document.querySelector(".app-shell")?.removeAttribute("inert");
-    }
-  };
-  
-  form.addEventListener("submit", onSubmit);
-  cancelBtn?.addEventListener("click", onCancel);
-}
-
 function bindUserSessionActions() {
   // Option checkbox dans Paramètres
   const alwaysPromptCheckbox = document.getElementById("always-prompt-startup");
@@ -1347,7 +1093,37 @@ function bindUserSessionActions() {
       return;
     }
 
-    promptUserPinAndLogin(targetUser);
+    const previousUser = (state.users || []).find(user => user.id === state.currentUserId && user.active !== false);
+    const previousActor = previousUser ? {
+      userId: previousUser.id,
+      userName: previousUser.name || previousUser.email || "Utilisateur",
+      userRole: previousUser.role || "readonly",
+      resourceId: previousUser.resourceId || ""
+    } : null;
+
+    if (setCurrentUser(window.selectedUserIdForStartup)) {
+      if (!previousUser) {
+        addAuditLog("users.session_selected", `Session utilisateur démarrée : ${targetUser.name}`, "Sélection initiale au démarrage", {
+          actor: { userId: targetUser.id, userName: targetUser.name, userRole: targetUser.role, resourceId: targetUser.resourceId || "" }
+        });
+      } else if (previousUser.id !== window.selectedUserIdForStartup) {
+        addAuditLog("users.current_changed", `Changement d'utilisateur actif : ${previousUser.name} -> ${targetUser.name}`, "Bascule locale effectuée", {
+          actor: previousActor
+        });
+      }
+      
+      saveState();
+      hideUserSelectorOverlay();
+      render();
+
+      if (targetUser.role === "technicien" && !targetUser.resourceId) {
+        notifyUser("Avertissement : Aucun technicien / ressource n'est lié à votre profil. Certaines fonctionnalités seront restreintes.", "warn");
+      } else {
+        quietNotify(`Bienvenue, ${targetUser.name} !`, "success");
+      }
+    } else {
+      notifyUser("Impossible d'appliquer l'utilisateur.", "error");
+    }
   });
 }
 

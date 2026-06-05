@@ -20,7 +20,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v23.1.0";
+const APP_VERSION = "v23.1.1";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const WORKSHOP_NAME = "NIMR SAV";
@@ -298,6 +298,7 @@ const ROLE_PERMISSIONS = {
     "case.close",
     "export.backup",
     "print.*",
+    "customer_claim.manage",
   ],
   reception: [
     "case.create",
@@ -309,6 +310,7 @@ const ROLE_PERMISSIONS = {
     "receive_vehicle",
     "delivery.complete",
     "print.*",
+    "customer_claim.manage",
   ],
   technicien: ["task.start", "task.pause", "task.resume", "task.complete", "task.block", "print.task"],
   qualite: ["quality.validate", "quality.reject", "print.quality"],
@@ -338,6 +340,7 @@ const MUTATION_PERMISSIONS = [
   "export.backup",
   "import.backup",
   "settings.edit",
+  "customer_claim.manage",
   "users.manage",
   "supabase.configure",
   "audit.view",
@@ -1880,6 +1883,7 @@ function normalizeCase(item, bookings) {
     qualityChecklist: normalizeQualityChecklist(item.qualityChecklist),
     appointment: item.appointment || null,
     claims: normalizeRepairClaims(item.claims, item),
+    customerClaims: Array.isArray(item.customerClaims) ? item.customerClaims.map(normalizeCustomerClaim).filter(Boolean) : [],
     supplements: normalizeRepairSupplements(item.supplements),
     closedAt: item.closedAt || "",
     archivedAt: item.archivedAt || "",
@@ -1906,6 +1910,35 @@ function isEmptyLegacyAutoClaim(claim, item = {}) {
 
 function hasRepairClaims(item) {
   return normalizeRepairClaims(item?.claims || [], item).length > 0;
+}
+
+function normalizeCustomerClaim(claim) {
+  if (!claim) return null;
+  return {
+    id: claim.id || uid("customer-claim"),
+    text: String(claim.text || "").trim(),
+    priority: claim.priority || "normal", // low / normal / high / urgent
+    status: claim.status || "open", // open / in_progress / resolved / unresolved / explained_to_customer
+    createdAt: claim.createdAt || new Date().toISOString(),
+    createdBy: claim.createdBy || "",
+    responsibleRole: claim.responsibleRole || "",
+    responsibleUserId: claim.responsibleUserId || "",
+    comments: Array.isArray(claim.comments) ? claim.comments.map(normalizeClaimComment).filter(Boolean) : [],
+    linkedBookingId: claim.linkedBookingId || "",
+    resolvedAt: claim.resolvedAt || "",
+    resolvedBy: claim.resolvedBy || "",
+    qualityChecked: Boolean(claim.qualityChecked),
+  };
+}
+
+function normalizeClaimComment(comment) {
+  if (!comment) return null;
+  return {
+    id: comment.id || uid("claim-comment"),
+    text: String(comment.text || "").trim(),
+    createdAt: comment.createdAt || new Date().toISOString(),
+    createdBy: comment.createdBy || "",
+  };
 }
 
 
@@ -2947,10 +2980,10 @@ function showInputPromptModal({
 }
 
 const ROLE_TABS = {
-  admin: ["dossiers", "today", "pilotage", "planning", "technician", "atelier"],
-  directeur_sav: ["dossiers", "today", "pilotage", "planning", "technician", "atelier"],
-  chef_atelier: ["dossiers", "today", "pilotage", "planning", "technician", "atelier"],
-  reception: ["dossiers", "today", "pilotage"],
+  admin: ["reception-workspace", "dossiers", "today", "pilotage", "planning", "technician", "atelier"],
+  directeur_sav: ["reception-workspace", "dossiers", "today", "pilotage", "planning", "technician", "atelier"],
+  chef_atelier: ["reception-workspace", "dossiers", "today", "pilotage", "planning", "technician", "atelier"],
+  reception: ["reception-workspace", "dossiers", "today"],
   technicien: ["technician"],
   qualite: ["dossiers", "today"],
   readonly: ["dossiers", "today", "pilotage", "planning"],

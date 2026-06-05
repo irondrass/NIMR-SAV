@@ -1,4 +1,4 @@
-const CACHE_NAME = "nimr-sav-v23.1.0-appointment-status-canonical-sync";
+const CACHE_NAME = "nimr-sav-v23.1.1-reception-workspace-claims";
 const ASSETS = [
   "./",
   "./index.html",
@@ -21,6 +21,7 @@ const ASSETS = [
   "./js/ui-cases.js",
   "./js/estimate-import.js",
   "./js/ui-planning.js",
+  "./js/ui-reception.js",
   "./js/photos.js",
   "./js/storage.js",
   "./js/planning.js",

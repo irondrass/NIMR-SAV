@@ -16,8 +16,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <script src="js/version.js?v=23.1.0"></script>
-    <link rel="stylesheet" href="styles.css?v=23.1.0" />
+    <script src="js/version.js?v=23.1.1"></script>
+    <link rel="stylesheet" href="styles.css?v=23.1.1" />
   </head>
   <body>
     <a class="skip-link" href="#main-content">Aller au contenu principal</a>
@@ -37,6 +37,10 @@
           <span class="save-status-indicator status-saved" id="save-status-indicator" aria-live="polite">Sauvegardé</span>
         </div>
         <nav class="sidebar-nav" aria-label="Navigation principale">
+          <button class="nav-button" type="button" data-tab="reception-workspace">
+            <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>
+            Réception
+          </button>
           <button class="nav-button active" type="button" data-tab="dossiers" aria-current="page">
             <svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /></svg>
             Dossiers
@@ -107,6 +111,54 @@
           <span class="sync-item"><strong>Connexion</strong><b data-sync-connection>Contrôle...</b></span>
           <span class="sync-item"><strong>Dernière sauvegarde</strong><b data-sync-last-save>Jamais</b></span>
           <span class="sync-item"><strong>Modifications en attente</strong><b data-sync-pending>0</b></span>
+        </section>
+
+        <section class="view" id="view-reception-workspace" hidden>
+          <div class="reception-banner" id="reception-action-banner">
+            <div>
+              <span class="banner-badge">Prochaine action recommandée</span>
+              <h2 id="reception-recommended-action-title">Aucune action à effectuer (sélectionnez ou créez un dossier)</h2>
+            </div>
+            <button class="primary-button" id="reception-recommended-action-btn" type="button">
+              Commencer
+            </button>
+          </div>
+
+          <div class="workbench">
+            <aside class="panel panel-list">
+              <div class="panel-heading">
+                <div>
+                  <h1>Dossiers Réception</h1>
+                  <p id="reception-cases-count">0 dossier</p>
+                </div>
+              </div>
+              
+              <div class="reception-filters-row">
+                <button class="filter-pill active" data-filter="all">Tous</button>
+                <button class="filter-pill" data-filter="new">Nouveaux</button>
+                <button class="filter-pill" data-filter="today">RDV Jour</button>
+                <button class="filter-pill" data-filter="expected">Attendus</button>
+                <button class="filter-pill" data-filter="arrived">Arrivés</button>
+                <button class="filter-pill" data-filter="pending-approval">Attente validation</button>
+                <button class="filter-pill" data-filter="ready-deliver">Prêts à livrer</button>
+                <button class="filter-pill" data-filter="open-claims">Récl. ouvertes</button>
+              </div>
+
+              <div class="case-list-tools">
+                <div class="search-wrap">
+                  <input id="reception-case-search" type="search" placeholder="Rechercher un dossier..." aria-label="Rechercher un dossier" />
+                </div>
+              </div>
+
+              <div class="case-list" id="reception-case-list">
+                <!-- Cases list filled dynamically -->
+              </div>
+            </aside>
+
+            <main class="panel panel-detail" id="reception-detail-panel">
+              <!-- Case detail or Creation form filled dynamically -->
+            </main>
+          </div>
         </section>
 
         <section class="view" id="view-today">
@@ -1138,20 +1190,21 @@
     </div>
 
     <script src="vendor/pdf.min.js" defer></script>
-    <script src="js/utils.js?v=23.1.0" defer></script>
-    <script src="js/state.js?v=23.1.0" defer></script>
-    <script src="js/ui-cases.js?v=23.1.0" defer></script>
-    <script src="js/estimate-import.js?v=23.1.0" defer></script>
-    <script src="js/ui-planning.js?v=23.1.0" defer></script>
-    <script src="js/photos.js?v=23.1.0" defer></script>
-    <script src="js/storage.js?v=23.1.0" defer></script>
-    <script src="js/planning.js?v=23.1.0" defer></script>
-    <script src="js/exports.js?v=23.1.0" defer></script>
-    <script src="js/business-rules-v2187.js?v=23.1.0" defer></script>
+    <script src="js/utils.js?v=23.1.1" defer></script>
+    <script src="js/state.js?v=23.1.1" defer></script>
+    <script src="js/ui-cases.js?v=23.1.1" defer></script>
+    <script src="js/estimate-import.js?v=23.1.1" defer></script>
+    <script src="js/ui-planning.js?v=23.1.1" defer></script>
+    <script src="js/ui-reception.js?v=23.1.1" defer></script>
+    <script src="js/photos.js?v=23.1.1" defer></script>
+    <script src="js/storage.js?v=23.1.1" defer></script>
+    <script src="js/planning.js?v=23.1.1" defer></script>
+    <script src="js/exports.js?v=23.1.1" defer></script>
+    <script src="js/business-rules-v2187.js?v=23.1.1" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
-    <script src="js/supabase-config.js?v=23.1.0" defer></script>
-    <script src="js/supabase-client.js?v=23.1.0" defer></script>
-    <script src="js/supabase-sync.js?v=23.1.0" defer></script>
-    <script src="app.js?v=23.1.0" defer></script>
+    <script src="js/supabase-config.js?v=23.1.1" defer></script>
+    <script src="js/supabase-client.js?v=23.1.1" defer></script>
+    <script src="js/supabase-sync.js?v=23.1.1" defer></script>
+    <script src="app.js?v=23.1.1" defer></script>
   </body>
 </html>

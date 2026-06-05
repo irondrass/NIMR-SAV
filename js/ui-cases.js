@@ -7,7 +7,7 @@ function render() {
   }
 
   // Block unauthorized view content from rendering to prevent leaks in DOM
-  const tabs = ["dossiers", "today", "pilotage", "planning", "technician", "atelier"];
+  const tabs = ["dossiers", "today", "pilotage", "planning", "technician", "atelier", "reception-workspace"];
   tabs.forEach((tab) => {
     const view = document.getElementById(`view-${tab}`);
     if (!view) return;
@@ -52,6 +52,9 @@ function render() {
   if (typeof canAccessTab !== "function" || canAccessTab("dossiers")) {
     renderCases();
     renderCaseDetail();
+  }
+  if (typeof canAccessTab !== "function" || canAccessTab("reception-workspace")) {
+    if (typeof renderReceptionWorkspace === "function") renderReceptionWorkspace();
   }
   if (typeof canAccessTab !== "function" || canAccessTab("today")) {
     renderTodayWorkshop();
@@ -1872,6 +1875,15 @@ function renderCaseDetail() {
         return;
       }
       if (checked) {
+        if (field === "delivered") {
+          if (typeof verifyDeliveryClaimsBlock === "function") {
+            const allowed = await verifyDeliveryClaimsBlock(item);
+            if (!allowed) {
+              input.checked = false;
+              return;
+            }
+          }
+        }
         const issues = getBusinessRuleIssues(item, field);
         if (issues.length) {
           input.checked = false;
@@ -1978,6 +1990,12 @@ function renderCaseDetail() {
     button.addEventListener("click", async () => {
       const permissionGuard = guardWorkflowAction(flag, item, true);
       if (!permissionGuard.ok) return;
+      if (flag === "delivered") {
+        if (typeof verifyDeliveryClaimsBlock === "function") {
+          const allowed = await verifyDeliveryClaimsBlock(item);
+          if (!allowed) return;
+        }
+      }
       const issues = getBusinessRuleIssues(item, flag);
       if (issues.length) {
         notifyUser(issues.join("\n"));

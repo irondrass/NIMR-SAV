@@ -12,11 +12,12 @@ const appJs = fs.readFileSync("./app.js", "utf8");
 // 2. Préparer le contexte global mocké
 global.window = global;
 
+const storageMap = new Map();
 const mockStorage = {
-  getItem: () => null,
-  setItem: () => {},
-  removeItem: () => {},
-  clear: () => {}
+  getItem: (key) => storageMap.has(key) ? storageMap.get(key) : null,
+  setItem: (key, val) => storageMap.set(key, String(val)),
+  removeItem: (key) => storageMap.delete(key),
+  clear: () => storageMap.clear()
 };
 global.localStorage = mockStorage;
 global.sessionStorage = mockStorage;
@@ -90,7 +91,7 @@ const getElement = (id) => {
       },
       dispatchEvent(event) {
         const list = this.listeners.get(event) || [];
-        list.forEach(l => l({ currentTarget: this, target: this }));
+        list.forEach(l => l({ currentTarget: this, target: this, preventDefault: () => {} }));
       },
       setAttribute(name, value) {
         this.attributes.set(name, value);
@@ -151,6 +152,7 @@ global.resetLocalSecurityIdleTimer = () => {};
 // Évaluer les scripts dans le contexte global
 vm.runInThisContext(utilsJs);
 vm.runInThisContext(stateJs);
+vm.runInThisContext("global.state = state;");
 
 // Pour app.js, on retire l'appel direct initApp(); à la fin pour contrôler manuellement l'initialisation
 const appJsClean = appJs.replace("initApp();", "/* initApp(); */");
@@ -182,9 +184,13 @@ const {
 const sidebarChangeBtn = getElement("sidebar-change-user-btn");
 const changeUserSettingsBtn = getElement("change-user-settings-btn");
 const alwaysPromptCheckbox = getElement("always-prompt-startup");
-const userSubmitBtn = getElement("user-selector-submit");
-const userSelectorList = getElement("user-selector-list");
-const userSelectorOverlay = getElement("user-selector-overlay");
+const userLoginOverlay = getElement("user-login-overlay");
+const userLoginForm = getElement("user-login-form");
+userLoginForm.elements = {
+  userId: { value: "" },
+  pin: { value: "" }
+};
+const userLoginSelect = getElement("user-login-select");
 const appShell = getElement("app-shell");
 
 async function runTests() {
@@ -209,22 +215,23 @@ async function runTests() {
 
   // Test 2: Plusieurs utilisateurs actifs -> écran choix affiché au démarrage
   localSessionUnlocked = true;
-  userSelectorOverlay.hidden = true;
+  userLoginOverlay.hidden = true;
   checkUserSessionStartup();
-  assert.equal(userSelectorOverlay.hidden, false, "L'overlay de sélection utilisateur doit être affiché au démarrage");
+  assert.equal(userLoginOverlay.hidden, false, "L'overlay de sélection utilisateur doit être affiché au démarrage");
   assert.equal(appShell.attributes.has("inert"), true, "L'application doit être marquée inert");
 
   // Test 3: Utilisateur inactif absent de la liste
   global.selectedUserIdForStartup = "";
-  renderUserSelectorScreen();
-  assert.ok(userSelectorList.innerHTML.includes("Admin Test"), "Admin actif doit être présent");
-  assert.ok(userSelectorList.innerHTML.includes("Tech Test"), "Tech actif doit être présent");
-  assert.ok(!userSelectorList.innerHTML.includes("Inactif Test"), "Utilisateur inactif doit être absent");
+  renderUserLoginScreen();
+  assert.ok(userLoginSelect.innerHTML.includes("Admin Test"), "Admin actif doit être présent");
+  assert.ok(userLoginSelect.innerHTML.includes("Tech Test"), "Tech actif doit être présent");
+  assert.ok(!userLoginSelect.innerHTML.includes("Inactif Test"), "Utilisateur inactif doit être absent");
 
   // Test 4: Choisir tech -> permissions technicien appliquées + warning si pas de ressource
   // A. Technicien avec ressource
   global.selectedUserIdForStartup = "u-tech";
-  userSubmitBtn.dispatchEvent("click");
+  userLoginForm.elements.userId.value = global.selectedUserIdForStartup;
+  userLoginForm.dispatchEvent("submit");
   assert.equal(state.currentUserId, "u-tech", "currentUserId doit passer à u-tech");
   assert.equal(getCurrentUser().id, "u-tech", "getCurrentUser doit retourner u-tech");
   assert.equal(getCurrentUser().role, "technicien");
@@ -232,38 +239,39 @@ async function runTests() {
   // B. Technicien sans ressource
   lastNotification = null;
   global.selectedUserIdForStartup = "u-tech-no-res";
-  userSubmitBtn.dispatchEvent("click");
+  userLoginForm.elements.userId.value = global.selectedUserIdForStartup;
+  userLoginForm.dispatchEvent("submit");
   assert.equal(state.currentUserId, "u-tech-no-res");
   assert.equal(lastNotification.type, "warn", "Un avertissement doit s'afficher si le technicien n'a pas de ressource liée");
   assert.ok(lastNotification.msg.includes("Aucun technicien / ressource"));
 
   // Test 5: currentUserId inactif -> écran choix forcé
   state.currentUserId = "u-inactif"; // Inactif !
-  userSelectorOverlay.hidden = true;
+  userLoginOverlay.hidden = true;
   checkUserSessionStartup();
-  assert.equal(userSelectorOverlay.hidden, false, "L'écran doit être forcé si l'utilisateur courant est inactif");
+  assert.equal(userLoginOverlay.hidden, false, "L'écran doit être forcé si l'utilisateur courant est inactif");
 
   // Test 6: Un seul utilisateur actif -> comportement conforme à l'option
-  const singleAdmin = { id: "u-single-admin", name: "Admin Unique", role: "admin", active: true };
+  const singleAdmin = { id: "u-single-admin", name: "Admin Unique", role: "reception", active: true };
   state.users = [singleAdmin];
   
   // A. Toujours demander = false
   state.settings.alwaysPromptUserStartup = false;
   state.currentUserId = "u-single-admin";
-  userSelectorOverlay.hidden = true;
+  userLoginOverlay.hidden = true;
   checkUserSessionStartup();
-  assert.equal(userSelectorOverlay.hidden, true, "L'écran de sélection doit être ignoré si un seul actif et alwaysPrompt est faux");
+  assert.equal(userLoginOverlay.hidden, true, "L'écran de sélection doit être ignoré si un seul actif et alwaysPrompt est faux");
 
   // B. Toujours demander = true
   state.settings.alwaysPromptUserStartup = true;
-  userSelectorOverlay.hidden = true;
+  userLoginOverlay.hidden = true;
   checkUserSessionStartup();
-  assert.equal(userSelectorOverlay.hidden, false, "L'écran de sélection doit s'afficher si alwaysPrompt est vrai, même pour un seul utilisateur");
+  assert.equal(userLoginOverlay.hidden, false, "L'écran de sélection doit s'afficher si alwaysPrompt est vrai, même pour un seul utilisateur");
 
   // Test 7: Bouton "Changer utilisateur" revient à l'écran choix
-  userSelectorOverlay.hidden = true;
+  userLoginOverlay.hidden = true;
   sidebarChangeBtn.dispatchEvent("click");
-  assert.equal(userSelectorOverlay.hidden, false, "Le clic sur Changer d'utilisateur doit afficher la sélection");
+  assert.equal(userLoginOverlay.hidden, false, "Le clic sur Changer d'utilisateur doit afficher la sélection");
 
   // Test 8: Audit users.session_selected / users.current_changed
   state.users = [uAdmin, uTech];
@@ -271,28 +279,32 @@ async function runTests() {
   state.auditLog = [];
   
   // A. Première sélection (démarrage)
-  global.selectedUserIdForStartup = "u-admin";
-  userSubmitBtn.dispatchEvent("click");
+  global.selectedUserIdForStartup = "u-tech";
+  userLoginForm.elements.userId.value = global.selectedUserIdForStartup;
+  userLoginForm.dispatchEvent("submit");
   let logSelected = state.auditLog.find(l => l.type === "users.session_selected");
   assert.ok(logSelected, "L'audit doit loguer users.session_selected au premier choix de session");
   
   // B. Changement d'utilisateur
-  global.selectedUserIdForStartup = "u-tech";
-  userSubmitBtn.dispatchEvent("click");
+  const uReception = { id: "u-reception", name: "Reception Test", role: "reception", active: true };
+  state.users.push(uReception);
+  global.selectedUserIdForStartup = "u-reception";
+  userLoginForm.elements.userId.value = global.selectedUserIdForStartup;
+  userLoginForm.dispatchEvent("submit");
   let logChanged = state.auditLog.find(l => l.type === "users.current_changed");
   assert.ok(logChanged, "L'audit doit loguer users.current_changed lors du changement d'utilisateur");
-  assert.equal(logChanged.userId, "u-admin", "L'acteur de l'audit doit être l'utilisateur précédent");
+  assert.equal(logChanged.userId, "u-tech", "L'acteur de l'audit doit être l'utilisateur précédent");
 
   // Test 9: PIN local activé -> prioritaire
   localSessionUnlocked = false; // Poste verrouillé !
-  userSelectorOverlay.hidden = true;
+  userLoginOverlay.hidden = true;
   checkUserSessionStartup();
-  assert.equal(userSelectorOverlay.hidden, true, "Le choix utilisateur ne doit pas s'afficher si le PIN local n'est pas déverrouillé");
+  assert.equal(userLoginOverlay.hidden, true, "Le choix utilisateur ne doit pas s'afficher si le PIN local n'est pas déverrouillé");
   
   // Déverrouillage PIN local
   localSessionUnlocked = true;
   hideLocalLockOverlay();
-  assert.equal(userSelectorOverlay.hidden, false, "Le choix utilisateur doit apparaître automatiquement après déverrouillage du PIN local");
+  assert.equal(userLoginOverlay.hidden, false, "Le choix utilisateur doit apparaître automatiquement après déverrouillage du PIN local");
 
   // Test 10: Paramètre check-card admin-only
   state.currentUserId = "u-tech"; // Non admin

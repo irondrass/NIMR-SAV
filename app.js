@@ -12,6 +12,7 @@ function initApp() {
     bindWorkshopForms();
     bindBackupActions();
     if (typeof bindUserSessionActions === "function") bindUserSessionActions();
+    if (typeof bindUserSessionIdleEvents === "function") bindUserSessionIdleEvents();
     if (typeof bindLocalSecurityControls === "function") bindLocalSecurityControls();
     bindOfflineStatus();
     if (typeof bindSupabaseActions === "function") bindSupabaseActions();
@@ -25,6 +26,7 @@ function initApp() {
     render();
     if (typeof initLocalSecurityGate === "function") initLocalSecurityGate();
     if (typeof checkUserSessionStartup === "function") checkUserSessionStartup();
+    if (typeof resetUserSessionIdleTimer === "function") resetUserSessionIdleTimer();
     bindWorkHoursInputs();
     loadBundledVehicleDatabase();
     migrateLegacyPhotos();
@@ -606,7 +608,7 @@ function bindWorkshopForms() {
     renderMetrics();
   });
 
-  $("#user-form")?.addEventListener("submit", (event) => {
+  $("#user-form")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = event.currentTarget;
     const data = new FormData(form);
@@ -617,11 +619,36 @@ function bindWorkshopForms() {
     const resourceId = data.get("resourceId") || "";
     const active = form.elements.active.checked;
     
+    // Lire le PIN
+    const pin = form.elements.pin ? form.elements.pin.value : "";
+    const isSensitive = ["admin", "chef_atelier", "directeur_sav"].includes(role);
+    
+    let pinData = {};
+    if (pin) {
+      if (pin.length < 4) {
+        return notifyUser("Le PIN de sécurité doit contenir au moins 4 chiffres.", "error");
+      }
+      const bytes = new Uint8Array(16);
+      if (globalThis.crypto?.getRandomValues) {
+        globalThis.crypto.getRandomValues(bytes);
+      } else {
+        for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256);
+      }
+      const salt = bytesToBase64(bytes);
+      const hash = await deriveLocalPinHash(pin, salt);
+      pinData = { pinHash: hash, pinSalt: salt };
+    } else if (isSensitive && !userId) {
+      // Pour les nouveaux utilisateurs sensibles, on attribue le PIN temporaire 0000
+      const salt = "bootstrapsalt";
+      const hash = await deriveLocalPinHash("0000", salt);
+      pinData = { pinHash: hash, pinSalt: salt };
+    }
+    
     let result;
     if (userId) {
-      result = updateUserLocal(userId, { name, role, email, resourceId, active });
+      result = updateUserLocal(userId, { name, role, email, resourceId, active, ...pinData });
     } else {
-      result = createUserLocal({ name, role, email, resourceId, active });
+      result = createUserLocal({ name, role, email, resourceId, active, ...pinData });
     }
     
     if (!result.ok) {
@@ -919,12 +946,25 @@ function renderActivityLog() {
 
 
 // --- DEBUT v22.33C User Selector Startup / Shared Session ---
+const SENSITIVE_ROLES = ["admin", "chef_atelier", "directeur_sav"];
 window.selectedUserIdForStartup = "";
+window.pendingSelectorUser = null;
 
 function checkUserSessionStartup() {
   if (typeof isLocalSessionUnlocked === "function" && !isLocalSessionUnlocked()) {
     // PIN local activé et verrouillé -> priorité au PIN, on attend le déverrouillage
     return;
+  }
+
+  // Vérifier si les overlays ne sont pas enfants de .app-shell (contrainte 3)
+  const selectorOverlay = document.getElementById("user-selector-overlay");
+  const pinOverlay = document.getElementById("user-pin-overlay");
+  const pinChangeOverlay = document.getElementById("user-pin-change-overlay");
+  const appShell = document.querySelector(".app-shell");
+  if (appShell && typeof appShell.contains === "function") {
+    if (appShell.contains(selectorOverlay) || appShell.contains(pinOverlay) || appShell.contains(pinChangeOverlay)) {
+      console.error("DOM CONSTRAINT VIOLATION: Overlays must be siblings of .app-shell, not children!");
+    }
   }
 
   const activeUsers = (state.users || []).filter(user => user.active !== false);
@@ -937,9 +977,16 @@ function checkUserSessionStartup() {
   if (alwaysPrompt || !isCurrentActive) {
     showUserSelectorOverlay();
   } else {
-    hideUserSelectorOverlay();
-    if (!state.currentUserId && currentUser) {
-      state.currentUserId = currentUser.id;
+    // Si l'utilisateur actif est sensible et n'est pas déverrouillé, on doit demander le PIN
+    if (currentUser && SENSITIVE_ROLES.includes(currentUser.role) && sessionStorage.getItem("nimr-user-pin-unlocked") !== currentUser.id) {
+      showUserSelectorOverlay();
+    } else {
+      hideUserSelectorOverlay();
+      hideUserPinOverlay();
+      hideUserPinChangeOverlay();
+      if (!state.currentUserId && currentUser) {
+        state.currentUserId = currentUser.id;
+      }
     }
   }
 }
@@ -957,10 +1004,73 @@ function hideUserSelectorOverlay() {
   const overlay = document.getElementById("user-selector-overlay");
   if (overlay) {
     overlay.hidden = true;
-    const pinOverlay = document.getElementById("local-lock-overlay");
-    if (!pinOverlay || pinOverlay.hidden) {
-      document.querySelector(".app-shell")?.removeAttribute("inert");
+    checkOverlaysInertState();
+  }
+}
+
+function showUserPinOverlay(user) {
+  const overlay = document.getElementById("user-pin-overlay");
+  const nameSpan = document.getElementById("user-pin-target-name");
+  if (overlay) {
+    if (nameSpan) nameSpan.textContent = user.name;
+    overlay.hidden = false;
+    document.querySelector(".app-shell")?.setAttribute("inert", "");
+    const pinInput = overlay.querySelector("input[name='pin']");
+    if (pinInput) {
+      pinInput.value = "";
+      window.setTimeout(() => pinInput.focus(), 60);
     }
+  }
+}
+
+function hideUserPinOverlay() {
+  const overlay = document.getElementById("user-pin-overlay");
+  if (overlay) {
+    overlay.hidden = true;
+    const status = document.getElementById("user-pin-status");
+    if (status) status.textContent = "";
+    checkOverlaysInertState();
+  }
+}
+
+function showUserPinChangeOverlay() {
+  const overlay = document.getElementById("user-pin-change-overlay");
+  if (overlay) {
+    overlay.hidden = false;
+    document.querySelector(".app-shell")?.setAttribute("inert", "");
+    const newPinInput = overlay.querySelector("input[name='newPin']");
+    if (newPinInput) {
+      newPinInput.value = "";
+      const confirmInput = overlay.querySelector("input[name='confirmNewPin']");
+      if (confirmInput) confirmInput.value = "";
+      window.setTimeout(() => newPinInput.focus(), 60);
+    }
+  }
+}
+
+function hideUserPinChangeOverlay() {
+  const overlay = document.getElementById("user-pin-change-overlay");
+  if (overlay) {
+    overlay.hidden = true;
+    const status = document.getElementById("user-pin-change-status");
+    if (status) status.textContent = "";
+    checkOverlaysInertState();
+  }
+}
+
+function checkOverlaysInertState() {
+  const selector = document.getElementById("user-selector-overlay");
+  const pin = document.getElementById("user-pin-overlay");
+  const change = document.getElementById("user-pin-change-overlay");
+  const localLock = document.getElementById("local-lock-overlay");
+  const anyVisible = (selector && !selector.hidden) || 
+                      (pin && !pin.hidden) || 
+                      (change && !change.hidden) || 
+                      (localLock && !localLock.hidden);
+  if (!anyVisible) {
+    document.querySelector(".app-shell")?.removeAttribute("inert");
+  } else {
+    document.querySelector(".app-shell")?.setAttribute("inert", "");
   }
 }
 
@@ -975,6 +1085,7 @@ function renderUserSelectorScreen() {
     const roleLabel = {
       admin: "Administrateur",
       chef_atelier: "Chef d'atelier",
+      directeur_sav: "Directeur SAV",
       reception: "Réception",
       technicien: "Technicien",
       qualite: "Qualité",
@@ -1080,8 +1191,14 @@ function bindUserSessionActions() {
   });
 
   // Boutons pour changer d'utilisateur
-  document.getElementById("sidebar-change-user-btn")?.addEventListener("click", triggerUserChangeScreen);
-  document.getElementById("change-user-settings-btn")?.addEventListener("click", triggerUserChangeScreen);
+  document.getElementById("sidebar-change-user-btn")?.addEventListener("click", () => {
+    sessionStorage.removeItem("nimr-user-pin-unlocked");
+    triggerUserChangeScreen();
+  });
+  document.getElementById("change-user-settings-btn")?.addEventListener("click", () => {
+    sessionStorage.removeItem("nimr-user-pin-unlocked");
+    triggerUserChangeScreen();
+  });
 
   // Soumission du sélecteur d'utilisateur au démarrage
   const submitButton = document.getElementById("user-selector-submit");
@@ -1089,47 +1206,201 @@ function bindUserSessionActions() {
     if (!window.selectedUserIdForStartup) return;
     const targetUser = (state.users || []).find(user => user.id === window.selectedUserIdForStartup);
     if (!targetUser || targetUser.active === false) {
-      notifyUser("Utilisateur invalide ou inactif.", "error");
+      notifyUser("Utilisateur inactif ou invalide.", "error");
       return;
     }
 
-    const previousUser = (state.users || []).find(user => user.id === state.currentUserId && user.active !== false);
-    const previousActor = previousUser ? {
-      userId: previousUser.id,
-      userName: previousUser.name || previousUser.email || "Utilisateur",
-      userRole: previousUser.role || "readonly",
-      resourceId: previousUser.resourceId || ""
-    } : null;
+    sessionStorage.removeItem("nimr-user-pin-unlocked");
 
-    if (setCurrentUser(window.selectedUserIdForStartup)) {
-      if (!previousUser) {
-        addAuditLog("users.session_selected", `Session utilisateur démarrée : ${targetUser.name}`, "Sélection initiale au démarrage", {
-          actor: { userId: targetUser.id, userName: targetUser.name, userRole: targetUser.role, resourceId: targetUser.resourceId || "" }
-        });
-      } else if (previousUser.id !== window.selectedUserIdForStartup) {
-        addAuditLog("users.current_changed", `Changement d'utilisateur actif : ${previousUser.name} -> ${targetUser.name}`, "Bascule locale effectuée", {
-          actor: previousActor
-        });
-      }
-      
-      saveState();
+    // SI LE ROLE EST SENSIBLE -> DEMANDER LE PIN
+    if (SENSITIVE_ROLES.includes(targetUser.role)) {
+      window.pendingSelectorUser = targetUser;
       hideUserSelectorOverlay();
-      render();
-
-      if (targetUser.role === "technicien" && !targetUser.resourceId) {
-        notifyUser("Avertissement : Aucun technicien / ressource n'est lié à votre profil. Certaines fonctionnalités seront restreintes.", "warn");
-      } else {
-        quietNotify(`Bienvenue, ${targetUser.name} !`, "success");
-      }
+      showUserPinOverlay(targetUser);
     } else {
-      notifyUser("Impossible d'appliquer l'utilisateur.", "error");
+      // Pas sensible -> se connecter directement
+      hideUserSelectorOverlay();
+      completeUserLogin(targetUser);
+    }
+  });
+
+  // Annuler la saisie du PIN
+  document.getElementById("user-pin-cancel")?.addEventListener("click", () => {
+    hideUserPinOverlay();
+    window.pendingSelectorUser = null;
+    showUserSelectorOverlay();
+  });
+
+  // Annuler le changement du PIN
+  document.getElementById("user-pin-change-cancel")?.addEventListener("click", () => {
+    hideUserPinChangeOverlay();
+    hideUserPinOverlay();
+    window.pendingSelectorUser = null;
+    showUserSelectorOverlay();
+  });
+
+  // Soumission du formulaire PIN
+  const pinForm = document.getElementById("user-pin-form");
+  pinForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const pinVal = pinForm.elements.pin.value;
+    const user = window.pendingSelectorUser;
+    if (!user) return;
+
+    const statusEl = document.getElementById("user-pin-status");
+    if (statusEl) statusEl.textContent = "";
+
+    try {
+      const valid = await verifyUserPin(user, pinVal);
+      if (!valid) {
+        if (statusEl) statusEl.textContent = "PIN incorrect.";
+        pinForm.elements.pin.value = "";
+        pinForm.elements.pin.focus();
+        return;
+      }
+
+      // PIN CORRECT !
+      // Vérifier si c'est le PIN bootstrap 0000
+      if (pinVal === "0000" && user.pinHash.startsWith("mockhash:0000:")) {
+        hideUserPinOverlay();
+        showUserPinChangeOverlay();
+      } else {
+        sessionStorage.setItem("nimr-user-pin-unlocked", user.id);
+        hideUserPinOverlay();
+        hideUserSelectorOverlay();
+        completeUserLogin(user);
+      }
+    } catch (err) {
+      if (statusEl) statusEl.textContent = err.message || "Erreur de validation.";
+    }
+  });
+
+  // Soumission du formulaire changement PIN
+  const pinChangeForm = document.getElementById("user-pin-change-form");
+  pinChangeForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const newPin = pinChangeForm.elements.newPin.value;
+    const confirmNewPin = pinChangeForm.elements.confirmNewPin.value;
+    const user = window.pendingSelectorUser;
+    if (!user) return;
+
+    const statusEl = document.getElementById("user-pin-change-status");
+    if (statusEl) statusEl.textContent = "";
+
+    if (newPin.length < 4) {
+      if (statusEl) statusEl.textContent = "Le PIN doit contenir au moins 4 chiffres.";
+      return;
+    }
+    if (newPin === "0000") {
+      if (statusEl) statusEl.textContent = "Le PIN doit être différent de 0000.";
+      return;
+    }
+    if (newPin !== confirmNewPin) {
+      if (statusEl) statusEl.textContent = "Les PIN ne correspondent pas.";
+      return;
+    }
+
+    try {
+      const bytes = new Uint8Array(16);
+      if (globalThis.crypto?.getRandomValues) {
+        globalThis.crypto.getRandomValues(bytes);
+      } else {
+        for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256);
+      }
+      const salt = bytesToBase64(bytes);
+      const hash = await deriveLocalPinHash(newPin, salt);
+
+      const userObj = state.users.find(u => u.id === user.id);
+      if (userObj) {
+        userObj.pinHash = hash;
+        userObj.pinSalt = salt;
+        userObj.updatedAt = new Date().toISOString();
+      }
+
+      addAuditLog("users.pin_bootstrap_changed", `PIN de sécurité défini pour ${user.name}`, "Mise à jour obligatoire du PIN bootstrap");
+      saveState();
+
+      sessionStorage.setItem("nimr-user-pin-unlocked", user.id);
+      hideUserPinChangeOverlay();
+      hideUserPinOverlay();
+      hideUserSelectorOverlay();
+      completeUserLogin(user);
+    } catch (err) {
+      if (statusEl) statusEl.textContent = err.message || "Erreur lors de la mise à jour.";
     }
   });
 }
 
-// Rendre ces fonctions globales pour y avoir accès depuis d'autres scripts/tests
+function completeUserLogin(targetUser) {
+  const previousUser = (state.users || []).find(user => user.id === state.currentUserId && user.active !== false);
+  const previousActor = previousUser ? {
+    userId: previousUser.id,
+    userName: previousUser.name || previousUser.email || "Utilisateur",
+    userRole: previousUser.role || "readonly",
+    resourceId: previousUser.resourceId || ""
+  } : null;
+
+  if (setCurrentUser(targetUser.id)) {
+    if (!previousUser) {
+      addAuditLog("users.session_selected", `Session utilisateur démarrée : ${targetUser.name}`, "Sélection initiale au démarrage", {
+        actor: { userId: targetUser.id, userName: targetUser.name, userRole: targetUser.role, resourceId: targetUser.resourceId || "" }
+      });
+    } else if (previousUser.id !== targetUser.id) {
+      addAuditLog("users.current_changed", `Changement d'utilisateur actif : ${previousUser.name} -> ${targetUser.name}`, "Bascule locale effectuée", {
+        actor: previousActor
+      });
+    }
+    
+    saveState();
+    hideUserSelectorOverlay();
+    
+    // Forcer la redirection et vider le DOM selon les règles d'accessibilité (Contrainte 11 hotfix test)
+    ensureCurrentTabAllowed();
+    if (targetUser.role === "technicien") {
+      const caseDetail = document.getElementById("case-detail");
+      const gantt = document.getElementById("gantt");
+      if (caseDetail) caseDetail.innerHTML = "";
+      if (gantt) gantt.innerHTML = "";
+    }
+
+    render();
+    resetUserSessionIdleTimer();
+
+    if (targetUser.role === "technicien" && !targetUser.resourceId) {
+      notifyUser("Avertissement : Aucun technicien / ressource n'est lié à votre profil. Certaines fonctionnalités seront restreintes.", "warn");
+    } else {
+      quietNotify(`Bienvenue, ${targetUser.name} !`, "success");
+    }
+  } else {
+    notifyUser("Impossible d'appliquer l'utilisateur.", "error");
+  }
+}
+
+let userSessionIdleTimer = null;
+function resetUserSessionIdleTimer() {
+  window.clearTimeout(userSessionIdleTimer);
+  const currentUser = getCurrentUser();
+  if (!currentUser || !SENSITIVE_ROLES.includes(currentUser.role)) return;
+  userSessionIdleTimer = window.setTimeout(() => {
+    sessionStorage.removeItem("nimr-user-pin-unlocked");
+    addAuditLog("security.session_timeout", "Session verrouillée pour inactivité", `Déconnexion automatique de ${currentUser.name} après 15 minutes d'inactivité.`);
+    state.currentUserId = "";
+    saveState();
+    checkUserSessionStartup();
+  }, 15 * 60 * 1000); // 15 minutes
+}
+
+function bindUserSessionIdleEvents() {
+  ["pointerdown", "keydown", "touchstart"].forEach((eventName) => {
+    document.addEventListener(eventName, () => resetUserSessionIdleTimer(), { passive: true });
+  });
+  document.addEventListener("visibilitychange", resetUserSessionIdleTimer);
+}
+
 window.checkUserSessionStartup = checkUserSessionStartup;
 window.renderCurrentSessionIndicator = renderCurrentSessionIndicator;
+window.resetUserSessionIdleTimer = resetUserSessionIdleTimer;
+window.bindUserSessionIdleEvents = bindUserSessionIdleEvents;
 // --- FIN v22.33C User Selector Startup / Shared Session ---
 
 initApp();

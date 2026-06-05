@@ -924,6 +924,10 @@ function getCaseBusinessTaskRows(item, options = {}) {
 }
 
 function getTechnicianTaskRows(technicianId, dateLike = new Date()) {
+  const currentUser = typeof getCurrentUser === "function" ? getCurrentUser() : null;
+  if (currentUser && currentUser.role === "technicien") {
+    return getTechnicianBusinessTaskRows(currentUser.resourceId || "__invalid_resource_id__", dateLike);
+  }
   return getTechnicianBusinessTaskRows(technicianId, dateLike);
 }
 
@@ -1312,6 +1316,13 @@ function getTechnicianActorLabel(technicianId) {
 function startTechnicianTask(item, bookingId, technicianId, options = {}) {
   if (isCaseReadonlyArchive(item)) return { ok: false, message: getArchivedCaseMessage(item) };
   const booking = findCaseBooking(item, bookingId);
+  const user = (state.users || []).find(u => u.resourceId === technicianId) || resolvePermissionUser(technicianId);
+  if (user && user.role === "technicien" && booking) {
+    if (!(booking.resourceIds || []).includes(user.resourceId)) {
+      addAuditLog("security.permission_denied", "Accès non autorisé", `Tentative de démarrage de la tâche d'une autre ressource par le technicien ${user.name}`);
+      return { ok: false, message: "Vous n'êtes pas autorisé à modifier cette tâche (isolation ressource).", issues: ["Vous n'êtes pas autorisé à modifier cette tâche."] };
+    }
+  }
   const permission = guardAction("task.start", { booking, technicianId }, { notify: false });
   if (!permission.ok) return { ok: false, message: permission.message, issues: [permission.message] };
   const validation = canStartTechnicianTask(item, booking, technicianId, options);
@@ -1329,6 +1340,13 @@ function pauseTechnicianTask(item, bookingId, technicianId, reason) {
   const cleanReason = String(reason || "").trim();
   if (!cleanReason) return { ok: false, message: "Motif de pause obligatoire." };
   const booking = findCaseBooking(item, bookingId);
+  const user = (state.users || []).find(u => u.resourceId === technicianId) || resolvePermissionUser(technicianId);
+  if (user && user.role === "technicien" && booking) {
+    if (!(booking.resourceIds || []).includes(user.resourceId)) {
+      addAuditLog("security.permission_denied", "Accès non autorisé", `Tentative de pause de la tâche d'une autre ressource par le technicien ${user.name}`);
+      return { ok: false, message: "Vous n'êtes pas autorisé à modifier cette tâche (isolation ressource)." };
+    }
+  }
   const permission = guardAction("task.pause", { booking, technicianId }, { notify: false });
   if (!permission.ok) return { ok: false, message: permission.message };
   return pauseCaseBookingTask(item, bookingId, cleanReason, {
@@ -1351,6 +1369,13 @@ function resumeTechnicianTask(item, bookingId, technicianId, options = {}) {
   if (getBookingOperationalStatus(booking) === "paused") {
     target = findRemainderBookingForPausedTask(booking.id);
     if (!target) return { ok: false, message: "Aucun reliquat planifié à reprendre pour cette tâche." };
+  }
+  const user = (state.users || []).find(u => u.resourceId === technicianId) || resolvePermissionUser(technicianId);
+  if (user && user.role === "technicien" && target) {
+    if (!(target.resourceIds || []).includes(user.resourceId)) {
+      addAuditLog("security.permission_denied", "Accès non autorisé", `Tentative de reprise de la tâche d'une autre ressource par le technicien ${user.name}`);
+      return { ok: false, message: "Vous n'êtes pas autorisé à modifier cette tâche (isolation ressource)." };
+    }
   }
   const permission = guardAction("task.resume", { booking: target, technicianId }, { notify: false });
   if (!permission.ok) return { ok: false, message: permission.message };
@@ -1397,6 +1422,13 @@ function blockTechnicianTask(item, bookingId, technicianId, reason, details = ""
   if (!cleanReason) return { ok: false, message: "Motif de blocage obligatoire." };
   const booking = findCaseBooking(item, bookingId);
   if (!booking) return { ok: false, message: "Tâche introuvable dans le planning." };
+  const user = (state.users || []).find(u => u.resourceId === technicianId) || resolvePermissionUser(technicianId);
+  if (user && user.role === "technicien" && booking) {
+    if (!(booking.resourceIds || []).includes(user.resourceId)) {
+      addAuditLog("security.permission_denied", "Accès non autorisé", `Tentative de blocage de la tâche d'une autre ressource par le technicien ${user.name}`);
+      return { ok: false, message: "Vous n'êtes pas autorisé à modifier cette tâche (isolation ressource)." };
+    }
+  }
   const permission = guardAction("task.block", { booking, technicianId }, { notify: false });
   if (!permission.ok) return { ok: false, message: permission.message };
   let target = booking;
@@ -1426,6 +1458,13 @@ function clearTechnicianTaskBlock(item, bookingId, technicianId, options = {}) {
   if (isCaseReadonlyArchive(item)) return { ok: false, message: getArchivedCaseMessage(item) };
   const booking = findCaseBooking(item, bookingId);
   if (!booking) return { ok: false, message: "Tâche introuvable dans le planning." };
+  const user = (state.users || []).find(u => u.resourceId === technicianId) || resolvePermissionUser(technicianId);
+  if (user && user.role === "technicien" && booking) {
+    if (!(booking.resourceIds || []).includes(user.resourceId)) {
+      addAuditLog("security.permission_denied", "Accès non autorisé", `Tentative de déblocage de la tâche d'une autre ressource par le technicien ${user.name}`);
+      return { ok: false, message: "Vous n'êtes pas autorisé à modifier cette tâche (isolation ressource)." };
+    }
+  }
   const hadBlock = isBookingTaskBlocked(booking);
   booking.blockedAt = "";
   booking.blockedBy = "";
@@ -1457,6 +1496,13 @@ function completeTechnicianTask(item, bookingId, technicianId, options = {}) {
   if (isCaseReadonlyArchive(item)) return { ok: false, message: getArchivedCaseMessage(item) };
   const booking = findCaseBooking(item, bookingId);
   if (!booking) return { ok: false, message: "Tâche introuvable dans le planning." };
+  const user = (state.users || []).find(u => u.resourceId === technicianId) || resolvePermissionUser(technicianId);
+  if (user && user.role === "technicien" && booking) {
+    if (!(booking.resourceIds || []).includes(user.resourceId)) {
+      addAuditLog("security.permission_denied", "Accès non autorisé", `Tentative de complétion de la tâche d'une autre ressource par le technicien ${user.name}`);
+      return { ok: false, message: "Vous n'êtes pas autorisé à modifier cette tâche (isolation ressource)." };
+    }
+  }
   const permission = guardAction("task.complete", { booking, technicianId }, { notify: false });
   if (!permission.ok) return { ok: false, message: permission.message };
   if (isBookingTaskBlocked(booking)) return { ok: false, message: "Résolvez le blocage avant de terminer la tâche." };
@@ -1483,6 +1529,13 @@ function addTechnicianTaskNote(item, bookingId, technicianId, note) {
   if (!cleanNote) return { ok: false, message: "Note vide." };
   const booking = findCaseBooking(item, bookingId);
   if (!booking) return { ok: false, message: "Tâche introuvable dans le planning." };
+  const user = (state.users || []).find(u => u.resourceId === technicianId) || resolvePermissionUser(technicianId);
+  if (user && user.role === "technicien" && booking) {
+    if (!(booking.resourceIds || []).includes(user.resourceId)) {
+      addAuditLog("security.permission_denied", "Accès non autorisé", `Tentative d'ajout de note sur la tâche d'une autre ressource par le technicien ${user.name}`);
+      return { ok: false, message: "Vous n'êtes pas autorisé à modifier cette tâche (isolation ressource)." };
+    }
+  }
   booking.notes = Array.isArray(booking.notes) ? booking.notes : [];
   booking.notes.push({ id: uid("task-note"), at: new Date().toISOString(), by: technicianId || "", text: cleanNote });
   addHistory(item, "planning.task.note", "Note technicien ajoutée", `${booking.title || getDurationLabel(booking.key)} · ${getTechnicianActorLabel(technicianId)}: ${cleanNote}`);
@@ -1492,6 +1545,13 @@ function addTechnicianTaskNote(item, bookingId, technicianId, note) {
 function attachTechnicianTaskPhoto(item, bookingId, technicianId, photoId) {
   const booking = findCaseBooking(item, bookingId);
   if (!booking || !photoId) return { ok: false, message: "Photo ou tâche introuvable." };
+  const user = (state.users || []).find(u => u.resourceId === technicianId) || resolvePermissionUser(technicianId);
+  if (user && user.role === "technicien" && booking) {
+    if (!(booking.resourceIds || []).includes(user.resourceId)) {
+      addAuditLog("security.permission_denied", "Accès non autorisé", `Tentative d'ajout de photo sur la tâche d'une autre ressource par le technicien ${user.name}`);
+      return { ok: false, message: "Vous n'êtes pas autorisé à modifier cette tâche (isolation ressource)." };
+    }
+  }
   booking.photoIds = Array.isArray(booking.photoIds) ? booking.photoIds : [];
   if (!booking.photoIds.includes(photoId)) booking.photoIds.push(photoId);
   addHistory(item, "planning.task.photo", "Photo tâche ajoutée", `${booking.title || getDurationLabel(booking.key)} · photo ajoutée par ${getTechnicianActorLabel(technicianId)}.`);

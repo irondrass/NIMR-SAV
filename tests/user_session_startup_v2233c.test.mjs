@@ -12,11 +12,12 @@ const appJs = fs.readFileSync("./app.js", "utf8");
 // 2. Préparer le contexte global mocké
 global.window = global;
 
+const storageMap = new Map();
 const mockStorage = {
-  getItem: () => null,
-  setItem: () => {},
-  removeItem: () => {},
-  clear: () => {}
+  getItem: (key) => storageMap.has(key) ? storageMap.get(key) : null,
+  setItem: (key, val) => storageMap.set(key, String(val)),
+  removeItem: (key) => storageMap.delete(key),
+  clear: () => storageMap.clear()
 };
 global.localStorage = mockStorage;
 global.sessionStorage = mockStorage;
@@ -244,7 +245,7 @@ async function runTests() {
   assert.equal(userSelectorOverlay.hidden, false, "L'écran doit être forcé si l'utilisateur courant est inactif");
 
   // Test 6: Un seul utilisateur actif -> comportement conforme à l'option
-  const singleAdmin = { id: "u-single-admin", name: "Admin Unique", role: "admin", active: true };
+  const singleAdmin = { id: "u-single-admin", name: "Admin Unique", role: "reception", active: true };
   state.users = [singleAdmin];
   
   // A. Toujours demander = false
@@ -271,17 +272,19 @@ async function runTests() {
   state.auditLog = [];
   
   // A. Première sélection (démarrage)
-  global.selectedUserIdForStartup = "u-admin";
+  global.selectedUserIdForStartup = "u-tech";
   userSubmitBtn.dispatchEvent("click");
   let logSelected = state.auditLog.find(l => l.type === "users.session_selected");
   assert.ok(logSelected, "L'audit doit loguer users.session_selected au premier choix de session");
   
   // B. Changement d'utilisateur
-  global.selectedUserIdForStartup = "u-tech";
+  const uReception = { id: "u-reception", name: "Reception Test", role: "reception", active: true };
+  state.users.push(uReception);
+  global.selectedUserIdForStartup = "u-reception";
   userSubmitBtn.dispatchEvent("click");
   let logChanged = state.auditLog.find(l => l.type === "users.current_changed");
   assert.ok(logChanged, "L'audit doit loguer users.current_changed lors du changement d'utilisateur");
-  assert.equal(logChanged.userId, "u-admin", "L'acteur de l'audit doit être l'utilisateur précédent");
+  assert.equal(logChanged.userId, "u-tech", "L'acteur de l'audit doit être l'utilisateur précédent");
 
   // Test 9: PIN local activé -> prioritaire
   localSessionUnlocked = false; // Poste verrouillé !

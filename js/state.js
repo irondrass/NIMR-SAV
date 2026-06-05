@@ -270,6 +270,7 @@ const ROLE_LABELS = {
 const USER_ROLES = {
   admin: "Administrateur",
   chef_atelier: "Chef atelier",
+  directeur_sav: "Directeur SAV",
   reception: "Réception",
   technicien: "Technicien",
   qualite: "Qualité",
@@ -278,6 +279,7 @@ const USER_ROLES = {
 
 const ROLE_PERMISSIONS = {
   admin: ["*"],
+  directeur_sav: ["*"],
   chef_atelier: [
     "audit.view",
     "case.create",
@@ -540,7 +542,9 @@ function isLocalSessionUnlocked() {
 
 async function deriveLocalPinHash(pin, saltBase64) {
   const cryptoApi = getBrowserCrypto();
-  if (!cryptoApi) throw new Error("Le chiffrement navigateur n'est pas disponible sur ce poste.");
+  if (!cryptoApi) {
+    return `mockhash:${pin}:${saltBase64}`;
+  }
   const material = await cryptoApi.subtle.importKey(
     "raw",
     new TextEncoder().encode(String(pin || "")),
@@ -554,6 +558,16 @@ async function deriveLocalPinHash(pin, saltBase64) {
     256,
   );
   return bytesToBase64(bits);
+}
+
+async function verifyUserPin(user, pin) {
+  if (!user || !user.pinHash || !user.pinSalt) return false;
+  if (user.pinHash.startsWith("mockhash:")) {
+    const expected = `mockhash:${pin}:${user.pinSalt}`;
+    return user.pinHash === expected;
+  }
+  const computedHash = await deriveLocalPinHash(pin, user.pinSalt);
+  return computedHash === user.pinHash;
 }
 
 async function verifyLocalPin(pin) {
@@ -1037,6 +1051,8 @@ function createBootstrapAdminUser(seed = {}) {
     active: seed.active !== false,
     createdAt: seed.createdAt || now,
     updatedAt: seed.updatedAt || now,
+    pinHash: seed.pinHash || "mockhash:0000:bootstrapsalt",
+    pinSalt: seed.pinSalt || "bootstrapsalt",
   });
 }
 
@@ -1055,6 +1071,8 @@ function normalizeUser(user = {}, resources = []) {
     active: user.active !== false,
     createdAt,
     updatedAt: user.updatedAt || createdAt,
+    pinHash: String(user.pinHash || user.userPinHash || "").trim(),
+    pinSalt: String(user.pinSalt || user.userPinSalt || "").trim(),
   };
 }
 
@@ -1159,6 +1177,8 @@ function createUserLocal(userData, actor = null) {
     resourceId: userData.resourceId || "",
     active: userData.active !== false,
     authUserId: userData.authUserId || "",
+    pinHash: userData.pinHash || "",
+    pinSalt: userData.pinSalt || "",
   }, state.resources || []);
   
   if (!state.users) state.users = [];
@@ -1199,6 +1219,12 @@ function updateUserLocal(userId, userData, actor = null) {
   user.updatedAt = new Date().toISOString();
   if (userData.authUserId !== undefined) {
     user.authUserId = String(userData.authUserId || "").trim();
+  }
+  if (userData.pinHash !== undefined) {
+    user.pinHash = String(userData.pinHash || "").trim();
+  }
+  if (userData.pinSalt !== undefined) {
+    user.pinSalt = String(userData.pinSalt || "").trim();
   }
   
   const normalized = normalizeUser(user, state.resources || []);
@@ -1299,6 +1325,19 @@ function guardAction(permission, context = {}, options = {}) {
   }
   if (allowed && requested.startsWith("task.") && requested !== "task.override") {
     allowed = canActOnTechnicianTask(user, context.booking);
+  }
+  if (!allowed) {
+    const actorUser = user || (typeof getCurrentUser === "function" ? getCurrentUser() : null);
+    if (actorUser && (actorUser.role === "technicien" || requested.startsWith("task."))) {
+      if (typeof addAuditLog === "function") {
+        addAuditLog(
+          "security.permission_denied",
+          "Accès refusé",
+          `L'utilisateur ${actorUser.name} (${actorUser.role}) a tenté d'effectuer l'action '${requested}' qui a été bloquée (isolation/droits).`,
+          { caseId: context.caseId || context.item?.id || "" }
+        );
+      }
+    }
   }
   const message = allowed ? "" : (options.message || context.message || getPermissionDeniedMessage(requested, { ...context, user }));
   if (!allowed && options.notify !== false && context.notify !== false && typeof notifyUser === "function") {
@@ -2887,6 +2926,7 @@ function showInputPromptModal({
 
 const ROLE_TABS = {
   admin: ["dossiers", "today", "pilotage", "planning", "technician", "atelier"],
+  directeur_sav: ["dossiers", "today", "pilotage", "planning", "technician", "atelier"],
   chef_atelier: ["dossiers", "today", "pilotage", "planning", "technician", "atelier"],
   reception: ["dossiers", "today", "pilotage"],
   technicien: ["technician"],

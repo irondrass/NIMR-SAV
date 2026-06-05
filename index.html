@@ -422,12 +422,14 @@
                 <select name="role" required>
                   <option value="admin">Administrateur</option>
                   <option value="chef_atelier">Chef atelier</option>
+                  <option value="directeur_sav">Directeur SAV</option>
                   <option value="reception">Réception</option>
                   <option value="technicien">Technicien</option>
                   <option value="qualite">Qualité</option>
                   <option value="readonly">Lecture seule</option>
                 </select>
                 <input name="email" type="email" placeholder="Email (optionnel)" />
+                <input name="pin" type="password" inputmode="numeric" placeholder="PIN de sécurité (requis si sensible)" minlength="4" />
                 <select name="resourceId">
                   <option value="">Lier à aucune ressource technicien</option>
                 </select>
@@ -710,6 +712,38 @@
           <button class="primary-button" id="user-selector-submit" type="button" disabled>Continuer</button>
         </div>
       </div>
+    </div>
+    <div class="local-lock-overlay" id="user-pin-overlay" hidden>
+      <form class="local-lock-dialog" id="user-pin-form" role="dialog" aria-modal="true" aria-labelledby="user-pin-title">
+        <div class="local-lock-logo">🔑</div>
+        <h2 id="user-pin-title">PIN utilisateur requis</h2>
+        <p>Veuillez saisir le PIN pour le compte <strong id="user-pin-target-name">...</strong>.</p>
+        <label>
+          PIN de sécurité
+          <input name="pin" type="password" inputmode="numeric" autocomplete="current-password" required minlength="4" placeholder="Entrez le PIN" />
+        </label>
+        <button class="primary-button" type="submit" style="width: 100%;">Valider</button>
+        <button class="ghost-button" id="user-pin-cancel" type="button" style="margin-top: 8px; width: 100%;">Annuler</button>
+        <p class="muted status-error" id="user-pin-status" style="margin-top: 8px; text-align: center; color: var(--danger-color);"></p>
+      </form>
+    </div>
+    <div class="local-lock-overlay" id="user-pin-change-overlay" hidden>
+      <form class="local-lock-dialog" id="user-pin-change-form" role="dialog" aria-modal="true" aria-labelledby="user-pin-change-title">
+        <div class="local-lock-logo">⚙️</div>
+        <h2 id="user-pin-change-title">Nouveau PIN requis</h2>
+        <p>Le PIN temporaire `0000` doit être modifié avant le premier accès à l'application.</p>
+        <label>
+          Nouveau PIN (4 chiffres min, différent de 0000)
+          <input name="newPin" type="password" inputmode="numeric" autocomplete="new-password" required minlength="4" placeholder="Nouveau PIN" />
+        </label>
+        <label>
+          Confirmer le nouveau PIN
+          <input name="confirmNewPin" type="password" inputmode="numeric" autocomplete="new-password" required minlength="4" placeholder="Confirmer PIN" />
+        </label>
+        <button class="primary-button" type="submit" style="width: 100%;">Enregistrer le PIN</button>
+        <button class="ghost-button" id="user-pin-change-cancel" type="button" style="margin-top: 8px; width: 100%;">Annuler</button>
+        <p class="muted status-error" id="user-pin-change-status" style="margin-top: 8px; text-align: center; color: var(--danger-color);"></p>
+      </form>
     </div>
     <div class="local-lock-overlay" id="local-lock-overlay" hidden>
       <form class="local-lock-dialog" id="local-lock-form" role="dialog" aria-modal="true" aria-labelledby="local-lock-title">

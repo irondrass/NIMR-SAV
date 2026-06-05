@@ -1,5 +1,5 @@
 // tests/hotfix_v2313_verification.test.mjs
-// Suite de tests pour valider le hotfix v23.1.3 :
+// Suite de tests pour valider le hotfix v23.1.4 :
 // 1. Suppression/désactivation du verrou local "Poste atelier verrouillé".
 // 2. Création de dossier directement depuis l'espace Réception avec initialisation des réclamations/demandes.
 
@@ -107,13 +107,25 @@ vm.runInContext(source, context);
 
 // Override mocks
 context.saveState = () => {};
-context.notifyUser = (msg, type) => console.log(`[Notification] ${type || 'info'}: ${msg}`);
+context.lastNotification = null;
+context.notifyUser = (msg, type) => {
+  context.lastNotification = { msg, type };
+  console.log(`[Notification] ${type || 'info'}: ${msg}`);
+};
 context.render = () => {};
 context.renderCases = () => {};
 
 function app(expr) { return vm.runInContext(expr, context); }
 
-console.log('Démarrage des tests v23.1.3 : Hotfix local PIN & Case Creation...');
+console.log('Démarrage des tests v23.1.4 : Hotfix local PIN & Case Creation...');
+
+// ==========================================
+// Test 0 : Reception-first startup
+// ==========================================
+console.log('Test 0 : Démarrage orienté Réception...');
+assert.equal(app('activeTab'), 'reception-workspace', 'Le démarrage doit privilégier le flux Réception');
+assert.deepEqual(Array.from(app('getAllowedTabsForCurrentUser()').slice(0, 2)), ['reception-workspace', 'dossiers'], 'Réception doit être le premier onglet autorisé pour l’admin');
+console.log('-> Test 0 (Démarrage Réception) : OK');
 
 // ==========================================
 // Test 1 : Deactivation of local lock PIN
@@ -162,26 +174,7 @@ app('state.currentUserId = "u-reception"');
 // Simuler le clic sur le bouton "Nouveau dossier"
 app('isReceptionCreationMode = true; activeCaseId = null;');
 
-// Simuler la soumission du formulaire de création de dossier avec réclamations et demandes
 const mockForm = getOrCreateElement('reception-case-create-form');
-mockForm.elements = {
-  clientName: { value: 'Jean Dupont' },
-  phone: { value: '0612345678' },
-  vehicle: { value: 'Peugeot 208' },
-  plate: { value: 'AB-123-CD' },
-  vin: { value: 'VF312345678901234' },
-  mileage: { value: '15000' },
-  driverName: { value: 'Jean Dupont' },
-  driverPhone: { value: '0612345678' },
-  arrivalNotes: { value: 'Véhicule propre' },
-  orderType: { value: 'mecanique' },
-  orderTitle: { value: 'Entretien annuel' },
-  customerClaimsText: { value: 'Bruit suspect à l\'avant\nClimatisation ne refroidit plus' },
-  customerRequestsText: { value: 'Lavage carrosserie\nPrêt véhicule de courtoisie' }
-};
-
-// Injection du formulaire simulé dans Runtime.evaluate (ou direct execution de FormData stub)
-// On stub FormData pour renvoyer les valeurs du formulaire simulé
 context.FormData = class {
   constructor(form) {
     this.form = form;
@@ -191,8 +184,52 @@ context.FormData = class {
   }
 };
 
+function setReceptionCreateForm(values = {}) {
+  const defaults = {
+    clientName: 'Jean Dupont',
+    phone: '0612345678',
+    vehicle: '',
+    plate: '',
+    vin: '',
+    mileage: '15000',
+    driverName: 'Jean Dupont',
+    driverPhone: '0612345678',
+    arrivalNotes: 'Véhicule propre',
+    orderType: 'mecanique',
+    orderTitle: 'Entretien annuel',
+    customerClaimsText: '',
+    customerRequestsText: '',
+  };
+  mockForm.elements = Object.fromEntries(
+    Object.entries({ ...defaults, ...values }).map(([key, value]) => [key, { value }])
+  );
+  return mockForm;
+}
+
+function resetReceptionCreateState() {
+  app('state.cases = []; state.auditLog = []; activeCaseId = null; isReceptionCreationMode = true;');
+  context.lastNotification = null;
+}
+
+async function submitReceptionCreate(values = {}) {
+  resetReceptionCreateState();
+  setReceptionCreateForm(values);
+  await app(`handleCreateCase(document.getElementById('reception-case-create-form'))`);
+  return {
+    count: app('state.cases.length'),
+    item: app('state.cases[0]'),
+    notification: context.lastNotification,
+  };
+}
+
 // Soumettre le formulaire
-app(`handleCreateCase(document.getElementById('reception-case-create-form'))`);
+await submitReceptionCreate({
+  vehicle: 'Peugeot 208',
+  plate: 'AB-123-CD',
+  vin: 'VF312345678901234',
+  customerClaimsText: 'Bruit suspect à l\'avant\nClimatisation ne refroidit plus',
+  customerRequestsText: 'Lavage carrosserie\nPrêt véhicule de courtoisie',
+});
 
 // Vérifier que le dossier a été créé
 assert.equal(app('state.cases.length'), 1, 'Un dossier doit être créé dans l\'état');
@@ -229,4 +266,53 @@ assert.equal(activeStep, 2, 'L\'étape active du nouveau dossier doit être l\'�
 
 console.log('-> Test 2 (Création dossier Réception) : OK');
 
-console.log('\n✅ TOUS LES TESTS HOTFIX v23.1.3 REUSSIS AVEC SUCCES !');
+// ==========================================
+// Test 3 : BUG-VAL-01 — validation identité véhicule
+// ==========================================
+console.log('Test 3 : BUG-VAL-01 validation identité véhicule...');
+
+const rejectedNoVehicleIdentity = await submitReceptionCreate({
+  clientName: 'Client Sans Vehicule',
+  vehicle: '',
+  plate: '',
+  vin: '',
+});
+assert.equal(rejectedNoVehicleIdentity.count, 0, 'Aucun dossier ne doit être créé sans véhicule, immatriculation ou VIN');
+assert.deepEqual(
+  rejectedNoVehicleIdentity.notification,
+  { msg: "Renseignez au moins le véhicule, l'immatriculation ou le VIN.", type: 'error' },
+  'La création sans identité véhicule doit afficher le message bloquant'
+);
+
+const acceptedPlateOnly = await submitReceptionCreate({
+  clientName: 'Client Plaque Seule',
+  vehicle: '',
+  plate: 'AA-111-AA',
+  vin: '',
+});
+assert.equal(acceptedPlateOnly.count, 1, 'Un dossier avec immatriculation seule doit être accepté');
+assert.equal(acceptedPlateOnly.item.vehicle, 'Véhicule à compléter', 'Le libellé véhicule par défaut ne doit être appliqué qu’après validation');
+assert.equal(acceptedPlateOnly.item.plate, 'AA-111-AA', 'La plaque seule doit être conservée');
+
+const acceptedVinOnly = await submitReceptionCreate({
+  clientName: 'Client VIN Seul',
+  vehicle: '',
+  plate: '',
+  vin: 'VF3ABCDEF12345678',
+});
+assert.equal(acceptedVinOnly.count, 1, 'Un dossier avec VIN seul doit être accepté');
+assert.equal(acceptedVinOnly.item.vehicle, 'Véhicule à compléter', 'Le libellé véhicule par défaut doit compléter les dossiers acceptés par VIN seul');
+assert.equal(acceptedVinOnly.item.vin, 'VF3ABCDEF12345678', 'Le VIN seul doit être conservé');
+
+const acceptedVehicleOnly = await submitReceptionCreate({
+  clientName: 'Client Vehicule Seul',
+  vehicle: 'Citroën C3',
+  plate: '',
+  vin: '',
+});
+assert.equal(acceptedVehicleOnly.count, 1, 'Un dossier avec véhicule seul doit être accepté');
+assert.equal(acceptedVehicleOnly.item.vehicle, 'Citroën C3', 'Le véhicule saisi doit être conservé');
+
+console.log('-> Test 3 (BUG-VAL-01 identité véhicule) : OK');
+
+console.log('\n✅ TOUS LES TESTS HOTFIX v23.1.4 REUSSIS AVEC SUCCES !');

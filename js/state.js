@@ -20,7 +20,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v23.1.3";
+const APP_VERSION = "v23.1.4";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const WORKSHOP_NAME = "NIMR SAV";
@@ -390,7 +390,7 @@ const photoObjectUrls = new Map();
 const legacyPhotoPayloads = new Map();
 
 let state = loadState();
-let activeTab = "dossiers";
+let activeTab = "reception-workspace";
 let activeCaseId = state.cases[0]?.id ?? null;
 let activeCaseDetailTab = "resume";
 let generatedProposals = {};
@@ -2896,6 +2896,36 @@ function normalizeWorkHours(workHours) {
   return normalized;
 }
 
+function modalMessageToText(message) {
+  return String(message || "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/?strong>/gi, "")
+    .replace(/<[^>]*>/g, "");
+}
+
+function appendSafeModalMessage(target, message) {
+  target.replaceChildren();
+  const fragments = String(message || "").split(/(<br\s*\/?>|<\/?strong>)/gi).filter(Boolean);
+  let strongNode = null;
+  fragments.forEach((fragment) => {
+    if (/^<br\s*\/?>$/i.test(fragment)) {
+      target.appendChild(document.createElement("br"));
+      return;
+    }
+    if (/^<strong>$/i.test(fragment)) {
+      strongNode = document.createElement("strong");
+      target.appendChild(strongNode);
+      return;
+    }
+    if (/^<\/strong>$/i.test(fragment)) {
+      strongNode = null;
+      return;
+    }
+    const text = document.createTextNode(fragment);
+    (strongNode || target).appendChild(text);
+  });
+}
+
 function showConfirmModal(htmlMessage) {
   return new Promise((resolve) => {
     const overlay = document.getElementById("custom-modal-overlay");
@@ -2904,11 +2934,11 @@ function showConfirmModal(htmlMessage) {
     const confirmBtn = document.getElementById("custom-modal-confirm");
     
     if (!overlay || !body || !cancelBtn || !confirmBtn) {
-      resolve(confirm(htmlMessage.replace(/<br>/g, '\n')));
+      resolve(confirm(modalMessageToText(htmlMessage)));
       return;
     }
 
-    body.innerHTML = htmlMessage;
+    appendSafeModalMessage(body, htmlMessage);
     overlay.hidden = false;
 
     const cleanup = () => {
@@ -2940,14 +2970,25 @@ function showPromptModal(htmlMessage, expectedText) {
     const confirmBtn = document.getElementById("custom-modal-confirm");
     
     if (!overlay || !body || !cancelBtn || !confirmBtn) {
-      resolve(prompt(htmlMessage.replace(/<br>/g, '\n')) === expectedText);
+      resolve(prompt(modalMessageToText(htmlMessage)) === expectedText);
       return;
     }
 
-    body.innerHTML = `${htmlMessage}<br><br><input type="text" id="prompt-input" style="width: 100%; padding: 8px; border: 1px solid #cfe0e8; border-radius: 8px;" placeholder="${expectedText}" autocomplete="off" />`;
+    appendSafeModalMessage(body, htmlMessage);
+    body.appendChild(document.createElement("br"));
+    body.appendChild(document.createElement("br"));
+    const input = document.createElement("input");
+    input.type = "text";
+    input.id = "prompt-input";
+    input.style.width = "100%";
+    input.style.padding = "8px";
+    input.style.border = "1px solid #cfe0e8";
+    input.style.borderRadius = "8px";
+    input.placeholder = expectedText;
+    input.autocomplete = "off";
+    body.appendChild(input);
     overlay.hidden = false;
     
-    const input = document.getElementById("prompt-input");
     input.focus();
 
     const cleanup = () => {
@@ -3081,7 +3122,7 @@ function getAllowedTabsForCurrentUser() {
   if (!user) {
     const activeUsers = (state?.users || []).filter((u) => u.active !== false);
     if (activeUsers.length === 0) {
-      return ["dossiers", "today", "pilotage", "planning", "technician", "atelier"];
+      return ["reception-workspace", "dossiers", "today", "pilotage", "planning", "technician", "atelier"];
     }
     return [];
   }
@@ -3202,6 +3243,7 @@ function canAdvanceReceptionStep(caseItem, stepKey, actor) {
 function advanceReceptionWorkflow(caseId, action, payload = {}) {
   const item = (typeof state !== "undefined" ? state.cases : []).find((c) => c.id === caseId);
   if (!item) return { ok: false, message: "Dossier introuvable." };
+  item.receptionWorkflow = normalizeReceptionWorkflow(item.receptionWorkflow);
   const rw = item.receptionWorkflow;
   const actor = typeof getCurrentActor === "function" ? getCurrentActor() : { userId: "", userName: "Système", role: "" };
   const now = new Date().toISOString();

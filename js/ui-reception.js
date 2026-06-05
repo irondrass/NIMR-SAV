@@ -4,6 +4,15 @@
 let activeReceptionFilter = "all";
 let isReceptionCreationMode = false;
 
+function ensureReceptionWorkflow(item) {
+  if (!item) return typeof normalizeReceptionWorkflow === "function" ? normalizeReceptionWorkflow(null) : {};
+  const normalized = typeof normalizeReceptionWorkflow === "function"
+    ? normalizeReceptionWorkflow(item.receptionWorkflow)
+    : (item.receptionWorkflow && typeof item.receptionWorkflow === "object" ? item.receptionWorkflow : {});
+  item.receptionWorkflow = normalized;
+  return normalized;
+}
+
 const RECEPTION_STEP_LABELS = [
   "", // index 0 non utilisé
   "Création du dossier",
@@ -350,7 +359,7 @@ function renderStep1_Creation(item, container) {
 // ─── ÉTAPE 2 — DEMANDE PLANNING ──────────────────────────────────────────────
 
 function renderStep2_PlanningRequest(item) {
-  const rw = item.receptionWorkflow;
+  const rw = ensureReceptionWorkflow(item);
   const cyclesLeft = 3 - (rw.planningCycles || 0);
   const isRevision = Boolean(rw.planningRevisionRequestedAt);
   return `
@@ -388,7 +397,7 @@ function renderStep2_PlanningRequest(item) {
 // ─── ÉTAPE 3 — PROPOSITION PLANNING ─────────────────────────────────────────
 
 function renderStep3_PlanningReceived(item) {
-  const rw = item.receptionWorkflow;
+  const rw = ensureReceptionWorkflow(item);
   const proposal = rw.planningProposal;
   return `
     <div class="step-card step-card-active">
@@ -445,7 +454,7 @@ function renderStep3_PlanningReceived(item) {
 // ─── ÉTAPE 4 — CONTACT CLIENT ────────────────────────────────────────────────
 
 function renderStep4_ContactClient(item) {
-  const rw = item.receptionWorkflow;
+  const rw = ensureReceptionWorkflow(item);
   const proposal = rw.planningProposal;
   const history = rw.customerContactHistory || [];
   return `
@@ -504,7 +513,7 @@ function renderStep4_ContactClient(item) {
 // ─── ÉTAPE 5 — RÉPONSE CLIENT ────────────────────────────────────────────────
 
 function renderStep5_ClientResponse(item) {
-  const rw = item.receptionWorkflow;
+  const rw = ensureReceptionWorkflow(item);
   const cyclesLeft = 3 - (rw.planningCycles || 0);
   return `
     <div class="step-card step-card-active">
@@ -549,7 +558,7 @@ function renderStep5_ClientResponse(item) {
 // ─── ÉTAPE 6 — CONFIRMATION RDV ──────────────────────────────────────────────
 
 function renderStep6_ConfirmRDV(item) {
-  const rw = item.receptionWorkflow;
+  const rw = ensureReceptionWorkflow(item);
   const proposal = rw.planningProposal;
   return `
     <div class="step-card step-card-active">
@@ -598,7 +607,7 @@ function renderStep6_ConfirmRDV(item) {
 // ─── ÉTAPE 7 — RÉCEPTION DU VÉHICULE ────────────────────────────────────────
 
 function renderStep7_VehicleReceived(item) {
-  const rw = item.receptionWorkflow;
+  const rw = ensureReceptionWorkflow(item);
   return `
     <div class="step-card step-card-active">
       <div class="step-card-header">
@@ -637,7 +646,7 @@ function renderStep7_VehicleReceived(item) {
 // ─── ÉTAPE 8 — ENVOI ATELIER ─────────────────────────────────────────────────
 
 function renderStep8_SendToWorkshop(item) {
-  const rw = item.receptionWorkflow;
+  const rw = ensureReceptionWorkflow(item);
   const openClaims = (item.customerClaims || []).filter((c) => ["open", "in_progress"].includes(c.status));
   return `
     <div class="step-card step-card-active">
@@ -671,7 +680,7 @@ function renderStep8_SendToWorkshop(item) {
 // ─── ÉTAPE 9 — SUIVI DES TRAVAUX ────────────────────────────────────────────
 
 function renderStep9_TrackVehicle(item) {
-  const rw = item.receptionWorkflow;
+  const rw = ensureReceptionWorkflow(item);
   const f = item.flags;
   const openClaims = (item.customerClaims || []).filter((c) => ["open", "in_progress", "unresolved"].includes(c.status));
 
@@ -731,7 +740,7 @@ function renderStep9_TrackVehicle(item) {
 // ─── ÉTAPE 10 — CONTRÔLE QUALITÉ ────────────────────────────────────────────
 
 function renderStep10_QualityCheck(item) {
-  const rw = item.receptionWorkflow;
+  const rw = ensureReceptionWorkflow(item);
   const f = item.flags;
   const openClaims = (item.customerClaims || []).filter((c) => ["open", "in_progress", "unresolved"].includes(c.status));
   const qsLabels = { not_started: "Non commencé", in_progress: "En cours", validated: "Validé ✓", rejected: "Refusé / Reprise nécessaire" };
@@ -791,7 +800,7 @@ function renderStep10_QualityCheck(item) {
 // ─── ÉTAPE 11 — LIVRAISON ────────────────────────────────────────────────────
 
 function renderStep11_Delivery(item) {
-  const rw = item.receptionWorkflow;
+  const rw = ensureReceptionWorkflow(item);
   const f = item.flags;
   const openClaims = (item.customerClaims || []).filter((c) => ["open", "in_progress", "unresolved"].includes(c.status));
   const hasDeliveryBlock = openClaims.length > 0;
@@ -1176,7 +1185,7 @@ async function handleCreateCase(form) {
   const candidate = {
     clientName: String(data.get("clientName") || "").trim(),
     phone: String(data.get("phone") || "").trim(),
-    vehicle: String(data.get("vehicle") || "").trim() || "Véhicule à compléter",
+    vehicle: String(data.get("vehicle") || "").trim(),
     plate: normalizeIdentifierValue(data.get("plate")),
     vin: normalizeIdentifierValue(data.get("vin")),
     mileage: normalizeIdentifierValue(data.get("mileage")),
@@ -1187,6 +1196,7 @@ async function handleCreateCase(form) {
 
   if (!candidate.clientName) { notifyUser("Le nom du client est obligatoire.", "error"); return; }
   if (!candidate.vehicle && !candidate.plate && !candidate.vin) { notifyUser("Renseignez au moins le véhicule, l'immatriculation ou le VIN.", "error"); return; }
+  if (!candidate.vehicle) candidate.vehicle = "Véhicule à compléter";
 
   const duplicate = findDuplicateCase(candidate);
   if (duplicate) {
@@ -1303,7 +1313,7 @@ async function handleEditCase(form) {
 // ─── FICHE DE LIVRAISON IMPRIMABLE ───────────────────────────────────────────
 
 function printDeliverySheet(item) {
-  const rw = item.receptionWorkflow || {};
+  const rw = ensureReceptionWorkflow(item);
   const proposal = rw.planningProposal;
   const priorityLabels = { low: "Faible", normal: "Normale", high: "Haute", urgent: "Urgente" };
   const statusLabelsMap = { open: "Ouverte ⚠️", in_progress: "En cours", resolved: "Résolue ✓", unresolved: "Non résolue ✗", explained_to_customer: "Expliquée au client ✓" };
@@ -1508,14 +1518,34 @@ function showTextPromptModal(title, htmlMessage, placeholder) {
     const body = document.getElementById("custom-modal-body");
     const cancelBtn = document.getElementById("custom-modal-cancel");
     const confirmBtn = document.getElementById("custom-modal-confirm");
-    if (!overlay || !body || !cancelBtn || !confirmBtn) { resolve(prompt(htmlMessage.replace(/<br>/g, "\n"))); return; }
-    const oldTitle = titleEl ? titleEl.innerHTML : "Confirmation";
-    if (titleEl) titleEl.innerHTML = title;
-    body.innerHTML = `${htmlMessage}<br><br><input type="text" id="custom-prompt-input" style="width:100%;padding:8px;border:1px solid var(--border-color,#cfe0e8);border-radius:8px;box-sizing:border-box;" placeholder="${placeholder || ""}" autocomplete="off" />`;
+    if (!overlay || !body || !cancelBtn || !confirmBtn) {
+      const promptText = typeof modalMessageToText === "function" ? modalMessageToText(htmlMessage) : String(htmlMessage || "").replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]*>/g, "");
+      resolve(prompt(promptText));
+      return;
+    }
+    const oldTitle = titleEl ? titleEl.textContent : "Confirmation";
+    if (titleEl) titleEl.textContent = title;
+    if (typeof appendSafeModalMessage === "function") {
+      appendSafeModalMessage(body, htmlMessage);
+    } else {
+      body.replaceChildren(document.createTextNode(String(htmlMessage || "").replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]*>/g, "")));
+    }
+    body.appendChild(document.createElement("br"));
+    body.appendChild(document.createElement("br"));
+    const input = document.createElement("input");
+    input.type = "text";
+    input.id = "custom-prompt-input";
+    input.style.width = "100%";
+    input.style.padding = "8px";
+    input.style.border = "1px solid var(--border-color,#cfe0e8)";
+    input.style.borderRadius = "8px";
+    input.style.boxSizing = "border-box";
+    input.placeholder = placeholder || "";
+    input.autocomplete = "off";
+    body.appendChild(input);
     overlay.hidden = false;
-    const input = document.getElementById("custom-prompt-input");
     if (input) input.focus();
-    const cleanup = () => { overlay.hidden = true; if (titleEl) titleEl.innerHTML = oldTitle; cancelBtn.removeEventListener("click", onCancel); confirmBtn.removeEventListener("click", onConfirm); };
+    const cleanup = () => { overlay.hidden = true; if (titleEl) titleEl.textContent = oldTitle; cancelBtn.removeEventListener("click", onCancel); confirmBtn.removeEventListener("click", onConfirm); };
     const onCancel = () => { cleanup(); resolve(null); };
     const onConfirm = () => { const val = input ? input.value.trim() : ""; cleanup(); resolve(val); };
     cancelBtn.addEventListener("click", onCancel);

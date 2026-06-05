@@ -310,10 +310,18 @@ function bindCaseCreation() {
   });
 
   $("#new-case-shortcut")?.addEventListener("click", () => {
-    setActiveTab("dossiers");
-    form.reset();
-    form.elements.clientName.focus();
-    renderQuickVinResults();
+    if (typeof startReceptionCaseCreation === "function") startReceptionCaseCreation();
+    else {
+      setActiveTab("dossiers");
+      form.reset();
+      form.elements.clientName.focus();
+      renderQuickVinResults();
+    }
+  });
+
+  $("#open-reception-workspace-from-dossiers")?.addEventListener("click", () => {
+    if (typeof startReceptionCaseCreation === "function") startReceptionCaseCreation();
+    else setActiveTab("reception-workspace");
   });
 }
 
@@ -799,7 +807,7 @@ function registerServiceWorker() {
   });
   window.addEventListener("load", async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=23.1.3", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=23.1.4", { updateViaCache: "none" });
       registration.update?.();
       if (registration.waiting) showUpdateAvailable(registration);
       window.setInterval(() => registration.update?.(), 10 * 60 * 1000);

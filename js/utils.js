@@ -511,10 +511,27 @@ function findDuplicateCase(candidate) {
 }
 
 function focusCaseSearch() {
-  setActiveTab("dossiers");
-  const input = $("#case-search");
+  const preferredTab = typeof canAccessTab !== "function" || canAccessTab("reception-workspace")
+    ? "reception-workspace"
+    : "dossiers";
+  setActiveTab(preferredTab);
+  const input = preferredTab === "reception-workspace" ? $("#reception-case-search") : $("#case-search");
   input?.focus();
   input?.select();
+}
+
+function startReceptionCaseCreation() {
+  if (typeof canAccessTab === "function" && !canAccessTab("reception-workspace")) {
+    setActiveTab("dossiers");
+    $("#case-form input[name='clientName']")?.focus();
+    return;
+  }
+  setActiveTab("reception-workspace");
+  if (typeof isReceptionCreationMode !== "undefined") isReceptionCreationMode = true;
+  if (typeof renderReceptionWorkspace === "function") renderReceptionWorkspace();
+  window.setTimeout(() => {
+    $("#reception-detail-panel input[name='clientName']")?.focus();
+  }, 0);
 }
 
 function bindKeyboardShortcuts() {
@@ -526,8 +543,7 @@ function bindKeyboardShortcuts() {
     }
     if ((event.ctrlKey || event.metaKey) && key === "n") {
       event.preventDefault();
-      setActiveTab("dossiers");
-      $("#case-form input[name='clientName']")?.focus();
+      startReceptionCaseCreation();
     }
   });
 }

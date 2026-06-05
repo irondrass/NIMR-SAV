@@ -11,10 +11,14 @@ const syncJs = fs.readFileSync('js/supabase-sync.js', 'utf8');
 console.log("Démarrage des tests v22.33 : Notifications de sauvegarde silencieuse...");
 
 // Test 1: Versions et Caches
-assert.match(stateJs, /APP_VERSION\s*=\s*"v23\.1.2"/, "state.js n'a pas la bonne version");
-assert.match(swJs, /nimr-sav-v23\.1.2-reception-workspace-claims/, "sw.js n'a pas le bon cache");
-assert.match(versionJs, /NIMR_BUILD\s*=\s*"v23\.1.2"/, "version.js n'a pas la bonne version");
-assert.match(appJs, /sw\.js\?v=23\.1.2/, "app.js n'appelle pas le bon sw.js");
+const appVersion = stateJs.match(/APP_VERSION\s*=\s*"([^"]+)"/)?.[1];
+const buildVersion = versionJs.match(/NIMR_BUILD\s*=\s*"([^"]+)"/)?.[1];
+const cacheName = versionJs.match(/NIMR_CACHE_NAME\s*=\s*"([^"]+)"/)?.[1];
+assert.ok(appVersion, "APP_VERSION introuvable dans state.js");
+assert.equal(buildVersion, appVersion, "version.js doit exposer la même version que state.js");
+assert.ok(cacheName?.includes(appVersion), "Le cache PWA doit inclure la version applicative");
+assert.ok(swJs.includes(`CACHE_NAME = "${cacheName}"`), "sw.js doit utiliser le même cache que version.js");
+assert.ok(appJs.includes(`sw.js?v=${appVersion.replace(/^v/, "")}`), "app.js doit enregistrer le service worker avec la version courante");
 
 // Test 2: saveState normal
 assert.match(stateJs, /if \(typeof renderSyncStatusStrip === "function"\) renderSyncStatusStrip\(\);/, "saveState n'appelle pas renderSyncStatusStrip");
@@ -30,32 +34,37 @@ const catchBlock = stateJs.match(/catch \(error\) \{[\s\S]*?notifyUser[\s\S]*?\}
 assert.ok(catchBlock !== null, "Le block catch de saveState doit contenir notifyUser");
 assert.ok(catchBlock[0].includes('"error"'), "Le block catch de saveState doit émettre une erreur");
 
-// Test 4: quietNotify
+// Test 4: Modales de confirmation sécurisées
+assert.ok(stateJs.includes("function appendSafeModalMessage"), "La modale doit passer par un rendu texte sécurisé");
+assert.equal(stateJs.includes("body.innerHTML = htmlMessage"), false, "La modale ne doit pas injecter htmlMessage en HTML brut");
+assert.ok(stateJs.includes("modalMessageToText"), "Le fallback natif doit convertir le message en texte");
+
+// Test 5: quietNotify
 const quietNotifyContent = stateJs.match(/function quietNotify\([\s\S]*?updateSaveStatusIndicator/);
 assert.ok(quietNotifyContent !== null, "quietNotify est introuvable");
 assert.ok(quietNotifyContent[0].includes('notifyUser(message, variant)'), "quietNotify ne délègue pas à notifyUser pour error/warn");
 assert.ok(quietNotifyContent[0].includes('variant === "error" || variant === "warn"'), "quietNotify ne filtre pas bien warn/error");
 
-// Test 5: updateSaveStatusIndicator timeout
+// Test 6: updateSaveStatusIndicator timeout
 const fnMatch = stateJs.match(/function updateSaveStatusIndicator\([\s\S]*?\}\s*\}/);
 assert.ok(fnMatch !== null, "updateSaveStatusIndicator est introuvable");
 assert.ok(fnMatch[0].includes('setTimeout'), "Pas de timeout pour reset le statut");
 assert.ok(fnMatch[0].includes('status-saved'), "Pas de reset CSS status-saved");
 
-// Test 6: Actions technicien/UI utilisent quietNotify
+// Test 7: Actions technicien/UI utilisent quietNotify
 const btnActionMatch = uiCasesJs.match(/function handleBookingTaskAction\([\s\S]*?render/);
 assert.ok(btnActionMatch !== null, "handleBookingTaskAction introuvable");
 assert.ok(btnActionMatch[0].includes('quietNotify'), "handleBookingTaskAction doit utiliser quietNotify");
 
-// Test 7: Sync et Hors ligne
+// Test 8: Sync et Hors ligne
 assert.ok(appJs.includes('quietNotify("Connexion rétablie. La synchronisation Supabase va reprendre.", "success")'), "Connexion rétablie non convertie");
 assert.ok(appJs.includes('quietNotify("Mode hors ligne actif. Les données locales restent consultables.", "offline")'), "Mode hors ligne non converti");
 assert.ok(syncJs.includes('quietNotify("Mise à jour reçue depuis un autre poste.", "info")'), "Sync entrante sans conflit non convertie");
 
-// Test 8: Utilisateur courant
+// Test 9: Utilisateur courant
 assert.ok(appJs.includes('quietNotify("Utilisateur actif mis à jour.", "success")'), "Changement utilisateur actif non converti");
 
-// Test 9: Toasts maintenus pour actions sensibles
+// Test 10: Toasts maintenus pour actions sensibles
 assert.ok(syncJs.includes('notifyUser("Données et réglages restaurés depuis Supabase.", "success")'), "Restauration cloud doit garder son toast");
 assert.ok(syncJs.includes('notifyUser("Conflit de synchronisation détecté — données locales conservées.", "warn")'), "Conflit sync doit garder son toast");
 

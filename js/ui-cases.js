@@ -1454,7 +1454,7 @@ async function removeClaimLaborLine(item, claimId, lineId) {
   const claim = item.claims.find((candidate) => candidate.id === claimId);
   if (!claim?.estimate) return;
   const sourceLine = [...(claim.estimate.originalLines || []), ...(claim.estimate.lines || [])].find((line) => line.id === lineId);
-  const confirmed = await showConfirmModal(`Supprimer la ligne main-d'œuvre ${escapeHtml(sourceLine?.operation || "")} ?`);
+  const confirmed = await showConfirmModal(`Supprimer la ligne main-d'œuvre ${sourceLine?.operation || ""} ?`);
   if (!confirmed) return;
   claim.estimate.originalLines = (claim.estimate.originalLines || []).filter((line) => line.id !== lineId);
   claim.estimate.lines = (claim.estimate.lines || []).filter((line) => line.id !== lineId);
@@ -3304,7 +3304,7 @@ async function requestWorkshopChiefOverride(item, booking, action, failedResult,
   let confirmed = options.overrideConfirmed === true;
   if (!confirmed) {
     confirmed = await showConfirmModal(
-      `<strong>Action bloquée par les règles technicien.</strong><br>${escapeHtml(failedResult?.message || "Action impossible.")}<br><br>Utiliser un override chef atelier ?`
+      `<strong>Action bloquée par les règles technicien.</strong><br>${failedResult?.message || "Action impossible."}<br><br>Utiliser un override chef atelier ?`
     );
   }
   if (!confirmed) return { ok: false, cancelled: true, message: "Action annulée." };

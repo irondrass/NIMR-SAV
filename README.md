@@ -1,3 +1,10 @@
+# v23.1A.1 - Hotfix cache runtime PIN overlay
+
+- Force le chargement du correctif PIN/clickability avec `APP_VERSION = v23.1A.1`, query strings `?v=23.1A.1` et cache PWA `nimr-sav-v23.1a.1-pin-overlay-click-fix`.
+- Corrige la cause runtime où `user-pin-overlay` restait en `display:none` lors d'une nouvelle demande PIN après changement utilisateur.
+- Après déverrouillage PIN, l'application ferme explicitement les overlays PIN/sélecteur, désactive leurs `pointerEvents`, retire `inert` / `aria-hidden` de `.app-shell` et restaure les clics.
+- Les rôles sensibles `admin`, `chef_atelier` et `directeur_sav` restent soumis au PIN à chaque sélection depuis le sélecteur.
+
 # v23.0.4 - Hotfix résolution conflits sync
 
 - Les conflits Supabase entrants reçoivent maintenant une clé stable et un statut `open/resolved/ignored`.

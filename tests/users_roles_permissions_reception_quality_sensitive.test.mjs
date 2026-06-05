@@ -104,7 +104,7 @@ assert.match(exportsSource, /guardSensitiveAction\("case\.delete"/, 'suppression
 assert.match(estimateSource, /guardEstimateImport\(item\)/, 'import devis doit être gardé');
 assert.match(supabaseClientSource, /guardSensitiveAction\("supabase\.configure"/, 'configuration Supabase doit être gardée');
 assert.match(uiCasesSource, /guardWorkflowAction\(action, item, true\)/, 'workflow dossier doit être gardé côté fonction');
-assert.match(swSource, /nimr-sav-v23\.0\.6-appointment-status-canonical-sync/, 'cache PWA v23.0.6 attendu');
+assert.match(swSource, /nimr-sav-v23\.1a\.1-pin-overlay-click-fix/, 'cache PWA v23.1A.1 attendu');
 
 function setupRole(role, extra = {}) {
   app(`

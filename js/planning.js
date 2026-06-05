@@ -1320,9 +1320,17 @@ function resolveUserIdForTechnician(technicianId) {
   return user ? user.id : technicianId;
 }
 
+function resolveTechnicianActionActorUserId(technicianId) {
+  const currentUser = typeof getCurrentUser === "function" ? getCurrentUser() : null;
+  return currentUser?.id || resolveUserIdForTechnician(technicianId);
+}
+
 function checkTechnicianTaskAccess(item, booking, technicianId) {
   const currentUser = typeof getCurrentUser === "function" ? getCurrentUser() : null;
   if (currentUser && currentUser.role === "technicien") {
+    if (!currentUser.resourceId) {
+      return { ok: false, message: "Aucune ressource technicien liée à cet utilisateur." };
+    }
     if (!canActOnTechnicianTask(currentUser, booking)) {
       const details = `Tentative d'action non autorisée par le technicien ${currentUser.name} sur une tâche d'un autre technicien`;
       addAuditLog("permission_denied", "Action non autorisée", details, {
@@ -1341,6 +1349,9 @@ function checkTechnicianTaskAccess(item, booking, technicianId) {
   const userId = resolveUserIdForTechnician(technicianId);
   const user = getUserById(userId) || resolvePermissionUser(userId);
   if (user && user.role === "technicien") {
+    if (!user.resourceId) {
+      return { ok: false, message: "Aucune ressource technicien liée à cet utilisateur." };
+    }
     if (!canActOnTechnicianTask(user, booking)) {
       const details = `Tentative d'action non autorisée par le technicien ${user.name} sur une tâche d'un autre technicien`;
       addAuditLog("permission_denied", "Action non autorisée", details, {
@@ -1364,7 +1375,7 @@ function startTechnicianTask(item, bookingId, technicianId, options = {}) {
   if (!booking) return { ok: false, message: "Tâche introuvable dans le planning." };
   const access = checkTechnicianTaskAccess(item, booking, technicianId);
   if (!access.ok) return access;
-  const permission = guardAction("task.start", { booking, userId: resolveUserIdForTechnician(technicianId) }, { notify: false });
+  const permission = guardAction("task.start", { booking, userId: resolveTechnicianActionActorUserId(technicianId) }, { notify: false });
   if (!permission.ok) return { ok: false, message: permission.message, issues: [permission.message] };
   const validation = canStartTechnicianTask(item, booking, technicianId, options);
   if (!validation.ok) return { ok: false, message: validation.issues.join("\n"), issues: validation.issues };
@@ -1384,7 +1395,7 @@ function pauseTechnicianTask(item, bookingId, technicianId, reason) {
   if (!booking) return { ok: false, message: "Tâche introuvable dans le planning." };
   const access = checkTechnicianTaskAccess(item, booking, technicianId);
   if (!access.ok) return access;
-  const permission = guardAction("task.pause", { booking, userId: resolveUserIdForTechnician(technicianId) }, { notify: false });
+  const permission = guardAction("task.pause", { booking, userId: resolveTechnicianActionActorUserId(technicianId) }, { notify: false });
   if (!permission.ok) return { ok: false, message: permission.message };
   return pauseCaseBookingTask(item, bookingId, cleanReason, {
     pausedBy: technicianId,
@@ -1409,7 +1420,7 @@ function resumeTechnicianTask(item, bookingId, technicianId, options = {}) {
   }
   const access = checkTechnicianTaskAccess(item, target, technicianId);
   if (!access.ok) return access;
-  const permission = guardAction("task.resume", { booking: target, userId: resolveUserIdForTechnician(technicianId) }, { notify: false });
+  const permission = guardAction("task.resume", { booking: target, userId: resolveTechnicianActionActorUserId(technicianId) }, { notify: false });
   if (!permission.ok) return { ok: false, message: permission.message };
   if (isBookingTaskBlocked(target)) clearTechnicianTaskBlock(item, target.id, technicianId, { silent: true });
   target.resumedAt = new Date().toISOString();
@@ -1456,7 +1467,7 @@ function blockTechnicianTask(item, bookingId, technicianId, reason, details = ""
   if (!booking) return { ok: false, message: "Tâche introuvable dans le planning." };
   const access = checkTechnicianTaskAccess(item, booking, technicianId);
   if (!access.ok) return access;
-  const permission = guardAction("task.block", { booking, userId: resolveUserIdForTechnician(technicianId) }, { notify: false });
+  const permission = guardAction("task.block", { booking, userId: resolveTechnicianActionActorUserId(technicianId) }, { notify: false });
   if (!permission.ok) return { ok: false, message: permission.message };
   let target = booking;
   const status = getBookingOperationalStatus(booking);
@@ -1487,7 +1498,7 @@ function clearTechnicianTaskBlock(item, bookingId, technicianId, options = {}) {
   if (!booking) return { ok: false, message: "Tâche introuvable dans le planning." };
   const access = checkTechnicianTaskAccess(item, booking, technicianId);
   if (!access.ok) return access;
-  const permission = guardAction("task.edit", { booking, userId: resolveUserIdForTechnician(technicianId) }, { notify: false });
+  const permission = guardAction("task.edit", { booking, userId: resolveTechnicianActionActorUserId(technicianId) }, { notify: false });
   if (!permission.ok) return { ok: false, message: permission.message };
   const hadBlock = isBookingTaskBlocked(booking);
   booking.blockedAt = "";
@@ -1522,7 +1533,7 @@ function completeTechnicianTask(item, bookingId, technicianId, options = {}) {
   if (!booking) return { ok: false, message: "Tâche introuvable dans le planning." };
   const access = checkTechnicianTaskAccess(item, booking, technicianId);
   if (!access.ok) return access;
-  const permission = guardAction("task.complete", { booking, userId: resolveUserIdForTechnician(technicianId) }, { notify: false });
+  const permission = guardAction("task.complete", { booking, userId: resolveTechnicianActionActorUserId(technicianId) }, { notify: false });
   if (!permission.ok) return { ok: false, message: permission.message };
   if (isBookingTaskBlocked(booking)) return { ok: false, message: "Résolvez le blocage avant de terminer la tâche." };
   if (technicianTaskRequiresCompletionPhoto(item, booking) && !options.skipPhotoCheck && !booking.photoIds?.length && !options.photoId) {
@@ -1550,7 +1561,7 @@ function addTechnicianTaskNote(item, bookingId, technicianId, note) {
   if (!booking) return { ok: false, message: "Tâche introuvable dans le planning." };
   const access = checkTechnicianTaskAccess(item, booking, technicianId);
   if (!access.ok) return access;
-  const permission = guardAction("task.edit", { booking, userId: resolveUserIdForTechnician(technicianId) }, { notify: false });
+  const permission = guardAction("task.edit", { booking, userId: resolveTechnicianActionActorUserId(technicianId) }, { notify: false });
   if (!permission.ok) return { ok: false, message: permission.message };
   booking.notes = Array.isArray(booking.notes) ? booking.notes : [];
   booking.notes.push({ id: uid("task-note"), at: new Date().toISOString(), by: technicianId || "", text: cleanNote });
@@ -1563,7 +1574,7 @@ function attachTechnicianTaskPhoto(item, bookingId, technicianId, photoId) {
   if (!booking || !photoId) return { ok: false, message: "Photo ou tâche introuvable." };
   const access = checkTechnicianTaskAccess(item, booking, technicianId);
   if (!access.ok) return access;
-  const permission = guardAction("task.edit", { booking, userId: resolveUserIdForTechnician(technicianId) }, { notify: false });
+  const permission = guardAction("task.edit", { booking, userId: resolveTechnicianActionActorUserId(technicianId) }, { notify: false });
   if (!permission.ok) return { ok: false, message: permission.message };
   booking.photoIds = Array.isArray(booking.photoIds) ? booking.photoIds : [];
   if (!booking.photoIds.includes(photoId)) booking.photoIds.push(photoId);

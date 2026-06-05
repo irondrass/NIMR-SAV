@@ -114,7 +114,12 @@ const contextObject = {
   alert: () => {},
   confirm: () => true,
   prompt: () => '',
-  fetch: async () => ({ ok: true, json: async () => ({}) })
+  fetch: async () => ({ ok: true, json: async () => ({}) }),
+  getReceptionRecommendedAction: (item) => {
+    if (!item.flags?.received) return { action: 'Marquer véhicule arrivé' };
+    if (!item.flags?.clientApproved) return { action: 'Validation client' };
+    return { action: 'Envoyer en atelier' };
+  }
 };
 
 const context = vm.createContext(contextObject);

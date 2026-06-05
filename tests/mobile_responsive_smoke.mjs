@@ -150,6 +150,16 @@ async function main() {
       }, sessionId);
       await send("Page.navigate", { url: `${baseUrl}?mobile-smoke=22.27-${viewport.width}x${viewport.height}` }, sessionId);
       await wait(2800);
+      await send("Runtime.evaluate", {
+        awaitPromise: true,
+        expression: `(async () => {
+          sessionStorage.setItem("nimr-user-pin-unlocked", state.currentUserId);
+          if (typeof checkUserSessionStartup === "function") {
+            checkUserSessionStartup();
+          }
+          await new Promise(r => setTimeout(r, 200));
+        })()`
+      }, sessionId);
       const evaluation = await send("Runtime.evaluate", {
         awaitPromise: true,
         returnByValue: true,

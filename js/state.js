@@ -20,7 +20,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v23.1.1";
+const APP_VERSION = "v23.1.2";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const WORKSHOP_NAME = "NIMR SAV";
@@ -1884,6 +1884,7 @@ function normalizeCase(item, bookings) {
     appointment: item.appointment || null,
     claims: normalizeRepairClaims(item.claims, item),
     customerClaims: Array.isArray(item.customerClaims) ? item.customerClaims.map(normalizeCustomerClaim).filter(Boolean) : [],
+    receptionWorkflow: normalizeReceptionWorkflow(item.receptionWorkflow),
     supplements: normalizeRepairSupplements(item.supplements),
     closedAt: item.closedAt || "",
     archivedAt: item.archivedAt || "",
@@ -1912,13 +1913,91 @@ function hasRepairClaims(item) {
   return normalizeRepairClaims(item?.claims || [], item).length > 0;
 }
 
+function normalizeReceptionWorkflow(raw) {
+  raw = raw && typeof raw === "object" ? raw : {};
+  return {
+    // Étape 2 — demande planning
+    planningRequestedAt: raw.planningRequestedAt || "",
+    planningRequestedBy: raw.planningRequestedBy || "",
+    planningComment: raw.planningComment || "",
+    planningCycles: Math.min(3, Math.max(0, Number(raw.planningCycles || 0))),
+    // Étape 3 — proposition planning reçue
+    planningReceivedAt: raw.planningReceivedAt || "",
+    planningReceivedBy: raw.planningReceivedBy || "",
+    planningProposal: raw.planningProposal && typeof raw.planningProposal === "object" ? {
+      startDate: raw.planningProposal.startDate || "",
+      deliveryDate: raw.planningProposal.deliveryDate || "",
+      workshopNote: raw.planningProposal.workshopNote || "",
+      proposedBy: raw.planningProposal.proposedBy || "",
+    } : null,
+    planningAcceptedAt: raw.planningAcceptedAt || "",
+    planningRevisionRequestedAt: raw.planningRevisionRequestedAt || "",
+    // Étape 4 — contact client
+    customerContactedAt: raw.customerContactedAt || "",
+    customerContactHistory: Array.isArray(raw.customerContactHistory)
+      ? raw.customerContactHistory.map((entry) => ({
+          at: entry.at || new Date().toISOString(),
+          by: entry.by || "",
+          outcome: entry.outcome || "contacted",
+          note: entry.note || "",
+        }))
+      : [],
+    // Étape 5 — décision client
+    customerDecision: raw.customerDecision || "", // confirmed | new_date | cancelled | pending
+    customerDecisionAt: raw.customerDecisionAt || "",
+    customerNewDateRequest: raw.customerNewDateRequest || "",
+    // Étape 6 — confirmation RDV
+    rdvConfirmedAt: raw.rdvConfirmedAt || "",
+    rdvConfirmedBy: raw.rdvConfirmedBy || "",
+    rdvChannel: raw.rdvChannel || "", // phone | sms | whatsapp | email | other
+    rdvReminderSent: Boolean(raw.rdvReminderSent),
+    rdvNote: raw.rdvNote || "",
+    // Étape 7 — réception physique (liée à flags.received)
+    vehicleReceivedAt: raw.vehicleReceivedAt || "",
+    vehicleReceivedBy: raw.vehicleReceivedBy || "",
+    vehicleMileageEntry: raw.vehicleMileageEntry || "",
+    vehicleAccessories: raw.vehicleAccessories || "",
+    vehicleDocuments: raw.vehicleDocuments || "",
+    vehicleConditionNote: raw.vehicleConditionNote || "",
+    // Étape 8 — envoi atelier
+    sentToWorkshopAt: raw.sentToWorkshopAt || "",
+    sentToWorkshopBy: raw.sentToWorkshopBy || "",
+    // Étape 9 — suivi
+    followupNotes: Array.isArray(raw.followupNotes)
+      ? raw.followupNotes.map((n) => ({ at: n.at || "", by: n.by || "", text: n.text || "" }))
+      : [],
+    // Étape 10 — contrôle qualité
+    qualityStatus: ["not_started", "in_progress", "validated", "rejected"].includes(raw.qualityStatus)
+      ? raw.qualityStatus
+      : "not_started",
+    qualityReviewedAt: raw.qualityReviewedAt || "",
+    qualityReturnRequestedAt: raw.qualityReturnRequestedAt || "",
+    qualityReturnReason: raw.qualityReturnReason || "",
+    readyForDeliveryAt: raw.readyForDeliveryAt || "",
+    // Étape 11 — livraison
+    deliverySheetPrintedAt: raw.deliverySheetPrintedAt || "",
+    deliverySheetSignedByClient: Boolean(raw.deliverySheetSignedByClient),
+    deliverySheetClientName: raw.deliverySheetClientName || "",
+    deliveredAt: raw.deliveredAt || "",
+    deliveredBy: raw.deliveredBy || "",
+    deliveryOverride: Boolean(raw.deliveryOverride),
+    deliveryOverrideReason: raw.deliveryOverrideReason || "",
+  };
+}
+
 function normalizeCustomerClaim(claim) {
   if (!claim) return null;
+  const validTypes = new Set(["claim", "request"]);
+  const validPriorities = new Set(["low", "normal", "high", "urgent"]);
+  const validStatuses = new Set(["open", "in_progress", "resolved", "unresolved", "explained_to_customer"]);
   return {
     id: claim.id || uid("customer-claim"),
-    text: String(claim.text || "").trim(),
-    priority: claim.priority || "normal", // low / normal / high / urgent
-    status: claim.status || "open", // open / in_progress / resolved / unresolved / explained_to_customer
+    type: validTypes.has(claim.type) ? claim.type : "claim", // claim | request
+    title: String(claim.title || claim.text || "").trim(),
+    text: String(claim.text || claim.title || "").trim(),
+    description: String(claim.description || "").trim(),
+    priority: validPriorities.has(claim.priority) ? claim.priority : "normal",
+    status: validStatuses.has(claim.status) ? claim.status : "open",
     createdAt: claim.createdAt || new Date().toISOString(),
     createdBy: claim.createdBy || "",
     responsibleRole: claim.responsibleRole || "",
@@ -3019,4 +3098,264 @@ function ensureCurrentTabAllowed() {
     }
   }
   return false;
+}
+
+// ─── RÉCEPTION WORKFLOW — LOGIQUE MÉTIER v23.1C ────────────────────────────
+
+/**
+ * Retourne le numéro de l'étape active (1–11) pour un dossier.
+ * Basé sur l'état réel des flags et receptionWorkflow.
+ */
+function getReceptionWorkflowStep(caseItem) {
+  if (!caseItem) return 1;
+  const rw = caseItem.receptionWorkflow || {};
+  const f = caseItem.flags || {};
+
+  // Étape 11 — livraison effectuée ou en cours
+  if (f.delivered) return 11;
+  // Étape 11 — prêt pour livraison (QC validé ou override)
+  if (rw.readyForDeliveryAt) return 11;
+  // Étape 10 — suivi qualité
+  if (rw.sentToWorkshopAt && (f.workCompleted || rw.qualityStatus !== "not_started")) return 10;
+  // Étape 9 — suivi atelier
+  if (rw.sentToWorkshopAt) return 9;
+  // Étape 8 — envoi atelier
+  if (f.received && !rw.sentToWorkshopAt) return 8;
+  // Étape 7 — réception physique
+  if (rw.rdvConfirmedAt && !f.received) return 7;
+  // Étape 6 — confirmation RDV
+  if (rw.customerDecision === "confirmed" && !rw.rdvConfirmedAt) return 6;
+  // Étape 5 — réponse client
+  if (rw.customerContactedAt && !rw.customerDecision) return 5;
+  if (rw.customerContactedAt && rw.customerDecision === "pending") return 5;
+  // Étape 4 — contact client
+  if (rw.planningAcceptedAt && !rw.customerContactedAt) return 4;
+  // Étape 3 — réception proposition planning
+  if (rw.planningRequestedAt && !rw.planningAcceptedAt && !rw.planningRevisionRequestedAt) return 3;
+  // Boucle : révision planning demandée et nouveau cycle possible
+  if (rw.planningRevisionRequestedAt && rw.planningCycles < 3) return 2;
+  // Étape 2 — demande planning
+  if (!rw.planningRequestedAt) return 2;
+  // Étape 3 par défaut si planning demandé mais pas encore répondu
+  return 3;
+}
+
+/**
+ * Retourne le statut d'une étape donnée.
+ * stepKey : 1..11
+ */
+function getReceptionStepStatus(caseItem, stepKey) {
+  const activeStep = getReceptionWorkflowStep(caseItem);
+  const step = Number(stepKey);
+  if (step < activeStep) return "completed";
+  if (step === activeStep) return "active";
+  if (step === activeStep + 1) return "pending";
+  return "locked";
+}
+
+/**
+ * Vérifie si l'acteur peut avancer l'étape donnée.
+ * Retourne {ok: boolean, message: string}
+ */
+function canAdvanceReceptionStep(caseItem, stepKey, actor) {
+  const step = Number(stepKey);
+  const rw = caseItem?.receptionWorkflow || {};
+  const f = caseItem?.flags || {};
+  const role = actor?.role || "";
+
+  const unauthorized = { ok: false, message: "Vous n'avez pas les droits pour cette action." };
+  const receptionAllowed = ["admin", "chef_atelier", "directeur_sav", "reception"];
+  if (!receptionAllowed.includes(role)) return unauthorized;
+
+  switch (step) {
+    case 1: return { ok: true, message: "" };
+    case 2: return { ok: !caseItem?.flags?.delivered, message: caseItem?.flags?.delivered ? "Dossier déjà livré." : "" };
+    case 3: return rw.planningRequestedAt ? { ok: true, message: "" } : { ok: false, message: "La demande de planning n'a pas encore été envoyée." };
+    case 4: return rw.planningAcceptedAt ? { ok: true, message: "" } : { ok: false, message: "Le planning n'a pas encore été accepté." };
+    case 5: return rw.customerContactedAt ? { ok: true, message: "" } : { ok: false, message: "Le contact client n'a pas encore été enregistré." };
+    case 6: return rw.customerDecision === "confirmed" ? { ok: true, message: "" } : { ok: false, message: "Le client n'a pas encore confirmé le rendez-vous." };
+    case 7: return rw.rdvConfirmedAt ? { ok: true, message: "" } : { ok: false, message: "Le rendez-vous n'est pas encore confirmé." };
+    case 8: return f.received ? { ok: true, message: "" } : { ok: false, message: "Le véhicule n'est pas encore réceptionné." };
+    case 9: return rw.sentToWorkshopAt ? { ok: true, message: "" } : { ok: false, message: "Le véhicule n'est pas encore envoyé en atelier." };
+    case 10: return rw.sentToWorkshopAt ? { ok: true, message: "" } : { ok: false, message: "Le véhicule n'est pas encore en atelier." };
+    case 11: {
+      const qcOk = rw.qualityStatus === "validated" || ["admin", "chef_atelier"].includes(role);
+      const noOpenClaims = !(caseItem.customerClaims || []).some((c) => ["open", "in_progress", "unresolved"].includes(c.status));
+      if (!qcOk) return { ok: false, message: "Le contrôle qualité n'est pas encore validé." };
+      if (!noOpenClaims && !["admin", "chef_atelier"].includes(role)) return { ok: false, message: "Il reste des réclamations client non résolues." };
+      return { ok: true, message: "" };
+    }
+    default: return { ok: false, message: "Étape inconnue." };
+  }
+}
+
+/**
+ * Applique une transition de workflow réception.
+ * action : string clé de l'action
+ * payload : données supplémentaires
+ * Retourne {ok, message}
+ */
+function advanceReceptionWorkflow(caseId, action, payload = {}) {
+  const item = (typeof state !== "undefined" ? state.cases : []).find((c) => c.id === caseId);
+  if (!item) return { ok: false, message: "Dossier introuvable." };
+  const rw = item.receptionWorkflow;
+  const actor = typeof getCurrentActor === "function" ? getCurrentActor() : { userId: "", userName: "Système", role: "" };
+  const now = new Date().toISOString();
+
+  switch (action) {
+    case "request_planning": {
+      rw.planningRequestedAt = now;
+      rw.planningRequestedBy = actor.userId;
+      rw.planningComment = payload.comment || "";
+      rw.planningCycles = Math.min(3, (rw.planningCycles || 0) + 1);
+      if (typeof addAuditLog === "function") addAuditLog("reception.planning_requested", "Demande de planning", `Demande envoyée (cycle ${rw.planningCycles}/3)`, { caseId });
+      if (typeof addHistory === "function") addHistory(item, "reception.planning_requested", "Demande de planning", payload.comment || "");
+      return { ok: true, message: "" };
+    }
+    case "receive_planning": {
+      rw.planningReceivedAt = now;
+      rw.planningReceivedBy = actor.userId;
+      rw.planningProposal = {
+        startDate: payload.startDate || "",
+        deliveryDate: payload.deliveryDate || "",
+        workshopNote: payload.workshopNote || "",
+        proposedBy: payload.proposedBy || actor.userId,
+      };
+      if (typeof addAuditLog === "function") addAuditLog("reception.planning_received", "Planning reçu", `Proposition reçue — démarrage: ${payload.startDate}, livraison: ${payload.deliveryDate}`, { caseId });
+      if (typeof addHistory === "function") addHistory(item, "reception.planning_received", "Planning reçu", payload.workshopNote || "");
+      return { ok: true, message: "" };
+    }
+    case "accept_planning": {
+      rw.planningAcceptedAt = now;
+      rw.planningRevisionRequestedAt = "";
+      if (typeof addAuditLog === "function") addAuditLog("reception.planning_received", "Planning accepté", "Proposition planning acceptée par la réception", { caseId });
+      return { ok: true, message: "" };
+    }
+    case "request_planning_revision": {
+      if (rw.planningCycles >= 3) return { ok: false, message: "Nombre maximum de cycles planning atteint (3/3)." };
+      rw.planningRevisionRequestedAt = now;
+      rw.planningAcceptedAt = "";
+      rw.planningReceivedAt = "";
+      rw.planningRequestedAt = "";
+      rw.customerDecision = "new_date";
+      rw.customerDecisionAt = now;
+      if (typeof addAuditLog === "function") addAuditLog("reception.planning_revision_requested", "Révision planning demandée", `Cycle ${rw.planningCycles}/3 — nouvelle date souhaitée: ${payload.newDate || ""}`, { caseId });
+      return { ok: true, message: "" };
+    }
+    case "contact_customer": {
+      const entry = { at: now, by: actor.userId, outcome: payload.outcome || "contacted", note: payload.note || "" };
+      rw.customerContactHistory = Array.isArray(rw.customerContactHistory) ? [...rw.customerContactHistory, entry] : [entry];
+      rw.customerContactedAt = now;
+      if (payload.outcome !== "pending") rw.customerDecision = "";
+      if (typeof addAuditLog === "function") {
+        const auditType = payload.outcome === "unreachable" ? "reception.customer_unreachable" : "reception.customer_contacted";
+        addAuditLog(auditType, "Contact client", payload.note || `Client ${payload.outcome || "contacté"}`, { caseId });
+      }
+      if (payload.note && typeof addHistory === "function") addHistory(item, "reception.customer_contacted", "Contact client", payload.note);
+      return { ok: true, message: "" };
+    }
+    case "set_customer_decision": {
+      const validDecisions = ["confirmed", "new_date", "cancelled", "pending"];
+      if (!validDecisions.includes(payload.decision)) return { ok: false, message: "Décision client invalide." };
+      rw.customerDecision = payload.decision;
+      rw.customerDecisionAt = now;
+      if (payload.decision === "new_date") {
+        rw.customerNewDateRequest = payload.newDate || "";
+        if (rw.planningCycles >= 3) return { ok: false, message: "Nombre maximum de cycles planning atteint (3/3). Veuillez contacter le chef d'atelier." };
+        // Réinitialiser le cycle planning pour retour à l'étape 2
+        rw.planningRevisionRequestedAt = now;
+        rw.planningRequestedAt = "";
+        rw.planningReceivedAt = "";
+        rw.planningAcceptedAt = "";
+        rw.customerContactedAt = "";
+        rw.customerDecision = "";
+      }
+      const auditTypes = { confirmed: "reception.customer_confirmed_schedule", new_date: "reception.customer_requested_new_date", cancelled: "reception.customer_cancelled", pending: "reception.customer_pending_response" };
+      if (typeof addAuditLog === "function") addAuditLog(auditTypes[payload.decision] || "reception.customer_decision", `Décision client: ${payload.decision}`, payload.note || "", { caseId });
+      return { ok: true, message: "" };
+    }
+    case "confirm_rdv": {
+      rw.rdvConfirmedAt = now;
+      rw.rdvConfirmedBy = actor.userId;
+      rw.rdvChannel = payload.channel || "phone";
+      rw.rdvReminderSent = Boolean(payload.reminderSent);
+      rw.rdvNote = payload.note || "";
+      if (typeof addAuditLog === "function") addAuditLog("reception.appointment_confirmed", "RDV confirmé", `Canal: ${payload.channel || "téléphone"}. ${payload.note || ""}`, { caseId });
+      if (typeof addHistory === "function") addHistory(item, "reception.appointment_confirmed", "Rendez-vous confirmé", payload.note || "");
+      return { ok: true, message: "" };
+    }
+    case "receive_vehicle": {
+      item.flags.received = true;
+      rw.vehicleReceivedAt = now;
+      rw.vehicleReceivedBy = actor.userId;
+      rw.vehicleMileageEntry = payload.mileage || item.mileage || "";
+      rw.vehicleAccessories = payload.accessories || "";
+      rw.vehicleDocuments = payload.documents || "";
+      rw.vehicleConditionNote = payload.conditionNote || "";
+      if (typeof recordFlagHistory === "function") recordFlagHistory(item, "received", true);
+      if (typeof addAuditLog === "function") addAuditLog("reception.vehicle_received", "Véhicule réceptionné", payload.conditionNote || `KM: ${rw.vehicleMileageEntry}`, { caseId });
+      return { ok: true, message: "" };
+    }
+    case "send_to_workshop": {
+      item.flags.workStarted = true;
+      rw.sentToWorkshopAt = now;
+      rw.sentToWorkshopBy = actor.userId;
+      if (typeof recordFlagHistory === "function") recordFlagHistory(item, "workStarted", true);
+      if (typeof addAuditLog === "function") addAuditLog("reception.sent_to_workshop", "Envoyé en atelier", payload.note || "", { caseId });
+      if (typeof addHistory === "function") addHistory(item, "reception.sent_to_workshop", "Envoyé en atelier", payload.note || "");
+      return { ok: true, message: "" };
+    }
+    case "add_followup_note": {
+      if (!payload.text) return { ok: false, message: "Le texte de la note est obligatoire." };
+      rw.followupNotes = Array.isArray(rw.followupNotes) ? [...rw.followupNotes, { at: now, by: actor.userId, text: payload.text }] : [{ at: now, by: actor.userId, text: payload.text }];
+      if (typeof addAuditLog === "function") addAuditLog("reception.vehicle_status_followed", "Note de suivi", payload.text, { caseId });
+      return { ok: true, message: "" };
+    }
+    case "update_quality_status": {
+      const validStatuses = ["not_started", "in_progress", "validated", "rejected"];
+      if (!validStatuses.includes(payload.status)) return { ok: false, message: "Statut qualité invalide." };
+      rw.qualityStatus = payload.status;
+      rw.qualityReviewedAt = now;
+      if (payload.status === "validated") {
+        item.flags.qualityApproved = true;
+        rw.readyForDeliveryAt = now;
+        if (typeof recordFlagHistory === "function") recordFlagHistory(item, "qualityApproved", true);
+      } else if (payload.status === "rejected") {
+        rw.qualityReturnRequestedAt = now;
+        rw.qualityReturnReason = payload.reason || "";
+      }
+      if (typeof addAuditLog === "function") addAuditLog("quality.reception_reviewed", `Qualité: ${payload.status}`, payload.reason || "", { caseId });
+      return { ok: true, message: "" };
+    }
+    case "mark_delivery_sheet_printed": {
+      rw.deliverySheetPrintedAt = now;
+      if (typeof addAuditLog === "function") addAuditLog("reception.delivery_sheet_printed", "Fiche de livraison imprimée", "", { caseId });
+      return { ok: true, message: "" };
+    }
+    case "mark_sheet_signed": {
+      rw.deliverySheetSignedByClient = true;
+      rw.deliverySheetClientName = payload.clientName || item.clientName || "";
+      if (typeof addAuditLog === "function") addAuditLog("reception.customer_signature_captured", "Fiche signée par le client", `Client: ${rw.deliverySheetClientName}`, { caseId });
+      return { ok: true, message: "" };
+    }
+    case "deliver_vehicle": {
+      item.flags.delivered = true;
+      rw.deliveredAt = now;
+      rw.deliveredBy = actor.userId;
+      if (typeof recordFlagHistory === "function") recordFlagHistory(item, "delivered", true);
+      if (typeof addAuditLog === "function") addAuditLog("reception.delivery_completed", "Véhicule livré", `Livré par ${actor.userName}`, { caseId });
+      if (typeof addHistory === "function") addHistory(item, "reception.delivery_completed", "Véhicule livré", `Livraison par ${actor.userName}`);
+      return { ok: true, message: "" };
+    }
+    default:
+      return { ok: false, message: `Action inconnue: ${action}` };
+  }
+}
+
+if (typeof window !== "undefined") {
+  window.getReceptionWorkflowStep = getReceptionWorkflowStep;
+  window.getReceptionStepStatus = getReceptionStepStatus;
+  window.canAdvanceReceptionStep = canAdvanceReceptionStep;
+  window.advanceReceptionWorkflow = advanceReceptionWorkflow;
+  window.normalizeReceptionWorkflow = normalizeReceptionWorkflow;
 }

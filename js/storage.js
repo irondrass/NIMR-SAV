@@ -616,13 +616,35 @@ async function loadBundledVehicleDatabase() {
   updateVehicleImportStatus("Chargement de la base véhicules...");
   try {
     const response = await fetch(VEHICLE_DATA_URL, { cache: "no-store" });
+    if (response.status === 404) {
+      clearBundledVehicleDatabase();
+      return;
+    }
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const records = await response.json();
+    const payload = typeof response.text === "function"
+      ? await response.text()
+      : JSON.stringify(await response.json());
+    if (!String(payload || "").trim()) {
+      clearBundledVehicleDatabase();
+      return;
+    }
+    const records = JSON.parse(payload);
+    if (!Array.isArray(records) || records.length === 0) {
+      clearBundledVehicleDatabase();
+      return;
+    }
     setVehicleRecords(records, "base locale");
   } catch (error) {
     console.warn("Base véhicules locale non chargée", error);
-    updateVehicleImportStatus("Importez la base véhicules pour chercher par VIN");
+    clearBundledVehicleDatabase();
   }
+}
+
+function clearBundledVehicleDatabase() {
+  vehicleRecords = [];
+  vehicleDatabaseLoaded = false;
+  updateVehicleImportStatus("Importez la base véhicules pour chercher par VIN ou immatriculation");
+  renderQuickVinResults();
 }
 
 function setVehicleRecords(records, source = "") {

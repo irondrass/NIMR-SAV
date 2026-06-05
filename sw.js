@@ -1,4 +1,4 @@
-const CACHE_NAME = "nimr-sav-v23.1.4-ux-safety-reception-first";
+const CACHE_NAME = "nimr-sav-v23.1.5-security-data-hotfix";
 const ASSETS = [
   "./",
   "./index.html",
@@ -13,7 +13,6 @@ const ASSETS = [
   "./assets/icon-192.png",
   "./assets/icon-512.png",
   "./assets/apple-touch-icon.png",
-  "./data/vehicles.json",
   "./vendor/pdf.min.js",
   "./vendor/pdf.worker.min.js",
   "./js/utils.js",

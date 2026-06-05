@@ -46,6 +46,24 @@ as $$
   );
 $$;
 
+create or replace function public.storage_object_workshop_id(object_name text)
+returns uuid
+language plpgsql
+stable
+security definer
+set search_path = public, storage
+as $$
+declare
+  first_segment text;
+begin
+  first_segment := (storage.foldername(object_name))[1];
+  if first_segment is null or first_segment !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then
+    return null;
+  end if;
+  return first_segment::uuid;
+end;
+$$;
+
 -- Correctif v21.10 : l'ancien script pouvait creer order_number en UNIQUE.
 -- En atelier SAV, un ancien import ou une reprise peut contenir un numero OR en double.
 -- On garde local_id comme cle de synchronisation et on rend order_number non bloquant.
@@ -489,29 +507,52 @@ begin
 end $$;
 
 -- Bucket photos: a creer aussi dans Storage si besoin.
+-- Securite v23.1.5: les objets doivent etre stockes sous
+-- <workshop_id>/<case_id>/<photo_id-or-file>. Aucun acces global authenticated.
 insert into storage.buckets (id, name, public)
 values ('repair-photos', 'repair-photos', false)
 on conflict (id) do nothing;
 
-do $$
-begin
-  if not exists (select 1 from pg_policies where schemaname='storage' and tablename='objects' and policyname='repair photos read authenticated') then
-    create policy "repair photos read authenticated"
-    on storage.objects for select to authenticated using (bucket_id = 'repair-photos');
-  end if;
-  if not exists (select 1 from pg_policies where schemaname='storage' and tablename='objects' and policyname='repair photos insert authenticated') then
-    create policy "repair photos insert authenticated"
-    on storage.objects for insert to authenticated with check (bucket_id = 'repair-photos');
-  end if;
-  if not exists (select 1 from pg_policies where schemaname='storage' and tablename='objects' and policyname='repair photos update authenticated') then
-    create policy "repair photos update authenticated"
-    on storage.objects for update to authenticated using (bucket_id = 'repair-photos') with check (bucket_id = 'repair-photos');
-  end if;
-  if not exists (select 1 from pg_policies where schemaname='storage' and tablename='objects' and policyname='repair photos delete authenticated') then
-    create policy "repair photos delete authenticated"
-    on storage.objects for delete to authenticated using (bucket_id = 'repair-photos');
-  end if;
-end $$;
+drop policy if exists "repair photos read authenticated" on storage.objects;
+drop policy if exists "repair photos insert authenticated" on storage.objects;
+drop policy if exists "repair photos update authenticated" on storage.objects;
+drop policy if exists "repair photos delete authenticated" on storage.objects;
+drop policy if exists "repair photos select workshop member" on storage.objects;
+drop policy if exists "repair photos insert workshop member" on storage.objects;
+drop policy if exists "repair photos update workshop member" on storage.objects;
+drop policy if exists "repair photos delete workshop member" on storage.objects;
+
+create policy "repair photos select workshop member"
+on storage.objects for select to authenticated
+using (
+  bucket_id = 'repair-photos'
+  and public.is_workshop_member(public.storage_object_workshop_id(name))
+);
+
+create policy "repair photos insert workshop member"
+on storage.objects for insert to authenticated
+with check (
+  bucket_id = 'repair-photos'
+  and public.is_workshop_member(public.storage_object_workshop_id(name))
+);
+
+create policy "repair photos update workshop member"
+on storage.objects for update to authenticated
+using (
+  bucket_id = 'repair-photos'
+  and public.is_workshop_member(public.storage_object_workshop_id(name))
+)
+with check (
+  bucket_id = 'repair-photos'
+  and public.is_workshop_member(public.storage_object_workshop_id(name))
+);
+
+create policy "repair photos delete workshop member"
+on storage.objects for delete to authenticated
+using (
+  bucket_id = 'repair-photos'
+  and public.is_workshop_member(public.storage_object_workshop_id(name))
+);
 
 -- Force PostgREST/Supabase API schema cache refresh after new tables.
 alter table public.cloud_backups replica identity full;

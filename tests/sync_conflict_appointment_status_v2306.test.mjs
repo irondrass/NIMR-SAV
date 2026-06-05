@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 
-console.log("Démarrage tests statut RDV canonique sync v23.0.6...");
+console.log("Démarrage tests statut RDV canonique sync v23.1.0...");
 
 const utilsJs = fs.readFileSync("./js/utils.js", "utf8");
 const stateJs = fs.readFileSync("./js/state.js", "utf8");
@@ -410,7 +410,7 @@ function createCase(id, status = "none") {
   console.log("-> Test 12 (Non-régression v23.0.4) OK");
 }
 
-// 13. Version/cache v23.0.6 validés
+// 13. Version/cache v23.1.0 validés
 {
   const stateSource = fs.readFileSync('js/state.js', 'utf8');
   const swSource = fs.readFileSync('sw.js', 'utf8');
@@ -418,11 +418,11 @@ function createCase(id, status = "none") {
   const indexSource = fs.readFileSync('index.html', 'utf8');
   const appSource = fs.readFileSync('app.js', 'utf8');
 
-  assert.match(stateSource, /APP_VERSION\s*=\s*"v23\.0\.6"/, "state.js n'a pas la bonne version");
-  assert.match(swSource, /nimr-sav-v23\.0\.6-appointment-status-canonical-sync/, "sw.js n'a pas le bon cache");
-  assert.match(versionSource, /NIMR_BUILD\s*=\s*"v23\.0\.6"/, "version.js n'a pas la bonne version");
-  assert.match(appSource, /sw\.js\?v=23\.0\.6/, "app.js n'appelle pas le bon sw.js");
-  console.log("-> Test 13 (Version/cache v23.0.6) OK");
+  assert.match(stateSource, /APP_VERSION\s*=\s*"v23\.1.0"/, "state.js n'a pas la bonne version");
+  assert.match(swSource, /nimr-sav-v23\.1.0-appointment-status-canonical-sync/, "sw.js n'a pas le bon cache");
+  assert.match(versionSource, /NIMR_BUILD\s*=\s*"v23\.1.0"/, "version.js n'a pas la bonne version");
+  assert.match(appSource, /sw\.js\?v=23\.1.0/, "app.js n'appelle pas le bon sw.js");
+  console.log("-> Test 13 (Version/cache v23.1.0) OK");
 }
 
-console.log("Tous les tests statut RDV canonique sync v23.0.6 passés avec succès !");
+console.log("Tous les tests statut RDV canonique sync v23.1.0 passés avec succès !");

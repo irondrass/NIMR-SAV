@@ -545,6 +545,35 @@ function renderUsersAndRoles() {
   }
 
   const users = Array.isArray(state.users) ? state.users : [];
+  const activeUsers = users.filter(u => u.active !== false);
+  const duplicates = [];
+  activeUsers.forEach((u) => {
+    const emailNorm = String(u.email || "").trim().toLowerCase();
+    if (emailNorm) {
+      const count = activeUsers.filter(ou => String(ou.email || "").trim().toLowerCase() === emailNorm && ou.role === u.role).length;
+      if (count > 1 && !duplicates.includes(emailNorm + ":" + u.role)) {
+        duplicates.push(emailNorm + ":" + u.role);
+      }
+    }
+  });
+
+  const alertContainer = document.getElementById("users-duplicates-alert");
+  if (alertContainer) {
+    if (duplicates.length > 0) {
+      alertContainer.innerHTML = `
+        <div class="alert warn" style="margin-bottom: 12px; padding: 10px; border-radius: 6px; border: 1px solid #f59e0b; background: #fffbeb; color: #b45309; font-size: 0.9rem;">
+          <strong>Avertissement :</strong> Des utilisateurs actifs possèdent le même email et le même rôle (Doublon). Veuillez corriger ces doublons.
+        </div>
+      `;
+      alertContainer.hidden = false;
+      alertContainer.style.display = "";
+    } else {
+      alertContainer.innerHTML = "";
+      alertContainer.hidden = true;
+      alertContainer.style.display = "none";
+    }
+  }
+
   list.innerHTML = users.map((user) => {
     const isCurrent = user.id === state.currentUserId;
     const linkedResource = user.resourceId ? state.resources.find(r => r.id === user.resourceId) : null;
@@ -554,6 +583,8 @@ function renderUsersAndRoles() {
     const activeLabel = user.active !== false ? `<span class="tag ok">Actif</span>` : `<span class="tag warn">Inactif</span>`;
     const currentBadge = isCurrent ? `<span class="tag" style="background:#e0f2fe;color:#0369a1;">Utilisateur actuel</span>` : "";
     const supabaseBadge = user.authUserId ? `<span class="tag soft" title="Supabase UID: ${escapeAttr(user.authUserId)}">Supabase</span>` : "";
+    const isDuplicate = user.active !== false && user.email && activeUsers.some(ou => ou.id !== user.id && String(ou.email || "").trim().toLowerCase() === String(user.email || "").trim().toLowerCase() && ou.role === user.role);
+    const duplicateBadge = isDuplicate ? `<span class="tag warn" title="Un autre utilisateur actif a le même email et rôle !">Doublon</span>` : "";
     const warnNoResource = isTechWithoutRes ? `<p class="risk-pill" style="margin-top: 6px; font-size: 0.8rem; font-weight: 700;">Aucune ressource technicien liée à cet utilisateur.</p>` : "";
     
     return `
@@ -571,6 +602,7 @@ function renderUsersAndRoles() {
             ${activeLabel}
             ${currentBadge}
             ${supabaseBadge}
+            ${duplicateBadge}
           </div>
           ${warnNoResource}
         </div>
@@ -587,8 +619,14 @@ function renderUsersAndRoles() {
   }).join("");
 
   if (switcher) {
-    const activeUsers = users.filter(u => u.active !== false);
-    switcher.innerHTML = activeUsers.map(u => `<option value="${escapeAttr(u.id)}" ${u.id === state.currentUserId ? 'selected' : ''}>${escapeHtml(u.name)} (${escapeHtml(USER_ROLES[u.role] || u.role)})</option>`).join("");
+    switcher.innerHTML = activeUsers.map(u => {
+      const emailNorm = String(u.email || "").trim().toLowerCase();
+      const isDup = emailNorm && activeUsers.some(ou => ou.id !== u.id && String(ou.email || "").trim().toLowerCase() === emailNorm && ou.role === u.role);
+      const displayLabel = isDup 
+        ? `${u.name} (${USER_ROLES[u.role] || u.role}) [Doublon: ${u.id.substring(5)}]`
+        : `${u.name} (${USER_ROLES[u.role] || u.role})`;
+      return `<option value="${escapeAttr(u.id)}" ${u.id === state.currentUserId ? 'selected' : ''}>${escapeHtml(displayLabel)}</option>`;
+    }).join("");
   }
 
   $$("[data-edit-user]", list).forEach((button) => {

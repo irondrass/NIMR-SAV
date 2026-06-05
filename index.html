@@ -16,8 +16,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <script src="js/version.js?v=23.0.6"></script>
-    <link rel="stylesheet" href="styles.css?v=23.0.6" />
+    <script src="js/version.js?v=23.1.0"></script>
+    <link rel="stylesheet" href="styles.css?v=23.1.0" />
   </head>
   <body>
     <a class="skip-link" href="#main-content">Aller au contenu principal</a>
@@ -447,6 +447,7 @@
                   </button>
                 </div>
               </form>
+              <div id="users-duplicates-alert" hidden></div>
               <div class="resource-list" id="users-list"></div>
               
               <div class="section-heading compact-heading">
@@ -702,36 +703,39 @@
       <strong>Mode hors ligne</strong>
       <span>Les données locales restent consultables. La synchronisation Supabase reprendra automatiquement à la reconnexion.</span>
     </div>
-    <div class="local-lock-overlay" id="user-selector-overlay" hidden>
-      <div class="local-lock-dialog user-selector-dialog" role="dialog" aria-modal="true" aria-labelledby="user-selector-title">
+    <div class="local-lock-overlay" id="user-login-overlay" hidden>
+      <form class="local-lock-dialog" id="user-login-form" role="dialog" aria-modal="true" aria-labelledby="user-login-title">
         <div class="local-lock-logo">👤</div>
-        <h2 id="user-selector-title">Qui utilise l'application ?</h2>
-        <p>Sélectionnez votre profil utilisateur pour ce poste de travail partagé.</p>
-        <div class="user-selector-list" id="user-selector-list"></div>
-        <div class="local-lock-actions">
-          <button class="primary-button" id="user-selector-submit" type="button" disabled>Continuer</button>
-        </div>
-      </div>
-    </div>
-    <div class="local-lock-overlay" id="user-pin-overlay" hidden>
-      <form class="local-lock-dialog" id="user-pin-form" role="dialog" aria-modal="true" aria-labelledby="user-pin-title">
-        <div class="local-lock-logo">🔑</div>
-        <h2 id="user-pin-title">PIN utilisateur requis</h2>
-        <p>Veuillez saisir le PIN pour le compte <strong id="user-pin-target-name">...</strong>.</p>
+        <h2 id="user-login-title">Connexion utilisateur</h2>
+        <p>Sélectionnez votre compte et entrez votre PIN de sécurité pour continuer.</p>
+        
         <label>
-          PIN de sécurité
-          <input name="pin" type="password" inputmode="numeric" autocomplete="current-password" required minlength="4" placeholder="Entrez le PIN" />
+          Utilisateur
+          <select id="user-login-select" name="userId" required style="width: 100%; margin-bottom: 12px; height: 38px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--border-color); font-size: 1rem;"></select>
         </label>
-        <button class="primary-button" type="submit" style="width: 100%;">Valider</button>
-        <button class="ghost-button" id="user-pin-cancel" type="button" style="margin-top: 8px; width: 100%;">Annuler</button>
-        <p class="muted status-error" id="user-pin-status" style="margin-top: 8px; text-align: center; color: var(--danger-color);"></p>
+
+        <div id="user-login-pin-container">
+          <label>
+            Code PIN
+            <div class="pin-input-wrapper" style="position: relative;">
+              <input id="user-login-pin" name="pin" type="password" inputmode="numeric" placeholder="Entrez le PIN" autocomplete="current-password" style="width: 100%; padding-right: 40px;" />
+              <button type="button" id="user-login-pin-toggle" class="ghost-button" style="position: absolute; right: 5px; top: 50%; transform: translateY(-50%); border: none; background: transparent; cursor: pointer; padding: 4px;">👁️</button>
+            </div>
+          </label>
+          <p class="muted" style="margin-top: 6px; font-size: 0.85rem; line-height: 1.2;">
+            Le PIN protège l’accès à l’interface sur ce poste. Il ne chiffre pas les données locales.
+          </p>
+        </div>
+
+        <button class="primary-button" type="submit" style="width: 100%; margin-top: 16px;">Se connecter</button>
+        <p class="muted status-error" id="user-login-status" style="margin-top: 8px; text-align: center; color: var(--danger-color); font-weight: bold;"></p>
       </form>
     </div>
     <div class="local-lock-overlay" id="user-pin-change-overlay" hidden>
       <form class="local-lock-dialog" id="user-pin-change-form" role="dialog" aria-modal="true" aria-labelledby="user-pin-change-title">
         <div class="local-lock-logo">⚙️</div>
         <h2 id="user-pin-change-title">Nouveau PIN requis</h2>
-        <p>Le PIN temporaire `0000` doit être modifié avant le premier accès à l'application.</p>
+        <p id="user-pin-change-desc">Le PIN temporaire `0000` doit être modifié avant le premier accès à l'application.</p>
         <label>
           Nouveau PIN (4 chiffres min, différent de 0000)
           <input name="newPin" type="password" inputmode="numeric" autocomplete="new-password" required minlength="4" placeholder="Nouveau PIN" />
@@ -1134,20 +1138,20 @@
     </div>
 
     <script src="vendor/pdf.min.js" defer></script>
-    <script src="js/utils.js?v=23.0.6" defer></script>
-    <script src="js/state.js?v=23.0.6" defer></script>
-    <script src="js/ui-cases.js?v=23.0.6" defer></script>
-    <script src="js/estimate-import.js?v=23.0.6" defer></script>
-    <script src="js/ui-planning.js?v=23.0.6" defer></script>
-    <script src="js/photos.js?v=23.0.6" defer></script>
-    <script src="js/storage.js?v=23.0.6" defer></script>
-    <script src="js/planning.js?v=23.0.6" defer></script>
-    <script src="js/exports.js?v=23.0.6" defer></script>
-    <script src="js/business-rules-v2187.js?v=23.0.6" defer></script>
+    <script src="js/utils.js?v=23.1.0" defer></script>
+    <script src="js/state.js?v=23.1.0" defer></script>
+    <script src="js/ui-cases.js?v=23.1.0" defer></script>
+    <script src="js/estimate-import.js?v=23.1.0" defer></script>
+    <script src="js/ui-planning.js?v=23.1.0" defer></script>
+    <script src="js/photos.js?v=23.1.0" defer></script>
+    <script src="js/storage.js?v=23.1.0" defer></script>
+    <script src="js/planning.js?v=23.1.0" defer></script>
+    <script src="js/exports.js?v=23.1.0" defer></script>
+    <script src="js/business-rules-v2187.js?v=23.1.0" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
-    <script src="js/supabase-config.js?v=23.0.6" defer></script>
-    <script src="js/supabase-client.js?v=23.0.6" defer></script>
-    <script src="js/supabase-sync.js?v=23.0.6" defer></script>
-    <script src="app.js?v=23.0.6" defer></script>
+    <script src="js/supabase-config.js?v=23.1.0" defer></script>
+    <script src="js/supabase-client.js?v=23.1.0" defer></script>
+    <script src="js/supabase-sync.js?v=23.1.0" defer></script>
+    <script src="app.js?v=23.1.0" defer></script>
   </body>
 </html>

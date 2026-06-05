@@ -795,7 +795,7 @@ function registerServiceWorker() {
   });
   window.addEventListener("load", async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=23.0.6", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=23.1.0", { updateViaCache: "none" });
       registration.update?.();
       if (registration.waiting) showUpdateAvailable(registration);
       window.setInterval(() => registration.update?.(), 10 * 60 * 1000);
@@ -950,6 +950,9 @@ const SENSITIVE_ROLES = ["admin", "chef_atelier", "directeur_sav"];
 window.selectedUserIdForStartup = "";
 window.pendingSelectorUser = null;
 
+window.selectedUserIdForStartup = "";
+window.pendingSelectorUser = null;
+
 function checkUserSessionStartup() {
   if (typeof isLocalSessionUnlocked === "function" && !isLocalSessionUnlocked()) {
     // PIN local activé et verrouillé -> priorité au PIN, on attend le déverrouillage
@@ -957,12 +960,11 @@ function checkUserSessionStartup() {
   }
 
   // Vérifier si les overlays ne sont pas enfants de .app-shell (contrainte 3)
-  const selectorOverlay = document.getElementById("user-selector-overlay");
-  const pinOverlay = document.getElementById("user-pin-overlay");
+  const loginOverlay = document.getElementById("user-login-overlay");
   const pinChangeOverlay = document.getElementById("user-pin-change-overlay");
   const appShell = document.querySelector(".app-shell");
   if (appShell && typeof appShell.contains === "function") {
-    if (appShell.contains(selectorOverlay) || appShell.contains(pinOverlay) || appShell.contains(pinChangeOverlay)) {
+    if (appShell.contains(loginOverlay) || appShell.contains(pinChangeOverlay)) {
       console.error("DOM CONSTRAINT VIOLATION: Overlays must be siblings of .app-shell, not children!");
     }
   }
@@ -975,14 +977,13 @@ function checkUserSessionStartup() {
   const isCurrentActive = currentUser && activeUsers.some(user => user.id === state.currentUserId);
 
   if (alwaysPrompt || !isCurrentActive) {
-    showUserSelectorOverlay();
+    showUserLoginScreen();
   } else {
     // Si l'utilisateur actif est sensible et n'est pas déverrouillé, on doit demander le PIN
     if (currentUser && SENSITIVE_ROLES.includes(currentUser.role) && sessionStorage.getItem("nimr-user-pin-unlocked") !== currentUser.id) {
-      showUserSelectorOverlay();
+      showUserLoginScreen();
     } else {
-      hideUserSelectorOverlay();
-      hideUserPinOverlay();
+      hideUserLoginScreen();
       hideUserPinChangeOverlay();
       if (!state.currentUserId && currentUser) {
         state.currentUserId = currentUser.id;
@@ -991,51 +992,37 @@ function checkUserSessionStartup() {
   }
 }
 
-function showUserSelectorOverlay() {
-  const overlay = document.getElementById("user-selector-overlay");
+function showUserLoginScreen() {
+  const overlay = document.getElementById("user-login-overlay");
   if (overlay) {
     overlay.hidden = false;
     document.querySelector(".app-shell")?.setAttribute("inert", "");
-    renderUserSelectorScreen();
+    renderUserLoginScreen();
   }
 }
 
-function hideUserSelectorOverlay() {
-  const overlay = document.getElementById("user-selector-overlay");
+function hideUserLoginScreen() {
+  const overlay = document.getElementById("user-login-overlay");
   if (overlay) {
     overlay.hidden = true;
-    checkOverlaysInertState();
-  }
-}
-
-function showUserPinOverlay(user) {
-  const overlay = document.getElementById("user-pin-overlay");
-  const nameSpan = document.getElementById("user-pin-target-name");
-  if (overlay) {
-    if (nameSpan) nameSpan.textContent = user.name;
-    overlay.hidden = false;
-    document.querySelector(".app-shell")?.setAttribute("inert", "");
-    const pinInput = overlay.querySelector("input[name='pin']");
-    if (pinInput) {
-      pinInput.value = "";
-      window.setTimeout(() => pinInput.focus(), 60);
-    }
-  }
-}
-
-function hideUserPinOverlay() {
-  const overlay = document.getElementById("user-pin-overlay");
-  if (overlay) {
-    overlay.hidden = true;
-    const status = document.getElementById("user-pin-status");
+    const status = document.getElementById("user-login-status");
     if (status) status.textContent = "";
     checkOverlaysInertState();
   }
 }
 
-function showUserPinChangeOverlay() {
+function showUserPinChangeOverlay(user, mode = "bootstrap") {
   const overlay = document.getElementById("user-pin-change-overlay");
+  const descEl = document.getElementById("user-pin-change-desc");
   if (overlay) {
+    if (descEl) {
+      if (mode === "creation") {
+        descEl.textContent = "Un code PIN de sécurité doit être défini avant le premier accès à l'application.";
+      } else {
+        descEl.textContent = "Le PIN temporaire `0000` doit être modifié avant le premier accès à l'application.";
+      }
+    }
+    window.pendingSelectorUser = user;
     overlay.hidden = false;
     document.querySelector(".app-shell")?.setAttribute("inert", "");
     const newPinInput = overlay.querySelector("input[name='newPin']");
@@ -1059,12 +1046,10 @@ function hideUserPinChangeOverlay() {
 }
 
 function checkOverlaysInertState() {
-  const selector = document.getElementById("user-selector-overlay");
-  const pin = document.getElementById("user-pin-overlay");
+  const login = document.getElementById("user-login-overlay");
   const change = document.getElementById("user-pin-change-overlay");
   const localLock = document.getElementById("local-lock-overlay");
-  const anyVisible = (selector && !selector.hidden) || 
-                      (pin && !pin.hidden) || 
+  const anyVisible = (login && !login.hidden) || 
                       (change && !change.hidden) || 
                       (localLock && !localLock.hidden);
   if (!anyVisible) {
@@ -1074,14 +1059,13 @@ function checkOverlaysInertState() {
   }
 }
 
-function renderUserSelectorScreen() {
-  const listContainer = document.getElementById("user-selector-list");
-  const submitButton = document.getElementById("user-selector-submit");
-  if (!listContainer || !submitButton) return;
+function renderUserLoginScreen() {
+  const selectEl = document.getElementById("user-login-select");
+  if (!selectEl) return;
 
   const activeUsers = (state.users || []).filter(user => user.active !== false);
 
-  listContainer.innerHTML = activeUsers.map(user => {
+  selectEl.innerHTML = activeUsers.map(user => {
     const roleLabel = {
       admin: "Administrateur",
       chef_atelier: "Chef d'atelier",
@@ -1092,60 +1076,63 @@ function renderUserSelectorScreen() {
       readonly: "Lecture seule"
     }[user.role] || user.role;
 
-    let resourceText = "";
-    if (user.role === "technicien" && user.resourceId) {
-      const res = (state.resources || []).find(r => r.id === user.resourceId);
-      if (res) {
-        resourceText = `<div class="user-resource">Ressource : ${escapeHtml(res.name)}</div>`;
+    const emailNorm = String(user.email || "").trim().toLowerCase();
+    const isDup = emailNorm && activeUsers.some(ou => ou.id !== user.id && String(ou.email || "").trim().toLowerCase() === emailNorm && ou.role === user.role);
+    const shortId = user.id.substring(5);
+    const displayLabel = isDup 
+      ? `${user.name} (${roleLabel}) [Doublon: ${shortId}]`
+      : `${user.name} (${roleLabel})`;
+
+    return `<option value="${escapeAttr(user.id)}">${escapeHtml(displayLabel)}</option>`;
+  }).join("") || `<option value="">Aucun utilisateur actif trouvé</option>`;
+
+  // Sélectionner par défaut l'utilisateur actuel s'il existe et est actif
+  const currentUser = getCurrentUser();
+  if (currentUser && activeUsers.some(u => u.id === currentUser.id)) {
+    selectEl.value = currentUser.id;
+  } else if (activeUsers.length > 0) {
+    selectEl.value = activeUsers[0].id;
+  }
+
+  updateLoginPinRequirement();
+}
+
+function updateLoginPinRequirement() {
+  const selectEl = document.getElementById("user-login-select");
+  const pinInput = document.getElementById("user-login-pin");
+  const pinContainer = document.getElementById("user-login-pin-container");
+  const statusEl = document.getElementById("user-login-status");
+  if (statusEl) statusEl.textContent = "";
+
+  const userId = selectEl?.value;
+  const user = (state.users || []).find(u => u.id === userId);
+  if (!user) return;
+
+  const isSensitive = ["admin", "chef_atelier", "directeur_sav"].includes(user.role);
+  const hasPin = Boolean(user.pinHash);
+  const pinRequired = isSensitive || user.pinRequired || hasPin;
+
+  if (pinInput) {
+    if (pinRequired) {
+      pinInput.required = true;
+      pinInput.placeholder = "PIN requis pour ce compte";
+      if (pinContainer) {
+        pinContainer.style.opacity = "1";
+        pinContainer.style.pointerEvents = "auto";
       }
-    }
-
-    const isActiveClass = window.selectedUserIdForStartup === user.id ? "active" : "";
-
-    return `
-      <div class="user-selector-card ${isActiveClass}" data-user-id="${user.id}">
-        <strong>${escapeHtml(user.name)}</strong>
-        <span>Rôle : ${escapeHtml(roleLabel)}</span>
-        ${resourceText}
-      </div>
-    `;
-  }).join("") || `<div class="muted">Aucun utilisateur actif trouvé.</div>`;
-
-  // Bind click & double click events
-  const cards = listContainer.querySelectorAll(".user-selector-card");
-  cards.forEach(card => {
-    card.addEventListener("click", () => {
-      window.selectedUserIdForStartup = card.dataset.userId;
-      cards.forEach(c => c.classList.remove("active"));
-      card.classList.add("active");
-      submitButton.disabled = false;
-    });
-
-    card.addEventListener("dblclick", () => {
-      window.selectedUserIdForStartup = card.dataset.userId;
-      submitButton.disabled = false;
-      submitButton.click();
-    });
-  });
-
-  // Highlight previously selected user if any
-  if (window.selectedUserIdForStartup) {
-    const activeCard = listContainer.querySelector(`[data-user-id="${window.selectedUserIdForStartup}"]`);
-    if (activeCard) {
-      activeCard.classList.add("active");
-      submitButton.disabled = false;
+    } else {
+      pinInput.required = false;
+      pinInput.placeholder = "PIN non requis (Optionnel)";
+      if (pinContainer) {
+        pinContainer.style.opacity = "0.7";
+      }
     }
   }
 }
 
 function triggerUserChangeScreen() {
-  const currentUser = getCurrentUser();
-  window.selectedUserIdForStartup = currentUser ? currentUser.id : "";
-  const submitButton = document.getElementById("user-selector-submit");
-  if (submitButton) {
-    submitButton.disabled = !window.selectedUserIdForStartup;
-  }
-  showUserSelectorOverlay();
+  sessionStorage.removeItem("nimr-user-pin-unlocked");
+  showUserLoginScreen();
 }
 
 function renderCurrentSessionIndicator() {
@@ -1200,79 +1187,92 @@ function bindUserSessionActions() {
     triggerUserChangeScreen();
   });
 
-  // Soumission du sélecteur d'utilisateur au démarrage
-  const submitButton = document.getElementById("user-selector-submit");
-  submitButton?.addEventListener("click", () => {
-    if (!window.selectedUserIdForStartup) return;
-    const targetUser = (state.users || []).find(user => user.id === window.selectedUserIdForStartup);
-    if (!targetUser || targetUser.active === false) {
-      notifyUser("Utilisateur inactif ou invalide.", "error");
-      return;
-    }
-
-    sessionStorage.removeItem("nimr-user-pin-unlocked");
-
-    // SI LE ROLE EST SENSIBLE -> DEMANDER LE PIN
-    if (SENSITIVE_ROLES.includes(targetUser.role)) {
-      window.pendingSelectorUser = targetUser;
-      hideUserSelectorOverlay();
-      showUserPinOverlay(targetUser);
-    } else {
-      // Pas sensible -> se connecter directement
-      hideUserSelectorOverlay();
-      completeUserLogin(targetUser);
-    }
+  // Changement de sélection d'utilisateur dans l'écran de login
+  document.getElementById("user-login-select")?.addEventListener("change", () => {
+    updateLoginPinRequirement();
   });
 
-  // Annuler la saisie du PIN
-  document.getElementById("user-pin-cancel")?.addEventListener("click", () => {
-    hideUserPinOverlay();
-    window.pendingSelectorUser = null;
-    showUserSelectorOverlay();
+  // Bouton Toggle afficher/masquer le PIN
+  document.getElementById("user-login-pin-toggle")?.addEventListener("click", (event) => {
+    event.preventDefault();
+    const pinInput = document.getElementById("user-login-pin");
+    if (pinInput) {
+      if (pinInput.type === "password") {
+        pinInput.type = "text";
+        event.currentTarget.textContent = "🙈";
+      } else {
+        pinInput.type = "password";
+        event.currentTarget.textContent = "👁️";
+      }
+    }
   });
 
   // Annuler le changement du PIN
   document.getElementById("user-pin-change-cancel")?.addEventListener("click", () => {
     hideUserPinChangeOverlay();
-    hideUserPinOverlay();
     window.pendingSelectorUser = null;
-    showUserSelectorOverlay();
+    showUserLoginScreen();
   });
 
-  // Soumission du formulaire PIN
-  const pinForm = document.getElementById("user-pin-form");
-  pinForm?.addEventListener("submit", async (event) => {
+  // Soumission du formulaire unique de login
+  const loginForm = document.getElementById("user-login-form");
+  loginForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
-    const pinVal = pinForm.elements.pin.value;
-    const user = window.pendingSelectorUser;
-    if (!user) return;
+    const userId = loginForm.elements.userId.value;
+    const pinVal = loginForm.elements.pin.value;
 
-    const statusEl = document.getElementById("user-pin-status");
+    const statusEl = document.getElementById("user-login-status");
     if (statusEl) statusEl.textContent = "";
 
-    try {
-      const valid = await verifyUserPin(user, pinVal);
-      if (!valid) {
-        if (statusEl) statusEl.textContent = "PIN incorrect.";
-        pinForm.elements.pin.value = "";
-        pinForm.elements.pin.focus();
+    const user = (state.users || []).find(u => u.id === userId);
+    if (!user || user.active === false) {
+      if (statusEl) statusEl.textContent = "Utilisateur inactif ou invalide.";
+      return;
+    }
+
+    sessionStorage.removeItem("nimr-user-pin-unlocked");
+
+    const isSensitive = ["admin", "chef_atelier", "directeur_sav"].includes(user.role);
+    const hasPin = Boolean(user.pinHash);
+    const pinRequired = isSensitive || user.pinRequired || hasPin;
+
+    // 1. Si PIN requis mais aucun PIN n'est défini -> forcer création
+    if (pinRequired && !user.pinHash) {
+      showUserPinChangeOverlay(user, "creation");
+      hideUserLoginScreen();
+      return;
+    }
+
+    // 2. Si PIN requis, le vérifier
+    if (pinRequired) {
+      try {
+        const valid = await verifyUserPin(user, pinVal);
+        if (!valid) {
+          addAuditLog("users.pin_incorrect", `PIN incorrect pour ${user.name}`, `Tentative de connexion échouée (rôle: ${user.role})`);
+          if (statusEl) statusEl.textContent = "PIN incorrect.";
+          loginForm.elements.pin.value = "";
+          loginForm.elements.pin.focus();
+          return;
+        }
+
+        // Si c'est le PIN bootstrap 0000 -> forcer changement
+        if (pinVal === "0000" && user.pinHash.startsWith("mockhash:0000:")) {
+          showUserPinChangeOverlay(user, "bootstrap");
+          hideUserLoginScreen();
+          return;
+        }
+
+        // Sinon, PIN valide -> déverrouillé !
+        sessionStorage.setItem("nimr-user-pin-unlocked", user.id);
+      } catch (err) {
+        if (statusEl) statusEl.textContent = err.message || "Erreur de validation.";
         return;
       }
-
-      // PIN CORRECT !
-      // Vérifier si c'est le PIN bootstrap 0000
-      if (pinVal === "0000" && user.pinHash.startsWith("mockhash:0000:")) {
-        hideUserPinOverlay();
-        showUserPinChangeOverlay();
-      } else {
-        sessionStorage.setItem("nimr-user-pin-unlocked", user.id);
-        hideUserPinOverlay();
-        hideUserSelectorOverlay();
-        completeUserLogin(user);
-      }
-    } catch (err) {
-      if (statusEl) statusEl.textContent = err.message || "Erreur de validation.";
     }
+
+    // Connexion finale
+    hideUserLoginScreen();
+    completeUserLogin(user);
   });
 
   // Soumission du formulaire changement PIN
@@ -1322,8 +1322,6 @@ function bindUserSessionActions() {
 
       sessionStorage.setItem("nimr-user-pin-unlocked", user.id);
       hideUserPinChangeOverlay();
-      hideUserPinOverlay();
-      hideUserSelectorOverlay();
       completeUserLogin(user);
     } catch (err) {
       if (statusEl) statusEl.textContent = err.message || "Erreur lors de la mise à jour.";
@@ -1352,7 +1350,7 @@ function completeUserLogin(targetUser) {
     }
     
     saveState();
-    hideUserSelectorOverlay();
+    hideUserLoginScreen();
     
     // Forcer la redirection et vider le DOM selon les règles d'accessibilité (Contrainte 11 hotfix test)
     ensureCurrentTabAllowed();

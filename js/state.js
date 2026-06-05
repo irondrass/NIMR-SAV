@@ -20,7 +20,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v23.0.6";
+const APP_VERSION = "v23.1.0";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const WORKSHOP_NAME = "NIMR SAV";
@@ -1169,6 +1169,17 @@ function createUserLocal(userData, actor = null) {
     return { ok: false, message: "Le rôle sélectionné est invalide." };
   }
   
+  const emailNorm = String(userData?.email || "").trim().toLowerCase();
+  const activeVal = userData?.active !== false;
+  if (activeVal && emailNorm) {
+    const isDuplicate = (state.users || []).some(
+      (u) => u.active !== false && String(u.email || "").trim().toLowerCase() === emailNorm && u.role === role
+    );
+    if (isDuplicate) {
+      return { ok: false, message: "Un autre utilisateur actif possède déjà cet email avec le même rôle." };
+    }
+  }
+  
   const newUser = normalizeUser({
     id: userData.id || uid("user"),
     name,
@@ -1202,6 +1213,17 @@ function updateUserLocal(userId, userData, actor = null) {
   if (!name) return { ok: false, message: "Le nom complet est obligatoire." };
   if (!role || !Object.prototype.hasOwnProperty.call(USER_ROLES, role)) {
     return { ok: false, message: "Le rôle sélectionné est invalide." };
+  }
+  
+  const emailNorm = String(userData?.email || "").trim().toLowerCase();
+  const activeVal = userData?.active !== false;
+  if (activeVal && emailNorm) {
+    const isDuplicate = (state.users || []).some(
+      (u) => u.id !== userId && u.active !== false && String(u.email || "").trim().toLowerCase() === emailNorm && u.role === role
+    );
+    if (isDuplicate) {
+      return { ok: false, message: "Un autre utilisateur actif possède déjà cet email avec le même rôle." };
+    }
   }
   
   const newActive = userData.active !== false;

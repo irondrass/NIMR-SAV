@@ -1,6 +1,6 @@
-window.APP_VERSION = "v23.0.6";
-window.NIMR_BUILD = "v23.0.6";
-window.NIMR_CACHE_NAME = "nimr-sav-v23.0.6-appointment-status-canonical-sync";
+window.APP_VERSION = "v23.1.0";
+window.NIMR_BUILD = "v23.1.0";
+window.NIMR_CACHE_NAME = "nimr-sav-v23.1.0-appointment-status-canonical-sync";
 
 if ("caches" in window) {
   caches.keys().then((keys) => Promise.all(

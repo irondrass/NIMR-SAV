@@ -800,7 +800,7 @@ function registerServiceWorker() {
   });
   window.addEventListener("load", async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=23.0.6", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=23.1A.1", { updateViaCache: "none" });
       registration.update?.();
       if (registration.waiting) showUpdateAvailable(registration);
       window.setInterval(() => registration.update?.(), 10 * 60 * 1000);
@@ -980,10 +980,15 @@ function showUserSelectorOverlay() {
   if (typeof clearUnlockedUserSessions === "function") {
     clearUnlockedUserSessions();
   }
+  closeUserSessionOverlay("user-pin-overlay");
   const overlay = document.getElementById("user-selector-overlay");
   if (overlay) {
+    overlay.style.display = "";
+    overlay.style.pointerEvents = "";
     overlay.hidden = false;
-    document.querySelector(".app-shell")?.setAttribute("inert", "");
+    const appShell = document.querySelector(".app-shell");
+    appShell?.setAttribute("inert", "");
+    appShell?.setAttribute("aria-hidden", "true");
     renderUserSelectorScreen();
   }
 }
@@ -991,10 +996,11 @@ function showUserSelectorOverlay() {
 function hideUserSelectorOverlay() {
   const overlay = document.getElementById("user-selector-overlay");
   if (overlay) {
-    overlay.hidden = true;
-    const pinOverlay = document.getElementById("local-lock-overlay");
-    if (!pinOverlay || pinOverlay.hidden) {
-      document.querySelector(".app-shell")?.removeAttribute("inert");
+    closeUserSessionOverlay("user-selector-overlay");
+    const localPinOverlay = document.getElementById("local-lock-overlay");
+    const userPinOverlay = document.getElementById("user-pin-overlay");
+    if ((!localPinOverlay || localPinOverlay.hidden) && (!userPinOverlay || userPinOverlay.hidden)) {
+      releaseAppShellInteractivity();
     }
   }
 }
@@ -1205,31 +1211,50 @@ function executeUserLogin(targetUser) {
   }
 }
 
-function finishUserUnlockAndActivateApp(targetUser) {
-  // 1. Retirer inert de l'app-shell EN PREMIER pour débloquer les clics
+function releaseAppShellInteractivity() {
   const appShell = document.querySelector(".app-shell");
   if (appShell) {
     appShell.removeAttribute("inert");
     appShell.removeAttribute("aria-hidden");
     appShell.style.pointerEvents = "";
   }
-  // 2. Fermer overlay PIN
-  const pinOverlay = document.getElementById("user-pin-overlay");
-  if (pinOverlay) {
-    pinOverlay.hidden = true;
-    pinOverlay.style.display = "none";
-    pinOverlay.style.pointerEvents = "none";
-  }
-  // 3. Fermer overlay sélecteur (executeUserLogin appellera hideUserSelectorOverlay
-  //    mais on le fait ici aussi pour garantir l'état avant)
-  const selectorOverlay = document.getElementById("user-selector-overlay");
-  if (selectorOverlay) {
-    selectorOverlay.hidden = true;
-  }
-  // 4. Rendre le focus à l'application
+}
+
+function closeUserSessionOverlay(id) {
+  const overlay = document.getElementById(id);
+  if (!overlay) return;
+  overlay.hidden = true;
+  overlay.style.display = "none";
+  overlay.style.pointerEvents = "none";
+}
+
+function openUserSessionOverlay(id) {
+  const overlay = document.getElementById(id);
+  if (!overlay) return null;
+  overlay.style.display = "";
+  overlay.style.pointerEvents = "";
+  overlay.hidden = false;
+  return overlay;
+}
+
+function forceFinishUserUnlockOverlayState(targetUser = null) {
+  closeUserSessionOverlay("user-pin-overlay");
+  closeUserSessionOverlay("user-selector-overlay");
+  releaseAppShellInteractivity();
   if (document.body) document.body.focus();
-  // 5. Déclencher le login (qui appelle render() via hideUserSelectorOverlay + render)
+  if (typeof console !== "undefined" && typeof console.debug === "function") {
+    console.debug("pin.unlock.finished", {
+      userId: targetUser?.id || "",
+      role: targetUser?.role || "",
+    });
+  }
+}
+
+function finishUserUnlockAndActivateApp(targetUser) {
+  // Retirer inert avant et après login : certains rendus remettent les overlays à jour.
+  forceFinishUserUnlockOverlayState(targetUser);
   executeUserLogin(targetUser);
+  forceFinishUserUnlockOverlayState(targetUser);
 }
 
 async function promptUserPinAndLogin(targetUser) {
@@ -1253,19 +1278,19 @@ async function promptUserPinAndLogin(targetUser) {
   
   if (!overlay || !form) {
     executeUserLogin(targetUser);
+    forceFinishUserUnlockOverlayState(targetUser);
     return;
   }
   
   form.reset();
   status.textContent = "";
-  overlay.hidden = false;
-  document.querySelector(".app-shell")?.setAttribute("inert", "");
+  openUserSessionOverlay("user-pin-overlay");
+  const appShell = document.querySelector(".app-shell");
+  appShell?.setAttribute("inert", "");
+  appShell?.setAttribute("aria-hidden", "true");
   
   // Masquer le sélecteur pendant la saisie PIN
-  const userSelectorOverlay = document.getElementById("user-selector-overlay");
-  if (userSelectorOverlay) {
-    userSelectorOverlay.hidden = true;
-  }
+  closeUserSessionOverlay("user-selector-overlay");
   
   pinInput.focus();
   

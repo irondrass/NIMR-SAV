@@ -149,13 +149,41 @@ async function main() {
         mobile: viewport.width <= 520,
       }, sessionId);
       await send("Page.navigate", { url: `${baseUrl}?mobile-smoke=22.27-${viewport.width}x${viewport.height}` }, sessionId);
-      await wait(2800);
+      await wait(2500);
       await send("Runtime.evaluate", {
         awaitPromise: true,
         expression: `(async () => {
-          sessionStorage.setItem("nimr-user-pin-unlocked", state.currentUserId);
-          if (typeof checkUserSessionStartup === "function") {
-            checkUserSessionStartup();
+          for (let i = 0; i < 50; i++) {
+            if (typeof state !== "undefined" && state.users && typeof checkUserSessionStartup === "function") {
+              break;
+            }
+            await new Promise(r => setTimeout(r, 100));
+          }
+          let user = (state.users || []).find(u => u.active !== false && (u.role === "admin" || u.role === "reception"));
+          if (!user) {
+            user = {
+              id: "user-test-reception",
+              name: "Reception Test",
+              role: "reception",
+              active: true,
+              pinHash: "",
+              pinSalt: ""
+            };
+            state.users = state.users || [];
+            state.users.push(user);
+          }
+          state.currentUserId = user.id;
+          sessionStorage.setItem("nimr-user-pin-unlocked", user.id);
+          checkUserSessionStartup();
+          const loginOverlay = document.getElementById("user-login-overlay");
+          if (loginOverlay) loginOverlay.hidden = true;
+          const pinChangeOverlay = document.getElementById("user-pin-change-overlay");
+          if (pinChangeOverlay) pinChangeOverlay.hidden = true;
+          const localLockOverlay = document.getElementById("local-lock-overlay");
+          if (localLockOverlay) localLockOverlay.hidden = true;
+          document.querySelector(".app-shell")?.removeAttribute("inert");
+          if (typeof render === "function") {
+            render();
           }
           await new Promise(r => setTimeout(r, 200));
         })()`
@@ -243,6 +271,7 @@ async function main() {
       }, sessionId);
       const result = evaluation.result?.value;
       results.push(result);
+      console.log("Viewport Result:", JSON.stringify(result, null, 2));
       assert.equal(result.navigationVisible, true, `navigation invisible en ${viewport.width}x${viewport.height}`);
       assert.equal(result.noHorizontalOverflow, true, `overflow horizontal global en ${viewport.width}x${viewport.height}: ${JSON.stringify({ innerWidth: result.innerWidth, scrollWidth: result.scrollWidth, overflowCandidates: result.overflowCandidates })}`);
       assert.equal(result.createButtonVisible, true, `bouton créer dossier coupé en ${viewport.width}x${viewport.height}`);

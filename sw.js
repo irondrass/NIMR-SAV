@@ -1,4 +1,4 @@
-const CACHE_NAME = "nimr-sav-v23.1.2-reception-workspace-claims";
+const CACHE_NAME = "nimr-sav-v23.1.3-reception-create-case-local-pin-fix";
 const ASSETS = [
   "./",
   "./index.html",

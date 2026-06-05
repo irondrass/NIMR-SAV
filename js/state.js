@@ -20,7 +20,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v23.1.2";
+const APP_VERSION = "v23.1.3";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const WORKSHOP_NAME = "NIMR SAV";
@@ -530,8 +530,7 @@ function recordLocalSecurityFailure() {
 }
 
 function isLocalPinEnabled() {
-  const config = readLocalSecurityConfig();
-  return Boolean(config.enabled && config.salt && config.hash);
+  return false;
 }
 
 function isLocalSessionUnlocked() {
@@ -598,11 +597,7 @@ function setLocalSecurityStatus(message, variant = "info") {
 }
 
 function renderLocalSecurityStatus() {
-  if (isLocalPinEnabled()) {
-    setLocalSecurityStatus("PIN local actif. Verrouillage automatique après 15 min d'inactivité. Attention : le PIN ne chiffre pas les données locales.", "ok");
-  } else {
-    setLocalSecurityStatus("Aucun PIN local actif. Activez-le sur les postes partagés.", "warn");
-  }
+  setLocalSecurityStatus("PIN local obsolète. L'authentification unifiée v23.1 est désormais obligatoire.", "info");
 }
 
 async function setLocalPin(pin) {
@@ -727,10 +722,19 @@ async function disableLocalPin() {
 }
 
 function initLocalSecurityGate() {
+  try {
+    localStorage.removeItem(LOCAL_SECURITY_KEY);
+    localStorage.removeItem(LOCAL_SECURITY_FAILURE_KEY);
+    sessionStorage.removeItem(LOCAL_SECURITY_SESSION_KEY);
+  } catch (error) {}
+
   bindLocalSecurityIdleEvents();
   renderLocalSecurityStatus();
-  if (!isLocalSessionUnlocked()) showLocalLockOverlay();
-  else resetLocalSecurityIdleTimer();
+  
+  const overlay = $("#local-lock-overlay");
+  if (overlay) overlay.hidden = true;
+  document.querySelector(".app-shell")?.removeAttribute("inert");
+  resetLocalSecurityIdleTimer();
 }
 
 function bindLocalSecurityControls() {

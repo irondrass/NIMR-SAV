@@ -1270,6 +1270,7 @@ function mergeCaseEntity(localCase, remoteCase, stats, localState = {}, remoteSt
     history: historyResult.history,
     photos: mergeArrayById(localCase.photos, remoteCase.photos, { fallbackPrefix: "photo", preferRemote: true }),
     claims: mergeArrayById(localCase.claims, remoteCase.claims, { fallbackPrefix: "claim", preferRemote: true }),
+    customerClaims: mergeArrayById(localCase.customerClaims, remoteCase.customerClaims, { fallbackPrefix: "customerClaim", preferRemote: true }),
     supplements: mergeArrayById(localCase.supplements, remoteCase.supplements, { fallbackPrefix: "supplement", preferRemote: true }),
     blockerSourceBookingIds: mergePrimitiveList(localCase.blockerSourceBookingIds, remoteCase.blockerSourceBookingIds),
     deletedAt: remoteCase.deletedAt || localCase.deletedAt || "",

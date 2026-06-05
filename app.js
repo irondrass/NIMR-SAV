@@ -21,6 +21,7 @@ function initApp() {
     bindAutoSaveSafety();
     if (typeof migratePlanningLogicV28 === "function") migratePlanningLogicV28();
     if (typeof migratePlanningLogicV36 === "function") migratePlanningLogicV36();
+    if (typeof initReceptionWorkspace === "function") initReceptionWorkspace();
 
     setActiveTab(activeTab || "dossiers");
     render();
@@ -95,6 +96,9 @@ function bindMainNavigation() {
       const tab = button.dataset.tab;
       if (!tab) return;
       setActiveTab(tab);
+      if (tab === "reception-workspace") {
+        if (typeof renderReceptionWorkspace === "function") renderReceptionWorkspace();
+      }
       if (tab === "today") renderTodayWorkshop();
       if (tab === "planning") renderPlanning();
       if (tab === "technician") renderTechnicianDashboard();
@@ -795,7 +799,7 @@ function registerServiceWorker() {
   });
   window.addEventListener("load", async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=23.1.0", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=23.1.1", { updateViaCache: "none" });
       registration.update?.();
       if (registration.waiting) showUpdateAvailable(registration);
       window.setInterval(() => registration.update?.(), 10 * 60 * 1000);

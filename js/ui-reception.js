@@ -67,6 +67,20 @@ function initReceptionWorkspace() {
     });
   }
 
+  // Bouton d'action recommandée
+  const recActionBtn = document.getElementById("reception-recommended-action-btn");
+  if (recActionBtn) {
+    recActionBtn.addEventListener("click", () => {
+      const activeItem = state.cases.find((c) => c.id === activeCaseId);
+      if (!activeItem && !isReceptionCreationMode) {
+        isReceptionCreationMode = true;
+        renderReceptionWorkspace();
+      } else {
+        document.getElementById("reception-step-content")?.scrollIntoView({ behavior: "smooth" });
+      }
+    });
+  }
+
   // Délégation d'événements sur le panneau central
   const detailPanel = document.getElementById("reception-detail-panel");
   if (detailPanel) {
@@ -150,6 +164,27 @@ function renderReceptionWorkspace() {
   }
 
   const activeItem = isReceptionCreationMode ? null : state.cases.find((c) => c.id === activeCaseId);
+
+  // Update recommended action banner
+  const bannerTitle = document.getElementById("reception-recommended-action-title");
+  const bannerBtn = document.getElementById("reception-recommended-action-btn");
+  if (bannerTitle && bannerBtn) {
+    if (isReceptionCreationMode) {
+      bannerTitle.textContent = "Saisie des informations du nouveau dossier (Étape 1)";
+      bannerBtn.style.display = "none";
+    } else if (!activeItem) {
+      bannerTitle.textContent = "Aucun dossier sélectionné (créez un nouveau dossier ou sélectionnez-en un)";
+      bannerBtn.style.display = "";
+      bannerBtn.textContent = "Créer un dossier";
+    } else {
+      bannerBtn.style.display = "";
+      const stepNum = getReceptionWorkflowStep(activeItem);
+      const stepLabel = RECEPTION_STEP_LABELS[stepNum] || "";
+      bannerTitle.textContent = `Étape ${stepNum} : ${stepLabel}`;
+      bannerBtn.textContent = "Accéder à l'étape";
+    }
+  }
+
   renderReceptionDetailPanel(activeItem);
 }
 
@@ -282,6 +317,16 @@ function renderStep1_Creation(item, container) {
             <span>Motif de l'intervention *</span>
             <input type="text" name="orderTitle" placeholder="Ex: Vidange moteur + filtres" required />
           </label>
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 12px;">
+            <label class="step-field">
+              <span>Réclamations client (une par ligne)</span>
+              <textarea name="customerClaimsText" rows="3" placeholder="Ex: Bruit suspect train avant&#10;Rayure portière gauche"></textarea>
+            </label>
+            <label class="step-field">
+              <span>Demandes client (une par ligne)</span>
+              <textarea name="customerRequestsText" rows="3" placeholder="Ex: Lavage intérieur souhaité&#10;Prêt de véhicule de courtoisie"></textarea>
+            </label>
+          </div>
         ` : ""}
         <label class="step-field" style="margin-top:12px;">
           <span>Notes de réception</span>
@@ -1151,7 +1196,48 @@ async function handleCreateCase(form) {
     if (!confirmed) { activeCaseId = duplicate.id; isReceptionCreationMode = false; renderReceptionWorkspace(); return; }
   }
 
-  const item = normalizeCase({ ...candidate, id: uid("case"), createdAt: new Date().toISOString(), durations: Object.fromEntries(DURATIONS.map(([k]) => [k, 0])), history: [makeHistoryEntry("case.created", "Dossier créé", new Date().toISOString())] });
+  const claimsText = String(data.get("customerClaimsText") || "").trim();
+  const requestsText = String(data.get("customerRequestsText") || "").trim();
+  const customerClaims = [];
+  const actor = getCurrentActor();
+
+  if (claimsText) {
+    claimsText.split("\n").map(l => l.trim()).filter(l => l.length > 0).forEach(line => {
+      customerClaims.push(normalizeCustomerClaim({
+        type: "claim",
+        title: line,
+        text: line,
+        priority: "normal",
+        status: "open",
+        createdBy: actor.userName || actor.userId || "Utilisateur",
+        createdAt: new Date().toISOString(),
+      }));
+    });
+  }
+
+  if (requestsText) {
+    requestsText.split("\n").map(l => l.trim()).filter(l => l.length > 0).forEach(line => {
+      customerClaims.push(normalizeCustomerClaim({
+        type: "request",
+        title: line,
+        text: line,
+        priority: "normal",
+        status: "open",
+        createdBy: actor.userName || actor.userId || "Utilisateur",
+        createdAt: new Date().toISOString(),
+      }));
+    });
+  }
+
+  const item = normalizeCase({
+    ...candidate,
+    id: uid("case"),
+    createdAt: new Date().toISOString(),
+    durations: Object.fromEntries(DURATIONS.map(([k]) => [k, 0])),
+    customerClaims,
+    history: [makeHistoryEntry("case.created", "Dossier créé", new Date().toISOString())]
+  });
+
   const firstClaim = normalizeRepairClaim({ id: uid("claim"), number: "OT-001", title: orderTitle, type: orderType, status: isClientOnlyRepairClaim({ type: orderType }) ? "client_pending" : "expert_pending", includeInPlanning: true, expertApproved: isClientOnlyRepairClaim({ type: orderType }), clientApproved: false, orNumber: item.orNavNumber || "" }, 0);
   item.claims = [firstClaim];
   addHistory(item, "claim.created", "Premier ordre de réparation créé", getClaimLabel(firstClaim));

@@ -259,7 +259,7 @@ const {
 async function runTests() {
   // Test 1: Le message PIN indique qu'il ne chiffre pas les données
   assert.ok(
-    htmlSource.includes("Le PIN protège l’accès à l’interface, mais ne chiffre pas les données stockées sur ce poste."),
+    htmlSource.includes("Le PIN protège l’interface locale, mais ne chiffre pas les données locales."),
     "index.html doit contenir la mention d'avertissement PIN ne chiffrant pas"
   );
   console.log("Test 1 OK : Avertissement PIN présent dans index.html");

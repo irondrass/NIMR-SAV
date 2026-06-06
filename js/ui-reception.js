@@ -1194,8 +1194,8 @@ async function handleCreateCase(form) {
     arrivalNotes: String(data.get("arrivalNotes") || "").trim(),
   };
 
-  if (!candidate.clientName) { notifyUser("Le nom du client est obligatoire.", "error"); return; }
-  if (!candidate.vehicle && !candidate.plate && !candidate.vin) { notifyUser("Renseignez au moins le véhicule, l'immatriculation ou le VIN.", "error"); return; }
+  if (!candidate.clientName) { notifyUser("Le nom du client est obligatoire pour créer un dossier. Renseignez le propriétaire ou la société.", "error"); return; }
+  if (!candidate.vehicle && !candidate.plate && !candidate.vin) { notifyUser("Renseignez au moins le véhicule, l'immatriculation ou le VIN avant de créer le dossier.", "error"); return; }
   if (!candidate.vehicle) candidate.vehicle = "Véhicule à compléter";
 
   const duplicate = findDuplicateCase(candidate);
@@ -1285,7 +1285,7 @@ async function handleEditCase(form) {
     driverPhone: String(data.get("driverPhone") || "").trim(),
     arrivalNotes: String(data.get("arrivalNotes") || "").trim(),
   };
-  if (!candidate.clientName) { notifyUser("Le nom du client est obligatoire.", "error"); return; }
+  if (!candidate.clientName) { notifyUser("Le nom du client est obligatoire pour enregistrer le dossier. Renseignez le propriétaire ou la société.", "error"); return; }
   Object.assign(item, candidate);
 
   const appDateVal = data.get("appointmentDate");

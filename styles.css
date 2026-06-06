@@ -2622,9 +2622,29 @@ button:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
 select:focus-visible,
-a:focus-visible {
-  outline: 3px solid rgba(29, 107, 117, 0.35);
-  outline-offset: 2px;
+a:focus-visible,
+[tabindex]:focus-visible {
+  outline: 3px solid #f59e0b;
+  outline-offset: 3px;
+  box-shadow: 0 0 0 5px rgba(245, 158, 11, 0.24);
+}
+
+.nav-button:focus-visible,
+.icon-button:focus-visible,
+.ghost-button:focus-visible,
+.primary-button:focus-visible,
+.step-primary-btn:focus-visible,
+.step-secondary-btn:focus-visible,
+.filter-pill:focus-visible,
+.case-card:focus-visible,
+.touch-action-btn:focus-visible {
+  outline-color: #f59e0b;
+  outline-offset: 4px;
+}
+
+.custom-modal-content:focus-within,
+.local-lock-dialog:focus-within {
+  box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.18), var(--shadow-lg);
 }
 
 @media (prefers-reduced-motion: reduce) {

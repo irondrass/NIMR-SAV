@@ -177,17 +177,17 @@ function bindCaseCreation() {
     }
 
     if (!candidate.clientName) {
-      notifyUser("Le nom du client est obligatoire pour créer un dossier.", "error");
+      notifyUser("Le nom du client est obligatoire pour créer un dossier. Renseignez le propriétaire ou la société.", "error");
       form.elements.clientName?.focus();
       return;
     }
     if (!candidate.vehicle && !candidate.plate && !candidate.vin) {
-      notifyUser("Renseignez au moins le véhicule, l'immatriculation ou le VIN.", "error");
+      notifyUser("Renseignez au moins le véhicule, l'immatriculation ou le VIN avant de créer le dossier.", "error");
       form.elements.vehicle?.focus();
       return;
     }
     if (!candidate.plate && !candidate.vin) {
-      notifyUser("Dossier créé sans identité véhicule complète : complétez l'immatriculation ou le VIN avant de calculer le planning.", "warn");
+      notifyUser("Dossier créé sans immatriculation/VIN : complétez l'identité véhicule avant le planning.", "warn");
     }
     if (!candidate.vehicle) {
       candidate.vehicle = "Véhicule à compléter";
@@ -807,7 +807,7 @@ function registerServiceWorker() {
   });
   window.addEventListener("load", async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=23.1.6", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=23.1.7", { updateViaCache: "none" });
       registration.update?.();
       if (registration.waiting) showUpdateAvailable(registration);
       window.setInterval(() => registration.update?.(), 10 * 60 * 1000);
@@ -965,6 +965,58 @@ window.pendingSelectorUser = null;
 window.selectedUserIdForStartup = "";
 window.pendingSelectorUser = null;
 
+let userSessionReturnFocus = null;
+
+function isUserSessionOverlayVisible() {
+  const login = document.getElementById("user-login-overlay");
+  const change = document.getElementById("user-pin-change-overlay");
+  return Boolean((login && !login.hidden) || (change && !change.hidden));
+}
+
+function captureUserSessionReturnFocus() {
+  if (userSessionReturnFocus || isUserSessionOverlayVisible()) return;
+  const active = document.activeElement;
+  if (!active || active === document.body || active.closest?.(".local-lock-overlay")) return;
+  if (typeof active.focus === "function") userSessionReturnFocus = active;
+}
+
+function restoreUserSessionReturnFocus() {
+  if (isUserSessionOverlayVisible()) return;
+  const target = userSessionReturnFocus;
+  userSessionReturnFocus = null;
+  if (target && typeof target.focus === "function") {
+    window.setTimeout(() => target.focus(), 60);
+  }
+}
+
+function focusUserSessionDialog(overlay, preferredSelector) {
+  if (!overlay || overlay.hidden) return;
+  const preferred = preferredSelector ? overlay.querySelector(preferredSelector) : null;
+  const focusable = typeof getFocusableElements === "function" ? getFocusableElements(overlay) : [];
+  const target = preferred && !preferred.disabled ? preferred : focusable[0];
+  if (target && typeof target.focus === "function") {
+    window.setTimeout(() => target.focus(), 60);
+  }
+}
+
+function handleUserSessionOverlayKeydown(event) {
+  const overlay = event.currentTarget;
+  const form = overlay?.querySelector?.("form");
+  if (!form) return;
+  if (event.key === "Escape" && overlay.id === "user-pin-change-overlay") {
+    event.preventDefault();
+    document.getElementById("user-pin-change-cancel")?.click();
+    return;
+  }
+  if (typeof trapFocusWithin === "function") trapFocusWithin(form, event);
+}
+
+function bindUserSessionOverlayKeyboard(overlay) {
+  if (!overlay || overlay.dataset.keyboardBound === "true") return;
+  overlay.dataset.keyboardBound = "true";
+  overlay.addEventListener("keydown", handleUserSessionOverlayKeydown);
+}
+
 function checkUserSessionStartup() {
   if (typeof isLocalSessionUnlocked === "function" && !isLocalSessionUnlocked()) {
     // PIN local activé et verrouillé -> priorité au PIN, on attend le déverrouillage
@@ -1007,9 +1059,12 @@ function checkUserSessionStartup() {
 function showUserLoginScreen() {
   const overlay = document.getElementById("user-login-overlay");
   if (overlay) {
+    captureUserSessionReturnFocus();
+    bindUserSessionOverlayKeyboard(overlay);
     overlay.hidden = false;
     document.querySelector(".app-shell")?.setAttribute("inert", "");
     renderUserLoginScreen();
+    focusUserSessionDialog(overlay, "#user-login-select");
   }
 }
 
@@ -1020,6 +1075,7 @@ function hideUserLoginScreen() {
     const status = document.getElementById("user-login-status");
     if (status) status.textContent = "";
     checkOverlaysInertState();
+    restoreUserSessionReturnFocus();
   }
 }
 
@@ -1027,6 +1083,8 @@ function showUserPinChangeOverlay(user, mode = "bootstrap") {
   const overlay = document.getElementById("user-pin-change-overlay");
   const descEl = document.getElementById("user-pin-change-desc");
   if (overlay) {
+    captureUserSessionReturnFocus();
+    bindUserSessionOverlayKeyboard(overlay);
     if (descEl) {
       if (mode === "creation") {
         descEl.textContent = "Un code PIN de sécurité doit être défini avant le premier accès à l'application.";
@@ -1042,7 +1100,7 @@ function showUserPinChangeOverlay(user, mode = "bootstrap") {
       newPinInput.value = "";
       const confirmInput = overlay.querySelector("input[name='confirmNewPin']");
       if (confirmInput) confirmInput.value = "";
-      window.setTimeout(() => newPinInput.focus(), 60);
+      focusUserSessionDialog(overlay, "input[name='newPin']");
     }
   }
 }
@@ -1054,6 +1112,7 @@ function hideUserPinChangeOverlay() {
     const status = document.getElementById("user-pin-change-status");
     if (status) status.textContent = "";
     checkOverlaysInertState();
+    restoreUserSessionReturnFocus();
   }
 }
 
@@ -1221,9 +1280,9 @@ function bindUserSessionActions() {
 
   // Annuler le changement du PIN
   document.getElementById("user-pin-change-cancel")?.addEventListener("click", () => {
-    hideUserPinChangeOverlay();
     window.pendingSelectorUser = null;
     showUserLoginScreen();
+    hideUserPinChangeOverlay();
   });
 
   // Soumission du formulaire unique de login
@@ -1238,7 +1297,7 @@ function bindUserSessionActions() {
 
     const user = (state.users || []).find(u => u.id === userId);
     if (!user || user.active === false) {
-      if (statusEl) statusEl.textContent = "Utilisateur inactif ou invalide.";
+      if (statusEl) statusEl.textContent = "Utilisateur inactif ou invalide. Sélectionnez un compte actif.";
       return;
     }
 
@@ -1261,7 +1320,7 @@ function bindUserSessionActions() {
         const valid = await verifyUserPin(user, pinVal);
         if (!valid) {
           addAuditLog("users.pin_incorrect", `PIN incorrect pour ${user.name}`, `Tentative de connexion échouée (rôle: ${user.role})`);
-          if (statusEl) statusEl.textContent = "PIN incorrect.";
+          if (statusEl) statusEl.textContent = "PIN incorrect. Vérifiez le code du compte sélectionné.";
           loginForm.elements.pin.value = "";
           loginForm.elements.pin.focus();
           return;
@@ -1277,7 +1336,7 @@ function bindUserSessionActions() {
         // Sinon, PIN valide -> déverrouillé !
         sessionStorage.setItem("nimr-user-pin-unlocked", user.id);
       } catch (err) {
-        if (statusEl) statusEl.textContent = err.message || "Erreur de validation.";
+        if (statusEl) statusEl.textContent = err.message || "Validation du PIN impossible. Réessayez ou contactez l'administrateur.";
         return;
       }
     }
@@ -1300,15 +1359,15 @@ function bindUserSessionActions() {
     if (statusEl) statusEl.textContent = "";
 
     if (newPin.length < 4) {
-      if (statusEl) statusEl.textContent = "Le PIN doit contenir au moins 4 chiffres.";
+      if (statusEl) statusEl.textContent = "Le PIN doit contenir au moins 4 chiffres avant validation.";
       return;
     }
     if (newPin === "0000") {
-      if (statusEl) statusEl.textContent = "Le PIN doit être différent de 0000.";
+      if (statusEl) statusEl.textContent = "Le PIN doit être différent de 0000 pour sécuriser l'accès.";
       return;
     }
     if (newPin !== confirmNewPin) {
-      if (statusEl) statusEl.textContent = "Les PIN ne correspondent pas.";
+      if (statusEl) statusEl.textContent = "Les deux PIN ne correspondent pas. Ressaisissez la confirmation.";
       return;
     }
 
@@ -1336,7 +1395,7 @@ function bindUserSessionActions() {
       hideUserPinChangeOverlay();
       completeUserLogin(user);
     } catch (err) {
-      if (statusEl) statusEl.textContent = err.message || "Erreur lors de la mise à jour.";
+      if (statusEl) statusEl.textContent = err.message || "Mise à jour du PIN impossible. Réessayez ou contactez l'administrateur.";
     }
   });
 }
@@ -1382,7 +1441,7 @@ function completeUserLogin(targetUser) {
       quietNotify(`Bienvenue, ${targetUser.name} !`, "success");
     }
   } else {
-    notifyUser("Impossible d'appliquer l'utilisateur.", "error");
+    notifyUser("Impossible d'appliquer l'utilisateur. Vérifiez que le compte est actif et autorisé.", "error");
   }
 }
 

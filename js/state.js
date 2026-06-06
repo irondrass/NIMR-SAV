@@ -20,7 +20,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v23.1.6";
+const APP_VERSION = "v23.1.7";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const WORKSHOP_NAME = "NIMR SAV";
@@ -597,7 +597,7 @@ function setLocalSecurityStatus(message, variant = "info") {
 }
 
 function renderLocalSecurityStatus() {
-  setLocalSecurityStatus("PIN local obsolète. L'authentification unifiée v23.1 est désormais obligatoire.", "info");
+  setLocalSecurityStatus("Le PIN protège l’interface locale, mais ne chiffre pas les données locales. L'authentification unifiée v23.1 reste obligatoire.", "info");
 }
 
 async function setLocalPin(pin) {
@@ -1319,30 +1319,30 @@ function getPermissionDeniedMessage(permission, context = {}) {
   if (context.item && isCaseReadonlyArchive(context.item) && MUTATION_PERMISSIONS.includes(requested)) {
     return getArchivedCaseMessage(context.item);
   }
-  if (!user) return "Aucun utilisateur actif n'est sélectionné.";
-  if (user.active === false) return "Utilisateur inactif.";
-  if (role === "readonly" && MUTATION_PERMISSIONS.includes(requested)) return "Mode lecture seule : modification impossible.";
-  if (requested === "case.delete") return "Suppression réservée administrateur.";
-  if (requested === "supabase.configure") return "Configuration Supabase réservée administrateur.";
-  if (requested === "import.backup") return "Import sauvegarde réservé administrateur.";
-  if (requested === "settings.edit" || requested === "users.manage") return "Action réservée administrateur.";
-  if (requested === "export.backup") return "Export sauvegarde réservé chef atelier/admin.";
-  if (requested === "quality.validate" || requested === "quality.reject") return "Action réservée qualité/chef atelier/admin.";
-  if (requested === "case.close") return "Clôture/Facturation réservée chef atelier/admin.";
-  if (requested === "delivery.complete") return "Livraison réservée réception/chef atelier/admin.";
+  if (!user) return "Aucun utilisateur actif n'est sélectionné. Choisissez une session utilisateur avant de continuer.";
+  if (user.active === false) return "Utilisateur inactif. Sélectionnez un compte actif pour continuer.";
+  if (role === "readonly" && MUTATION_PERMISSIONS.includes(requested)) return "Mode lecture seule : modification impossible. Connectez-vous avec un rôle autorisé pour enregistrer des changements.";
+  if (requested === "case.delete") return "Suppression réservée administrateur. Demandez une validation avant de supprimer un dossier.";
+  if (requested === "supabase.configure") return "Configuration Supabase réservée administrateur. Connectez-vous avec un administrateur technique.";
+  if (requested === "import.backup") return "Import sauvegarde réservé administrateur. Vérifiez le rôle actif avant restauration.";
+  if (requested === "settings.edit" || requested === "users.manage") return "Action réservée administrateur. Vérifiez la session active.";
+  if (requested === "export.backup") return "Export sauvegarde réservé chef atelier/admin. Demandez un export à un responsable autorisé.";
+  if (requested === "quality.validate" || requested === "quality.reject") return "Action réservée qualité/chef atelier/admin. Vérifiez le rôle de la session active.";
+  if (requested === "case.close") return "Clôture/Facturation réservée chef atelier/admin. Finalisez depuis une session responsable.";
+  if (requested === "delivery.complete") return "Livraison réservée réception/chef atelier/admin. Basculez vers un rôle autorisé.";
   if (["case.create", "case.edit", "estimate.import", "appointment.schedule", "schedule_appointment", "vehicle.receive", "receive_vehicle"].includes(requested)) {
-    return "Action réservée réception/chef atelier/admin.";
+    return "Action réservée réception/chef atelier/admin. Connectez-vous avec un rôle autorisé.";
   }
-  if (requested === "task.override" || requested === "planning.edit") return "Action réservée chef atelier/admin.";
+  if (requested === "task.override" || requested === "planning.edit") return "Action réservée chef atelier/admin. Demandez un ajustement planning à un responsable.";
   if (requested.startsWith("task.")) {
-    if (role === "technicien" && !user.resourceId) return "Aucune ressource technicien liée à cet utilisateur.";
+    if (role === "technicien" && !user.resourceId) return "Aucune ressource technicien liée à cet utilisateur. Associez le profil à une ressource atelier.";
     if (role === "technicien" && context.booking && !canActOnTechnicianTask(user, context.booking)) {
-      return "Cette tâche est affectée à un autre technicien.";
+      return "Cette tâche est affectée à un autre technicien. Seul le technicien assigné ou un responsable peut agir.";
     }
-    if (role === "readonly") return "Mode lecture seule : modification impossible.";
+    if (role === "readonly") return "Mode lecture seule : modification impossible. Connectez-vous avec un rôle atelier autorisé.";
     if (role === "reception" || role === "qualite") return "Action réservée au technicien affecté ou au chef atelier/admin.";
   }
-  return "Permission insuffisante.";
+  return "Permission insuffisante. Vérifiez le rôle de la session active.";
 }
 
 function guardAction(permission, context = {}, options = {}) {
@@ -3045,20 +3045,46 @@ function showInputPromptModal({
     cancelBtn.textContent = cancelLabel;
     confirmBtn.textContent = confirmLabel;
 
-    let inputHtml = "";
-    if (options && Array.isArray(options)) {
-      const selectOptions = options
-        .map(([val, lbl]) => `<option value="${escapeHtml(val)}" ${val === defaultValue ? "selected" : ""}>${escapeHtml(lbl)}</option>`)
-        .join("");
-      inputHtml = `<select id="prompt-modal-input" class="custom-modal-select" style="width: 100%; padding: 10px; margin-top: 12px; border: 1px solid #cfe0e8; border-radius: 8px; font-size: 16px; min-height: 48px;">${selectOptions}</select>`;
-    } else {
-      inputHtml = `<input type="text" id="prompt-modal-input" class="custom-modal-input" style="width: 100%; padding: 10px; margin-top: 12px; border: 1px solid #cfe0e8; border-radius: 8px; font-size: 16px; min-height: 48px;" value="${escapeHtml(defaultValue)}" autocomplete="off" />`;
-    }
+    const messageWrap = document.createElement("div");
+    appendSafeModalMessage(messageWrap, message);
+    messageWrap.className = "custom-modal-message";
+    messageWrap.style.marginBottom = "12px";
 
-    body.innerHTML = `<div>${message}</div>${inputHtml}`;
+    let input = null;
+    if (options && Array.isArray(options)) {
+      input = document.createElement("select");
+      options.forEach(([val, lbl]) => {
+        const option = document.createElement("option");
+        option.value = String(val);
+        option.textContent = String(lbl);
+        option.selected = String(val) === String(defaultValue);
+        input.appendChild(option);
+      });
+    } else {
+      input = document.createElement("input");
+      input.type = "text";
+      input.value = String(defaultValue || "");
+      input.autocomplete = "off";
+    }
+    input.id = "prompt-modal-input";
+    input.className = options && Array.isArray(options) ? "custom-modal-select" : "custom-modal-input";
+    input.style.width = "100%";
+    input.style.padding = "10px";
+    input.style.border = "1px solid #cfe0e8";
+    input.style.borderRadius = "8px";
+    input.style.fontSize = "16px";
+    input.style.minHeight = "48px";
+
+    if (typeof body.replaceChildren === "function") {
+      body.replaceChildren(messageWrap, input);
+    } else {
+      body.textContent = "";
+      body.innerHTML = "";
+      body.appendChild(messageWrap);
+      body.appendChild(input);
+    }
     overlay.hidden = false;
 
-    const input = document.getElementById("prompt-modal-input");
     if (input) {
       input.focus();
       if (input.tagName === "INPUT") {

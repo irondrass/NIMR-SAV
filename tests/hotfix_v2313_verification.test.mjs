@@ -280,7 +280,7 @@ const rejectedNoVehicleIdentity = await submitReceptionCreate({
 assert.equal(rejectedNoVehicleIdentity.count, 0, 'Aucun dossier ne doit être créé sans véhicule, immatriculation ou VIN');
 assert.deepEqual(
   rejectedNoVehicleIdentity.notification,
-  { msg: "Renseignez au moins le véhicule, l'immatriculation ou le VIN.", type: 'error' },
+  { msg: "Renseignez au moins le véhicule, l'immatriculation ou le VIN avant de créer le dossier.", type: 'error' },
   'La création sans identité véhicule doit afficher le message bloquant'
 );
 

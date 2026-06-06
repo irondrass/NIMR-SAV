@@ -12,7 +12,7 @@ async function signInSupabaseFromForm(event) {
   const email = form.elements.email.value.trim();
   const password = form.elements.password.value;
   if (!email || !password) {
-    setSupabaseStatus("Email et mot de passe requis.", "error");
+    setSupabaseStatus("Email et mot de passe Supabase requis pour ouvrir la session cloud.", "error");
     return;
   }
   setSupabaseStatus("Connexion en cours...");
@@ -20,7 +20,7 @@ async function signInSupabaseFromForm(event) {
   if (error) {
     console.error("Connexion Supabase impossible", error);
     setSupabaseStatus(`Connexion refusée : ${error.message}`, "error");
-    notifyUser("Connexion Supabase impossible. Vérifiez email/mot de passe.", "error");
+    notifyUser("Connexion Supabase impossible. Vérifiez email, mot de passe et droits d'accès atelier.", "error");
     return;
   }
   form.elements.password.value = "";
@@ -50,7 +50,7 @@ async function testSupabaseConnection() {
   const { data: authData, error: authError } = await client.auth.getUser();
   if (authError || !authData?.user) {
     setSupabaseStatus("Connexion requise avant le test.", "warn");
-    setSupabaseDetails("Connectez-vous d'abord avec email + mot de passe.");
+    setSupabaseDetails("Connectez-vous d'abord avec email + mot de passe Supabase, puis relancez le test.");
     return;
   }
 
@@ -664,7 +664,8 @@ async function saveLocalToSupabase() {
   }
   const user = await getSupabaseUser();
   if (!user) {
-    setSupabaseStatus("Connectez-vous avant de sauvegarder.", "warn");
+    setSupabaseStatus("Connectez-vous à Supabase avant de sauvegarder.", "warn");
+    setSupabaseDetails("La sauvegarde cloud est bloquée tant qu'aucune session Supabase active n'est détectée.");
     return;
   }
   const confirmed = await showConfirmModal("Sauvegarder les données locales actuelles vers Supabase ? Une copie JSON locale sera téléchargée avant l'envoi.");
@@ -704,7 +705,8 @@ async function saveLocalToSupabase() {
   } catch (error) {
     console.error("Sauvegarde Supabase impossible", error);
     setSupabaseStatus(`Sauvegarde impossible : ${error.message}`, "error");
-    notifyUser(error.message || "Sauvegarde Supabase impossible.", "error");
+    setSupabaseDetails("La copie locale n'a pas été remplacée. Vérifiez la connexion, les policies Supabase et le schéma SQL.");
+    notifyUser(error.message || "Sauvegarde Supabase impossible. Vérifiez la connexion et les droits cloud.", "error");
   }
 }
 
@@ -718,7 +720,8 @@ async function restoreLocalFromSupabase() {
   }
   const user = await getSupabaseUser();
   if (!user) {
-    setSupabaseStatus("Connectez-vous avant de restaurer.", "warn");
+    setSupabaseStatus("Connectez-vous à Supabase avant de restaurer.", "warn");
+    setSupabaseDetails("La restauration cloud est bloquée tant qu'aucune session Supabase active n'est détectée.");
     return;
   }
   const restoreWarning = `Restaurer les données depuis Supabase ? Une sauvegarde JSON locale sera téléchargée avant remplacement.<br><br>` +
@@ -738,7 +741,7 @@ async function restoreLocalFromSupabase() {
     const data = await selectCloudBackupRow(client, tableName, backupKey, "state, photos, app_version, updated_at, cases_count, photos_count");
     if (!data?.state) {
       setSupabaseStatus("Aucune sauvegarde Supabase trouvée.", "warn");
-      setSupabaseDetails("Faites d'abord une sauvegarde local → Supabase.");
+      setSupabaseDetails("Faites d'abord une sauvegarde local → Supabase depuis un poste autorisé, puis relancez la restauration.");
       return;
     }
 
@@ -777,7 +780,8 @@ async function restoreLocalFromSupabase() {
   } catch (error) {
     console.error("Restauration Supabase impossible", error);
     setSupabaseStatus(`Restauration impossible : ${error.message}`, "error");
-    notifyUser(error.message || "Restauration Supabase impossible.", "error");
+    setSupabaseDetails("Les données locales n'ont pas été remplacées. Vérifiez la connexion, les policies Supabase et le schéma SQL.");
+    notifyUser(error.message || "Restauration Supabase impossible. Vérifiez la connexion et les droits cloud.", "error");
   }
 }
 

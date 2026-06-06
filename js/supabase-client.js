@@ -59,13 +59,13 @@ async function refreshSupabasePanel() {
   const client = getSupabaseClient();
   hydrateSupabaseConfigForm();
   if (!isSupabaseConfigured()) {
-    setSupabaseStatus("Supabase non configuré.", "error");
-    setSupabaseDetails("Renseignez l'URL projet, la clé anon publique et l'ID atelier dans Paramètres > Cloud Supabase. Ces valeurs restent dans ce navigateur.");
+    setSupabaseStatus("Supabase non configuré : synchronisation cloud inactive.", "error");
+    setSupabaseDetails("Renseignez l'URL projet, la clé anon publique et l'ID atelier dans Paramètres > Cloud Supabase. Les données restent locales tant que la configuration n'est pas valide.");
     return;
   }
   if (!client) {
-    setSupabaseStatus("Librairie Supabase non chargée.", "error");
-    setSupabaseDetails("Vérifiez votre connexion internet ou le script CDN Supabase dans index.html.");
+    setSupabaseStatus("Librairie Supabase non chargée : synchronisation indisponible.", "error");
+    setSupabaseDetails("Vérifiez la connexion internet du poste ou le chargement du script CDN Supabase dans index.html.");
     return;
   }
   const user = await getSupabaseUser();
@@ -77,7 +77,7 @@ async function refreshSupabasePanel() {
     setSupabaseDetails("Synchronisation multi-PC active : les modifications sont sauvegardées et reçues depuis Supabase.");
   } else {
     setSupabaseStatus("Supabase configuré, utilisateur non connecté.", "warn");
-    setSupabaseDetails("Connectez-vous avec l'utilisateur créé dans Authentication > Users.");
+    setSupabaseDetails("Connectez-vous avec un compte Supabase autorisé. Les sauvegardes cloud restent bloquées tant que la session n'est pas active.");
   }
 }
 
@@ -116,7 +116,7 @@ function saveSupabaseRuntimeConfigFromForm(event) {
     refreshSupabasePanel();
   } catch (error) {
     console.error("Enregistrement config Supabase impossible", error);
-    notifyUser("Impossible d'enregistrer la configuration Supabase locale.", "error");
+    notifyUser("Impossible d'enregistrer la configuration Supabase locale. Vérifiez le stockage du navigateur et les droits de l'utilisateur.", "error");
   }
 }
 

@@ -69,6 +69,7 @@ const getElement = (id) => {
   if (!elements[cleanId]) {
     elements[cleanId] = {
       id: cleanId,
+      tagName: cleanId.toUpperCase(),
       hidden: true,
       disabled: false,
       value: "",
@@ -77,6 +78,7 @@ const getElement = (id) => {
       textContent: "",
       dataset: {},
       style: {},
+      children: [],
       classList: {
         classes: new Set(),
         add(cls) { this.classes.add(cls); },
@@ -108,8 +110,11 @@ const getElement = (id) => {
         return this;
       },
       appendChild(child) {
-        if (!this.children) this.children = [];
         this.children.push(child);
+      },
+      replaceChildren(...children) {
+        this.children = children;
+        this.innerHTML = children.map((child) => child.outerHTML || child.textContent || "").join("");
       },
       removeChild(child) {
         if (this.children) {
@@ -154,16 +159,49 @@ global.document = {
   },
   createElement: (tag) => {
     return {
+      tagName: String(tag || "").toUpperCase(),
       className: "",
       textContent: "",
+      value: "",
+      selected: false,
+      disabled: false,
+      id: "",
+      type: "",
+      autocomplete: "",
+      style: {},
+      dataset: {},
+      children: [],
+      listeners: new Map(),
       setAttribute: () => {},
-      appendChild: () => {},
+      appendChild(child) {
+        this.children.push(child);
+      },
+      replaceChildren(...children) {
+        this.children = children;
+        this.innerHTML = children.map((child) => child.outerHTML || child.textContent || "").join("");
+      },
+      addEventListener(event, listener) {
+        if (!this.listeners.has(event)) this.listeners.set(event, []);
+        this.listeners.get(event).push(listener);
+      },
+      removeEventListener(event, listener) {
+        const list = this.listeners.get(event) || [];
+        const index = list.indexOf(listener);
+        if (index !== -1) list.splice(index, 1);
+      },
+      dispatchEvent(event, extra = {}) {
+        const list = this.listeners.get(event) || [];
+        list.forEach(l => l(Object.assign({ currentTarget: this, target: this, preventDefault() {} }, extra)));
+      },
+      focus() {},
+      select() {},
       classList: {
         add: () => {}
       },
       remove: () => {}
     };
-  }
+  },
+  createTextNode: (text) => ({ nodeType: 3, textContent: String(text || "") })
 };
 
 global.escapeHtml = (s) => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -194,12 +232,11 @@ async function runTests() {
     });
 
     const body = getElement("custom-modal-body");
-    assert.ok(body.innerHTML.includes('input type="text"'), "Le corps du modal doit contenir un input texte");
-    assert.ok(body.innerHTML.includes('value="valeurInitiale"'), "L'input doit avoir la valeur par défaut");
+    const inputEl = body.children.find((child) => child.id === "prompt-modal-input");
+    assert.equal(inputEl?.tagName, "INPUT", "Le corps du modal doit contenir un input texte");
+    assert.equal(inputEl.value, "valeurInitiale", "L'input doit avoir la valeur par défaut");
 
     // Simuler le fait de renseigner une valeur
-    // Pour cela, nous créons l'élément input avec l'id attendu
-    const inputEl = getElement("prompt-modal-input");
     inputEl.value = "NouvelleNote";
 
     // Cliquer sur confirmer
@@ -223,10 +260,10 @@ async function runTests() {
     });
 
     const body = getElement("custom-modal-body");
-    assert.ok(body.innerHTML.includes("<select"), "Le corps du modal doit contenir un élément select");
-    assert.ok(body.innerHTML.includes('value="opt2" selected'), "L'option defaultValue doit être sélectionnée");
+    const inputEl = body.children.find((child) => child.id === "prompt-modal-input");
+    assert.equal(inputEl?.tagName, "SELECT", "Le corps du modal doit contenir un élément select");
+    assert.equal(inputEl.children.find((option) => option.value === "opt2")?.selected, true, "L'option defaultValue doit être sélectionnée");
 
-    const inputEl = getElement("prompt-modal-input");
     inputEl.value = "opt1"; // simuler le choix de l'utilisateur
 
     const confirmBtn = getElement("custom-modal-confirm");

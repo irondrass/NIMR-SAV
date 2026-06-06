@@ -1,6 +1,6 @@
-window.APP_VERSION = "v23.1.8";
-window.NIMR_BUILD = "v23.1.8";
-window.NIMR_CACHE_NAME = "nimr-sav-v23.1.8-roles-governance-hardening";
+window.APP_VERSION = "v23.2.0";
+window.NIMR_BUILD = "v23.2.0";
+window.NIMR_CACHE_NAME = "nimr-sav-v23.2.0-sav-performance-dashboard";
 
 if ("caches" in window) {
   caches.keys().then((keys) => Promise.all(

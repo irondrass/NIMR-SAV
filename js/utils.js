@@ -30,9 +30,14 @@ const LOAD_CATEGORIES = {
     bookingKeys: ["oilService"],
   },
   heavy: {
-    humanRoles: ["mecanicien", "electricien"],
+    humanRoles: ["mecanicien"],
     equipmentRoles: ["pont_mecanique"],
-    bookingKeys: ["mechanical", "electrical"],
+    bookingKeys: ["mechanical"],
+  },
+  electrical: {
+    humanRoles: ["electricien"],
+    equipmentRoles: [],
+    bookingKeys: ["electrical"],
   },
 };
 

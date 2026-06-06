@@ -20,7 +20,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v23.1.8";
+const APP_VERSION = "v23.2.0";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const WORKSHOP_NAME = "NIMR SAV";
@@ -281,6 +281,7 @@ const ROLE_PERMISSIONS = {
   admin: ["*"],
   directeur_sav: [
     "audit.view",
+    "dashboard.view",
     "case.create",
     "case.edit",
     "estimate.import",
@@ -295,6 +296,7 @@ const ROLE_PERMISSIONS = {
   ],
   chef_atelier: [
     "audit.view",
+    "dashboard.view",
     "case.create",
     "case.edit",
     "estimate.import",
@@ -327,7 +329,7 @@ const ROLE_PERMISSIONS = {
   ],
   technicien: ["task.start", "task.pause", "task.resume", "task.complete", "task.block", "print.task"],
   qualite: ["quality.validate", "quality.reject", "print.quality"],
-  readonly: ["print.*"],
+  readonly: ["dashboard.view", "print.*"],
 };
 
 const MUTATION_PERMISSIONS = [
@@ -979,6 +981,9 @@ function createDefaultState() {
       caseStatusFilter: "all",
       caseTypeFilter: "all",
       caseSort: "recent",
+      savDashboardPeriod: "today",
+      savDashboardStatusFilter: "all",
+      savDashboardTypeFilter: "all",
       technicianId: "",
       technicianDate: todayKey(new Date()),
     },
@@ -1602,11 +1607,15 @@ function ensureMinimumEquipmentResources(resources, defaults, role, minimum) {
 function normalizeUiPreferences(ui = {}) {
   const allowedSorts = new Set(["recent", "oldest", "client", "appointment"]);
   const allowedStatuses = new Set(["all", ...Object.keys(statusLabels)]);
-  const allowedTypes = new Set(["all", "assurance", "client", "vidange", "mechanical_client", "electrical_client", "garantie"]);
+  const allowedTypes = new Set(["all", "assurance", "client", "vidange", "mechanical_client", "electrical_client", "diagnostic", "garantie"]);
+  const allowedDashboardPeriods = new Set(["today", "week", "month"]);
   return {
     caseStatusFilter: allowedStatuses.has(ui.caseStatusFilter) ? ui.caseStatusFilter : "all",
     caseTypeFilter: allowedTypes.has(ui.caseTypeFilter) ? ui.caseTypeFilter : "all",
     caseSort: allowedSorts.has(ui.caseSort) ? ui.caseSort : "recent",
+    savDashboardPeriod: allowedDashboardPeriods.has(ui.savDashboardPeriod) ? ui.savDashboardPeriod : "today",
+    savDashboardStatusFilter: allowedStatuses.has(ui.savDashboardStatusFilter) ? ui.savDashboardStatusFilter : "all",
+    savDashboardTypeFilter: allowedTypes.has(ui.savDashboardTypeFilter) ? ui.savDashboardTypeFilter : "all",
     technicianId: typeof ui.technicianId === "string" ? ui.technicianId : "",
     technicianDate: /^\d{4}-\d{2}-\d{2}$/.test(String(ui.technicianDate || "")) ? ui.technicianDate : todayKey(new Date()),
   };

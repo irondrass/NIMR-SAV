@@ -1839,6 +1839,31 @@ select:focus {
   padding: 18px;
 }
 
+.sav-dashboard-filters {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.sav-dashboard-filters label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.sav-dashboard-filters select {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  color: var(--ink);
+  background: var(--paper);
+}
+
 .sav-kpi-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1881,6 +1906,47 @@ select:focus {
 .sav-kpi-card.info { border-left-color: #2563eb; }
 .sav-kpi-card.warn { border-left-color: #d97706; }
 .sav-kpi-card.danger { border-left-color: #b54040; }
+
+.sav-dashboard-load-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.sav-load-card {
+  display: grid;
+  gap: 6px;
+  min-height: 94px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-left: 4px solid #8aa4b2;
+  border-radius: var(--radius);
+  background: #f8fafb;
+}
+
+.sav-load-card span {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.sav-load-card strong {
+  color: var(--ink);
+  font-size: 1.65rem;
+  line-height: 1;
+}
+
+.sav-load-card small {
+  color: var(--muted);
+  line-height: 1.3;
+}
+
+.sav-load-card.neutral { border-left-color: #8aa4b2; }
+.sav-load-card.info { border-left-color: #2563eb; }
+.sav-load-card.warn { border-left-color: #d97706; }
+.sav-load-card.danger { border-left-color: #b54040; }
 
 .pilotage-alert-block {
   margin-top: 18px;
@@ -2363,6 +2429,8 @@ select:focus {
   .today-board,
   .chief-summary-grid,
   .sav-kpi-grid,
+  .sav-dashboard-load-grid,
+  .sav-dashboard-filters,
   .detail-grid,
   .settings-grid,
   .proposal-grid,
@@ -2403,6 +2471,8 @@ select:focus {
   .technician-task-meta,
   .chief-summary-grid,
   .sav-kpi-grid,
+  .sav-dashboard-load-grid,
+  .sav-dashboard-filters,
   .workbench,
   .detail-grid,
   .settings-grid,

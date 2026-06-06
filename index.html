@@ -16,8 +16,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <script src="js/version.js?v=23.1.8"></script>
-    <link rel="stylesheet" href="styles.css?v=23.1.8" />
+    <script src="js/version.js?v=23.2.0"></script>
+    <link rel="stylesheet" href="styles.css?v=23.2.0" />
   </head>
   <body>
     <a class="skip-link" href="#main-content">Aller au contenu principal</a>
@@ -341,16 +341,58 @@
           <section class="panel kanban-panel">
             <div class="panel-heading">
               <div>
-                <h1>Pilotage production</h1>
-                <p>KPI SAV, alertes opérationnelles et statuts dossiers</p>
+                <h1>Dashboard performance SAV</h1>
+                <p>KPI Directeur SAV, charge atelier et alertes prioritaires</p>
               </div>
             </div>
+            <div class="sav-dashboard-filters" aria-label="Filtres dashboard SAV">
+              <label>
+                Période
+                <select id="sav-dashboard-period" aria-label="Filtrer le dashboard par période">
+                  <option value="today">Aujourd'hui</option>
+                  <option value="week">Semaine</option>
+                  <option value="month">Mois</option>
+                </select>
+              </label>
+              <label>
+                Type de dossier
+                <select id="sav-dashboard-type-filter" aria-label="Filtrer le dashboard par type de dossier">
+                  <option value="all">Tous les types</option>
+                  <option value="assurance">Assurance / expert</option>
+                  <option value="client">Client direct / intervention SAV</option>
+                  <option value="vidange">Vidange / entretien rapide</option>
+                  <option value="mechanical_client">Réparation mécanique client</option>
+                  <option value="electrical_client">Réparation électrique client</option>
+                  <option value="diagnostic">Diagnostic</option>
+                  <option value="garantie">Garantie</option>
+                </select>
+              </label>
+              <label>
+                Statut
+                <select id="sav-dashboard-status-filter" aria-label="Filtrer le dashboard par statut">
+                  <option value="all">Tous les statuts</option>
+                  <option value="estimate">Fiche dossier</option>
+                  <option value="approvals">Accords</option>
+                  <option value="appointment">RDV à fixer</option>
+                  <option value="appointmentScheduled">RDV fixé</option>
+                  <option value="noShow">Client absent</option>
+                  <option value="awaitingVehicle">En attente réception</option>
+                  <option value="vehicleReceived">Véhicule reçu</option>
+                  <option value="workScheduled">Travaux planifiés</option>
+                  <option value="work">En travaux</option>
+                  <option value="quality">Contrôle qualité</option>
+                  <option value="delivered">Livré</option>
+                  <option value="invoiced">Clôturé & facturé</option>
+                </select>
+              </label>
+            </div>
             <div class="sav-kpi-grid" id="sav-kpi-grid" aria-label="KPI SAV"></div>
+            <div class="sav-dashboard-load-grid" id="sav-dashboard-load-grid" aria-label="Charge atelier par service"></div>
             <div class="pilotage-alert-block">
               <div class="section-heading compact-heading">
                 <div>
-                  <h2>Alertes SAV</h2>
-                  <span>Réceptions, livraisons et qualité à traiter.</span>
+                  <h2>Alertes priorité Directeur SAV</h2>
+                  <span>Réceptions, livraisons, blocages et qualité à traiter.</span>
                 </div>
               </div>
               <div class="pilotage-alerts" id="pilotage-alerts"></div>
@@ -541,7 +583,7 @@
                 </article>
                 <article class="resource-card" style="padding: 12px; font-size: 0.85rem; display: block;">
                   <strong>Directeur SAV</strong>
-                  <p class="muted" style="margin: 4px 0 0;">Pilotage métier : tableau de bord, dossiers, planning, KPI, exports, journal d'activité en consultation et override livraison si nécessaire. Pas d'accès aux actions techniques destructives.</p>
+                  <p class="muted" style="margin: 4px 0 0;">Pilotage métier : dashboard performance SAV, dossiers, planning, KPI, exports, journal d'activité en consultation et override livraison si nécessaire. Pas d'accès aux actions techniques destructives.</p>
                 </article>
                 <article class="resource-card" style="padding: 12px; font-size: 0.85rem; display: block;">
                   <strong>Chef atelier</strong>
@@ -1204,21 +1246,21 @@
     </div>
 
     <script src="vendor/pdf.min.js" defer></script>
-    <script src="js/utils.js?v=23.1.8" defer></script>
-    <script src="js/state.js?v=23.1.8" defer></script>
-    <script src="js/ui-cases.js?v=23.1.8" defer></script>
-    <script src="js/estimate-import.js?v=23.1.8" defer></script>
-    <script src="js/ui-planning.js?v=23.1.8" defer></script>
-    <script src="js/ui-reception.js?v=23.1.8" defer></script>
-    <script src="js/photos.js?v=23.1.8" defer></script>
-    <script src="js/storage.js?v=23.1.8" defer></script>
-    <script src="js/planning.js?v=23.1.8" defer></script>
-    <script src="js/exports.js?v=23.1.8" defer></script>
-    <script src="js/business-rules-v2187.js?v=23.1.8" defer></script>
+    <script src="js/utils.js?v=23.2.0" defer></script>
+    <script src="js/state.js?v=23.2.0" defer></script>
+    <script src="js/ui-cases.js?v=23.2.0" defer></script>
+    <script src="js/estimate-import.js?v=23.2.0" defer></script>
+    <script src="js/ui-planning.js?v=23.2.0" defer></script>
+    <script src="js/ui-reception.js?v=23.2.0" defer></script>
+    <script src="js/photos.js?v=23.2.0" defer></script>
+    <script src="js/storage.js?v=23.2.0" defer></script>
+    <script src="js/planning.js?v=23.2.0" defer></script>
+    <script src="js/exports.js?v=23.2.0" defer></script>
+    <script src="js/business-rules-v2187.js?v=23.2.0" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
-    <script src="js/supabase-config.js?v=23.1.8" defer></script>
-    <script src="js/supabase-client.js?v=23.1.8" defer></script>
-    <script src="js/supabase-sync.js?v=23.1.8" defer></script>
-    <script src="app.js?v=23.1.8" defer></script>
+    <script src="js/supabase-config.js?v=23.2.0" defer></script>
+    <script src="js/supabase-client.js?v=23.2.0" defer></script>
+    <script src="js/supabase-sync.js?v=23.2.0" defer></script>
+    <script src="app.js?v=23.2.0" defer></script>
   </body>
 </html>

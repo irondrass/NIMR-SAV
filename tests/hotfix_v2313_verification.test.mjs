@@ -1,5 +1,5 @@
 // tests/hotfix_v2313_verification.test.mjs
-// Suite de tests pour valider le hotfix v23.1.5 :
+// Suite de tests pour valider le hotfix v23.1.x :
 // 1. Suppression/désactivation du verrou local "Poste atelier verrouillé".
 // 2. Création de dossier directement depuis l'espace Réception avec initialisation des réclamations/demandes.
 
@@ -117,7 +117,7 @@ context.renderCases = () => {};
 
 function app(expr) { return vm.runInContext(expr, context); }
 
-console.log('Démarrage des tests v23.1.5 : Hotfix local PIN & Case Creation...');
+console.log('Démarrage des tests v23.1.x : Hotfix local PIN & Case Creation...');
 
 // ==========================================
 // Test 0 : Reception-first startup
@@ -315,4 +315,4 @@ assert.equal(acceptedVehicleOnly.item.vehicle, 'Citroën C3', 'Le véhicule sais
 
 console.log('-> Test 3 (BUG-VAL-01 identité véhicule) : OK');
 
-console.log('\n✅ TOUS LES TESTS HOTFIX v23.1.5 REUSSIS AVEC SUCCES !');
+console.log('\n✅ TOUS LES TESTS HOTFIX v23.1.x REUSSIS AVEC SUCCES !');

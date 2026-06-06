@@ -1,4 +1,4 @@
-const CACHE_NAME = "nimr-sav-v23.1.5-security-data-hotfix";
+const CACHE_NAME = "nimr-sav-v23.1.6-version-cache-consistency";
 const ASSETS = [
   "./",
   "./index.html",

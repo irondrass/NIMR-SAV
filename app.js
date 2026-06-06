@@ -807,7 +807,7 @@ function registerServiceWorker() {
   });
   window.addEventListener("load", async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=23.1.5", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=23.1.6", { updateViaCache: "none" });
       registration.update?.();
       if (registration.waiting) showUpdateAvailable(registration);
       window.setInterval(() => registration.update?.(), 10 * 60 * 1000);

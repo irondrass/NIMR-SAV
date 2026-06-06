@@ -8,7 +8,7 @@ const uiCasesSource = fs.readFileSync("js/ui-cases.js", "utf8");
 const uiReceptionSource = fs.readFileSync("js/ui-reception.js", "utf8");
 const stylesSource = fs.readFileSync("styles.css", "utf8");
 
-console.log("Demarrage tests v23.1.7 UX/accessibility/security hardening...");
+console.log("Demarrage tests UX/accessibility/security hardening...");
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -82,5 +82,6 @@ assert.ok(appSource.includes("PIN incorrect. Vérifiez le code du compte sélect
 assert.ok(appSource.includes("Le nom du client est obligatoire pour créer un dossier. Renseignez le propriétaire ou la société."), "message donnees invalides client attendu");
 assert.ok(appSource.includes("Renseignez au moins le véhicule, l'immatriculation ou le VIN avant de créer le dossier."), "message donnees invalides vehicule attendu");
 assert.ok(stateSource.includes("Configuration Supabase réservée administrateur. Connectez-vous avec un administrateur technique."), "message permission Supabase attendu");
+assert.ok(stateSource.includes("Action réservée administrateur technique."), "message admin technique attendu pour les actions critiques");
 
-console.log("Tests v23.1.7 UX/accessibility/security hardening OK");
+console.log("Tests UX/accessibility/security hardening OK");

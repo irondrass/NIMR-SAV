@@ -807,7 +807,7 @@ function registerServiceWorker() {
   });
   window.addEventListener("load", async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=23.1.7", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=23.1.8", { updateViaCache: "none" });
       registration.update?.();
       if (registration.waiting) showUpdateAvailable(registration);
       window.setInterval(() => registration.update?.(), 10 * 60 * 1000);
@@ -1138,7 +1138,7 @@ function renderUserLoginScreen() {
 
   selectEl.innerHTML = activeUsers.map(user => {
     const roleLabel = {
-      admin: "Administrateur",
+      admin: "Admin technique",
       chef_atelier: "Chef d'atelier",
       directeur_sav: "Directeur SAV",
       reception: "Réception",
@@ -1210,7 +1210,7 @@ function renderCurrentSessionIndicator() {
   const currentUser = getCurrentUser();
   const sidebarUserName = document.getElementById("sidebar-user-name");
   if (sidebarUserName) {
-    sidebarUserName.textContent = currentUser ? `${currentUser.name} (${currentUser.role === "admin" ? "Admin" : currentUser.role})` : "Atelier";
+    sidebarUserName.textContent = currentUser ? `${currentUser.name} (${currentUser.role === "admin" ? "Admin technique" : currentUser.role})` : "Atelier";
   }
 
   // Mettre à jour l'option checkbox dans les Paramètres
@@ -1228,7 +1228,7 @@ function renderCurrentSessionIndicator() {
     const container = alwaysPromptCheckbox.closest(".check-card");
     if (container) {
       container.style.opacity = isAdmin ? "1" : "0.6";
-      container.title = isAdmin ? "" : "Action réservée administrateur.";
+      container.title = isAdmin ? "" : "Action réservée administrateur technique.";
     }
   }
 }
@@ -1239,7 +1239,7 @@ function bindUserSessionActions() {
   alwaysPromptCheckbox?.addEventListener("change", (event) => {
     const currentUser = getCurrentUser();
     if (!currentUser || currentUser.role !== "admin") {
-      notifyUser("Action réservée administrateur.", "error");
+      notifyUser("Action réservée administrateur technique.", "error");
       renderCurrentSessionIndicator();
       return;
     }

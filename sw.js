@@ -1,4 +1,4 @@
-const CACHE_NAME = "nimr-sav-v23.1.7-ux-accessibility-security-hardening";
+const CACHE_NAME = "nimr-sav-v23.1.8-roles-governance-hardening";
 const ASSETS = [
   "./",
   "./index.html",

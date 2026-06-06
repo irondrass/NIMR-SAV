@@ -104,7 +104,7 @@ assert.match(exportsSource, /guardSensitiveAction\("case\.delete"/, 'suppression
 assert.match(estimateSource, /guardEstimateImport\(item\)/, 'import devis doit être gardé');
 assert.match(supabaseClientSource, /guardSensitiveAction\("supabase\.configure"/, 'configuration Supabase doit être gardée');
 assert.match(uiCasesSource, /guardWorkflowAction\(action, item, true\)/, 'workflow dossier doit être gardé côté fonction');
-assert.match(swSource, /nimr-sav-v23\.1\.7-ux-accessibility-security-hardening/, 'cache PWA v23.1.7 attendu');
+assert.match(swSource, /nimr-sav-v23\.1\.8-roles-governance-hardening/, 'cache PWA v23.1.8 attendu');
 
 function setupRole(role, extra = {}) {
   app(`
@@ -112,6 +112,7 @@ function setupRole(role, extra = {}) {
       users: [
         { id: 'u-admin', name: 'Admin SAV', role: 'admin', active: true },
         { id: 'u-chef', name: 'Chef atelier', role: 'chef_atelier', active: true },
+        { id: 'u-directeur_sav', name: 'Directeur SAV', role: 'directeur_sav', active: true },
         { id: 'u-reception', name: 'Réception', role: 'reception', active: true },
         { id: 'u-tech', name: 'Technicien', role: 'technicien', resourceId: 'tech-1', active: true },
         { id: 'u-qualite', name: 'Contrôle qualité', role: 'qualite', active: true },
@@ -193,6 +194,18 @@ app(`addAuditLog('backup.imported', 'Sauvegarde importée', 'Test import')`);
 app(`addAuditLog('backup.exported', 'Sauvegarde exportée', 'Test export')`);
 assert.equal(app(`state.auditLog[0].userId`), 'u-admin', 'audit export contient acteur');
 assert.equal(app(`state.auditLog[1].userName`), 'Admin SAV', 'audit import contient nom acteur');
+
+setupRole('directeur_sav');
+app(`state.cases[0].flags.qualityApproved = false; state.cases[0].receptionWorkflow = { qualityStatus: 'pending' }; state.cases[0].customerClaims = [{ id: 'claim-open', status: 'open', text: 'Client attend accord' }];`);
+assert.equal(app(`hasPermission('audit.view')`), true, 'directeur SAV peut consulter le journal');
+assert.equal(app(`guardSensitiveAction('export.backup').ok`), true, 'directeur SAV peut exporter');
+assert.equal(app(`guardSensitiveAction('case.delete', { item: state.cases[0] }).ok`), false, 'directeur SAV ne supprime pas dossier');
+assert.equal(app(`guardSensitiveAction('import.backup').ok`), false, 'directeur SAV ne restaure pas backup');
+assert.equal(app(`guardSensitiveAction('settings.edit').ok`), false, 'directeur SAV ne modifie pas les paramètres système sensibles');
+assert.equal(app(`guardSensitiveAction('supabase.configure').ok`), false, 'directeur SAV ne configure pas Supabase');
+assert.equal(app(`guardSensitiveAction('users.manage').ok`), false, 'directeur SAV ne gère pas les permissions critiques');
+assert.equal(app(`guardDeliveryComplete(state.cases[0]).ok`), true, 'directeur SAV peut déclencher override livraison');
+assert.equal(app(`canAdvanceReceptionStep(state.cases[0], 11, { role: 'directeur_sav' }).ok`), true, 'directeur SAV peut passer l’étape livraison en override');
 
 setupRole('chef');
 app(`state.cases[0].flags.qualityApproved = true;`);

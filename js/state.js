@@ -20,7 +20,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v23.1.7";
+const APP_VERSION = "v23.1.8";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const WORKSHOP_NAME = "NIMR SAV";
@@ -268,7 +268,7 @@ const ROLE_LABELS = {
 };
 
 const USER_ROLES = {
-  admin: "Administrateur",
+  admin: "Admin technique",
   chef_atelier: "Chef atelier",
   directeur_sav: "Directeur SAV",
   reception: "Réception",
@@ -279,7 +279,20 @@ const USER_ROLES = {
 
 const ROLE_PERMISSIONS = {
   admin: ["*"],
-  directeur_sav: ["*"],
+  directeur_sav: [
+    "audit.view",
+    "case.create",
+    "case.edit",
+    "estimate.import",
+    "appointment.schedule",
+    "schedule_appointment",
+    "vehicle.receive",
+    "receive_vehicle",
+    "delivery.complete",
+    "export.backup",
+    "print.*",
+    "customer_claim.manage",
+  ],
   chef_atelier: [
     "audit.view",
     "case.create",
@@ -1167,7 +1180,7 @@ function canDisableOrDemoteUser(userId, newRole, newActive) {
 function createUserLocal(userData, actor = null) {
   const resolvedActor = actor || getCurrentActor();
   if (!hasPermission("users.manage", { user: resolvedActor })) {
-    return { ok: false, message: "Action réservée administrateur." };
+    return { ok: false, message: "Action réservée administrateur technique." };
   }
   const name = String(userData?.name || "").trim();
   const role = String(userData?.role || "").trim();
@@ -1210,7 +1223,7 @@ function createUserLocal(userData, actor = null) {
 function updateUserLocal(userId, userData, actor = null) {
   const resolvedActor = actor || getCurrentActor();
   if (!hasPermission("users.manage", { user: resolvedActor })) {
-    return { ok: false, message: "Action réservée administrateur." };
+    return { ok: false, message: "Action réservée administrateur technique." };
   }
   const user = getUserById(userId);
   if (!user) return { ok: false, message: "Utilisateur introuvable." };
@@ -1322,14 +1335,14 @@ function getPermissionDeniedMessage(permission, context = {}) {
   if (!user) return "Aucun utilisateur actif n'est sélectionné. Choisissez une session utilisateur avant de continuer.";
   if (user.active === false) return "Utilisateur inactif. Sélectionnez un compte actif pour continuer.";
   if (role === "readonly" && MUTATION_PERMISSIONS.includes(requested)) return "Mode lecture seule : modification impossible. Connectez-vous avec un rôle autorisé pour enregistrer des changements.";
-  if (requested === "case.delete") return "Suppression réservée administrateur. Demandez une validation avant de supprimer un dossier.";
+  if (requested === "case.delete") return "Suppression réservée administrateur technique. Demandez une validation avant de supprimer un dossier.";
   if (requested === "supabase.configure") return "Configuration Supabase réservée administrateur. Connectez-vous avec un administrateur technique.";
-  if (requested === "import.backup") return "Import sauvegarde réservé administrateur. Vérifiez le rôle actif avant restauration.";
-  if (requested === "settings.edit" || requested === "users.manage") return "Action réservée administrateur. Vérifiez la session active.";
-  if (requested === "export.backup") return "Export sauvegarde réservé chef atelier/admin. Demandez un export à un responsable autorisé.";
+  if (requested === "import.backup") return "Import sauvegarde réservé administrateur technique. Vérifiez le rôle actif avant restauration complète.";
+  if (requested === "settings.edit" || requested === "users.manage") return "Action réservée administrateur technique. Vérifiez la session active.";
+  if (requested === "export.backup") return "Export sauvegarde réservé directeur SAV/chef atelier/admin technique. Demandez un export à un responsable autorisé.";
   if (requested === "quality.validate" || requested === "quality.reject") return "Action réservée qualité/chef atelier/admin. Vérifiez le rôle de la session active.";
   if (requested === "case.close") return "Clôture/Facturation réservée chef atelier/admin. Finalisez depuis une session responsable.";
-  if (requested === "delivery.complete") return "Livraison réservée réception/chef atelier/admin. Basculez vers un rôle autorisé.";
+  if (requested === "delivery.complete") return "Livraison réservée réception/directeur SAV/chef atelier/admin technique. Basculez vers un rôle autorisé.";
   if (["case.create", "case.edit", "estimate.import", "appointment.schedule", "schedule_appointment", "vehicle.receive", "receive_vehicle"].includes(requested)) {
     return "Action réservée réception/chef atelier/admin. Connectez-vous avec un rôle autorisé.";
   }
@@ -3250,10 +3263,11 @@ function canAdvanceReceptionStep(caseItem, stepKey, actor) {
     case 9: return rw.sentToWorkshopAt ? { ok: true, message: "" } : { ok: false, message: "Le véhicule n'est pas encore envoyé en atelier." };
     case 10: return rw.sentToWorkshopAt ? { ok: true, message: "" } : { ok: false, message: "Le véhicule n'est pas encore en atelier." };
     case 11: {
-      const qcOk = rw.qualityStatus === "validated" || ["admin", "chef_atelier"].includes(role);
+      const deliveryOverrideRoles = ["admin", "chef_atelier", "directeur_sav"];
+      const qcOk = rw.qualityStatus === "validated" || deliveryOverrideRoles.includes(role);
       const noOpenClaims = !(caseItem.customerClaims || []).some((c) => ["open", "in_progress", "unresolved"].includes(c.status));
       if (!qcOk) return { ok: false, message: "Le contrôle qualité n'est pas encore validé." };
-      if (!noOpenClaims && !["admin", "chef_atelier"].includes(role)) return { ok: false, message: "Il reste des réclamations client non résolues." };
+      if (!noOpenClaims && !deliveryOverrideRoles.includes(role)) return { ok: false, message: "Il reste des réclamations client non résolues." };
       return { ok: true, message: "" };
     }
     default: return { ok: false, message: "Étape inconnue." };

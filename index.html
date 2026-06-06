@@ -16,8 +16,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <script src="js/version.js?v=23.1.7"></script>
-    <link rel="stylesheet" href="styles.css?v=23.1.7" />
+    <script src="js/version.js?v=23.1.8"></script>
+    <link rel="stylesheet" href="styles.css?v=23.1.8" />
   </head>
   <body>
     <a class="skip-link" href="#main-content">Aller au contenu principal</a>
@@ -482,7 +482,7 @@
                 <input name="userId" type="hidden" />
                 <input name="name" required placeholder="Nom complet" />
                 <select name="role" required>
-                  <option value="admin">Administrateur</option>
+                  <option value="admin">Admin technique</option>
                   <option value="chef_atelier">Chef atelier</option>
                   <option value="directeur_sav">Directeur SAV</option>
                   <option value="reception">Réception</option>
@@ -536,8 +536,12 @@
               </div>
               <div class="holiday-list" id="roles-permissions-summary" style="gap: 8px;">
                 <article class="resource-card" style="padding: 12px; font-size: 0.85rem; display: block;">
-                  <strong>Administrateur</strong>
-                  <p class="muted" style="margin: 4px 0 0;">Accès complet et gestion de l'atelier (Sauvegardes, Configuration Supabase, Gestion Utilisateurs, Suppression dossiers, Paramètres globaux).</p>
+                  <strong>Admin technique</strong>
+                  <p class="muted" style="margin: 4px 0 0;">Responsabilités techniques sensibles : configuration cloud Supabase, nettoyage poste, restauration complète, suppression de données, gestion permissions critiques et paramètres système.</p>
+                </article>
+                <article class="resource-card" style="padding: 12px; font-size: 0.85rem; display: block;">
+                  <strong>Directeur SAV</strong>
+                  <p class="muted" style="margin: 4px 0 0;">Pilotage métier : tableau de bord, dossiers, planning, KPI, exports, journal d'activité en consultation et override livraison si nécessaire. Pas d'accès aux actions techniques destructives.</p>
                 </article>
                 <article class="resource-card" style="padding: 12px; font-size: 0.85rem; display: block;">
                   <strong>Chef atelier</strong>
@@ -1200,21 +1204,21 @@
     </div>
 
     <script src="vendor/pdf.min.js" defer></script>
-    <script src="js/utils.js?v=23.1.7" defer></script>
-    <script src="js/state.js?v=23.1.7" defer></script>
-    <script src="js/ui-cases.js?v=23.1.7" defer></script>
-    <script src="js/estimate-import.js?v=23.1.7" defer></script>
-    <script src="js/ui-planning.js?v=23.1.7" defer></script>
-    <script src="js/ui-reception.js?v=23.1.7" defer></script>
-    <script src="js/photos.js?v=23.1.7" defer></script>
-    <script src="js/storage.js?v=23.1.7" defer></script>
-    <script src="js/planning.js?v=23.1.7" defer></script>
-    <script src="js/exports.js?v=23.1.7" defer></script>
-    <script src="js/business-rules-v2187.js?v=23.1.7" defer></script>
+    <script src="js/utils.js?v=23.1.8" defer></script>
+    <script src="js/state.js?v=23.1.8" defer></script>
+    <script src="js/ui-cases.js?v=23.1.8" defer></script>
+    <script src="js/estimate-import.js?v=23.1.8" defer></script>
+    <script src="js/ui-planning.js?v=23.1.8" defer></script>
+    <script src="js/ui-reception.js?v=23.1.8" defer></script>
+    <script src="js/photos.js?v=23.1.8" defer></script>
+    <script src="js/storage.js?v=23.1.8" defer></script>
+    <script src="js/planning.js?v=23.1.8" defer></script>
+    <script src="js/exports.js?v=23.1.8" defer></script>
+    <script src="js/business-rules-v2187.js?v=23.1.8" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
-    <script src="js/supabase-config.js?v=23.1.7" defer></script>
-    <script src="js/supabase-client.js?v=23.1.7" defer></script>
-    <script src="js/supabase-sync.js?v=23.1.7" defer></script>
-    <script src="app.js?v=23.1.7" defer></script>
+    <script src="js/supabase-config.js?v=23.1.8" defer></script>
+    <script src="js/supabase-client.js?v=23.1.8" defer></script>
+    <script src="js/supabase-sync.js?v=23.1.8" defer></script>
+    <script src="app.js?v=23.1.8" defer></script>
   </body>
 </html>

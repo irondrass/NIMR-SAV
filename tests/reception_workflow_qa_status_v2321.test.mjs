@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 
-console.log("Demarrage tests v23.2.1 reception workflow QA/status...");
+console.log("Demarrage tests v23.2.2 reception workflow QA/status...");
 
 const scriptFiles = [
   "js/utils.js",
@@ -70,8 +70,8 @@ const app = (code) => vm.runInContext(code, context);
 
 const stateSource = fs.readFileSync("js/state.js", "utf8");
 const swSource = fs.readFileSync("sw.js", "utf8");
-assert.match(stateSource, /APP_VERSION\s*=\s*"v23\.2\.1"/, "APP_VERSION v23.2.1 attendu");
-assert.match(swSource, /nimr-sav-v23\.2\.1-reception-workflow-qa-status-stabilization/, "cache PWA v23.2.1 attendu");
+assert.match(stateSource, /APP_VERSION\s*=\s*"v23\.2\.2"/, "APP_VERSION v23.2.2 attendu");
+assert.match(swSource, /nimr-sav-v23\.2\.2-security-exports-pin-supabase-hardening/, "cache PWA v23.2.2 attendu");
 assert.equal(swSource.includes("./data/vehicles.json"), false, "data/vehicles.json ne doit pas etre precache");
 assert.deepEqual(JSON.parse(fs.readFileSync("data/vehicles.json", "utf8")), [], "data/vehicles.json doit rester public vide");
 
@@ -220,4 +220,4 @@ assert.ok(alerts.some((alert) => alert.title === "Retour atelier / retravail"), 
 assert.equal(app(`hasPermission('dashboard.view', { userId: 'u-directeur' })`), true, "Directeur SAV doit voir le dashboard");
 assert.equal(app(`hasPermission('dashboard.view', { userId: 'u-readonly' })`), true, "lecture seule doit voir le dashboard");
 
-console.log("Tests v23.2.1 reception workflow QA/status OK");
+console.log("Tests v23.2.2 reception workflow QA/status OK");

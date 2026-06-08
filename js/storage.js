@@ -1,3 +1,6 @@
+const PLAIN_JSON_EXPORT_CONFIRMATION = "EXPORT NON CHIFFRE";
+const RESTORE_BACKUP_CONFIRMATION = "RESTAURER";
+
 function isPlainObject(value) {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
@@ -131,6 +134,28 @@ function showBackupStatus(message, stateName = "") {
   target.dataset.state = stateName;
 }
 
+async function confirmStrongSensitiveAction(htmlMessage, expectedText, fallbackMessage = "") {
+  if (typeof showPromptModal === "function") {
+    return showPromptModal(htmlMessage, expectedText);
+  }
+  return confirm(fallbackMessage || modalMessageToText(htmlMessage));
+}
+
+function formatSensitiveActionAuditDetails(type, payload = {}, actorOverride = null) {
+  const actor = actorOverride || (typeof getCurrentActor === "function" ? getCurrentActor() : {});
+  const exportedAt = new Date().toISOString();
+  const details = [
+    `type=${type}`,
+    `date=${exportedAt}`,
+    `user=${actor.userName || "Atelier"}`,
+    `role=${actor.userRole || actor.role || "inconnu"}`,
+  ];
+  Object.entries(payload).forEach(([key, value]) => {
+    details.push(`${key}=${value}`);
+  });
+  return details.join(" ; ");
+}
+
 function formatBackupDate(value) {
   if (!value) return "jamais";
   const date = new Date(value);
@@ -210,10 +235,27 @@ function controlAutosaveHealth() {
 async function exportSafetySnapshotNow() {
   const permissionGuard = guardSensitiveAction("export.backup");
   if (!permissionGuard.ok) return;
+  const confirmed = await confirmStrongSensitiveAction(
+    `<strong>Copie de sécurité JSON non chiffrée</strong><br><br>` +
+      `Ce fichier contient des données sensibles en clair : clients, VIN, immatriculations, téléphones, photos et historique.<br><br>` +
+      `Utilisez l'export chiffré pour tout archivage ou transfert. Tapez ${PLAIN_JSON_EXPORT_CONFIRMATION} pour confirmer cette action exceptionnelle.`,
+    PLAIN_JSON_EXPORT_CONFIRMATION,
+    "Télécharger une copie JSON non chiffrée ?",
+  );
+  if (!confirmed) {
+    showBackupStatus("Copie de sécurité JSON annulée.");
+    return;
+  }
   showBackupStatus("Préparation de la copie de sécurité...");
   try {
     const payload = await buildBackupPayload();
     downloadJson(payload, `nimr-carrosserie-controle-securite-${todayKey(new Date())}.json`);
+    addAuditLog("backup.safety_snapshot.exported", "Copie de sécurité JSON non chiffrée exportée", formatSensitiveActionAuditDetails("safety-json", {
+      cases: state.cases.length,
+      photos: payload.photos.length,
+      documents: payload.documents?.length || 0,
+    }));
+    saveState({ skipCloud: true, skipSnapshot: true });
     showBackupStatus("Copie de sécurité téléchargée.", "ok");
     renderAutosaveHealthStatus();
   } catch (error) {
@@ -234,13 +276,24 @@ async function restoreLatestAutomaticSnapshot() {
     }
     const chosen = snapshots.find((snapshot) => snapshot?.state && Array.isArray(snapshot.state.cases));
     if (!chosen) throw new Error("Aucun snapshot valide trouvé.");
-    const confirmed = await showConfirmModal(`Restaurer le dernier point automatique du ${formatBackupDate(chosen.savedAt)} ? Une copie JSON de l'état actuel sera téléchargée avant restauration.`);
+    const confirmed = await confirmStrongSensitiveAction(
+      `Restaurer le dernier point automatique du ${formatBackupDate(chosen.savedAt)} ?<br><br>` +
+        `Cette action remplace l'état local actuel. Une copie JSON de sécurité sera téléchargée avant restauration.<br><br>` +
+        `Tapez ${RESTORE_BACKUP_CONFIRMATION} pour confirmer la restauration.`,
+      RESTORE_BACKUP_CONFIRMATION,
+      "Restaurer le dernier point automatique ?",
+    );
     if (!confirmed) return;
     const safetyPayload = await buildBackupPayload();
     downloadJson(safetyPayload, `nimr-carrosserie-avant-restauration-auto-${todayKey(new Date())}.json`);
+    const restoreActor = getCurrentActor();
     state = normalizeState(chosen.state);
     activeCaseId = state.cases[0]?.id ?? null;
     generatedProposals = {};
+    addAuditLog("backup.snapshot.restored", "Point de restauration automatique restauré", formatSensitiveActionAuditDetails("restore-automatic-snapshot", {
+      snapshotAt: chosen.savedAt || "inconnu",
+      cases: state.cases.length,
+    }, restoreActor), { actor: restoreActor });
     saveState({ skipCloud: true });
     render();
     showBackupStatus(`Restauration automatique effectuée depuis ${formatBackupDate(chosen.savedAt)}.`, "ok");
@@ -395,11 +448,14 @@ async function exportBackup() {
     `Ce fichier contient toutes les données personnelles (noms clients, téléphones, VIN, immatriculations, photos, historique) EN CLAIR.<br>` +
     `Transmettre ou stocker ce fichier sans chiffrement présente un risque de sécurité et de conformité RGPD.<br><br>` +
     `Pour archiver ou transférer une sauvegarde, utilisez de préférence <strong>l’export chiffré (.nimrsecure)</strong>.<br><br>` +
-    `Voulez-vous vraiment générer l'export JSON non chiffré ?`;
+    `Action exceptionnelle réservée aux rôles autorisés.<br><br>` +
+    `Tapez ${PLAIN_JSON_EXPORT_CONFIRMATION} pour générer l'export JSON non chiffré.`;
 
-  const confirmed = (typeof showConfirmModal === "function")
-    ? await showConfirmModal(warningMsg)
-    : confirm("Exporter une sauvegarde JSON non chiffrée ? Contient des données sensibles en clair.");
+  const confirmed = await confirmStrongSensitiveAction(
+    warningMsg,
+    PLAIN_JSON_EXPORT_CONFIRMATION,
+    "Exporter une sauvegarde JSON non chiffrée ? Contient des données sensibles en clair.",
+  );
 
   if (!confirmed) {
     showBackupStatus("Export JSON non chiffré annulé.");
@@ -409,7 +465,11 @@ async function exportBackup() {
   try {
     const payload = await buildBackupPayload();
     downloadJson(payload, `nimr-sav-sauvegarde-non-chiffree-${todayKey(new Date())}.json`);
-    addAuditLog("backup.exported", "Sauvegarde JSON non chiffrée exportée", `${state.cases.length} dossier(s), ${payload.photos.length} photo(s).`);
+    addAuditLog("backup.exported", "Sauvegarde JSON non chiffrée exportée", formatSensitiveActionAuditDetails("plain-json", {
+      cases: state.cases.length,
+      photos: payload.photos.length,
+      documents: payload.documents?.length || 0,
+    }));
     saveState({ skipCloud: true, skipSnapshot: true });
     showBackupStatus(`Sauvegarde JSON non chiffrée exportée: ${state.cases.length} dossier(s), ${payload.photos.length} photo(s). Protégez ce fichier.`, "ok");
     notifyUser("Export JSON non chiffré créé. Protégez ce fichier.", "warn");
@@ -450,7 +510,11 @@ async function exportEncryptedBackup() {
     const payload = await buildBackupPayload();
     const encrypted = await encryptBackupPayload(payload, password);
     downloadJson(encrypted, `nimr-sav-sauvegarde-chiffree-${todayKey(new Date())}.nimrsecure`);
-    addAuditLog("backup.encrypted.exported", "Sauvegarde chiffrée exportée", `${state.cases.length} dossier(s), ${payload.photos.length} photo(s).`);
+    addAuditLog("backup.encrypted.exported", "Sauvegarde chiffrée exportée", formatSensitiveActionAuditDetails("encrypted-backup", {
+      cases: state.cases.length,
+      photos: payload.photos.length,
+      documents: payload.documents?.length || 0,
+    }));
     saveState({ skipCloud: true, skipSnapshot: true });
     showBackupStatus(`Sauvegarde chiffrée exportée: ${state.cases.length} dossier(s), ${payload.photos.length} photo(s). Testez-la avant archivage.`, "ok");
     notifyUser("Sauvegarde chiffrée créée. Testez-la avant archivage.", "success");
@@ -534,11 +598,13 @@ async function importBackup(event) {
     const versionLabel = isLegacy ? "format ancien" : `${metadata.appVersion}, exportée le ${metadata.exportedAt}`;
     const importWarning = `Importer cette sauvegarde (${versionLabel}) remplacera l'intégralité de l'état local actuel (dossiers, planning, paramètres, photos). Une copie de sécurité de l'état actuel sera téléchargée avant remplacement.<br><br>` +
       `<strong>Attention :</strong> Assurez-vous de n'importer que des fichiers de confiance contenant des informations RGPD sensibles (données clients/véhicules).<br><br>` +
-      `Êtes-vous sûr de vouloir continuer ?`;
+      `Tapez ${RESTORE_BACKUP_CONFIRMATION} pour confirmer la restauration.`;
 
-    const confirmed = (typeof showConfirmModal === "function")
-      ? await showConfirmModal(importWarning)
-      : confirm("Importer cette sauvegarde ? Écrase les données locales.");
+    const confirmed = await confirmStrongSensitiveAction(
+      importWarning,
+      RESTORE_BACKUP_CONFIRMATION,
+      "Importer cette sauvegarde ? Écrase les données locales.",
+    );
 
     if (!confirmed) {
       showBackupStatus("Import annulé.");
@@ -567,12 +633,19 @@ async function importBackup(event) {
       await cleanupOrphanedStorage().catch(() => null);
     }
 
-    addAuditLog("backup.imported", "Sauvegarde importée", `${importedState.cases.length} dossier(s), ${photos.length} photo(s), ${restoredDocuments} document(s).`, { actor: importActor });
+    addAuditLog("backup.imported", "Sauvegarde importée", formatSensitiveActionAuditDetails("restore-file", {
+      cases: importedState.cases.length,
+      photos: photos.length,
+      documents: restoredDocuments,
+      sourceVersion: metadata.appVersion || "inconnue",
+    }, importActor), { actor: importActor });
     saveState();
     render();
     showBackupStatus(`Sauvegarde importée: ${state.cases.length} dossier(s), ${restoredPhotos} photo(s), ${restoredDocuments} document(s).`, "ok");
   } catch (error) {
     console.error("Import sauvegarde impossible", error);
+    addAuditLog("backup.import_failed", "Import sauvegarde refusé ou échoué", error.message || "Sauvegarde invalide.", { actor: getCurrentActor() });
+    saveState({ skipCloud: true, skipSnapshot: true });
     showBackupStatus("Import impossible. Le fichier n'est pas une sauvegarde valide.", "error");
     notifyUser(error.message || "Impossible d'importer cette sauvegarde.");
   } finally {

@@ -1,7 +1,7 @@
 // Configuration Supabase NIMR SAV.
-// Aucune clé n'est publiée dans le code. Chaque poste configure l'URL et la clé
-// anon publique depuis Paramètres > Cloud Supabase ; ces valeurs restent locales
-// au navigateur. Ne jamais placer la clé service_role dans cette application.
+// Aucune clé n'est publiée dans le code. Chaque poste configure l'URL et la
+// publishable key / clé publique Supabase depuis Paramètres > Cloud Supabase ;
+// ces valeurs restent locales au navigateur. Ne jamais placer service_role dans cette application.
 const SUPABASE_RUNTIME_CONFIG_KEY = "nimr-sav:supabase-runtime-config:v1";
 const DEFAULT_WORKSHOP_ID = "00000000-0000-0000-0000-000000000001";
 

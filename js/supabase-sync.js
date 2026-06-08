@@ -668,7 +668,7 @@ async function saveLocalToSupabase() {
     setSupabaseDetails("La sauvegarde cloud est bloquée tant qu'aucune session Supabase active n'est détectée.");
     return;
   }
-  const confirmed = await showConfirmModal("Sauvegarder les données locales actuelles vers Supabase ? Une copie JSON locale sera téléchargée avant l'envoi.");
+  const confirmed = await showConfirmModal("Sauvegarder les données locales actuelles vers Supabase ? Une copie JSON locale de sécurité sera téléchargée avant l'envoi. Vérifiez que l'authentification et les règles RLS Supabase sont actives.");
   if (!confirmed) return;
 
   try {
@@ -696,7 +696,12 @@ async function saveLocalToSupabase() {
     if (typeof resolveKeptConflictsAfterPush === "function") {
       resolveKeptConflictsAfterPush();
     }
-    addAuditLog("backup.cloud.exported", "Sauvegarde Supabase envoyée", `${payload.state.cases.length} dossier(s), ${payload.photos.length} photo(s).`);
+    addAuditLog("backup.cloud.exported", "Sauvegarde Supabase envoyée", formatSensitiveActionAuditDetails("cloud-export", {
+      cases: payload.state.cases.length,
+      photos: payload.photos.length,
+      documents: payload.documents?.length || 0,
+      supabaseUser: user.email || user.id,
+    }));
     saveState({ skipCloud: true, skipSnapshot: true });
 
     setSupabaseStatus("Sauvegarde Supabase terminée.", "ok");
@@ -726,11 +731,14 @@ async function restoreLocalFromSupabase() {
   }
   const restoreWarning = `Restaurer les données depuis Supabase ? Une sauvegarde JSON locale sera téléchargée avant remplacement.<br><br>` +
     `<strong>Attention :</strong> Restaurer depuis le Cloud écrase et remplace les données locales de ce poste avec les données partagées de Supabase.<br><br>` +
-    `Êtes-vous sûr de vouloir continuer ?`;
+    `Vérifiez que l'authentification Supabase et les règles RLS sont actives avant usage réel.<br><br>` +
+    `Tapez ${RESTORE_BACKUP_CONFIRMATION} pour confirmer la restauration.`;
 
-  const confirmed = (typeof showConfirmModal === "function")
-    ? await showConfirmModal(restoreWarning)
-    : confirm("Restaurer les données depuis Supabase ? Écrase les données locales.");
+  const confirmed = await confirmStrongSensitiveAction(
+    restoreWarning,
+    RESTORE_BACKUP_CONFIRMATION,
+    "Restaurer les données depuis Supabase ? Écrase les données locales.",
+  );
 
   if (!confirmed) return;
 
@@ -768,7 +776,12 @@ async function restoreLocalFromSupabase() {
     if (typeof cleanupOrphanedStorage === "function") {
       cleanupOrphanedStorage().catch(() => null);
     }
-    addAuditLog("backup.cloud.imported", "Restauration Supabase effectuée", `${state.cases.length} dossier(s), ${restoredPhotos} photo(s).`, { actor: restoreActor });
+    addAuditLog("backup.cloud.imported", "Restauration Supabase effectuée", formatSensitiveActionAuditDetails("cloud-restore", {
+      cases: state.cases.length,
+      photos: restoredPhotos,
+      supabaseUser: user.email || user.id,
+      sourceVersion: data.app_version || "inconnue",
+    }, restoreActor), { actor: restoreActor });
     lastKnownCloudUpdatedAt = new Date(data.updated_at || 0).getTime() || lastKnownCloudUpdatedAt;
     if (typeof rememberKnownCloudUpdatedAt === "function" && lastKnownCloudUpdatedAt) rememberKnownCloudUpdatedAt(lastKnownCloudUpdatedAt);
     if (typeof clearLocalUserChangeAt === "function") clearLocalUserChangeAt();
@@ -779,6 +792,8 @@ async function restoreLocalFromSupabase() {
     notifyUser("Données et réglages restaurés depuis Supabase.", "success");
   } catch (error) {
     console.error("Restauration Supabase impossible", error);
+    addAuditLog("backup.cloud.import_failed", "Restauration Supabase échouée", error.message || "Erreur inconnue.", { actor: getCurrentActor() });
+    saveState({ skipCloud: true, skipSnapshot: true });
     setSupabaseStatus(`Restauration impossible : ${error.message}`, "error");
     setSupabaseDetails("Les données locales n'ont pas été remplacées. Vérifiez la connexion, les policies Supabase et le schéma SQL.");
     notifyUser(error.message || "Restauration Supabase impossible. Vérifiez la connexion et les droits cloud.", "error");

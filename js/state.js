@@ -20,7 +20,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v23.2.1";
+const APP_VERSION = "v23.2.2";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const WORKSHOP_NAME = "NIMR SAV";
@@ -34,6 +34,9 @@ const ALLOWED_PHOTO_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const LOCAL_SECURITY_MAX_FAILED_ATTEMPTS = 5;
 const LOCAL_SECURITY_LOCKOUT_MS = 5 * 60 * 1000;
 const LOCAL_SECURITY_IDLE_MS = 15 * 60 * 1000;
+const LOCAL_PIN_MIN_LENGTH = 6;
+const LEGACY_BOOTSTRAP_PIN = Array(4).fill("0").join("");
+const LEGACY_BOOTSTRAP_PIN_HASH_PREFIX = `mockhash:${LEGACY_BOOTSTRAP_PIN}:`;
 const MAX_PLANNING_SEARCH_DAYS = 90;
 const MAX_PLANNING_ITERATIONS = 10000;
 const RECEPTION_GRACE_HOURS = 2;
@@ -653,6 +656,65 @@ function isLocalSessionUnlocked() {
   }
 }
 
+function normalizeLocalPin(pin) {
+  return String(pin || "").trim();
+}
+
+function isSimplePinSequence(pin) {
+  if (pin.length < LOCAL_PIN_MIN_LENGTH) return false;
+  const ascending = "0123456789";
+  const descending = "9876543210";
+  return ascending.includes(pin) || descending.includes(pin);
+}
+
+function hasWeakPinPattern(pin) {
+  if (!pin) return true;
+  if (/^(\d)\1+$/.test(pin)) return true;
+  if (isSimplePinSequence(pin)) return true;
+  if (pin.length % 2 === 0) {
+    const half = pin.slice(0, pin.length / 2);
+    if (half && half.repeat(2) === pin) return true;
+  }
+  if (/^(\d{2})\1+$/.test(pin)) return true;
+  return false;
+}
+
+function validateLocalPinStrength(pin) {
+  const cleanPin = normalizeLocalPin(pin);
+  if (cleanPin.length < LOCAL_PIN_MIN_LENGTH) {
+    return { ok: false, value: cleanPin, message: `Le PIN doit contenir au moins ${LOCAL_PIN_MIN_LENGTH} chiffres.` };
+  }
+  if (!/^\d+$/.test(cleanPin)) {
+    return { ok: false, value: cleanPin, message: "Le PIN doit contenir uniquement des chiffres." };
+  }
+  if (hasWeakPinPattern(cleanPin)) {
+    return { ok: false, value: cleanPin, message: "PIN trop évident : évitez répétitions, suites simples ou motifs prévisibles." };
+  }
+  return { ok: true, value: cleanPin, message: "" };
+}
+
+function createPinSaltBase64() {
+  const bytes = new Uint8Array(16);
+  if (globalThis.crypto?.getRandomValues) {
+    globalThis.crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < bytes.length; i += 1) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  return bytesToBase64(bytes);
+}
+
+async function createLocalPinCredentials(pin) {
+  const validation = validateLocalPinStrength(pin);
+  if (!validation.ok) throw new Error(validation.message);
+  const salt = createPinSaltBase64();
+  const hash = await deriveLocalPinHash(validation.value, salt);
+  return { pinHash: hash, pinSalt: salt };
+}
+
+function isLegacyBootstrapPin(user) {
+  return String(user?.pinHash || "").startsWith(LEGACY_BOOTSTRAP_PIN_HASH_PREFIX);
+}
+
 async function deriveLocalPinHash(pin, saltBase64) {
   const cryptoApi = getBrowserCrypto();
   if (!cryptoApi) {
@@ -708,18 +770,18 @@ function setLocalSecurityStatus(message, variant = "info") {
 }
 
 function renderLocalSecurityStatus() {
-  setLocalSecurityStatus("Le PIN protège l’interface locale, mais ne chiffre pas les données locales. L'authentification unifiée v23.1 reste obligatoire.", "info");
+  setLocalSecurityStatus("Le PIN protège l’interface locale, mais ne chiffre pas les données locales et ne remplace pas une authentification serveur. L'authentification unifiée reste obligatoire.", "info");
 }
 
 async function setLocalPin(pin) {
-  const cleanPin = String(pin || "").trim();
-  if (cleanPin.length < 4) throw new Error("Le PIN doit contenir au moins 4 caractères.");
+  const validation = validateLocalPinStrength(pin);
+  if (!validation.ok) throw new Error(validation.message);
   const cryptoApi = getBrowserCrypto();
   if (!cryptoApi) throw new Error("Le chiffrement navigateur n'est pas disponible sur ce poste.");
   const salt = new Uint8Array(16);
   cryptoApi.getRandomValues(salt);
   const saltBase64 = bytesToBase64(salt);
-  const hash = await deriveLocalPinHash(cleanPin, saltBase64);
+  const hash = await deriveLocalPinHash(validation.value, saltBase64);
   localStorage.setItem(LOCAL_SECURITY_KEY, JSON.stringify({
     enabled: true,
     salt: saltBase64,
@@ -957,7 +1019,10 @@ async function cleanLocalWorkstation() {
     "NETTOYER",
   );
   if (!confirmed) return;
+  const cleanActor = getCurrentActor();
   try {
+    addAuditLog("security.workstation_clean_requested", "Nettoyage local du poste confirmé", "Suppression locale des données, caches, IndexedDB, configuration Supabase et session navigateur.", { actor: cleanActor });
+    saveState({ skipSnapshot: true });
     if (typeof stopSupabaseLiveSync === "function") stopSupabaseLiveSync();
     if (typeof photoObjectUrls !== "undefined") photoObjectUrls.forEach((url) => URL.revokeObjectURL(url));
     if (typeof photoObjectUrls !== "undefined") photoObjectUrls.clear();
@@ -980,6 +1045,8 @@ async function cleanLocalWorkstation() {
     showWorkstationCleanedScreen();
   } catch (error) {
     console.error("Nettoyage poste impossible", error);
+    addAuditLog("security.workstation_clean_failed", "Nettoyage local du poste échoué", error.message || "Erreur inconnue.", { actor: cleanActor });
+    saveState({ skipCloud: true, skipSnapshot: true });
     notifyUser(error.message || "Nettoyage du poste impossible.", "error");
   }
 }
@@ -1172,8 +1239,8 @@ function createBootstrapAdminUser(seed = {}) {
     active: seed.active !== false,
     createdAt: seed.createdAt || now,
     updatedAt: seed.updatedAt || now,
-    pinHash: seed.pinHash || "mockhash:0000:bootstrapsalt",
-    pinSalt: seed.pinSalt || "bootstrapsalt",
+    pinHash: seed.pinHash || "",
+    pinSalt: seed.pinSalt || "",
   });
 }
 

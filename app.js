@@ -652,25 +652,16 @@ function bindWorkshopForms() {
     const pin = form.elements.pin ? form.elements.pin.value : "";
     const isSensitive = ["admin", "chef_atelier", "directeur_sav"].includes(role);
     
+    const existingUser = userId ? getUserById(userId) : null;
     let pinData = {};
     if (pin) {
-      if (pin.length < 4) {
-        return notifyUser("Le PIN de sécurité doit contenir au moins 4 chiffres.", "error");
+      try {
+        pinData = await createLocalPinCredentials(pin);
+      } catch (error) {
+        return notifyUser(error.message || "PIN de sécurité trop faible.", "error");
       }
-      const bytes = new Uint8Array(16);
-      if (globalThis.crypto?.getRandomValues) {
-        globalThis.crypto.getRandomValues(bytes);
-      } else {
-        for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256);
-      }
-      const salt = bytesToBase64(bytes);
-      const hash = await deriveLocalPinHash(pin, salt);
-      pinData = { pinHash: hash, pinSalt: salt };
-    } else if (isSensitive && !userId) {
-      // Pour les nouveaux utilisateurs sensibles, on attribue le PIN temporaire 0000
-      const salt = "bootstrapsalt";
-      const hash = await deriveLocalPinHash("0000", salt);
-      pinData = { pinHash: hash, pinSalt: salt };
+    } else if (isSensitive && !existingUser?.pinHash) {
+      return notifyUser("Définissez un PIN initial robuste pour ce rôle sensible avant d'enregistrer l'utilisateur.", "error");
     }
     
     let result;
@@ -720,6 +711,7 @@ function bindWorkshopForms() {
       return;
     }
     if (setCurrentUser(newUserId)) {
+      resetSensitiveUiStateForUserSwitch("sélecteur paramètres");
       addAuditLog("users.current_changed", `Changement d'utilisateur actif : ${user.name}`);
       saveState();
       render();
@@ -824,7 +816,7 @@ function registerServiceWorker() {
   });
   window.addEventListener("load", async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=23.2.1", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=23.2.2", { updateViaCache: "none" });
       registration.update?.();
       if (registration.waiting) showUpdateAvailable(registration);
       window.setInterval(() => registration.update?.(), 10 * 60 * 1000);
@@ -1104,9 +1096,9 @@ function showUserPinChangeOverlay(user, mode = "bootstrap") {
     bindUserSessionOverlayKeyboard(overlay);
     if (descEl) {
       if (mode === "creation") {
-        descEl.textContent = "Un code PIN de sécurité doit être défini avant le premier accès à l'application.";
+        descEl.textContent = "Un PIN de sécurité robuste doit être défini avant le premier accès local à l'application.";
       } else {
-        descEl.textContent = "Le PIN temporaire `0000` doit être modifié avant le premier accès à l'application.";
+        descEl.textContent = "Ce compte utilise un ancien PIN de démarrage faible. Définissez un PIN robuste avant de continuer.";
       }
     }
     window.pendingSelectorUser = user;
@@ -1218,8 +1210,28 @@ function updateLoginPinRequirement() {
   }
 }
 
+function resetSensitiveUiStateForUserSwitch(reason = "user-switch") {
+  try {
+    sessionStorage.removeItem("nimr-user-pin-unlocked");
+  } catch (error) {
+    // Session storage peut être indisponible dans certains navigateurs.
+  }
+  generatedProposals = {};
+  estimateImportPreviews = {};
+  document.querySelectorAll(".custom-modal-overlay").forEach((overlay) => {
+    if (overlay.id === "user-login-overlay") return;
+    overlay.hidden = true;
+    if (!overlay.id) overlay.remove();
+  });
+  const promptInput = document.getElementById("prompt-input");
+  if (promptInput) promptInput.value = "";
+  if (typeof addAuditLog === "function") {
+    addAuditLog("security.shared_workstation_user_switch", "Changement utilisateur sur poste partagé", `Actions sensibles ouvertes refermées (${reason}).`);
+  }
+}
+
 function triggerUserChangeScreen() {
-  sessionStorage.removeItem("nimr-user-pin-unlocked");
+  resetSensitiveUiStateForUserSwitch("demande utilisateur");
   showUserLoginScreen();
 }
 
@@ -1267,11 +1279,9 @@ function bindUserSessionActions() {
 
   // Boutons pour changer d'utilisateur
   document.getElementById("sidebar-change-user-btn")?.addEventListener("click", () => {
-    sessionStorage.removeItem("nimr-user-pin-unlocked");
     triggerUserChangeScreen();
   });
   document.getElementById("change-user-settings-btn")?.addEventListener("click", () => {
-    sessionStorage.removeItem("nimr-user-pin-unlocked");
     triggerUserChangeScreen();
   });
 
@@ -1343,8 +1353,8 @@ function bindUserSessionActions() {
           return;
         }
 
-        // Si c'est le PIN bootstrap 0000 -> forcer changement
-        if (pinVal === "0000" && user.pinHash.startsWith("mockhash:0000:")) {
+        // Ancien PIN de démarrage faible : migration obligatoire vers un PIN robuste.
+        if (typeof isLegacyBootstrapPin === "function" && isLegacyBootstrapPin(user)) {
           showUserPinChangeOverlay(user, "bootstrap");
           hideUserLoginScreen();
           return;
@@ -1375,12 +1385,11 @@ function bindUserSessionActions() {
     const statusEl = document.getElementById("user-pin-change-status");
     if (statusEl) statusEl.textContent = "";
 
-    if (newPin.length < 4) {
-      if (statusEl) statusEl.textContent = "Le PIN doit contenir au moins 4 chiffres avant validation.";
-      return;
-    }
-    if (newPin === "0000") {
-      if (statusEl) statusEl.textContent = "Le PIN doit être différent de 0000 pour sécuriser l'accès.";
+    const validation = typeof validateLocalPinStrength === "function"
+      ? validateLocalPinStrength(newPin)
+      : { ok: String(newPin || "").trim().length >= 6, value: String(newPin || "").trim(), message: "PIN trop faible." };
+    if (!validation.ok) {
+      if (statusEl) statusEl.textContent = validation.message || "PIN trop faible.";
       return;
     }
     if (newPin !== confirmNewPin) {
@@ -1389,23 +1398,16 @@ function bindUserSessionActions() {
     }
 
     try {
-      const bytes = new Uint8Array(16);
-      if (globalThis.crypto?.getRandomValues) {
-        globalThis.crypto.getRandomValues(bytes);
-      } else {
-        for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256);
-      }
-      const salt = bytesToBase64(bytes);
-      const hash = await deriveLocalPinHash(newPin, salt);
+      const { pinHash, pinSalt } = await createLocalPinCredentials(validation.value);
 
       const userObj = state.users.find(u => u.id === user.id);
       if (userObj) {
-        userObj.pinHash = hash;
-        userObj.pinSalt = salt;
+        userObj.pinHash = pinHash;
+        userObj.pinSalt = pinSalt;
         userObj.updatedAt = new Date().toISOString();
       }
 
-      addAuditLog("users.pin_bootstrap_changed", `PIN de sécurité défini pour ${user.name}`, "Mise à jour obligatoire du PIN bootstrap");
+      addAuditLog("users.pin_security_updated", `PIN de sécurité défini pour ${user.name}`, "Mise à jour obligatoire du PIN local robuste");
       saveState();
 
       sessionStorage.setItem("nimr-user-pin-unlocked", user.id);

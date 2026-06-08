@@ -16,8 +16,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <script src="js/version.js?v=23.2.1"></script>
-    <link rel="stylesheet" href="styles.css?v=23.2.1" />
+    <script src="js/version.js?v=23.2.2"></script>
+    <link rel="stylesheet" href="styles.css?v=23.2.2" />
   </head>
   <body>
     <a class="skip-link" href="#main-content">Aller au contenu principal</a>
@@ -673,11 +673,11 @@
               <form class="security-form" id="local-pin-form">
                 <label>
                   PIN local
-                  <input name="pin" type="password" inputmode="numeric" autocomplete="new-password" minlength="4" placeholder="4 chiffres minimum" />
+                  <input name="pin" type="password" inputmode="numeric" autocomplete="new-password" minlength="6" placeholder="6 chiffres non évidents" />
                 </label>
                 <label>
                   Confirmer PIN
-                  <input name="confirmPin" type="password" inputmode="numeric" autocomplete="new-password" minlength="4" placeholder="Répéter le PIN" />
+                  <input name="confirmPin" type="password" inputmode="numeric" autocomplete="new-password" minlength="6" placeholder="Répéter le PIN robuste" />
                 </label>
                 <div class="backup-actions wide">
                   <button class="primary-button" type="submit">Activer / changer PIN</button>
@@ -686,7 +686,8 @@
                   <button class="ghost-button danger-button" type="button" id="clear-local-workstation">Nettoyer ce poste</button>
                 </div>
               </form>
-              <p class="muted backup-warning">Le PIN protège l’interface locale, mais ne chiffre pas les données locales. Les exports chiffrés restent la méthode recommandée pour transporter une sauvegarde.</p>
+              <p class="muted backup-warning">Le PIN protège l’interface locale, mais ne chiffre pas les données locales et ne remplace pas une authentification serveur. Les exports chiffrés restent la méthode recommandée pour transporter une sauvegarde.</p>
+              <p class="muted backup-warning">Poste partagé atelier : verrouillez ou changez d'utilisateur après usage. Un changement d'utilisateur referme les actions sensibles ouvertes sur ce navigateur.</p>
               <p class="muted backup-status" id="local-security-status">Sécurité locale non contrôlée.</p>
             </section>
 
@@ -703,8 +704,8 @@
                   <input name="url" type="url" placeholder="https://xxxx.supabase.co" autocomplete="off" />
                 </label>
                 <label>
-                  Clé anon publique
-                  <input name="anonKey" type="password" placeholder="eyJhbGci..." autocomplete="off" />
+                  Publishable key / clé publique Supabase
+                  <input name="anonKey" type="password" placeholder="clé publique Supabase" autocomplete="off" />
                 </label>
                 <label>
                   ID atelier
@@ -719,7 +720,7 @@
                   <button class="ghost-button" type="button" id="supabase-config-clear">Retirer config locale</button>
                 </div>
               </form>
-              <p class="muted backup-warning">La clé anon publique n'est pas une clé service. La sécurité réelle vient de l'authentification et des règles RLS par atelier.</p>
+              <p class="muted backup-warning">Utilisez uniquement la publishable key / clé publique Supabase côté navigateur. Ne jamais utiliser service_role ici : la sécurité dépend de l'authentification, des règles RLS par atelier et de la vérification que RLS est activé avant un usage réel.</p>
               <form class="supabase-login-form" id="supabase-login-form">
                 <label>
                   Email utilisateur
@@ -822,14 +823,14 @@
       <form class="local-lock-dialog" id="user-pin-change-form" role="dialog" aria-modal="true" aria-labelledby="user-pin-change-title">
         <div class="local-lock-logo">⚙️</div>
         <h2 id="user-pin-change-title">Nouveau PIN requis</h2>
-        <p id="user-pin-change-desc">Le PIN temporaire `0000` doit être modifié avant le premier accès à l'application.</p>
+        <p id="user-pin-change-desc">Ce compte doit définir un PIN local robuste avant de continuer.</p>
         <label>
-          Nouveau PIN (4 chiffres min, différent de 0000)
-          <input name="newPin" type="password" inputmode="numeric" autocomplete="new-password" required minlength="4" placeholder="Nouveau PIN" />
+          Nouveau PIN (6 chiffres min, non évident)
+          <input name="newPin" type="password" inputmode="numeric" autocomplete="new-password" required minlength="6" placeholder="Nouveau PIN robuste" />
         </label>
         <label>
           Confirmer le nouveau PIN
-          <input name="confirmNewPin" type="password" inputmode="numeric" autocomplete="new-password" required minlength="4" placeholder="Confirmer PIN" />
+          <input name="confirmNewPin" type="password" inputmode="numeric" autocomplete="new-password" required minlength="6" placeholder="Confirmer PIN robuste" />
         </label>
         <button class="primary-button" type="submit" style="width: 100%;">Enregistrer le PIN</button>
         <button class="ghost-button" id="user-pin-change-cancel" type="button" style="margin-top: 8px; width: 100%;">Annuler</button>
@@ -841,7 +842,7 @@
         <img src="assets/icon.svg" alt="" class="local-lock-logo" />
         <h2 id="local-lock-title">Poste atelier verrouillé</h2>
         <p>Entrez le PIN local pour accéder aux dossiers, photos et sauvegardes de ce navigateur.</p>
-        <p class="muted font-small" style="font-size: 0.85em; opacity: 0.8; margin-bottom: 1rem;">Le PIN protège l’interface locale, mais ne chiffre pas les données locales.</p>
+        <p class="muted font-small" style="font-size: 0.85em; opacity: 0.8; margin-bottom: 1rem;">Le PIN protège l’interface locale, mais ne chiffre pas les données locales et ne remplace pas une authentification serveur.</p>
         <label>
           PIN local
           <input name="pin" type="password" inputmode="numeric" autocomplete="current-password" required autofocus />
@@ -1225,21 +1226,21 @@
     </div>
 
     <script src="vendor/pdf.min.js" defer></script>
-    <script src="js/utils.js?v=23.2.1" defer></script>
-    <script src="js/state.js?v=23.2.1" defer></script>
-    <script src="js/ui-cases.js?v=23.2.1" defer></script>
-    <script src="js/estimate-import.js?v=23.2.1" defer></script>
-    <script src="js/ui-planning.js?v=23.2.1" defer></script>
-    <script src="js/ui-reception.js?v=23.2.1" defer></script>
-    <script src="js/photos.js?v=23.2.1" defer></script>
-    <script src="js/storage.js?v=23.2.1" defer></script>
-    <script src="js/planning.js?v=23.2.1" defer></script>
-    <script src="js/exports.js?v=23.2.1" defer></script>
-    <script src="js/business-rules-v2187.js?v=23.2.1" defer></script>
+    <script src="js/utils.js?v=23.2.2" defer></script>
+    <script src="js/state.js?v=23.2.2" defer></script>
+    <script src="js/ui-cases.js?v=23.2.2" defer></script>
+    <script src="js/estimate-import.js?v=23.2.2" defer></script>
+    <script src="js/ui-planning.js?v=23.2.2" defer></script>
+    <script src="js/ui-reception.js?v=23.2.2" defer></script>
+    <script src="js/photos.js?v=23.2.2" defer></script>
+    <script src="js/storage.js?v=23.2.2" defer></script>
+    <script src="js/planning.js?v=23.2.2" defer></script>
+    <script src="js/exports.js?v=23.2.2" defer></script>
+    <script src="js/business-rules-v2187.js?v=23.2.2" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
-    <script src="js/supabase-config.js?v=23.2.1" defer></script>
-    <script src="js/supabase-client.js?v=23.2.1" defer></script>
-    <script src="js/supabase-sync.js?v=23.2.1" defer></script>
-    <script src="app.js?v=23.2.1" defer></script>
+    <script src="js/supabase-config.js?v=23.2.2" defer></script>
+    <script src="js/supabase-client.js?v=23.2.2" defer></script>
+    <script src="js/supabase-sync.js?v=23.2.2" defer></script>
+    <script src="app.js?v=23.2.2" defer></script>
   </body>
 </html>

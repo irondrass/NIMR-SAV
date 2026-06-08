@@ -11,9 +11,9 @@ function render() {
   tabs.forEach((tab) => {
     const view = document.getElementById(`view-${tab}`);
     if (!view) return;
-    
+
     let blockedMessage = view.querySelector(".unauthorized-blocked-message");
-    
+
     if (typeof canAccessTab === "function" && !canAccessTab(tab)) {
       scrubUnauthorizedViewContent(tab, view);
       Array.from(view.children).forEach((child) => {
@@ -22,7 +22,7 @@ function render() {
           child.setAttribute("hidden", "true");
         }
       });
-      
+
       if (!blockedMessage) {
         blockedMessage = document.createElement("div");
         blockedMessage.className = "unauthorized-blocked-message empty-inline";
@@ -751,28 +751,53 @@ function renderSyncStatusStrip() {
   const localOk = Boolean(health.principal && health.mirror && !health.errors?.length);
   const cloudOk = safeLocalStorageGet(`${STORAGE_KEY}:last-cloud-autosave`);
   const cloudError = safeLocalStorageGet(`${STORAGE_KEY}:last-cloud-autosave-error`);
-  const localChangeAt = typeof getLocalUserChangeAt === "function" ? getLocalUserChangeAt() : 0;
-  const cloudAt = cloudOk ? new Date(cloudOk).getTime() || 0 : 0;
-  const pending = localChangeAt && (!cloudAt || localChangeAt > cloudAt) ? 1 : 0;
   const configured = typeof isSupabaseConfigured === "function" ? isSupabaseConfigured() : false;
   const online = typeof navigator === "undefined" ? true : navigator.onLine !== false;
   const openConflicts = typeof getOpenSyncConflicts === "function" ? getOpenSyncConflicts().length : 0;
-  const cloudLabel = !configured
-    ? "Non configuré"
-    : cloudError
-      ? "Erreur"
-      : openConflicts
-        ? `Conflit à résoudre (${openConflicts})`
-        : pending
-          ? "En attente"
-          : cloudOk
-            ? "Synchronisé"
-            : "Prêt";
+
+  let pendingCasesCount = 0;
+  if (state && Array.isArray(state.cases)) {
+    pendingCasesCount = state.cases.filter(c => Number(c.localRevision || 0) > Number(c.syncRevision || 0)).length;
+  }
+
+  let pendingOfflineCount = 0;
+  try {
+    const rawQueue = localStorage.getItem("nimr-sav-offline-queue");
+    const queue = rawQueue ? JSON.parse(rawQueue) : [];
+    pendingOfflineCount = queue.filter(action => action.status === "pending" || action.status === "failed" || action.status === "processing").length;
+  } catch (e) {
+    pendingOfflineCount = 0;
+  }
+
+  let cloudLabel = "Prêt";
+  let cloudState = "ok";
+  if (!configured) {
+    cloudLabel = "Non configuré";
+    cloudState = "muted";
+  } else if (openConflicts > 0) {
+    cloudLabel = "Conflit détecté";
+    cloudState = "warn";
+  } else if (cloudError) {
+    cloudLabel = "Échec sync";
+    cloudState = "error";
+  } else if (pendingCasesCount > 0 || pendingOfflineCount > 0) {
+    cloudLabel = "Sync en attente";
+    cloudState = "warn";
+  } else if (cloudOk) {
+    cloudLabel = "Sync réussie";
+    cloudState = "ok";
+  }
+
+  let pendingText = `${pendingCasesCount}`;
+  if (pendingOfflineCount > 0) {
+    pendingText += ` (${pendingOfflineCount} en attente)`;
+  }
+
   setSyncItem(target, "local", localOk ? "OK" : "À vérifier", localOk ? "ok" : "warn");
-  setSyncItem(target, "cloud", cloudLabel, !configured ? "muted" : cloudError ? "error" : openConflicts || pending ? "warn" : "ok");
+  setSyncItem(target, "cloud", cloudLabel, cloudState);
   setSyncItem(target, "connection", online ? "En ligne" : "Hors ligne", online ? "ok" : "warn");
   setSyncItem(target, "last-save", formatSyncDate(health.lastSavedAt || safeReadStorageMeta()?.savedAt || ""));
-  setSyncItem(target, "pending", String(pending), pending ? "warn" : "ok");
+  setSyncItem(target, "pending", pendingText, (pendingCasesCount || pendingOfflineCount) ? "warn" : "ok");
 }
 
 function setSyncItem(root, key, value, stateName = "") {
@@ -2954,8 +2979,8 @@ function applyProductionLock(root, item) {
   if (isCaseReadonlyArchive(item)) return;
 
   const isInvoiced = Boolean(item?.flags?.invoiced);
-  const lockedPanels = isInvoiced 
-    ? ["claims", "photos", "planning", "atelier", "livraison"] 
+  const lockedPanels = isInvoiced
+    ? ["claims", "photos", "planning", "atelier", "livraison"]
     : ["claims", "planning"];
 
   lockedPanels.forEach((panelName) => {

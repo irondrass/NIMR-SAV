@@ -288,6 +288,9 @@ async function restoreLatestAutomaticSnapshot() {
     downloadJson(safetyPayload, `nimr-carrosserie-avant-restauration-auto-${todayKey(new Date())}.json`);
     const restoreActor = getCurrentActor();
     state = normalizeState(chosen.state);
+    if (typeof initializeLastKnownCasesComparable === "function") {
+      initializeLastKnownCasesComparable();
+    }
     activeCaseId = state.cases[0]?.id ?? null;
     generatedProposals = {};
     addAuditLog("backup.snapshot.restored", "Point de restauration automatique restauré", formatSensitiveActionAuditDetails("restore-automatic-snapshot", {
@@ -616,6 +619,9 @@ async function importBackup(event) {
 
     const importActor = getCurrentActor();
     state = normalizeState(importedState);
+    if (typeof initializeLastKnownCasesComparable === "function") {
+      initializeLastKnownCasesComparable();
+    }
     activeCaseId = state.cases[0]?.id ?? null;
     generatedProposals = {};
     

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 
-console.log("Demarrage tests v23.2.2 security exports PIN and Supabase hardening...");
+console.log("Demarrage tests v23.2.3 security exports PIN and Supabase hardening...");
 
 const scriptFiles = [
   "js/utils.js",
@@ -107,10 +107,10 @@ const versionSource = fs.readFileSync("js/version.js", "utf8");
 const swSource = fs.readFileSync("sw.js", "utf8");
 const vehiclesSource = fs.readFileSync("data/vehicles.json", "utf8").trim();
 
-assert.match(stateSource, /APP_VERSION\s*=\s*"v23\.2\.2"/, "APP_VERSION v23.2.2 attendu");
-assert.match(appSource, /serviceWorker\.register\("sw\.js\?v=23\.2\.2"/, "service worker v23.2.2 attendu");
-assert.match(versionSource, /NIMR_CACHE_NAME\s*=\s*"nimr-sav-v23\.2\.2-security-exports-pin-supabase-hardening"/, "cache annonce v23.2.2 attendu");
-assert.match(swSource, /nimr-sav-v23\.2\.2-security-exports-pin-supabase-hardening/, "cache PWA v23.2.2 attendu");
+assert.match(stateSource, /APP_VERSION\s*=\s*"v23\.2\.3"/, "APP_VERSION v23.2.3 attendu");
+assert.match(appSource, /serviceWorker\.register\("sw\.js\?v=23\.2\.3"/, "service worker v23.2.3 attendu");
+assert.match(versionSource, /NIMR_CACHE_NAME\s*=\s*"nimr-sav-v23\.2\.3-offline-sync-conflict-local-data-hardening"/, "cache annonce v23.2.3 attendu");
+assert.match(swSource, /nimr-sav-v23\.2\.3-offline-sync-conflict-local-data-hardening/, "cache PWA v23.2.3 attendu");
 
 const weakBootstrap = Array(4).fill("0").join("");
 assert.equal(app(`validateLocalPinStrength(${JSON.stringify(weakBootstrap)}).ok`), false, "PIN faible historique refuse");
@@ -179,4 +179,4 @@ assert.match(supabaseClientSource, /looksLikeSupabaseServiceRoleKey/, "detection
 assert.equal(vehiclesSource, "[]", "data/vehicles.json doit rester vide");
 assert.doesNotMatch(swSource, /data\/vehicles\.json/, "data/vehicles.json ne doit pas etre precache");
 
-console.log("Tests v23.2.2 security exports PIN and Supabase hardening OK");
+console.log("Tests v23.2.3 security exports PIN and Supabase hardening OK");

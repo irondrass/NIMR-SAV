@@ -84,9 +84,9 @@ const app = (code) => vm.runInContext(code, context);
 const stateSource = fs.readFileSync('js/state.js', 'utf8');
 const appSource = fs.readFileSync('app.js', 'utf8');
 const swSource = fs.readFileSync('sw.js', 'utf8');
-assert.match(stateSource, /APP_VERSION\s*=\s*"v23\.2\.2"/, 'APP_VERSION doit rester en v23.2.2 pour cette branche');
-assert.match(appSource, /serviceWorker\.register\("sw\.js\?v=23\.2\.2"/, 'le service worker doit pointer vers sw.js?v=23.2.2');
-assert.match(swSource, /nimr-sav-v23\.2\.2-security-exports-pin-supabase-hardening/, 'le cache PWA doit refléter v23.2.2');
+assert.match(stateSource, /APP_VERSION\s*=\s*"v23\.2\.3"/, 'APP_VERSION doit rester en v23.2.3 pour cette branche');
+assert.match(appSource, /serviceWorker\.register\("sw\.js\?v=23\.2\.3"/, 'le service worker doit pointer vers sw.js?v=23.2.3');
+assert.match(swSource, /nimr-sav-v23\.2\.3-offline-sync-conflict-local-data-hardening/, 'le cache PWA doit refléter v23.2.3');
 
 function setupPermissionState(currentUserId = 'u-admin', options = {}) {
   const now = new Date();

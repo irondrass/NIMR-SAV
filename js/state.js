@@ -20,7 +20,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v23.2.2";
+const APP_VERSION = "v23.2.3";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const WORKSHOP_NAME = "NIMR SAV";
@@ -504,6 +504,7 @@ const photoObjectUrls = new Map();
 const legacyPhotoPayloads = new Map();
 
 let state = loadState();
+initializeLastKnownCasesComparable();
 let activeTab = "reception-workspace";
 let activeCaseId = state.cases[0]?.id ?? null;
 let activeCaseDetailTab = "resume";
@@ -543,12 +544,12 @@ function updateSaveStatusIndicator(message, variant = "saved") {
   if (!indicator) return;
   indicator.textContent = message;
   indicator.className = `save-status-indicator status-${variant}`;
-  
+
   if (saveStatusTimeout) {
     clearTimeout(saveStatusTimeout);
     saveStatusTimeout = null;
   }
-  
+
   if (variant !== "saved" && variant !== "offline") {
     saveStatusTimeout = setTimeout(() => {
       indicator.textContent = "Sauvegardé";
@@ -562,12 +563,12 @@ function quietNotify(message, variant = "success") {
     notifyUser(message, variant);
     return;
   }
-  
+
   let indicatorVariant = "saved";
   if (variant === "success") indicatorVariant = "saved";
   else if (variant === "info") indicatorVariant = "syncing";
   else indicatorVariant = variant;
-  
+
   updateSaveStatusIndicator(message, indicatorVariant);
 }
 
@@ -903,7 +904,7 @@ function initLocalSecurityGate() {
 
   bindLocalSecurityIdleEvents();
   renderLocalSecurityStatus();
-  
+
   const overlay = $("#local-lock-overlay");
   if (overlay) overlay.hidden = true;
   document.querySelector(".app-shell")?.removeAttribute("inert");
@@ -1356,7 +1357,7 @@ function createUserLocal(userData, actor = null) {
   if (!role || !Object.prototype.hasOwnProperty.call(USER_ROLES, role)) {
     return { ok: false, message: "Le rôle sélectionné est invalide." };
   }
-  
+
   const emailNorm = String(userData?.email || "").trim().toLowerCase();
   const activeVal = userData?.active !== false;
   if (activeVal && emailNorm) {
@@ -1367,7 +1368,7 @@ function createUserLocal(userData, actor = null) {
       return { ok: false, message: "Un autre utilisateur actif possède déjà cet email avec le même rôle." };
     }
   }
-  
+
   const newUser = normalizeUser({
     id: userData.id || uid("user"),
     name,
@@ -1379,11 +1380,11 @@ function createUserLocal(userData, actor = null) {
     pinHash: userData.pinHash || "",
     pinSalt: userData.pinSalt || "",
   }, state.resources || []);
-  
+
   if (!state.users) state.users = [];
   state.users.push(newUser);
   linkResourcesToUsers(state.resources, state.users);
-  
+
   addAuditLog("users.created", `Utilisateur créé : ${newUser.name} (${USER_ROLES[newUser.role]})`, "", { actor: resolvedActor });
   return { ok: true, user: newUser };
 }
@@ -1395,14 +1396,14 @@ function updateUserLocal(userId, userData, actor = null) {
   }
   const user = getUserById(userId);
   if (!user) return { ok: false, message: "Utilisateur introuvable." };
-  
+
   const name = String(userData?.name || "").trim();
   const role = String(userData?.role || "").trim();
   if (!name) return { ok: false, message: "Le nom complet est obligatoire." };
   if (!role || !Object.prototype.hasOwnProperty.call(USER_ROLES, role)) {
     return { ok: false, message: "Le rôle sélectionné est invalide." };
   }
-  
+
   const emailNorm = String(userData?.email || "").trim().toLowerCase();
   const activeVal = userData?.active !== false;
   if (activeVal && emailNorm) {
@@ -1413,14 +1414,14 @@ function updateUserLocal(userId, userData, actor = null) {
       return { ok: false, message: "Un autre utilisateur actif possède déjà cet email avec le même rôle." };
     }
   }
-  
+
   const newActive = userData.active !== false;
   const safety = canDisableOrDemoteUser(userId, role, newActive);
   if (!safety.ok) return safety;
-  
+
   const oldRole = user.role;
   const oldActive = user.active;
-  
+
   user.name = name;
   user.role = role;
   user.email = String(userData.email || "").trim().toLowerCase();
@@ -1436,12 +1437,12 @@ function updateUserLocal(userId, userData, actor = null) {
   if (userData.pinSalt !== undefined) {
     user.pinSalt = String(userData.pinSalt || "").trim();
   }
-  
+
   const normalized = normalizeUser(user, state.resources || []);
   Object.assign(user, normalized);
-  
+
   linkResourcesToUsers(state.resources, state.users);
-  
+
   if (oldRole !== role) {
     addAuditLog("users.role_changed", `Rôle modifié pour ${user.name} : ${USER_ROLES[oldRole]} -> ${USER_ROLES[role]}`, "", { actor: resolvedActor });
   }
@@ -1454,11 +1455,11 @@ function updateUserLocal(userId, userData, actor = null) {
   } else if (oldRole === role) {
     addAuditLog("users.updated", `Utilisateur modifié : ${user.name}`, "", { actor: resolvedActor });
   }
-  
+
   if (state.currentUserId === userId && newActive === false) {
     state.currentUserId = resolveCurrentUserId(state.currentUserId, state.users);
   }
-  
+
   return { ok: true, user };
 }
 
@@ -1536,6 +1537,39 @@ function guardAction(permission, context = {}, options = {}) {
   if (allowed && requested.startsWith("task.") && requested !== "task.override") {
     allowed = canActOnTechnicianTask(user, context.booking);
   }
+  let blockedByConflict = false;
+  if (allowed) {
+    let targetCaseId = "";
+    if (context.item && context.item.id) targetCaseId = context.item.id;
+    else if (context.case && context.case.id) targetCaseId = context.case.id;
+    else if (context.booking && context.booking.caseId) targetCaseId = context.booking.caseId;
+    else if (context.caseId) targetCaseId = context.caseId;
+
+    if (targetCaseId) {
+      const openConflicts = typeof getOpenSyncConflicts === "function" ? getOpenSyncConflicts() : [];
+      const hasConflict = openConflicts.some((c) => c.caseId === targetCaseId || c.entityId === targetCaseId);
+      if (hasConflict) {
+        const isSensitive = [
+          "planning.edit",
+          "task.start",
+          "task.pause",
+          "task.resume",
+          "task.complete",
+          "task.block",
+          "task.override",
+          "quality.validate",
+          "quality.reject",
+          "delivery.complete",
+          "case.delete",
+          "case.edit"
+        ].includes(requested);
+        if (isSensitive) {
+          allowed = false;
+          blockedByConflict = true;
+        }
+      }
+    }
+  }
   if (!allowed) {
     const actorUser = user || (typeof getCurrentUser === "function" ? getCurrentUser() : null);
     if (actorUser && (actorUser.role === "technicien" || requested.startsWith("task."))) {
@@ -1549,7 +1583,7 @@ function guardAction(permission, context = {}, options = {}) {
       }
     }
   }
-  const message = allowed ? "" : (options.message || context.message || getPermissionDeniedMessage(requested, { ...context, user }));
+  const message = allowed ? "" : (blockedByConflict ? "Action bloquée : ce dossier présente un conflit de synchronisation non résolu. Veuillez d'abord résoudre le conflit." : (options.message || context.message || getPermissionDeniedMessage(requested, { ...context, user })));
   if (!allowed && options.notify !== false && context.notify !== false && typeof notifyUser === "function") {
     notifyUser(message, "error");
   }
@@ -2079,6 +2113,10 @@ function normalizeCase(item, bookings) {
     deletedAt: item.deletedAt || "",
     deletedBy: item.deletedBy || "",
     deleteReason: item.deleteReason || "",
+    updatedAt: item.updatedAt || item.createdAt || new Date().toISOString(),
+    updatedBy: item.updatedBy || "",
+    localRevision: Number(item.localRevision || 0),
+    syncRevision: Number(item.syncRevision || 0),
   };
 }
 
@@ -2663,7 +2701,7 @@ function resolveKeptConflictsAfterPush() {
   if (!state.syncConflicts) return;
   let changed = false;
   const now = new Date().toISOString();
-  
+
   const updated = state.syncConflicts.map((entry) => {
     const normalized = normalizeSyncConflictEntry(entry);
     if (normalized.status === "open" && ["kept_local", "kept_remote"].includes(normalized.decision)) {
@@ -2674,7 +2712,7 @@ function resolveKeptConflictsAfterPush() {
     }
     return normalized;
   });
-  
+
   if (changed) {
     state.syncConflicts = normalizeSyncConflicts(updated);
     saveState({ skipCloud: true });
@@ -2727,29 +2765,79 @@ function resolveSyncConflict(conflictIdOrKey, action = "mark_resolved") {
   if (index < 0) return { ok: false, message: "Conflit introuvable." };
   const conflict = { ...conflicts[index] };
   const actor = typeof getCurrentActor === "function" ? getCurrentActor() : { userName: "Atelier", userRole: "", resourceId: "" };
-  if (action === "accept_cloud") {
-    const item = state.cases.find((caseItem) => caseItem.id === (conflict.caseId || conflict.entityId));
-    if (!item || !conflict.field) return { ok: false, message: "Dossier ou champ introuvable." };
-    applySyncConflictRemoteValue(item, conflict.field, conflict.remoteValue);
-    addHistoryWithActor(item, "sync.conflict.accept_cloud", "Conflit synchronisation résolu", `Champ ${conflict.field} : valeur cloud acceptée.`, actor);
-    conflict.decision = "accepted_cloud";
-    conflict.resolution = "accepted_cloud";
-  } else if (action === "keep_local") {
-    const item = state.cases.find((caseItem) => caseItem.id === (conflict.caseId || conflict.entityId));
-    if (item) addHistoryWithActor(item, "sync.conflict.keep_local", "Conflit synchronisation résolu", `Champ ${conflict.field || "inconnu"} : valeur locale conservée.`, actor);
-    conflict.decision = "kept_local";
-    conflict.resolution = "kept_local";
+
+  if (conflict.type === "case_conflict") {
+    const caseId = conflict.caseId || conflict.entityId;
+    const localCaseIdx = state.cases.findIndex((c) => c.id === caseId);
+
+    if (action === "accept_cloud") {
+      if (localCaseIdx < 0) return { ok: false, message: "Dossier introuvable localement." };
+      if (!conflict.remoteValue) return { ok: false, message: "Version cloud manquante dans le conflit." };
+
+      const remoteCaseCopy = JSON.parse(JSON.stringify(conflict.remoteValue));
+      remoteCaseCopy.syncRevision = remoteCaseCopy.localRevision;
+
+      state.cases[localCaseIdx] = normalizeCase(remoteCaseCopy);
+      addHistoryWithActor(state.cases[localCaseIdx], "sync.conflict.accept_cloud", "Conflit synchronisation résolu", `Dossier remplacé par la version cloud (révision ${remoteCaseCopy.localRevision}).`, actor);
+
+      conflict.decision = "accepted_cloud";
+      conflict.resolution = "accepted_cloud";
+      conflict.status = "resolved";
+      conflict.resolvedAt = new Date().toISOString();
+      conflict.resolvedBy = actor.userName || actor.name || "Atelier";
+    } else if (action === "keep_local") {
+      if (localCaseIdx < 0) return { ok: false, message: "Dossier introuvable localement." };
+
+      const localCase = state.cases[localCaseIdx];
+      localCase.localRevision = (Number(localCase.localRevision) || 0) + 1;
+      localCase.updatedAt = new Date().toISOString();
+      localCase.updatedBy = actor.userName || "Atelier";
+
+      addHistoryWithActor(localCase, "sync.conflict.keep_local", "Conflit synchronisation résolu", "Version locale conservée et révision incrémentée.", actor);
+
+      conflict.decision = "kept_local";
+      conflict.resolution = "kept_local";
+      conflict.status = "resolved";
+      conflict.resolvedAt = new Date().toISOString();
+      conflict.resolvedBy = actor.userName || actor.name || "Atelier";
+    } else if (action === "defer_manual_merge") {
+      if (localCaseIdx >= 0) {
+        addHistoryWithActor(state.cases[localCaseIdx], "sync.conflict.deferred", "Résolution du conflit reportée", "La résolution du conflit a été reportée par l'utilisateur.", actor);
+      }
+      conflict.decision = "deferred";
+      conflict.resolution = "deferred";
+      conflict.status = "open"; // Garde le conflit ouvert
+      conflict.notes = (conflict.notes || "") + `[${new Date().toLocaleString()}] Résolution reportée par ${actor.userName || "Atelier"}.\n`;
+    } else {
+      return { ok: false, message: "Action non prise en charge pour ce type de conflit." };
+    }
   } else {
-    conflict.decision = "marked_resolved";
-    conflict.resolution = "manual";
+    // Standard conflict handling (for case_field_conflict etc.)
+    if (action === "accept_cloud") {
+      const item = state.cases.find((caseItem) => caseItem.id === (conflict.caseId || conflict.entityId));
+      if (!item || !conflict.field) return { ok: false, message: "Dossier ou champ introuvable." };
+      applySyncConflictRemoteValue(item, conflict.field, conflict.remoteValue);
+      addHistoryWithActor(item, "sync.conflict.accept_cloud", "Conflit synchronisation résolu", `Champ ${conflict.field} : valeur cloud acceptée.`, actor);
+      conflict.decision = "accepted_cloud";
+      conflict.resolution = "accepted_cloud";
+    } else if (action === "keep_local") {
+      const item = state.cases.find((caseItem) => caseItem.id === (conflict.caseId || conflict.entityId));
+      if (item) addHistoryWithActor(item, "sync.conflict.keep_local", "Conflit synchronisation résolu", `Champ ${conflict.field || "inconnu"} : valeur locale conservée.`, actor);
+      conflict.decision = "kept_local";
+      conflict.resolution = "kept_local";
+    } else {
+      conflict.decision = "marked_resolved";
+      conflict.resolution = "manual";
+    }
+    conflict.status = "resolved";
+    conflict.resolvedAt = new Date().toISOString();
+    conflict.resolvedBy = actor.userName || actor.name || "Atelier";
   }
-  conflict.status = "resolved";
-  conflict.resolvedAt = new Date().toISOString();
-  conflict.resolvedBy = actor.userName || actor.name || "Atelier";
+
   conflicts[index] = conflict;
   state.syncConflicts = normalizeSyncConflicts(conflicts);
   if (action === "keep_local" && typeof rememberLocalUserChangeAt === "function") rememberLocalUserChangeAt(new Date());
-  saveState({ flushCloud: action !== "mark_resolved" });
+  saveState({ flushCloud: action !== "defer_manual_merge" && action !== "mark_resolved" });
   return { ok: true, conflict };
 }
 
@@ -2900,6 +2988,62 @@ if (typeof window !== "undefined") {
   window.hasRealBooking = hasRealBooking;
 }
 
+function getComparableCaseJSON(caseItem) {
+  const clone = { ...caseItem };
+  delete clone.updatedAt;
+  delete clone.updatedBy;
+  delete clone.localRevision;
+  delete clone.syncRevision;
+  delete clone.history;
+  return JSON.stringify(clone);
+}
+
+function initializeLastKnownCasesComparable() {
+  window.lastKnownCasesComparable = {};
+  if (typeof state !== "undefined" && state && Array.isArray(state.cases)) {
+    state.cases.forEach((caseItem) => {
+      window.lastKnownCasesComparable[caseItem.id] = getComparableCaseJSON(caseItem);
+    });
+  }
+}
+
+function detectAndIncrementCaseRevisions() {
+  if (!window.lastKnownCasesComparable) {
+    initializeLastKnownCasesComparable();
+  }
+  const actor = getCurrentActor();
+  const now = new Date().toISOString();
+  let anyIncremented = false;
+
+  if (typeof state !== "undefined" && state && Array.isArray(state.cases)) {
+    state.cases.forEach((caseItem) => {
+      const currentJSON = getComparableCaseJSON(caseItem);
+      const previousJSON = window.lastKnownCasesComparable[caseItem.id];
+
+      if (previousJSON === undefined) {
+        caseItem.localRevision = (Number(caseItem.localRevision) || 0) + 1;
+        caseItem.updatedAt = caseItem.updatedAt || now;
+        caseItem.updatedBy = caseItem.updatedBy || actor.userName || "Atelier";
+        window.lastKnownCasesComparable[caseItem.id] = currentJSON;
+        anyIncremented = true;
+      } else if (previousJSON !== currentJSON) {
+        caseItem.localRevision = (Number(caseItem.localRevision) || 0) + 1;
+        caseItem.updatedAt = now;
+        caseItem.updatedBy = actor.userName || "Atelier";
+        window.lastKnownCasesComparable[caseItem.id] = currentJSON;
+        anyIncremented = true;
+      }
+    });
+  }
+  return anyIncremented;
+}
+
+if (typeof window !== "undefined") {
+  window.getComparableCaseJSON = getComparableCaseJSON;
+  window.initializeLastKnownCasesComparable = initializeLastKnownCasesComparable;
+  window.detectAndIncrementCaseRevisions = detectAndIncrementCaseRevisions;
+}
+
 function recordFlagHistory(item, flag, checked) {
   const event = FLAG_HISTORY_EVENTS[flag]?.[checked ? "on" : "off"];
   if (event) addHistory(item, event[0], event[1]);
@@ -2995,6 +3139,12 @@ function clearLocalUserChangeAt() {
 
 function saveState(options = {}) {
   try {
+    const modified = detectAndIncrementCaseRevisions();
+    if (modified && !options.skipCloud && typeof navigator !== "undefined" && navigator.onLine === false) {
+      if (typeof enqueueOfflineAction === "function") {
+        enqueueOfflineAction("sync_push", "Modification locale hors ligne");
+      }
+    }
     const envelope = buildAutosaveEnvelope();
     const stateJson = JSON.stringify(state);
     localStorage.setItem(STORAGE_KEY, stateJson);
@@ -3124,7 +3274,7 @@ function showConfirmModal(htmlMessage) {
     const body = document.getElementById("custom-modal-body");
     const cancelBtn = document.getElementById("custom-modal-cancel");
     const confirmBtn = document.getElementById("custom-modal-confirm");
-    
+
     if (!overlay || !body || !cancelBtn || !confirmBtn) {
       resolve(confirm(modalMessageToText(htmlMessage)));
       return;
@@ -3160,7 +3310,7 @@ function showPromptModal(htmlMessage, expectedText) {
     const body = document.getElementById("custom-modal-body");
     const cancelBtn = document.getElementById("custom-modal-cancel");
     const confirmBtn = document.getElementById("custom-modal-confirm");
-    
+
     if (!overlay || !body || !cancelBtn || !confirmBtn) {
       resolve(prompt(modalMessageToText(htmlMessage)) === expectedText);
       return;
@@ -3180,7 +3330,7 @@ function showPromptModal(htmlMessage, expectedText) {
     input.autocomplete = "off";
     body.appendChild(input);
     overlay.hidden = false;
-    
+
     input.focus();
 
     const cleanup = () => {
@@ -3218,7 +3368,7 @@ function showInputPromptModal({
     const body = document.getElementById("custom-modal-body");
     const cancelBtn = document.getElementById("custom-modal-cancel");
     const confirmBtn = document.getElementById("custom-modal-confirm");
-    
+
     if (!overlay || !body || !cancelBtn || !confirmBtn) {
       if (options && Array.isArray(options)) {
         const text = options.map(([val, lbl]) => `${val}: ${lbl}`).join("\n");

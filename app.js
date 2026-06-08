@@ -647,11 +647,11 @@ function bindWorkshopForms() {
     const email = normalizeTextInputValue(data.get("email"));
     const resourceId = data.get("resourceId") || "";
     const active = form.elements.active.checked;
-    
+
     // Lire le PIN
     const pin = form.elements.pin ? form.elements.pin.value : "";
     const isSensitive = ["admin", "chef_atelier", "directeur_sav"].includes(role);
-    
+
     const existingUser = userId ? getUserById(userId) : null;
     let pinData = {};
     if (pin) {
@@ -663,28 +663,28 @@ function bindWorkshopForms() {
     } else if (isSensitive && !existingUser?.pinHash) {
       return notifyUser("Définissez un PIN initial robuste pour ce rôle sensible avant d'enregistrer l'utilisateur.", "error");
     }
-    
+
     let result;
     if (userId) {
       result = updateUserLocal(userId, { name, role, email, resourceId, active, ...pinData });
     } else {
       result = createUserLocal({ name, role, email, resourceId, active, ...pinData });
     }
-    
+
     if (!result.ok) {
       return notifyUser(result.message, "error");
     }
-    
+
     saveState();
     form.reset();
     form.elements.userId.value = "";
-    
+
     const submitLabel = document.getElementById("user-submit-label");
     if (submitLabel) submitLabel.textContent = "Ajouter l'utilisateur";
-    
+
     const cancelBtn = document.getElementById("user-cancel-btn");
     if (cancelBtn) cancelBtn.hidden = true;
-    
+
     render();
     quietNotify(userId ? "Utilisateur mis à jour." : "Utilisateur créé.", "success");
   });
@@ -816,7 +816,7 @@ function registerServiceWorker() {
   });
   window.addEventListener("load", async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=23.2.2", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=23.2.3", { updateViaCache: "none" });
       registration.update?.();
       if (registration.waiting) showUpdateAvailable(registration);
       window.setInterval(() => registration.update?.(), 10 * 60 * 1000);
@@ -904,22 +904,61 @@ function renderActivityLog() {
         </div>
       </div>
       <div class="sync-conflict-list">
-        ${conflicts.map((conflict) => `
-          <article class="sync-conflict-card">
-            <strong>${escapeHtml(conflict.caseNumber || conflict.caseId || conflict.entityId || "Dossier inconnu")}</strong>
-            <span>Champ : ${escapeHtml(conflict.field || "inconnu")}</span>
-            <small>${escapeHtml(conflict.reason || "Valeurs locales et cloud différentes.")}</small>
-            <div class="sync-conflict-values">
-              <code>Local : ${escapeHtml(formatConflictValue(conflict.localValue))}</code>
-              <code>Cloud : ${escapeHtml(formatConflictValue(conflict.remoteValue))}</code>
-            </div>
-            <div class="sync-conflict-actions">
-              <button type="button" class="tiny-button" data-sync-conflict-action="keep_local" data-sync-conflict-id="${escapeAttr(conflict.id)}">Garder local</button>
-              <button type="button" class="tiny-button" data-sync-conflict-action="accept_cloud" data-sync-conflict-id="${escapeAttr(conflict.id)}">Accepter cloud</button>
-              <button type="button" class="tiny-button ghost" data-sync-conflict-action="mark_resolved" data-sync-conflict-id="${escapeAttr(conflict.id)}">Marquer résolu</button>
-            </div>
-          </article>
-        `).join("")}
+        ${conflicts.map((conflict) => {
+          if (conflict.type === "case_conflict") {
+            const locDate = conflict.localCase?.updatedAt ? new Date(conflict.localCase.updatedAt).toLocaleString() : "Inconnue";
+            const locUser = conflict.localCase?.updatedBy || "Non spécifié";
+            const locRev = conflict.localCase?.localRevision ?? 0;
+            const rmtDate = conflict.remoteCase?.updatedAt ? new Date(conflict.remoteCase.updatedAt).toLocaleString() : "Inconnue";
+            const rmtUser = conflict.remoteCase?.updatedBy || "Non spécifié";
+            const rmtRev = conflict.remoteCase?.localRevision ?? 0;
+
+            return `
+              <article class="sync-conflict-card case-conflict-card" style="margin-bottom: 15px; padding: 15px; background: var(--bg-card, #ffffff); border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); border: 1px solid var(--border-color, #eef2f6);">
+                <strong style="display: block; font-size: 1.1em; margin-bottom: 5px;">[Dossier] ${escapeHtml(conflict.caseNumber || conflict.caseId || conflict.entityId || "Dossier inconnu")}</strong>
+                <small style="color: var(--text-muted, #718096); display: block; margin-bottom: 10px;">${escapeHtml(conflict.reason || "Modifications concurrentes locales et cloud.")}</small>
+
+                <div class="sync-conflict-meta-compare" style="display: flex; gap: 15px; margin: 10px 0; font-size: 0.9em; flex-wrap: wrap;">
+                  <div class="meta-column local-meta" style="flex: 1; min-width: 200px; padding: 8px; background: rgba(76, 175, 80, 0.05); border-left: 3px solid #4caf50; border-radius: 4px; display: flex; flex-direction: column; gap: 2px;">
+                    <strong style="color: #4caf50; margin-bottom: 4px;">Version Locale</strong>
+                    <span>Date : ${escapeHtml(locDate)}</span>
+                    <span>Modifié par : ${escapeHtml(locUser)}</span>
+                    <span>Révision : ${escapeHtml(locRev)}</span>
+                  </div>
+                  <div class="meta-column remote-meta" style="flex: 1; min-width: 200px; padding: 8px; background: rgba(33, 150, 243, 0.05); border-left: 3px solid #2196f3; border-radius: 4px; display: flex; flex-direction: column; gap: 2px;">
+                    <strong style="color: #2196f3; margin-bottom: 4px;">Version Cloud</strong>
+                    <span>Date : ${escapeHtml(rmtDate)}</span>
+                    <span>Modifié par : ${escapeHtml(rmtUser)}</span>
+                    <span>Révision : ${escapeHtml(rmtRev)}</span>
+                  </div>
+                </div>
+
+                <div class="sync-conflict-actions" style="display: flex; gap: 10px; margin-top: 10px;">
+                  <button type="button" class="tiny-button" data-sync-conflict-action="keep_local" data-sync-conflict-id="${escapeAttr(conflict.id)}">Conserver version locale</button>
+                  <button type="button" class="tiny-button" data-sync-conflict-action="accept_cloud" data-sync-conflict-id="${escapeAttr(conflict.id)}">Conserver version cloud</button>
+                  <button type="button" class="tiny-button ghost" data-sync-conflict-action="defer_manual_merge" data-sync-conflict-id="${escapeAttr(conflict.id)}">Fusion manuelle plus tard</button>
+                </div>
+              </article>
+            `;
+          } else {
+            return `
+              <article class="sync-conflict-card">
+                <strong>${escapeHtml(conflict.caseNumber || conflict.caseId || conflict.entityId || "Dossier inconnu")}</strong>
+                <span>Champ : ${escapeHtml(conflict.field || "inconnu")}</span>
+                <small>${escapeHtml(conflict.reason || "Valeurs locales et cloud différentes.")}</small>
+                <div class="sync-conflict-values">
+                  <code>Local : ${escapeHtml(formatConflictValue(conflict.localValue))}</code>
+                  <code>Cloud : ${escapeHtml(formatConflictValue(conflict.remoteValue))}</code>
+                </div>
+                <div class="sync-conflict-actions">
+                  <button type="button" class="tiny-button" data-sync-conflict-action="keep_local" data-sync-conflict-id="${escapeAttr(conflict.id)}">Garder local</button>
+                  <button type="button" class="tiny-button" data-sync-conflict-action="accept_cloud" data-sync-conflict-id="${escapeAttr(conflict.id)}">Accepter cloud</button>
+                  <button type="button" class="tiny-button ghost" data-sync-conflict-action="mark_resolved" data-sync-conflict-id="${escapeAttr(conflict.id)}">Marquer résolu</button>
+                </div>
+              </article>
+            `;
+          }
+        }).join("")}
       </div>
     `;
     conflictPanel.querySelectorAll("[data-sync-conflict-action]").forEach((button) => {
@@ -1043,7 +1082,7 @@ function checkUserSessionStartup() {
   }
 
   const activeUsers = (state.users || []).filter(user => user.active !== false);
-  const alwaysPrompt = state.settings.alwaysPromptUserStartup !== false && 
+  const alwaysPrompt = state.settings.alwaysPromptUserStartup !== false &&
                        (state.settings.alwaysPromptUserStartup === true || activeUsers.length > 1);
 
   const currentUser = getCurrentUser();
@@ -1129,8 +1168,8 @@ function checkOverlaysInertState() {
   const login = document.getElementById("user-login-overlay");
   const change = document.getElementById("user-pin-change-overlay");
   const localLock = document.getElementById("local-lock-overlay");
-  const anyVisible = (login && !login.hidden) || 
-                      (change && !change.hidden) || 
+  const anyVisible = (login && !login.hidden) ||
+                      (change && !change.hidden) ||
                       (localLock && !localLock.hidden);
   if (!anyVisible) {
     document.querySelector(".app-shell")?.removeAttribute("inert");
@@ -1159,7 +1198,7 @@ function renderUserLoginScreen() {
     const emailNorm = String(user.email || "").trim().toLowerCase();
     const isDup = emailNorm && activeUsers.some(ou => ou.id !== user.id && String(ou.email || "").trim().toLowerCase() === emailNorm && ou.role === user.role);
     const shortId = user.id.substring(5);
-    const displayLabel = isDup 
+    const displayLabel = isDup
       ? `${user.name} (${roleLabel}) [Doublon: ${shortId}]`
       : `${user.name} (${roleLabel})`;
 
@@ -1247,7 +1286,7 @@ function renderCurrentSessionIndicator() {
   if (alwaysPromptCheckbox) {
     const activeUsers = (state.users || []).filter(user => user.active !== false);
     // Cochée par défaut si non définie et plusieurs utilisateurs, ou si configurée explicitement à vrai
-    const isChecked = state.settings.alwaysPromptUserStartup === true || 
+    const isChecked = state.settings.alwaysPromptUserStartup === true ||
                       (state.settings.alwaysPromptUserStartup !== false && activeUsers.length > 1);
     alwaysPromptCheckbox.checked = isChecked;
 
@@ -1438,10 +1477,10 @@ function completeUserLogin(targetUser) {
         actor: previousActor
       });
     }
-    
+
     saveState();
     hideUserLoginScreen();
-    
+
     // Forcer la redirection et vider le DOM selon les règles d'accessibilité (Contrainte 11 hotfix test)
     ensureCurrentTabAllowed();
     if (targetUser.role === "technicien") {

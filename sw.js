@@ -1,4 +1,4 @@
-const CACHE_NAME = "nimr-sav-v23.2.2-security-exports-pin-supabase-hardening";
+const CACHE_NAME = "nimr-sav-v23.2.3-offline-sync-conflict-local-data-hardening";
 const ASSETS = [
   "./",
   "./index.html",

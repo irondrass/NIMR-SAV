@@ -1,6 +1,6 @@
-window.APP_VERSION = "v23.2.2";
-window.NIMR_BUILD = "v23.2.2";
-window.NIMR_CACHE_NAME = "nimr-sav-v23.2.2-security-exports-pin-supabase-hardening";
+window.APP_VERSION = "v23.2.3";
+window.NIMR_BUILD = "v23.2.3";
+window.NIMR_CACHE_NAME = "nimr-sav-v23.2.3-offline-sync-conflict-local-data-hardening";
 
 if ("caches" in window) {
   caches.keys().then((keys) => Promise.all(

@@ -703,6 +703,7 @@ async function saveLocalToSupabase() {
       supabaseUser: user.email || user.id,
     }));
     saveState({ skipCloud: true, skipSnapshot: true });
+    markLocalCasesAsSynced();
 
     setSupabaseStatus("Sauvegarde Supabase terminée.", "ok");
     setSupabaseDetails(`${stats.repairOrders} dossier(s), ${stats.clients} client(s), ${stats.vehicles} véhicule(s), ${stats.repairSteps} étape(s), ${stats.resources} ressource(s), ${stats.holidays} jour(s) férié(s), ${stats.workHoursDays} jour(s) horaire(s), ${stats.planningSlots} créneau(x), ${stats.claims || 0} ordre(s), ${stats.supplements || 0} complément(s), ${stats.photos} photo(s) synchronisé(s). Réglages enregistrés dans app_settings.`);
@@ -758,6 +759,9 @@ async function restoreLocalFromSupabase() {
 
     const restoreActor = getCurrentActor();
     state = normalizeState(data.state);
+    if (typeof initializeLastKnownCasesComparable === "function") {
+      initializeLastKnownCasesComparable();
+    }
     let settingsRestored = false;
     try {
       const settingsBackup = await restoreWorkshopSettingsFromSupabase(client);
@@ -867,6 +871,7 @@ async function autoBackupToSupabase(reason = "autosave", options = {}) {
     if (typeof resolveKeptConflictsAfterPush === "function") {
       resolveKeptConflictsAfterPush();
     }
+    markLocalCasesAsSynced();
     lastAutoSupabaseBackupAt = Date.now();
     lastKnownCloudUpdatedAt = new Date(updatedAt).getTime();
     if (typeof rememberKnownCloudUpdatedAt === "function") rememberKnownCloudUpdatedAt(updatedAt);
@@ -881,6 +886,9 @@ async function autoBackupToSupabase(reason = "autosave", options = {}) {
   } catch (error) {
     console.warn("Sauvegarde automatique Supabase impossible", error);
     localStorage.setItem(`${STORAGE_KEY}:last-cloud-autosave-error`, String(error.message || error));
+    if (typeof enqueueOfflineAction === "function") {
+      enqueueOfflineAction("sync_push", "Sauvegarde automatique échouée");
+    }
     if (typeof renderSyncStatusStrip === "function") renderSyncStatusStrip();
   } finally {
     autoSupabaseBackupRunning = false;
@@ -1103,12 +1111,12 @@ function pushCaseFieldConflict(stats, context) {
   const now = new Date().toISOString();
   const localValueHash = makeSupabaseConflictHash(context.localValue);
   const remoteValueHash = makeSupabaseConflictHash(context.remoteValue);
-  
+
   let label = context.label;
   if (!label) {
     label = context.field === "appointmentStatus" ? "Conflit statut RDV" : "Conflit dossier";
   }
-  
+
   let details = context.details || context.reason;
   if (!details) {
     if (context.field === "appointmentStatus") {
@@ -1177,17 +1185,17 @@ function hasRealBooking(caseId, bookings) {
 function resolveCanonicalAppointmentStatus(localCase, remoteCase, localState, remoteState) {
   const localVal = localCase?.appointmentStatus || "none";
   const remoteVal = remoteCase?.appointmentStatus || "none";
-  
+
   if (localVal === remoteVal) return null;
-  
+
   const localHas = hasRealBooking(localCase?.id, localState?.bookings);
   const remoteHas = hasRealBooking(remoteCase?.id, remoteState?.bookings);
   const hasPlanning = localHas || remoteHas;
-  
+
   if (hasPlanning) {
     return "scheduled";
   }
-  
+
   // If neither has planning:
   if ((localVal === "scheduled" && remoteVal === "none") || (localVal === "none" && remoteVal === "scheduled")) {
     return "none";
@@ -1198,7 +1206,7 @@ function resolveCanonicalAppointmentStatus(localCase, remoteCase, localState, re
   if ((localVal === "scheduled" && remoteVal === "reschedule_pending") || (localVal === "reschedule_pending" && remoteVal === "scheduled")) {
     return "reschedule_pending";
   }
-  
+
   return null;
 }
 
@@ -1224,7 +1232,7 @@ function mergeCriticalCaseField(localCase, remoteCase, field, stats, localState 
 
   const localNorm = normalizeSyncComparableValue(localVal);
   const remoteNorm = normalizeSyncComparableValue(remoteVal);
-  
+
   if (localNorm === remoteNorm) return localVal;
 
   if (field === "appointmentStatus") {
@@ -1280,33 +1288,73 @@ function mergeCaseEntity(localCase, remoteCase, stats, localState = {}, remoteSt
     stats.protectedKept += 1;
     return localCase;
   }
-  const historyResult = mergeHistoryAppendOnly(localCase.history, remoteCase.history);
-  stats.historyMerged += historyResult.added;
-  const merged = {
-    ...localCase,
-    ...remoteCase,
-    flags: mergeCaseFlags(localCase, remoteCase, stats),
-    history: historyResult.history,
-    photos: mergeArrayById(localCase.photos, remoteCase.photos, { fallbackPrefix: "photo", preferRemote: true }),
-    claims: mergeArrayById(localCase.claims, remoteCase.claims, { fallbackPrefix: "claim", preferRemote: true }),
-    customerClaims: mergeArrayById(localCase.customerClaims, remoteCase.customerClaims, { fallbackPrefix: "customerClaim", preferRemote: true }),
-    supplements: mergeArrayById(localCase.supplements, remoteCase.supplements, { fallbackPrefix: "supplement", preferRemote: true }),
-    blockerSourceBookingIds: mergePrimitiveList(localCase.blockerSourceBookingIds, remoteCase.blockerSourceBookingIds),
-    deletedAt: remoteCase.deletedAt || localCase.deletedAt || "",
-    deletedBy: remoteCase.deletedBy || localCase.deletedBy || "",
-    deleteReason: remoteCase.deleteReason || localCase.deleteReason || "",
-  };
-  
-  CRITICAL_CASE_SYNC_FIELDS.forEach(field => {
-    merged[field] = mergeCriticalCaseField(localCase, remoteCase, field, stats, localState, remoteState);
-  });
 
-  if (isProtectedCase(localCase) && !isProtectedCase(remoteCase)) {
-    // Other fields that might not be in CRITICAL_CASE_SYNC_FIELDS
-    stats.protectedKept += 1;
+  const getComparable = typeof getComparableCaseJSON === "function"
+    ? getComparableCaseJSON
+    : (window.getComparableCaseJSON || ((c) => JSON.stringify(c)));
+
+  const localModified = Number(localCase.localRevision || 0) > Number(localCase.syncRevision || 0);
+  const remoteModified = Number(remoteCase.localRevision || 0) > Number(localCase.syncRevision || 0);
+  const isDifferent = getComparable(localCase) !== getComparable(remoteCase);
+
+  if (localModified && remoteModified && isDifferent) {
+    const nowStr = new Date().toISOString();
+    const localValHash = makeSupabaseConflictHash(localCase);
+    const remoteValHash = makeSupabaseConflictHash(remoteCase);
+    const sortedHashes = [localValHash, remoteValHash].sort();
+    const conflictKey = `case:${localCase.id}:all:${sortedHashes[0]}:${sortedHashes[1]}`;
+
+    const details = `Le dossier ${localCase.orNavNumber || localCase.id || ""} a été modifié localement (révision ${localCase.localRevision}) et sur le cloud (révision ${remoteCase.localRevision}).`;
+
+    const entry = {
+      id: uid("sync-conflict"),
+      at: nowStr,
+      createdAt: nowStr,
+      type: "case_conflict",
+      entityType: "case",
+      entity: "case",
+      entityId: localCase.id,
+      caseId: localCase.id,
+      caseNumber: localCase.orNavNumber || localCase.id,
+      localCase: JSON.parse(JSON.stringify(localCase)),
+      remoteCase: JSON.parse(JSON.stringify(remoteCase)),
+      localValue: JSON.parse(JSON.stringify(localCase)),
+      remoteValue: JSON.parse(JSON.stringify(remoteCase)),
+      status: "open",
+      decision: "needs_review",
+      reason: "Modifications concurrentes locales et cloud.",
+      label: "Conflit de synchronisation du dossier",
+      details,
+      conflictKey
+    };
+
+    if (!stats.conflictEntries) stats.conflictEntries = [];
+    if (!stats.conflictEntries.some(e => e.conflictKey === conflictKey)) {
+      stats.conflictEntries.push(entry);
+      stats.conflicts = (stats.conflicts || 0) + 1;
+      stats.newConflicts = (stats.newConflicts || 0) + 1;
+    }
+
+    if (typeof logSyncConflict === "function") {
+      logSyncConflict(localCase.id, details);
+    }
+
+    return localCase;
   }
-  stats.casesMerged += 1;
-  return merged;
+
+  if (remoteModified && !localModified) {
+    stats.casesMerged += 1;
+    return {
+      ...remoteCase,
+      syncRevision: remoteCase.localRevision
+    };
+  }
+
+  if (localModified && !remoteModified) {
+    return localCase;
+  }
+
+  return localCase;
 }
 
 function mergeCasesById(localCases = [], remoteCases = [], stats = createEmptySyncMergeStats(), localState = {}, remoteState = {}) {
@@ -1657,6 +1705,9 @@ async function applyRemoteSupabaseBackup(data, reason = "cloud") {
       remoteVersion: data.app_version || "",
     });
     state = mergeResult.state;
+    if (typeof initializeLastKnownCasesComparable === "function") {
+      initializeLastKnownCasesComparable();
+    }
     if (previousActiveCaseId && state.cases.some((item) => item.id === previousActiveCaseId)) activeCaseId = previousActiveCaseId;
     else activeCaseId = state.cases[0]?.id ?? null;
     activeCaseDetailTab = previousTab || "resume";
@@ -1734,8 +1785,12 @@ function startSupabaseLiveSync() {
     supabaseLiveSyncChannel = null;
   }
   window.clearInterval(supabaseLivePullTimer);
-  supabaseLivePullTimer = window.setInterval(() => pullLatestSupabaseBackup("poll"), SUPABASE_LIVE_PULL_INTERVAL_MS);
+  supabaseLivePullTimer = window.setInterval(() => {
+    pullLatestSupabaseBackup("poll");
+    if (typeof processOfflineQueue === "function") processOfflineQueue();
+  }, SUPABASE_LIVE_PULL_INTERVAL_MS);
   pullLatestSupabaseBackup("live-start");
+  if (typeof processOfflineQueue === "function") processOfflineQueue();
 }
 
 function stopSupabaseLiveSync() {
@@ -1759,11 +1814,166 @@ function bindSupabaseActions() {
   refreshSupabasePanel();
   startSupabaseLiveSync();
   pullLatestSupabaseBackup("initialisation");
-  window.addEventListener("focus", () => pullLatestSupabaseBackup("focus"));
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") pullLatestSupabaseBackup("retour application");
-    else flushSupabaseBackup("mise-en-arriere-plan");
+  if (typeof processOfflineQueue === "function") processOfflineQueue();
+  window.addEventListener("focus", () => {
+    pullLatestSupabaseBackup("focus");
+    if (typeof processOfflineQueue === "function") processOfflineQueue();
   });
-  window.addEventListener("online", () => pullLatestSupabaseBackup("retour connexion"));
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      pullLatestSupabaseBackup("retour application");
+      if (typeof processOfflineQueue === "function") processOfflineQueue();
+    } else {
+      flushSupabaseBackup("mise-en-arriere-plan");
+    }
+  });
+  window.addEventListener("online", () => {
+    pullLatestSupabaseBackup("retour connexion");
+    if (typeof processOfflineQueue === "function") processOfflineQueue();
+  });
   window.addEventListener("pagehide", () => flushSupabaseBackup("fermeture-page"));
+}
+
+function markLocalCasesAsSynced() {
+  if (state && Array.isArray(state.cases)) {
+    state.cases.forEach((caseItem) => {
+      caseItem.syncRevision = caseItem.localRevision;
+    });
+    saveState({ skipCloud: true });
+    if (typeof initializeLastKnownCasesComparable === "function") {
+      initializeLastKnownCasesComparable();
+    }
+  }
+}
+
+let offlineQueue = [];
+
+function loadOfflineQueue() {
+  try {
+    const raw = localStorage.getItem("nimr-sav-offline-queue");
+    offlineQueue = raw ? JSON.parse(raw) : [];
+  } catch (error) {
+    offlineQueue = [];
+  }
+}
+
+function saveOfflineQueue() {
+  try {
+    localStorage.setItem("nimr-sav-offline-queue", JSON.stringify(offlineQueue));
+  } catch (error) {
+    console.warn("Impossible de sauvegarder la file offline", error);
+  }
+}
+
+function enqueueOfflineAction(type = "sync_push", description = "Mise à jour des données") {
+  loadOfflineQueue();
+  if (type === "sync_push" && offlineQueue.some(action => action.type === "sync_push" && action.status === "pending")) {
+    return;
+  }
+  const action = {
+    id: uid("offline-action"),
+    timestamp: new Date().toISOString(),
+    type,
+    description,
+    status: "pending",
+    attempts: 0,
+    error: ""
+  };
+  offlineQueue.push(action);
+  saveOfflineQueue();
+  if (typeof renderSyncStatusStrip === "function") renderSyncStatusStrip();
+}
+
+let isProcessingOfflineQueue = false;
+
+async function processOfflineQueue() {
+  if (isProcessingOfflineQueue) return;
+  loadOfflineQueue();
+  const pending = offlineQueue.filter(action => action.status === "pending" || action.status === "failed");
+  if (!pending.length) return;
+
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    return;
+  }
+
+  isProcessingOfflineQueue = true;
+  for (const action of pending) {
+    action.status = "processing";
+    action.attempts = (action.attempts || 0) + 1;
+    saveOfflineQueue();
+    if (typeof renderSyncStatusStrip === "function") renderSyncStatusStrip();
+
+    try {
+      if (action.type === "sync_push") {
+        await autoBackupToSupabase("retry-offline-queue", { force: true });
+      }
+      action.status = "success";
+      logSyncSuccess(action);
+    } catch (err) {
+      action.status = "failed";
+      action.error = err.message || String(err);
+      logSyncFailure(action, err);
+      saveOfflineQueue();
+      if (typeof renderSyncStatusStrip === "function") renderSyncStatusStrip();
+      break;
+    }
+  }
+
+  offlineQueue = offlineQueue.filter(action => action.status !== "success");
+  saveOfflineQueue();
+  isProcessingOfflineQueue = false;
+  if (typeof renderSyncStatusStrip === "function") renderSyncStatusStrip();
+}
+
+function logSyncSuccess(action) {
+  if (!state.syncLog) state.syncLog = [];
+  const entry = {
+    id: uid("sync-log"),
+    at: new Date().toISOString(),
+    status: "success",
+    source: "offline_queue",
+    reason: "retry",
+    items: state.cases.length,
+    details: `Sync réussie (action offline : ${action.description})`
+  };
+  state.syncLog.unshift(entry);
+  state.syncLog = state.syncLog.slice(0, 100);
+  saveState({ skipCloud: true });
+}
+
+function logSyncFailure(action, error) {
+  if (!state.syncLog) state.syncLog = [];
+  const entry = {
+    id: uid("sync-log"),
+    at: new Date().toISOString(),
+    status: "failed",
+    source: "offline_queue",
+    reason: "retry",
+    details: `Échec sync (action offline : ${action.description}). Erreur: ${error.message || error}`
+  };
+  state.syncLog.unshift(entry);
+  state.syncLog = state.syncLog.slice(0, 100);
+  saveState({ skipCloud: true });
+}
+
+function logSyncConflict(caseId, details) {
+  if (!state.syncLog) state.syncLog = [];
+  const entry = {
+    id: uid("sync-log"),
+    at: new Date().toISOString(),
+    status: "conflict",
+    source: "sync",
+    reason: "conflict",
+    details: `Conflit détecté pour le dossier ${caseId}. ${details}`
+  };
+  state.syncLog.unshift(entry);
+  state.syncLog = state.syncLog.slice(0, 100);
+}
+
+if (typeof window !== "undefined") {
+  window.markLocalCasesAsSynced = markLocalCasesAsSynced;
+  window.enqueueOfflineAction = enqueueOfflineAction;
+  window.processOfflineQueue = processOfflineQueue;
+  window.logSyncConflict = logSyncConflict;
+  window.offlineQueue = offlineQueue;
 }

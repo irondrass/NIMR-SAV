@@ -613,11 +613,11 @@ async function parseVehicleDatabaseFile(file) {
 }
 
 async function loadBundledVehicleDatabase() {
-  updateVehicleImportStatus("Chargement de la base véhicules...");
+  updateVehicleImportStatus("Vérification base véhicules locale...");
   try {
     const response = await fetch(VEHICLE_DATA_URL, { cache: "no-store" });
     if (response.status === 404) {
-      clearBundledVehicleDatabase();
+      clearBundledVehicleDatabase("empty");
       return;
     }
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -625,31 +625,36 @@ async function loadBundledVehicleDatabase() {
       ? await response.text()
       : JSON.stringify(await response.json());
     if (!String(payload || "").trim()) {
-      clearBundledVehicleDatabase();
+      clearBundledVehicleDatabase("empty");
       return;
     }
     const records = JSON.parse(payload);
     if (!Array.isArray(records) || records.length === 0) {
-      clearBundledVehicleDatabase();
+      clearBundledVehicleDatabase("empty");
       return;
     }
     setVehicleRecords(records, "base locale");
   } catch (error) {
     console.warn("Base véhicules locale non chargée", error);
-    clearBundledVehicleDatabase();
+    clearBundledVehicleDatabase("error");
   }
 }
 
-function clearBundledVehicleDatabase() {
+function clearBundledVehicleDatabase(reason = "empty") {
   vehicleRecords = [];
   vehicleDatabaseLoaded = false;
-  updateVehicleImportStatus("Importez la base véhicules pour chercher par VIN ou immatriculation");
+  vehicleDatabaseStatus = reason === "error" ? "error" : "empty";
+  const message = reason === "error"
+    ? "Base véhicules indisponible. Import local CSV/XLSX possible."
+    : "Base véhicules publique vide. Import local CSV/XLSX disponible.";
+  updateVehicleImportStatus(message);
   renderQuickVinResults();
 }
 
 function setVehicleRecords(records, source = "") {
   vehicleRecords = records.map(normalizeVehicleRecord).filter((record) => record.vin || record.plate);
   vehicleDatabaseLoaded = true;
+  vehicleDatabaseStatus = "local";
   const label = `${vehicleRecords.length} véhicules chargés${source ? ` (${source})` : ""}`;
   updateVehicleImportStatus(label);
   renderQuickVinResults();
@@ -811,7 +816,11 @@ function renderQuickVinResults() {
   const query = getQuickVehicleLookupQuery(form);
   if (!vehicleRecords.length) {
     target.innerHTML = "";
-    status.textContent = vehicleDatabaseLoaded ? "Aucun véhicule dans la base" : "Importez la base véhicules pour chercher par VIN ou immatriculation";
+    status.textContent = vehicleDatabaseLoaded
+      ? "Base véhicules importée vide."
+      : vehicleDatabaseStatus === "error"
+        ? "Base véhicules indisponible. Import local CSV/XLSX possible."
+        : "Base véhicules publique vide. Import local CSV/XLSX disponible.";
     return;
   }
   if (normalizeVehicleKey(query).length < 1) {

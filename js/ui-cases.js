@@ -264,6 +264,7 @@ function renderSavDashboardLoads() {
 }
 
 function bindSavDashboardFilters() {
+  if (typeof populateCaseStatusFilters === "function") populateCaseStatusFilters();
   const bindings = [
     ["#sav-dashboard-period", "savDashboardPeriod", "today"],
     ["#sav-dashboard-type-filter", "savDashboardTypeFilter", "all"],
@@ -272,11 +273,12 @@ function bindSavDashboardFilters() {
   bindings.forEach(([selector, key, fallback]) => {
     const control = $(selector);
     if (!control) return;
-    control.value = state.ui?.[key] || fallback;
+    control.value = key.includes("Status") ? normalizeCaseStatusFilter(state.ui?.[key]) : (state.ui?.[key] || fallback);
     if (control.dataset.bound === "true") return;
     control.dataset.bound = "true";
     control.addEventListener("change", () => {
-      state.ui[key] = control.value || fallback;
+      state.ui[key] = key.includes("Status") ? normalizeCaseStatusFilter(control.value) : (control.value || fallback);
+      control.value = state.ui[key];
       saveState();
       renderSavKpis();
       renderSavDashboardLoads();
@@ -345,12 +347,11 @@ function buildSavPerformanceDashboard(now = new Date()) {
 }
 
 function getSavDashboardFilters() {
-  const allowedStatuses = new Set(["all", ...Object.keys(statusLabels)]);
   const allowedTypes = new Set(["all", "assurance", "client", "vidange", "mechanical_client", "electrical_client", "diagnostic", "garantie"]);
   const allowedPeriods = new Set(["today", "week", "month"]);
   return {
     period: allowedPeriods.has(state.ui?.savDashboardPeriod) ? state.ui.savDashboardPeriod : "today",
-    status: allowedStatuses.has(state.ui?.savDashboardStatusFilter) ? state.ui.savDashboardStatusFilter : "all",
+    status: normalizeCaseStatusFilter(state.ui?.savDashboardStatusFilter),
     type: allowedTypes.has(state.ui?.savDashboardTypeFilter) ? state.ui.savDashboardTypeFilter : "all",
   };
 }
@@ -438,9 +439,10 @@ function caseHasPendingAgreement(item) {
 
 function isDashboardQualityPending(item) {
   if (!item || item.flags?.qualityApproved) return false;
-  const qualityStatus = item.receptionWorkflow?.qualityStatus || "";
+  const qualityStatus = normalizeQualityStatus(item.receptionWorkflow?.qualityStatus);
+  if (qualityStatus === "rework" || qualityStatus === "rejected") return true;
   if (!item.flags?.workCompleted) return false;
-  return ["", "not_started", "in_progress", "pending", "rejected"].includes(qualityStatus);
+  return ["not_started", "in_progress"].includes(qualityStatus);
 }
 
 function caseWithoutScheduledNextAction(item, now = new Date()) {
@@ -522,6 +524,59 @@ function getCaseTypeSummary(item) {
   if (!claims.length) return getClaimTypeLabel("assurance");
   const types = [...new Set(claims.map((claim) => claim.type || "assurance"))];
   return types.map(getClaimTypeLabel).join(" + ");
+}
+
+function normalizeCaseSearchText(value) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+function normalizeCaseSearchIdentifier(value) {
+  return normalizeIdentifierValue(value).replace(/[^A-Z0-9]/g, "");
+}
+
+function getCaseSearchTokens(item) {
+  const claims = normalizeRepairClaims(item?.claims || [], item);
+  const customerClaims = Array.isArray(item?.customerClaims) ? item.customerClaims : [];
+  return [
+    item?.clientName,
+    item?.ownerName,
+    item?.driverName,
+    item?.phone,
+    item?.driverPhone,
+    item?.vehicle,
+    item?.plate,
+    item?.vin,
+    item?.color,
+    item?.orNavNumber,
+    getCaseTypeSummary(item),
+    statusLabels[getCaseStatus(item)],
+    ...claims.flatMap((claim) => [
+      claim.number,
+      claim.orNumber,
+      claim.estimateNumber,
+      claim.title,
+      claim.type,
+      getClaimTypeLabel(claim.type),
+    ]),
+    ...customerClaims.flatMap((claim) => [claim.title, claim.text, claim.status]),
+  ].filter(Boolean);
+}
+
+function caseMatchesGlobalSearch(item, query) {
+  const raw = String(query || "").trim();
+  if (!raw) return true;
+  const textNeedle = normalizeCaseSearchText(raw);
+  const identifierNeedle = normalizeCaseSearchIdentifier(raw);
+  return getCaseSearchTokens(item).some((token) => {
+    const textHaystack = normalizeCaseSearchText(token);
+    const identifierHaystack = normalizeCaseSearchIdentifier(token);
+    return (textNeedle && textHaystack.includes(textNeedle))
+      || (identifierNeedle && identifierHaystack.includes(identifierNeedle));
+  });
 }
 
 function getCaseBookings(item) {
@@ -1272,14 +1327,12 @@ function getNextBookingTimeLabel(bookings, now = new Date()) {
 
 function renderCases() {
   const list = $("#case-list");
-  const search = $("#case-search").value.trim().toLowerCase();
-  const statusFilter = state.ui?.caseStatusFilter || "all";
+  const search = $("#case-search").value.trim();
+  const statusFilter = normalizeCaseStatusFilter(state.ui?.caseStatusFilter);
   const typeFilter = state.ui?.caseTypeFilter || "all";
   const cases = state.cases
     .filter((item) => {
-      const typeSummary = getCaseTypeSummary(item);
-      const haystack = `${item.clientName} ${item.ownerName} ${item.driverName} ${item.driverPhone} ${item.vehicle} ${item.plate} ${item.phone} ${item.vin} ${item.color} ${item.orNavNumber} ${typeSummary}`.toLowerCase();
-      const matchesText = haystack.includes(search);
+      const matchesText = caseMatchesGlobalSearch(item, search);
       const matchesStatus = statusFilter === "all" || getCaseStatus(item) === statusFilter;
       const matchesType = caseMatchesTypeFilter(item, typeFilter);
       return matchesText && matchesStatus && matchesType;
@@ -1374,6 +1427,27 @@ function caseOperationalAlerts(item, now = new Date()) {
       title: 'Dossier bloqué',
       details: `${label} · ${statusLabel} · ${getDashboardBlockerLabel(item)}`,
       when: item.updatedAt || item.createdAt,
+    });
+  }
+  const qualityStatus = normalizeQualityStatus(item.receptionWorkflow?.qualityStatus);
+  if (qualityStatus === "rejected") {
+    alerts.push({
+      caseId: item.id,
+      level: "danger",
+      priority: 1,
+      title: "QC refusé",
+      details: `${label} · ${item.receptionWorkflow?.qualityReturnReason || "Motif à traiter"}`,
+      when: item.receptionWorkflow?.qualityReviewedAt || item.updatedAt || item.createdAt,
+    });
+  }
+  if (qualityStatus === "rework") {
+    alerts.push({
+      caseId: item.id,
+      level: "warn",
+      priority: 2,
+      title: "Retour atelier / retravail",
+      details: `${label} · Reprise à suivre avant revalidation QC`,
+      when: item.receptionWorkflow?.qualityReworkStartedAt || item.updatedAt || item.createdAt,
     });
   }
   if (item.appointment?.start && !item.flags.received) {
@@ -2085,11 +2159,11 @@ function renderKanban() {
     return;
   }
   const columns = [
-    { key: "reception", label: "Réception", statuses: ["estimate", "awaitingVehicle", "vehicleReceived"] },
+    { key: "reception", label: "Réception", statuses: ["receptionDraft", "awaitingVehicle", "vehicleReceived"] },
     { key: "approvals", label: "Accords", statuses: ["approvals"] },
     { key: "appointment", label: "RDV", statuses: ["appointment", "appointmentScheduled", "workScheduled", "noShow"] },
     { key: "work", label: "En travaux", statuses: ["work"] },
-    { key: "quality", label: "Qualité", statuses: ["quality"] },
+    { key: "quality", label: "Qualité", statuses: ["quality", "qualityRejected", "qualityRework"] },
     { key: "delivered", label: "Livré", statuses: ["delivered"] },
   ];
   const dashboardCases = getSavDashboardCases(getSavDashboardRange()).periodCases;
@@ -2634,7 +2708,7 @@ function getWorkflowStepsForCase(item) {
   const hasInsurance = workflowClaims.some((claim) => !isClientOnlyRepairClaim(claim));
   if (!workflowClaims.length || hasInsurance) return WORKFLOW;
   return [
-    ["created", "Fiche dossier"],
+    ["created", "Réception à compléter"],
     ["clientApproved", "Validation client/interne"],
     ["appointment", "RDV fixé"],
     ["vehiclePending", "En attente réception"],

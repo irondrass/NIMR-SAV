@@ -20,7 +20,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v23.2.0";
+const APP_VERSION = "v23.2.1";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const WORKSHOP_NAME = "NIMR SAV";
@@ -178,7 +178,7 @@ const FLAG_HISTORY_EVENTS = {
 };
 
 const WORKFLOW = [
-  ["created", "Fiche dossier"],
+  ["created", "Réception à compléter"],
   ["photos", "Photos avant réparation"],
   ["expert", "Expert assigné"],
   ["expertApproved", "Accord expert"],
@@ -381,24 +381,120 @@ const SERVICE_TYPE_CONFIG = {
 const ESTIMATE_PLANNING_KEYS = ["body", "oilService", "mechanical", "electrical", "prep", "paint", "reassembly", "finish"];
 const ESTIMATE_ALLOWED_KEYS = [...ESTIMATE_PLANNING_KEYS, "quality"];
 
-const statusLabels = {
-  estimate: "Fiche dossier",
-  approvals: "Accords",
-  appointment: "RDV à fixer",
-  appointmentScheduled: "RDV fixé",
-  noShow: "Client absent",
-  awaitingVehicle: "En attente réception véhicule",
-  vehicleReceived: "Véhicule reçu",
-  workScheduled: "Travaux planifiés",
-  work: "En travaux",
-  quality: "Contrôle qualité",
-  delivered: "Livré",
-  invoiced: "Clôturé & Facturé",
-};
+const CASE_STATUS_DEFINITIONS = Object.freeze([
+  ["receptionDraft", "Réception à compléter"],
+  ["approvals", "Accords à finaliser"],
+  ["appointment", "RDV à fixer"],
+  ["appointmentScheduled", "RDV fixé"],
+  ["noShow", "Client absent"],
+  ["awaitingVehicle", "En attente réception"],
+  ["vehicleReceived", "Véhicule reçu"],
+  ["workScheduled", "Travaux planifiés"],
+  ["work", "En travaux"],
+  ["quality", "Contrôle qualité"],
+  ["qualityRejected", "QC refusé"],
+  ["qualityRework", "Retour atelier / retravail"],
+  ["delivered", "Livré"],
+  ["invoiced", "Clôturé & facturé"],
+]);
+const CASE_STATUS_LABELS = Object.freeze(Object.fromEntries(CASE_STATUS_DEFINITIONS));
+const CASE_STATUS_KEYS = Object.freeze(CASE_STATUS_DEFINITIONS.map(([key]) => key));
+const CASE_STATUS_ALIASES = Object.freeze({ estimate: "receptionDraft" });
+const CASE_STATUS_TRANSITIONS = Object.freeze({
+  receptionDraft: ["approvals", "appointment", "appointmentScheduled"],
+  approvals: ["appointment", "appointmentScheduled", "receptionDraft"],
+  appointment: ["appointmentScheduled", "approvals"],
+  appointmentScheduled: ["awaitingVehicle", "noShow", "vehicleReceived"],
+  noShow: ["appointment"],
+  awaitingVehicle: ["vehicleReceived", "appointment"],
+  vehicleReceived: ["workScheduled", "work"],
+  workScheduled: ["work", "vehicleReceived"],
+  work: ["quality", "qualityRejected"],
+  quality: ["qualityRejected", "delivered"],
+  qualityRejected: ["qualityRework"],
+  qualityRework: ["work", "quality"],
+  delivered: ["invoiced"],
+  invoiced: [],
+});
+const statusLabels = CASE_STATUS_LABELS;
+
+const QUALITY_STATUS_VALUES = Object.freeze(["not_started", "in_progress", "validated", "rejected", "rework"]);
+const QUALITY_STATUS_ALIASES = Object.freeze({
+  pending: "not_started",
+  approved: "validated",
+  refused: "rejected",
+  return_to_workshop: "rework",
+});
+
+function normalizeCaseStatus(value, fallback = "receptionDraft") {
+  const raw = String(value || "").trim();
+  const normalized = CASE_STATUS_ALIASES[raw] || raw;
+  return CASE_STATUS_LABELS[normalized] ? normalized : fallback;
+}
+
+function normalizeCaseStatusFilter(value) {
+  const raw = String(value || "").trim();
+  if (!raw || raw === "all") return "all";
+  return normalizeCaseStatus(raw, "all");
+}
+
+function getCaseStatusLabel(value) {
+  return CASE_STATUS_LABELS[normalizeCaseStatus(value)] || CASE_STATUS_LABELS.receptionDraft;
+}
+
+function getCaseStatusOptions() {
+  return CASE_STATUS_DEFINITIONS.map(([value, label]) => ({ value, label }));
+}
+
+function getCaseStatusTransitions(value) {
+  return CASE_STATUS_TRANSITIONS[normalizeCaseStatus(value)] || [];
+}
+
+function isValidCaseStatusTransition(fromStatus, toStatus) {
+  const from = normalizeCaseStatus(fromStatus);
+  const to = normalizeCaseStatus(toStatus);
+  return getCaseStatusTransitions(from).includes(to);
+}
+
+function normalizeQualityStatus(value) {
+  const raw = String(value || "").trim();
+  const normalized = QUALITY_STATUS_ALIASES[raw] || raw;
+  return QUALITY_STATUS_VALUES.includes(normalized) ? normalized : "not_started";
+}
+
+function getCaseStatus(item) {
+  if (!item) return "receptionDraft";
+  const flags = item.flags || {};
+  const rw = item.receptionWorkflow || {};
+  const qualityStatus = normalizeQualityStatus(rw.qualityStatus);
+  if (flags.invoiced) return "invoiced";
+  if (flags.delivered) return "delivered";
+  if (qualityStatus === "rejected") return "qualityRejected";
+  if (qualityStatus === "rework") return "qualityRework";
+  if (flags.qualityApproved || qualityStatus === "validated") return "quality";
+  if (flags.workCompleted || (rw.sentToWorkshopAt && qualityStatus === "in_progress")) return "quality";
+  if (flags.workStarted) return "work";
+
+  const bookings = Array.isArray(state?.bookings) ? state.bookings : [];
+  const hasAssignments = bookings.some((booking) => booking.caseId === item.id && booking.type !== "leave");
+  if (flags.received) return hasAssignments ? "workScheduled" : "vehicleReceived";
+  if (item.appointmentStatus === "no_show") return "noShow";
+
+  if (item.appointment) {
+    const appointmentStart = new Date(item.appointment.start);
+    const appointmentIsDue = !Number.isNaN(appointmentStart.getTime()) && appointmentStart <= new Date();
+    return appointmentIsDue ? "awaitingVehicle" : "appointmentScheduled";
+  }
+
+  if (flags.expertApproved && flags.clientApproved) return "appointment";
+  if (item.expertName || hasRepairClaims(item)) return "approvals";
+  return "receptionDraft";
+}
 
 const DAY_LABELS = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"];
 let vehicleRecords = [];
 let vehicleDatabaseLoaded = false;
+let vehicleDatabaseStatus = "empty";
 
 let photoDbPromise = null;
 const photoObjectUrls = new Map();
@@ -1606,15 +1702,14 @@ function ensureMinimumEquipmentResources(resources, defaults, role, minimum) {
 
 function normalizeUiPreferences(ui = {}) {
   const allowedSorts = new Set(["recent", "oldest", "client", "appointment"]);
-  const allowedStatuses = new Set(["all", ...Object.keys(statusLabels)]);
   const allowedTypes = new Set(["all", "assurance", "client", "vidange", "mechanical_client", "electrical_client", "diagnostic", "garantie"]);
   const allowedDashboardPeriods = new Set(["today", "week", "month"]);
   return {
-    caseStatusFilter: allowedStatuses.has(ui.caseStatusFilter) ? ui.caseStatusFilter : "all",
+    caseStatusFilter: normalizeCaseStatusFilter(ui.caseStatusFilter),
     caseTypeFilter: allowedTypes.has(ui.caseTypeFilter) ? ui.caseTypeFilter : "all",
     caseSort: allowedSorts.has(ui.caseSort) ? ui.caseSort : "recent",
     savDashboardPeriod: allowedDashboardPeriods.has(ui.savDashboardPeriod) ? ui.savDashboardPeriod : "today",
-    savDashboardStatusFilter: allowedStatuses.has(ui.savDashboardStatusFilter) ? ui.savDashboardStatusFilter : "all",
+    savDashboardStatusFilter: normalizeCaseStatusFilter(ui.savDashboardStatusFilter),
     savDashboardTypeFilter: allowedTypes.has(ui.savDashboardTypeFilter) ? ui.savDashboardTypeFilter : "all",
     technicianId: typeof ui.technicianId === "string" ? ui.technicianId : "",
     technicianDate: /^\d{4}-\d{2}-\d{2}$/.test(String(ui.technicianDate || "")) ? ui.technicianDate : todayKey(new Date()),
@@ -1993,12 +2088,20 @@ function normalizeReceptionWorkflow(raw) {
       ? raw.followupNotes.map((n) => ({ at: n.at || "", by: n.by || "", text: n.text || "" }))
       : [],
     // Étape 10 — contrôle qualité
-    qualityStatus: ["not_started", "in_progress", "validated", "rejected"].includes(raw.qualityStatus)
-      ? raw.qualityStatus
-      : "not_started",
+    qualityStatus: normalizeQualityStatus(raw.qualityStatus),
     qualityReviewedAt: raw.qualityReviewedAt || "",
     qualityReturnRequestedAt: raw.qualityReturnRequestedAt || "",
     qualityReturnReason: raw.qualityReturnReason || "",
+    qualityReworkStartedAt: raw.qualityReworkStartedAt || "",
+    qualityRevalidatedAt: raw.qualityRevalidatedAt || "",
+    qualityReviewHistory: Array.isArray(raw.qualityReviewHistory)
+      ? raw.qualityReviewHistory.map((entry) => ({
+          at: entry.at || "",
+          by: entry.by || "",
+          status: normalizeQualityStatus(entry.status),
+          reason: String(entry.reason || "").trim(),
+        }))
+      : [],
     readyForDeliveryAt: raw.readyForDeliveryAt || "",
     // Étape 11 — livraison
     deliverySheetPrintedAt: raw.deliverySheetPrintedAt || "",
@@ -3273,7 +3376,8 @@ function canAdvanceReceptionStep(caseItem, stepKey, actor) {
     case 10: return rw.sentToWorkshopAt ? { ok: true, message: "" } : { ok: false, message: "Le véhicule n'est pas encore en atelier." };
     case 11: {
       const deliveryOverrideRoles = ["admin", "chef_atelier", "directeur_sav"];
-      const qcOk = rw.qualityStatus === "validated" || deliveryOverrideRoles.includes(role);
+      if (isCaseBlocked(caseItem)) return { ok: false, message: `Résoudre le blocage avant livraison : ${getCaseBlockerLabel(caseItem) || "dossier bloqué"}.` };
+      const qcOk = normalizeQualityStatus(rw.qualityStatus) === "validated" || f.qualityApproved;
       const noOpenClaims = !(caseItem.customerClaims || []).some((c) => ["open", "in_progress", "unresolved"].includes(c.status));
       if (!qcOk) return { ok: false, message: "Le contrôle qualité n'est pas encore validé." };
       if (!noOpenClaims && !deliveryOverrideRoles.includes(role)) return { ok: false, message: "Il reste des réclamations client non résolues." };
@@ -3406,20 +3510,50 @@ function advanceReceptionWorkflow(caseId, action, payload = {}) {
       if (typeof addAuditLog === "function") addAuditLog("reception.vehicle_status_followed", "Note de suivi", payload.text, { caseId });
       return { ok: true, message: "" };
     }
+    case "return_to_workshop": {
+      return advanceReceptionWorkflow(caseId, "update_quality_status", { ...payload, status: "rework" });
+    }
     case "update_quality_status": {
-      const validStatuses = ["not_started", "in_progress", "validated", "rejected"];
-      if (!validStatuses.includes(payload.status)) return { ok: false, message: "Statut qualité invalide." };
-      rw.qualityStatus = payload.status;
+      const status = normalizeQualityStatus(payload.status);
+      const previousStatus = normalizeQualityStatus(rw.qualityStatus);
+      const reason = String(payload.reason || "").trim();
+      const statusLabelsMap = {
+        not_started: "QC remis à zéro",
+        in_progress: "QC en cours",
+        validated: previousStatus === "rejected" || previousStatus === "rework" ? "QC revalidé" : "QC validé",
+        rejected: "QC refusé",
+        rework: "Retour atelier / retravail",
+      };
+      if (!QUALITY_STATUS_VALUES.includes(status)) return { ok: false, message: "Statut qualité invalide." };
+      if (status === "rejected" && !reason) return { ok: false, message: "Motif obligatoire pour refuser le contrôle qualité." };
+      rw.qualityStatus = status;
       rw.qualityReviewedAt = now;
-      if (payload.status === "validated") {
+      rw.qualityReviewHistory = Array.isArray(rw.qualityReviewHistory) ? rw.qualityReviewHistory : [];
+      rw.qualityReviewHistory.push({ at: now, by: actor.userId, status, reason });
+      if (status === "validated") {
         item.flags.qualityApproved = true;
         rw.readyForDeliveryAt = now;
+        if (previousStatus === "rejected" || previousStatus === "rework") rw.qualityRevalidatedAt = now;
         if (typeof recordFlagHistory === "function") recordFlagHistory(item, "qualityApproved", true);
-      } else if (payload.status === "rejected") {
-        rw.qualityReturnRequestedAt = now;
-        rw.qualityReturnReason = payload.reason || "";
+      } else {
+        if (item.flags.qualityApproved && typeof recordFlagHistory === "function") recordFlagHistory(item, "qualityApproved", false);
+        item.flags.qualityApproved = false;
+        item.flags.delivered = false;
+        rw.readyForDeliveryAt = "";
       }
-      if (typeof addAuditLog === "function") addAuditLog("quality.reception_reviewed", `Qualité: ${payload.status}`, payload.reason || "", { caseId });
+      if (status === "rejected") {
+        rw.qualityReturnRequestedAt = now;
+        rw.qualityReturnReason = reason;
+      } else if (status === "rework") {
+        rw.qualityReworkStartedAt = now;
+        rw.qualityReturnReason = reason || rw.qualityReturnReason || "";
+        if (item.flags.workCompleted && typeof recordFlagHistory === "function") recordFlagHistory(item, "workCompleted", false);
+        item.flags.workCompleted = false;
+        item.flags.workStarted = true;
+        if (!rw.sentToWorkshopAt) rw.sentToWorkshopAt = now;
+      }
+      if (typeof addAuditLog === "function") addAuditLog("quality.reception_reviewed", statusLabelsMap[status], reason, { caseId });
+      if (typeof addHistory === "function") addHistory(item, "quality.reception_reviewed", statusLabelsMap[status], reason);
       return { ok: true, message: "" };
     }
     case "mark_delivery_sheet_printed": {
@@ -3434,6 +3568,10 @@ function advanceReceptionWorkflow(caseId, action, payload = {}) {
       return { ok: true, message: "" };
     }
     case "deliver_vehicle": {
+      if (isCaseBlocked(item)) return { ok: false, message: `Résoudre le blocage avant livraison : ${getCaseBlockerLabel(item) || "dossier bloqué"}.` };
+      const qcOk = item.flags.qualityApproved || normalizeQualityStatus(rw.qualityStatus) === "validated";
+      if (!qcOk) return { ok: false, message: "Le contrôle qualité doit être validé avant livraison." };
+      item.flags.qualityApproved = true;
       item.flags.delivered = true;
       rw.deliveredAt = now;
       rw.deliveredBy = actor.userId;
@@ -3448,6 +3586,15 @@ function advanceReceptionWorkflow(caseId, action, payload = {}) {
 }
 
 if (typeof window !== "undefined") {
+  window.CASE_STATUS_DEFINITIONS = CASE_STATUS_DEFINITIONS;
+  window.CASE_STATUS_TRANSITIONS = CASE_STATUS_TRANSITIONS;
+  window.getCaseStatus = getCaseStatus;
+  window.getCaseStatusOptions = getCaseStatusOptions;
+  window.getCaseStatusLabel = getCaseStatusLabel;
+  window.normalizeCaseStatus = normalizeCaseStatus;
+  window.normalizeCaseStatusFilter = normalizeCaseStatusFilter;
+  window.isValidCaseStatusTransition = isValidCaseStatusTransition;
+  window.normalizeQualityStatus = normalizeQualityStatus;
   window.getReceptionWorkflowStep = getReceptionWorkflowStep;
   window.getReceptionStepStatus = getReceptionStepStatus;
   window.canAdvanceReceptionStep = canAdvanceReceptionStep;

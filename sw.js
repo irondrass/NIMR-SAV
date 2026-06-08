@@ -1,4 +1,4 @@
-const CACHE_NAME = "nimr-sav-v23.2.0-sav-performance-dashboard";
+const CACHE_NAME = "nimr-sav-v23.2.1-reception-workflow-qa-status-stabilization";
 const ASSETS = [
   "./",
   "./index.html",

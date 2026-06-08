@@ -7,6 +7,7 @@ function initApp() {
     bindCaseList();
     bindCaseCreation();
     bindQuickCreateMode();
+    populateCaseStatusFilters();
     bindCaseFilters();
     bindPlanningToolbar();
     bindWorkshopForms();
@@ -159,7 +160,7 @@ function bindCaseCreation() {
     const hasEstimateFile = estimateFile && estimateFile.name;
     const orderType = data.get("orderType") || "vidange";
     const orderTitle = normalizeTextInputValue(data.get("orderTitle")) || getClaimTypeLabel(orderType);
-    const candidate = {
+    let candidate = {
       clientName: normalizeTextInputValue(data.get("clientName")),
       phone: normalizeTextInputValue(data.get("phone")),
       ownerName: normalizeTextInputValue(data.get("ownerName")),
@@ -172,30 +173,16 @@ function bindCaseCreation() {
       vin: normalizeIdentifierValue(data.get("vin")),
       orNavNumber: normalizeIdentifierValue(data.get("orNavNumber")),
     };
-    const visibleVehicleIdentity = candidate.plate.replace(/[^A-Z0-9]/gi, "").toUpperCase();
-    if (!candidate.vin && /^[A-HJ-NPR-Z0-9]{17}$/.test(visibleVehicleIdentity)) {
-      candidate.vin = visibleVehicleIdentity;
-      candidate.plate = "";
-    }
-
-    if (!candidate.clientName) {
-      notifyUser("Le nom du client est obligatoire pour créer un dossier. Renseignez le propriétaire ou la société.", "error");
-      form.elements.clientName?.focus();
+    const validation = validateReceptionCaseCandidate(candidate);
+    candidate = validation.normalized;
+    if (!validation.ok) {
+      renderFormValidationErrors(form, validation, "case-form-errors");
+      notifyUser(validation.messages.join("\n"), "error");
       return;
     }
-    if (!candidate.vehicle && !candidate.plate && !candidate.vin) {
-      notifyUser("Renseignez au moins le véhicule, l'immatriculation ou le VIN avant de créer le dossier.", "error");
-      form.elements.vehicle?.focus();
-      return;
-    }
-    if (!candidate.plate && !candidate.vin) {
-      notifyUser("Dossier créé sans immatriculation/VIN : complétez l'identité véhicule avant le planning.", "warn");
-    }
+    renderFormValidationErrors(form, validation, "case-form-errors");
     if (!candidate.vehicle) {
       candidate.vehicle = "Véhicule à compléter";
-    }
-    if (!candidate.plate && !candidate.vin && hasEstimateFile) {
-      notifyUser("Le devis a été importé, mais aucun VIN ou immatriculation n'a été détecté.", "warn");
     }
     const duplicate = findDuplicateCase(candidate);
     if (duplicate) {
@@ -345,6 +332,32 @@ function makeQuickEstimateSourceFile(file) {
   };
 }
 
+function populateCaseStatusFilters() {
+  const options = typeof getCaseStatusOptions === "function"
+    ? getCaseStatusOptions()
+    : Object.entries(statusLabels || {}).map(([value, label]) => ({ value, label }));
+  ["#case-status-filter", "#sav-dashboard-status-filter"].forEach((selector) => {
+    const select = $(selector);
+    if (!select || select.dataset.statusOptionsPopulated === "true") return;
+    const current = typeof normalizeCaseStatusFilter === "function"
+      ? normalizeCaseStatusFilter(select.value || state.ui?.caseStatusFilter || "all")
+      : (select.value || "all");
+    select.replaceChildren();
+    const all = document.createElement("option");
+    all.value = "all";
+    all.textContent = "Tous les statuts";
+    select.appendChild(all);
+    options.forEach(({ value, label }) => {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = label;
+      select.appendChild(option);
+    });
+    select.value = current;
+    select.dataset.statusOptionsPopulated = "true";
+  });
+}
+
 async function buildQuickEstimateCreationDraft(file, form) {
   const extracted = await extractEstimateTextFromFile(file);
   const claimType = form?.elements?.orderType?.value || "assurance";
@@ -484,14 +497,16 @@ function inferEstimateCreationMetadata(parsed, extracted = {}) {
 }
 
 function bindCaseFilters() {
+  populateCaseStatusFilters();
   const search = $("#case-search");
   search?.addEventListener("input", renderCases);
 
   const status = $("#case-status-filter");
   if (status) {
-    status.value = state.ui?.caseStatusFilter || "all";
+    status.value = normalizeCaseStatusFilter(state.ui?.caseStatusFilter);
     status.addEventListener("change", () => {
-      state.ui.caseStatusFilter = status.value;
+      state.ui.caseStatusFilter = normalizeCaseStatusFilter(status.value);
+      status.value = state.ui.caseStatusFilter;
       saveState();
       renderCases();
     });
@@ -809,7 +824,7 @@ function registerServiceWorker() {
   });
   window.addEventListener("load", async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=23.2.0", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=23.2.1", { updateViaCache: "none" });
       registration.update?.();
       if (registration.waiting) showUpdateAvailable(registration);
       window.setInterval(() => registration.update?.(), 10 * 60 * 1000);

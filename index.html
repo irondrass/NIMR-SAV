@@ -16,8 +16,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <script src="js/version.js?v=23.2.0"></script>
-    <link rel="stylesheet" href="styles.css?v=23.2.0" />
+    <script src="js/version.js?v=23.2.1"></script>
+    <link rel="stylesheet" href="styles.css?v=23.2.1" />
   </head>
   <body>
     <a class="skip-link" href="#main-content">Aller au contenu principal</a>
@@ -149,7 +149,7 @@
 
               <div class="case-list-tools">
                 <div class="search-wrap">
-                  <input id="reception-case-search" type="search" placeholder="Rechercher un dossier..." aria-label="Rechercher un dossier" />
+                  <input id="reception-case-search" type="search" placeholder="Client, téléphone, immat., VIN, OR..." aria-label="Rechercher un dossier" />
                 </div>
               </div>
 
@@ -202,9 +202,11 @@
                   <input type="checkbox" id="quick-create-mode" checked />
                   <span>Mode guichet rapide : champs essentiels atelier</span>
                 </label>
+                <p class="required-hint">* Champs obligatoires. Identité véhicule minimale : immatriculation ou VIN.</p>
+                <p class="form-error-summary" id="case-form-errors" data-form-errors role="alert" hidden></p>
                 <label>
                   Client / société propriétaire <span class="required-marker">*</span>
-                  <input name="clientName" autocomplete="name" placeholder="Nom client ou société" />
+                  <input name="clientName" autocomplete="name" placeholder="Nom client ou société" required aria-describedby="case-form-errors" />
                 </label>
                 <label>
                   Téléphone client
@@ -216,7 +218,7 @@
                 </label>
                 <label>
                   Immatriculation ou VIN <span class="required-marker">*</span>
-                  <input name="plate" placeholder="Ex. 123 TU 4567" />
+                  <input name="plate" placeholder="Ex. 123 TU 4567" aria-describedby="case-form-errors" />
                 </label>
                 <label>
                   Réf. OR
@@ -273,7 +275,7 @@
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M17 8 12 3 7 8" /><path d="M12 3v12" /></svg>
                   Importer base véhicules
                 </label>
-                <span class="muted" id="quick-vehicle-import-status">Chargement de la base véhicules...</span>
+                <span class="muted" id="quick-vehicle-import-status">Base véhicules publique vide. Import local CSV/XLSX disponible.</span>
                 <div class="vin-result-list" id="quick-vin-results"></div>
                 <button class="primary-button" type="submit">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
@@ -283,23 +285,12 @@
 
               <div class="case-list-tools" aria-label="Filtres dossiers">
                 <div class="search-wrap">
-                  <input id="case-search" type="search" placeholder="Rechercher un dossier" aria-label="Rechercher un dossier" />
+                  <input id="case-search" type="search" placeholder="Client, téléphone, immat., VIN, OR..." aria-label="Rechercher un dossier" />
                 </div>
                 <label>
                   Statut
                   <select id="case-status-filter" aria-label="Filtrer par statut">
                     <option value="all">Tous les statuts</option>
-                    <option value="estimate">Fiche dossier</option>
-                    <option value="approvals">Accords</option>
-                    <option value="appointment">RDV à fixer</option>
-                    <option value="appointmentScheduled">RDV fixé</option>
-                    <option value="noShow">Client absent</option>
-                    <option value="awaitingVehicle">En attente réception</option>
-                    <option value="vehicleReceived">Véhicule reçu</option>
-                    <option value="workScheduled">Travaux planifiés</option>
-                    <option value="work">En travaux</option>
-                    <option value="quality">Contrôle qualité</option>
-                    <option value="delivered">Livré</option>
                   </select>
                 </label>
                 <label>
@@ -371,18 +362,6 @@
                 Statut
                 <select id="sav-dashboard-status-filter" aria-label="Filtrer le dashboard par statut">
                   <option value="all">Tous les statuts</option>
-                  <option value="estimate">Fiche dossier</option>
-                  <option value="approvals">Accords</option>
-                  <option value="appointment">RDV à fixer</option>
-                  <option value="appointmentScheduled">RDV fixé</option>
-                  <option value="noShow">Client absent</option>
-                  <option value="awaitingVehicle">En attente réception</option>
-                  <option value="vehicleReceived">Véhicule reçu</option>
-                  <option value="workScheduled">Travaux planifiés</option>
-                  <option value="work">En travaux</option>
-                  <option value="quality">Contrôle qualité</option>
-                  <option value="delivered">Livré</option>
-                  <option value="invoiced">Clôturé & facturé</option>
                 </select>
               </label>
             </div>
@@ -759,7 +738,7 @@
                 <button class="ghost-button" type="button" id="supabase-signout">Déconnexion</button>
               </div>
               <p class="muted backup-warning">Avant chaque sauvegarde ou restauration cloud, l'application télécharge automatiquement une copie JSON locale de sécurité.</p>
-              <p class="muted backup-status" id="supabase-status">Initialisation Supabase...</p>
+              <p class="muted backup-status" id="supabase-status">Supabase non configuré : synchronisation cloud inactive.</p>
               <p class="muted" id="supabase-details">Exécutez le dernier supabase-schema.sql fourni avec cette version si le test indique que cloud_backups, Realtime, app_settings ou les politiques atelier manquent.</p>
             </section>
 
@@ -1246,21 +1225,21 @@
     </div>
 
     <script src="vendor/pdf.min.js" defer></script>
-    <script src="js/utils.js?v=23.2.0" defer></script>
-    <script src="js/state.js?v=23.2.0" defer></script>
-    <script src="js/ui-cases.js?v=23.2.0" defer></script>
-    <script src="js/estimate-import.js?v=23.2.0" defer></script>
-    <script src="js/ui-planning.js?v=23.2.0" defer></script>
-    <script src="js/ui-reception.js?v=23.2.0" defer></script>
-    <script src="js/photos.js?v=23.2.0" defer></script>
-    <script src="js/storage.js?v=23.2.0" defer></script>
-    <script src="js/planning.js?v=23.2.0" defer></script>
-    <script src="js/exports.js?v=23.2.0" defer></script>
-    <script src="js/business-rules-v2187.js?v=23.2.0" defer></script>
+    <script src="js/utils.js?v=23.2.1" defer></script>
+    <script src="js/state.js?v=23.2.1" defer></script>
+    <script src="js/ui-cases.js?v=23.2.1" defer></script>
+    <script src="js/estimate-import.js?v=23.2.1" defer></script>
+    <script src="js/ui-planning.js?v=23.2.1" defer></script>
+    <script src="js/ui-reception.js?v=23.2.1" defer></script>
+    <script src="js/photos.js?v=23.2.1" defer></script>
+    <script src="js/storage.js?v=23.2.1" defer></script>
+    <script src="js/planning.js?v=23.2.1" defer></script>
+    <script src="js/exports.js?v=23.2.1" defer></script>
+    <script src="js/business-rules-v2187.js?v=23.2.1" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
-    <script src="js/supabase-config.js?v=23.2.0" defer></script>
-    <script src="js/supabase-client.js?v=23.2.0" defer></script>
-    <script src="js/supabase-sync.js?v=23.2.0" defer></script>
-    <script src="app.js?v=23.2.0" defer></script>
+    <script src="js/supabase-config.js?v=23.2.1" defer></script>
+    <script src="js/supabase-client.js?v=23.2.1" defer></script>
+    <script src="js/supabase-sync.js?v=23.2.1" defer></script>
+    <script src="app.js?v=23.2.1" defer></script>
   </body>
 </html>

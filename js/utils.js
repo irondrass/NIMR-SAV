@@ -505,6 +505,149 @@ function normalizeIdentifierValue(value) {
   return normalizeTextInputValue(value).toUpperCase();
 }
 
+function normalizePhoneValue(value) {
+  return normalizeTextInputValue(value);
+}
+
+function normalizePlateValue(value) {
+  return normalizeIdentifierValue(value);
+}
+
+function normalizeVinValue(value) {
+  return normalizeIdentifierValue(value).replace(/[^A-Z0-9]/g, "");
+}
+
+function normalizeMileageValue(value) {
+  return normalizeIdentifierValue(value).replace(/[^\d]/g, "");
+}
+
+function isValidPhoneValue(value) {
+  const normalized = normalizePhoneValue(value);
+  if (!normalized) return true;
+  const digits = normalized.replace(/\D/g, "");
+  return digits.length >= 8 && digits.length <= 15 && /^\+?[\d\s().-]+$/.test(normalized);
+}
+
+function isValidPlateValue(value) {
+  const normalized = normalizePlateValue(value);
+  if (!normalized) return true;
+  const compact = normalized.replace(/[^A-Z0-9]/g, "");
+  return compact.length >= 3 && compact.length <= 16;
+}
+
+function isValidVinValue(value) {
+  const normalized = normalizeVinValue(value);
+  return !normalized || /^[A-HJ-NPR-Z0-9]{17}$/.test(normalized);
+}
+
+function isValidMileageValue(value) {
+  const raw = normalizeTextInputValue(value).replace(/\s+/g, "");
+  if (!raw) return true;
+  if (!/^\d+$/.test(raw)) return false;
+  const normalized = normalizeMileageValue(raw);
+  if (!normalized) return true;
+  const mileage = Number(normalized);
+  return Number.isInteger(mileage) && mileage >= 0 && mileage <= 9999999;
+}
+
+function normalizeReceptionCaseCandidate(candidate = {}) {
+  const normalized = {
+    ...candidate,
+    clientName: normalizeTextInputValue(candidate.clientName),
+    phone: normalizePhoneValue(candidate.phone),
+    ownerName: normalizeTextInputValue(candidate.ownerName),
+    driverName: normalizeTextInputValue(candidate.driverName),
+    driverPhone: normalizePhoneValue(candidate.driverPhone),
+    vehicle: normalizeTextInputValue(candidate.vehicle),
+    plate: normalizePlateValue(candidate.plate),
+    color: normalizeTextInputValue(candidate.color),
+    mileage: normalizeMileageValue(candidate.mileage),
+    vin: normalizeVinValue(candidate.vin),
+    orNavNumber: normalizeIdentifierValue(candidate.orNavNumber),
+    arrivalNotes: normalizeTextInputValue(candidate.arrivalNotes),
+  };
+  const plateAsIdentifier = normalized.plate.replace(/[^A-Z0-9]/g, "");
+  if (!normalized.vin && /^[A-HJ-NPR-Z0-9]{17}$/.test(plateAsIdentifier)) {
+    normalized.vin = plateAsIdentifier;
+    normalized.plate = "";
+  }
+  return normalized;
+}
+
+function validateReceptionCaseCandidate(candidate = {}) {
+  const normalized = normalizeReceptionCaseCandidate(candidate);
+  const errors = [];
+  const rawMileage = candidate.mileage;
+  if (!normalized.clientName) {
+    errors.push({ field: "clientName", message: "Le nom du client est obligatoire." });
+  }
+  if (!normalized.plate && !normalized.vin) {
+    errors.push({ field: "plate", message: "Renseignez une immatriculation ou un VIN avant de créer le dossier." });
+  }
+  if (normalized.phone && !isValidPhoneValue(normalized.phone)) {
+    errors.push({ field: "phone", message: "Le téléphone client doit contenir 8 à 15 chiffres." });
+  }
+  if (normalized.driverPhone && !isValidPhoneValue(normalized.driverPhone)) {
+    errors.push({ field: "driverPhone", message: "Le téléphone déposant doit contenir 8 à 15 chiffres." });
+  }
+  if (normalized.plate && !isValidPlateValue(normalized.plate)) {
+    errors.push({ field: "plate", message: "L'immatriculation doit contenir 3 à 16 caractères utiles." });
+  }
+  if (normalized.vin && !isValidVinValue(normalized.vin)) {
+    errors.push({ field: "vin", message: "Le VIN doit contenir 17 caractères valides, sans I, O ni Q." });
+  }
+  if (rawMileage && !isValidMileageValue(rawMileage)) {
+    errors.push({ field: "mileage", message: "Le kilométrage doit être un nombre positif réaliste." });
+  }
+  return {
+    ok: errors.length === 0,
+    errors,
+    messages: errors.map((error) => error.message),
+    normalized,
+  };
+}
+
+function renderFormValidationErrors(form, validation = {}, fallbackId = "") {
+  if (!form) return;
+  const errors = Array.isArray(validation.errors) ? validation.errors : [];
+  form.querySelectorAll("[aria-invalid='true']").forEach((control) => {
+    control.removeAttribute("aria-invalid");
+    const describedBy = String(control.getAttribute("aria-describedby") || "")
+      .split(/\s+/)
+      .filter((id) => id && id !== fallbackId)
+      .join(" ");
+    if (describedBy) control.setAttribute("aria-describedby", describedBy);
+    else control.removeAttribute("aria-describedby");
+  });
+  const fallbackTarget = fallbackId && typeof document !== "undefined" && typeof document.getElementById === "function"
+    ? document.getElementById(fallbackId)
+    : null;
+  const target = form.querySelector("[data-form-errors]") || fallbackTarget;
+  if (!errors.length) {
+    if (target) {
+      target.hidden = true;
+      target.textContent = "";
+    }
+    return;
+  }
+  if (target) {
+    target.hidden = false;
+    target.textContent = validation.messages?.join(" ") || errors.map((error) => error.message).join(" ");
+  }
+  errors.forEach((error) => {
+    const field = form.elements?.[error.field];
+    if (!field) return;
+    field.setAttribute("aria-invalid", "true");
+    if (fallbackId) {
+      const describedBy = new Set(String(field.getAttribute("aria-describedby") || "").split(/\s+/).filter(Boolean));
+      describedBy.add(fallbackId);
+      field.setAttribute("aria-describedby", [...describedBy].join(" "));
+    }
+  });
+  const firstField = form.elements?.[errors[0]?.field];
+  firstField?.focus?.();
+}
+
 function findDuplicateCase(candidate) {
   const vin = normalizeIdentifierValue(candidate.vin);
   const plate = normalizeIdentifierValue(candidate.plate);

@@ -1,24 +1,3 @@
-function getCaseStatus(item) {
-  if (item.flags.invoiced) return "invoiced";
-  if (item.flags.delivered) return "delivered";
-  if (item.flags.qualityApproved) return "quality";
-  if (item.flags.workCompleted) return "quality";
-  if (item.flags.workStarted) return "work";
-
-  const hasAssignments = state.bookings.some((booking) => booking.caseId === item.id);
-  if (item.flags.received) return hasAssignments ? "workScheduled" : "vehicleReceived";
-  if (item.appointmentStatus === "no_show") return "noShow";
-
-  if (item.appointment) {
-    const appointmentStart = new Date(item.appointment.start);
-    const appointmentIsDue = !Number.isNaN(appointmentStart.getTime()) && appointmentStart <= new Date();
-    return appointmentIsDue ? "awaitingVehicle" : "appointmentScheduled";
-  }
-
-  if (item.flags.expertApproved && item.flags.clientApproved) return "appointment";
-  return item.expertName ? "approvals" : "estimate";
-}
-
 function getWorkflowValues(item) {
   const hasAppointment = Boolean(item.appointment);
   const hasReceivedVehicle = Boolean(item.flags.received);

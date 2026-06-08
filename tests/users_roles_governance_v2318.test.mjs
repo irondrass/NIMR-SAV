@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-console.log('Demarrage tests v23.2.0 roles and governance hardening...');
+console.log('Demarrage tests v23.2.1 roles and governance hardening...');
 
 const scriptFiles = [
   'js/utils.js',
@@ -95,12 +95,12 @@ const swSource = fs.readFileSync('sw.js', 'utf8');
 const versionSource = fs.readFileSync('js/version.js', 'utf8');
 const indexSource = fs.readFileSync('index.html', 'utf8');
 
-assert.match(stateSource, /APP_VERSION\s*=\s*"v23\.2\.0"/, 'APP_VERSION v23.2.0 attendu');
-assert.match(appSource, /serviceWorker\.register\("sw\.js\?v=23\.2\.0"/, 'service worker v23.2.0 attendu');
-assert.match(swSource, /nimr-sav-v23\.2\.0-sav-performance-dashboard/, 'cache PWA v23.2.0 attendu');
-assert.match(versionSource, /NIMR_BUILD\s*=\s*"v23\.2\.0"/, 'version.js v23.2.0 attendu');
+assert.match(stateSource, /APP_VERSION\s*=\s*"v23\.2\.1"/, 'APP_VERSION v23.2.1 attendu');
+assert.match(appSource, /serviceWorker\.register\("sw\.js\?v=23\.2\.1"/, 'service worker v23.2.1 attendu');
+assert.match(swSource, /nimr-sav-v23\.2\.1-reception-workflow-qa-status-stabilization/, 'cache PWA v23.2.1 attendu');
+assert.match(versionSource, /NIMR_BUILD\s*=\s*"v23\.2\.1"/, 'version.js v23.2.1 attendu');
 [...indexSource.matchAll(/\?v=(\d+\.\d+(?:\.\d+)?)/g)].forEach((match) => {
-  assert.equal(match[1], '23.2.0', `reference index.html incoherente: ?v=${match[1]}`);
+  assert.equal(match[1], '23.2.1', `reference index.html incoherente: ?v=${match[1]}`);
 });
 assert.match(indexSource, /Admin technique/, 'libelle UI Admin technique attendu');
 assert.match(indexSource, /Directeur SAV[\s\S]*Pilotage métier/, 'resume permissions Directeur SAV attendu');
@@ -161,7 +161,9 @@ assert.equal(app(`hasPermission('audit.view')`), true, 'directeur SAV peut consu
 assert.equal(app(`hasPermission('dashboard.view')`), true, 'directeur SAV peut consulter le dashboard performance');
 assert.equal(app(`guardSensitiveAction('export.backup').ok`), true, 'directeur SAV peut exporter');
 assert.equal(app(`guardDeliveryComplete(state.cases[0]).ok`), true, 'directeur SAV garde override livraison');
-assert.equal(app(`canAdvanceReceptionStep(state.cases[0], 11, { role: 'directeur_sav' }).ok`), true, 'directeur SAV peut override livraison avec reclamation ouverte');
+assert.equal(app(`canAdvanceReceptionStep(state.cases[0], 11, { role: 'directeur_sav' }).ok`), false, 'directeur SAV ne contourne pas un QC non valide');
+app(`state.cases[0].flags.qualityApproved = true; state.cases[0].receptionWorkflow.qualityStatus = 'validated';`);
+assert.equal(app(`canAdvanceReceptionStep(state.cases[0], 11, { role: 'directeur_sav' }).ok`), true, 'directeur SAV peut override livraison avec reclamation ouverte si QC valide');
 assert.equal(app(`guardSensitiveAction('settings.edit').ok`), false, 'directeur SAV ne peut pas nettoyer poste');
 assert.equal(app(`guardSensitiveAction('case.delete', { item: state.cases[0] }).ok`), false, 'directeur SAV ne peut pas supprimer donnees dossier');
 assert.equal(app(`guardSensitiveAction('import.backup').ok`), false, 'directeur SAV ne peut pas restaurer completement');
@@ -200,4 +202,4 @@ assert.equal(app(`hasPermission('print.task')`), true, 'lecture seule conserve i
 assert.equal(app(`guardCaseCreate().ok`), false, 'lecture seule ne cree pas');
 assert.equal(app(`guardSensitiveAction('settings.edit').ok`), false, 'lecture seule ne touche pas aux reglages sensibles');
 
-console.log('Tests v23.2.0 roles and governance hardening OK');
+console.log('Tests v23.2.1 roles and governance hardening OK');

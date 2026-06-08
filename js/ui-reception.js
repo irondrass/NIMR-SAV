@@ -106,7 +106,7 @@ function renderReceptionWorkspace() {
   if (!view || view.hidden) return;
 
   const searchInput = document.getElementById("reception-case-search");
-  const query = String(searchInput?.value || "").trim().toLowerCase();
+  const query = String(searchInput?.value || "").trim();
 
   const allCases = (state.cases || []).filter((c) => !c.deletedAt);
   const now = new Date();
@@ -131,10 +131,7 @@ function renderReceptionWorkspace() {
       if (item.flags.delivered || !(item.customerClaims || []).some((c) => ["open", "in_progress", "unresolved"].includes(c.status))) return false;
     }
 
-    if (query) {
-      return [item.clientName, item.phone, item.vehicle, item.plate, item.vin, item.driverName]
-        .some((f) => String(f || "").toLowerCase().includes(query));
-    }
+    if (query) return typeof caseMatchesGlobalSearch === "function" ? caseMatchesGlobalSearch(item, query) : true;
     return true;
   });
 
@@ -261,6 +258,7 @@ function renderReceptionActiveStep(item, stepNum) {
 
 function renderStep1_Creation(item, container) {
   const isCreate = !item;
+  const primaryClaimType = item?.claims?.[0]?.type || "vidange";
   const html = `
     <div class="step-card step-card-active">
       <div class="step-card-header">
@@ -272,6 +270,8 @@ function renderStep1_Creation(item, container) {
       </div>
 
       <form id="${isCreate ? "reception-case-create-form" : "reception-case-detail-form"}" class="step-form">
+        <p class="required-hint">* Champs obligatoires. Identité véhicule minimale : immatriculation ou VIN.</p>
+        <p class="form-error-summary" data-form-errors role="alert" hidden></p>
         <div class="step-form-grid">
           <label class="step-field">
             <span>Client *</span>
@@ -282,16 +282,20 @@ function renderStep1_Creation(item, container) {
             <input type="tel" name="phone" value="${escapeAttr(item?.phone || "")}" placeholder="Numéro de téléphone" />
           </label>
           <label class="step-field">
-            <span>Véhicule *</span>
-            <input type="text" name="vehicle" value="${escapeAttr(item?.vehicle || "")}" placeholder="Marque et modèle" required />
+            <span>Véhicule</span>
+            <input type="text" name="vehicle" value="${escapeAttr(item?.vehicle || "")}" placeholder="Marque et modèle" />
           </label>
           <label class="step-field">
-            <span>Immatriculation</span>
+            <span>Immatriculation ou VIN *</span>
             <input type="text" name="plate" value="${escapeAttr(item?.plate || "")}" placeholder="AA-123-BB" />
           </label>
           <label class="step-field">
             <span>VIN</span>
             <input type="text" name="vin" value="${escapeAttr(item?.vin || "")}" placeholder="Numéro de série" />
+          </label>
+          <label class="step-field">
+            <span>Réf. OR</span>
+            <input type="text" name="orNavNumber" value="${escapeAttr(item?.orNavNumber || "")}" placeholder="OR-2026-001" />
           </label>
           <label class="step-field">
             <span>Kilométrage</span>
@@ -312,12 +316,13 @@ function renderStep1_Creation(item, container) {
           <label class="step-field">
             <span>Type d'ordre</span>
             <select name="orderType">
-              <option value="tolerie" ${item?.claims?.[0]?.type === "tolerie" ? "selected" : ""}>Tôlerie</option>
-              <option value="mecanique" ${item?.claims?.[0]?.type === "mecanique" ? "selected" : ""}>Mécanique</option>
-              <option value="electrique" ${item?.claims?.[0]?.type === "electrique" ? "selected" : ""}>Électrique</option>
-              <option value="peinture" ${item?.claims?.[0]?.type === "peinture" ? "selected" : ""}>Peinture</option>
-              <option value="vidange" ${(!item || item?.claims?.[0]?.type === "vidange") ? "selected" : ""}>Vidange</option>
-              <option value="auto" ${item?.claims?.[0]?.type === "auto" ? "selected" : ""}>Automatique</option>
+              <option value="vidange" ${primaryClaimType === "vidange" ? "selected" : ""}>Vidange / entretien rapide</option>
+              <option value="client" ${primaryClaimType === "client" ? "selected" : ""}>Client direct / intervention SAV</option>
+              <option value="mechanical_client" ${primaryClaimType === "mechanical_client" ? "selected" : ""}>Réparation mécanique client</option>
+              <option value="electrical_client" ${primaryClaimType === "electrical_client" ? "selected" : ""}>Réparation électrique client</option>
+              <option value="diagnostic" ${primaryClaimType === "diagnostic" ? "selected" : ""}>Diagnostic</option>
+              <option value="garantie" ${primaryClaimType === "garantie" ? "selected" : ""}>Garantie constructeur</option>
+              <option value="assurance" ${primaryClaimType === "assurance" ? "selected" : ""}>Assurance / expert</option>
             </select>
           </label>
         </div>
@@ -743,8 +748,8 @@ function renderStep10_QualityCheck(item) {
   const rw = ensureReceptionWorkflow(item);
   const f = item.flags;
   const openClaims = (item.customerClaims || []).filter((c) => ["open", "in_progress", "unresolved"].includes(c.status));
-  const qsLabels = { not_started: "Non commencé", in_progress: "En cours", validated: "Validé ✓", rejected: "Refusé / Reprise nécessaire" };
-  const qsClass = { not_started: "", in_progress: "tag-info", validated: "priority-low", rejected: "priority-urgent" };
+  const qsLabels = { not_started: "Non commencé", in_progress: "En cours", validated: "Validé ✓", rejected: "Refusé / reprise nécessaire", rework: "Retour atelier / retravail" };
+  const qsClass = { not_started: "", in_progress: "tag-info", validated: "priority-low", rejected: "priority-urgent", rework: "priority-high" };
 
   return `
     <div class="step-card step-card-active">
@@ -775,8 +780,9 @@ function renderStep10_QualityCheck(item) {
           <select name="qualityStatus">
             <option value="not_started" ${rw.qualityStatus === "not_started" ? "selected" : ""}>Non commencé</option>
             <option value="in_progress" ${rw.qualityStatus === "in_progress" ? "selected" : ""}>En cours</option>
-            <option value="validated" ${rw.qualityStatus === "validated" ? "selected" : ""}>Validé — prêt pour livraison</option>
             <option value="rejected" ${rw.qualityStatus === "rejected" ? "selected" : ""}>Refusé — reprise nécessaire</option>
+            <option value="rework" ${rw.qualityStatus === "rework" ? "selected" : ""}>Retour atelier / retravail</option>
+            <option value="validated" ${rw.qualityStatus === "validated" ? "selected" : ""}>Validé — prêt pour livraison</option>
           </select>
         </label>
         <label class="step-field">
@@ -789,6 +795,25 @@ function renderStep10_QualityCheck(item) {
       ${rw.qualityStatus === "validated" ? `
         <div style="margin-top:16px;padding:12px;background:var(--green-bg,#eaffea);border-radius:var(--radius-sm);border:1px solid var(--green,#27ae60);">
           <strong>✓ Contrôle qualité validé.</strong> Vous pouvez préparer la livraison.
+        </div>
+      ` : ""}
+
+      ${rw.qualityStatus === "rejected" || rw.qualityStatus === "rework" ? `
+        <div class="step-warning-box" style="margin-top:16px;">
+          <strong>${rw.qualityStatus === "rejected" ? "QC refusé" : "Retour atelier / retravail"} :</strong>
+          ${escapeHtml(rw.qualityReturnReason || "Motif à compléter avant revalidation.")}
+        </div>
+      ` : ""}
+
+      ${(rw.qualityReviewHistory || []).length ? `
+        <div class="step-history" style="margin-top:16px;">
+          <div class="step-history-title">Historique qualité</div>
+          ${rw.qualityReviewHistory.slice().reverse().map((entry) => `
+            <div class="step-history-item">
+              <span style="font-size:0.8rem;color:var(--muted);">${new Date(entry.at).toLocaleString("fr-FR")}</span>
+              <div>${escapeHtml(qsLabels[entry.status] || entry.status)}${entry.reason ? ` — ${escapeHtml(entry.reason)}` : ""}</div>
+            </div>
+          `).join("")}
         </div>
       ` : ""}
 
@@ -805,6 +830,8 @@ function renderStep11_Delivery(item) {
   const openClaims = (item.customerClaims || []).filter((c) => ["open", "in_progress", "unresolved"].includes(c.status));
   const hasDeliveryBlock = openClaims.length > 0;
   const isDelivered = f.delivered;
+  const qcOk = f.qualityApproved || normalizeQualityStatus(rw.qualityStatus) === "validated";
+  const blockerLabel = isCaseBlocked(item) ? getCaseBlockerLabel(item) || "dossier bloqué" : "";
 
   return `
     <div class="step-card step-card-active">
@@ -818,8 +845,18 @@ function renderStep11_Delivery(item) {
 
       ${hasDeliveryBlock && !isDelivered ? `
         <div class="step-warning-box" style="background:rgba(231,76,60,0.08);border-color:rgba(231,76,60,0.4);">
-          <strong>⚠️ Livraison bloquée :</strong> ${openClaims.length} réclamation(s) client non résolue(s). Seul un administrateur ou chef d'atelier peut forcer la livraison.
+          <strong>⚠️ Livraison avec override requis :</strong> ${openClaims.length} réclamation(s) client non résolue(s). Seul un administrateur, chef d'atelier ou Directeur SAV peut forcer la livraison avec motif.
           <ul style="margin:6px 0 0 16px;">${openClaims.map((c) => `<li>${escapeHtml(c.text || c.title)}</li>`).join("")}</ul>
+        </div>
+      ` : ""}
+      ${!qcOk && !isDelivered ? `
+        <div class="step-warning-box" style="background:rgba(231,76,60,0.08);border-color:rgba(231,76,60,0.4);">
+          <strong>Livraison bloquée :</strong> le contrôle qualité doit être validé. Aucun override ne contourne ce contrôle.
+        </div>
+      ` : ""}
+      ${blockerLabel && !isDelivered ? `
+        <div class="step-warning-box" style="background:rgba(231,76,60,0.08);border-color:rgba(231,76,60,0.4);">
+          <strong>Livraison bloquée :</strong> résoudre le blocage dossier avant livraison (${escapeHtml(blockerLabel)}).
         </div>
       ` : ""}
 
@@ -1182,20 +1219,27 @@ async function handleCreateCase(form) {
   const orderType = data.get("orderType") || "vidange";
   const orderTitle = String(data.get("orderTitle") || "").trim() || getClaimTypeLabel(orderType);
 
-  const candidate = {
+  let candidate = {
     clientName: String(data.get("clientName") || "").trim(),
     phone: String(data.get("phone") || "").trim(),
     vehicle: String(data.get("vehicle") || "").trim(),
     plate: normalizeIdentifierValue(data.get("plate")),
     vin: normalizeIdentifierValue(data.get("vin")),
+    orNavNumber: normalizeIdentifierValue(data.get("orNavNumber")),
     mileage: normalizeIdentifierValue(data.get("mileage")),
     driverName: String(data.get("driverName") || "").trim(),
     driverPhone: String(data.get("driverPhone") || "").trim(),
     arrivalNotes: String(data.get("arrivalNotes") || "").trim(),
   };
 
-  if (!candidate.clientName) { notifyUser("Le nom du client est obligatoire pour créer un dossier. Renseignez le propriétaire ou la société.", "error"); return; }
-  if (!candidate.vehicle && !candidate.plate && !candidate.vin) { notifyUser("Renseignez au moins le véhicule, l'immatriculation ou le VIN avant de créer le dossier.", "error"); return; }
+  const validation = validateReceptionCaseCandidate(candidate);
+  candidate = validation.normalized;
+  if (!validation.ok) {
+    renderFormValidationErrors(form, validation);
+    notifyUser(validation.messages.join("\n"), "error");
+    return;
+  }
+  renderFormValidationErrors(form, validation);
   if (!candidate.vehicle) candidate.vehicle = "Véhicule à compléter";
 
   const duplicate = findDuplicateCase(candidate);
@@ -1274,18 +1318,27 @@ async function handleEditCase(form) {
   const item = state.cases.find((c) => c.id === activeCaseId);
   if (!item) return;
   const data = new FormData(form);
-  const candidate = {
+  let candidate = {
     clientName: String(data.get("clientName") || "").trim(),
     phone: String(data.get("phone") || "").trim(),
     vehicle: String(data.get("vehicle") || "").trim(),
     plate: normalizeIdentifierValue(data.get("plate")),
     vin: normalizeIdentifierValue(data.get("vin")),
+    orNavNumber: normalizeIdentifierValue(data.get("orNavNumber")),
     mileage: normalizeIdentifierValue(data.get("mileage")),
     driverName: String(data.get("driverName") || "").trim(),
     driverPhone: String(data.get("driverPhone") || "").trim(),
     arrivalNotes: String(data.get("arrivalNotes") || "").trim(),
   };
-  if (!candidate.clientName) { notifyUser("Le nom du client est obligatoire pour enregistrer le dossier. Renseignez le propriétaire ou la société.", "error"); return; }
+  const validation = validateReceptionCaseCandidate(candidate);
+  candidate = validation.normalized;
+  if (!validation.ok) {
+    renderFormValidationErrors(form, validation);
+    notifyUser(validation.messages.join("\n"), "error");
+    return;
+  }
+  renderFormValidationErrors(form, validation);
+  if (!candidate.vehicle) candidate.vehicle = "Véhicule à compléter";
   Object.assign(item, candidate);
 
   const appDateVal = data.get("appointmentDate");
@@ -1558,9 +1611,9 @@ async function verifyDeliveryClaimsBlock(item) {
   if (!hasUnresolved) return true;
   if (typeof addAuditLog === "function") addAuditLog("reception.delivery_warning", "Avertissement livraison", `Réclamations non résolues pour ${item.plate || item.vin}.`, { caseId: item.id });
   const user = typeof getCurrentUser === "function" ? getCurrentUser() : null;
-  const isAuthorized = user && ["admin", "chef_atelier"].includes(user.role);
+  const isAuthorized = user && ["admin", "chef_atelier", "directeur_sav"].includes(user.role);
   if (!isAuthorized) {
-    if (typeof showConfirmModal === "function") await showConfirmModal("Livraison bloquée : réclamations client non résolues. Seul un administrateur ou chef d'atelier peut forcer la livraison.");
+    if (typeof showConfirmModal === "function") await showConfirmModal("Livraison bloquée : réclamations client non résolues. Seul un administrateur, chef d'atelier ou Directeur SAV peut forcer la livraison avec motif.");
     else alert("Livraison bloquée : réclamations client non résolues.");
     return false;
   }

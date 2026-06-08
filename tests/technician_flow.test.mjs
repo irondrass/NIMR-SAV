@@ -84,12 +84,12 @@ const swSource = fs.readFileSync('sw.js', 'utf8');
 const versionSource = fs.readFileSync('js/version.js', 'utf8');
 const indexSource = fs.readFileSync('index.html', 'utf8');
 const appVersion = stateSource.match(/APP_VERSION\s*=\s*"(v\d+\.\d+(?:\.\d+)?)"/)?.[1];
-assert.equal(appVersion, 'v23.2.0', 'APP_VERSION doit rester en v23.2.0 pour cette branche');
-assert.match(appSource, /serviceWorker\.register\("sw\.js\?v=23\.2\.0"/, 'le service worker doit être enregistré avec sw.js?v=23.2.0');
-assert.match(swSource, /nimr-sav-v23\.2\.0-sav-performance-dashboard/, 'le cache PWA doit être en v23.2.0');
-assert.match(versionSource, /NIMR_BUILD\s*=\s*"v23\.2\.0"/, 'js/version.js doit exposer v23.2.0');
+assert.equal(appVersion, 'v23.2.1', 'APP_VERSION doit rester en v23.2.1 pour cette branche');
+assert.match(appSource, /serviceWorker\.register\("sw\.js\?v=23\.2\.1"/, 'le service worker doit être enregistré avec sw.js?v=23.2.1');
+assert.match(swSource, /nimr-sav-v23\.2\.1-reception-workflow-qa-status-stabilization/, 'le cache PWA doit être en v23.2.1');
+assert.match(versionSource, /NIMR_BUILD\s*=\s*"v23\.2\.1"/, 'js/version.js doit exposer v23.2.1');
 [...indexSource.matchAll(/\?v=(\d+\.\d+(?:\.\d+)?)/g)].forEach((match) => {
-  assert.equal(match[1], '23.2.0', `référence index.html incohérente: ?v=${match[1]}`);
+  assert.equal(match[1], '23.2.1', `référence index.html incohérente: ?v=${match[1]}`);
 });
 
 function setupTechnicianState() {

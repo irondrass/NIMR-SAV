@@ -72,6 +72,12 @@ async function getSupabaseUser() {
 }
 
 async function refreshSupabasePanel() {
+  const safetyContainer = $("#supabase-safety-download-container");
+  if (safetyContainer) {
+    const hasSnapshot = localStorage.getItem("nimr-sav-restore-safety-snapshot:last");
+    safetyContainer.style.display = hasSnapshot ? "block" : "none";
+  }
+
   const client = getSupabaseClient();
   hydrateSupabaseConfigForm();
   if (!isSupabaseConfigured()) {

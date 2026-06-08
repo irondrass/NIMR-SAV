@@ -27,7 +27,14 @@ function stubElement() {
     title: "",
     dataset: {},
     style: {},
-    elements: {},
+    elements: {
+      url: { value: "" },
+      anonKey: { value: "" },
+      workshopId: { value: "" },
+      backupKey: { value: "" },
+      email: { value: "" },
+      password: { value: "" },
+    },
     classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
     setAttribute() {},
     removeAttribute() {},
@@ -300,5 +307,210 @@ assert.equal(resolveDeferResult.conflict.status, "open", "defer_manual_merge sho
 
 const guardEditAfterDefer = app(`guardAction("case.edit", ${JSON.stringify(caseContext)})`);
 assert.equal(guardEditAfterDefer.ok, false, "Sensitive actions must remain blocked after deferring manual merge");
+
+// --- ADDITIONAL TESTS FOR HOTFIX v23.2.3 ---
+console.log("Running additional hotfix assertions...");
+
+await app(`
+  downloadJsonCalls = [];
+  downloadJson = function(payload, filename) {
+    downloadJsonCalls.push({ payload, filename });
+  };
+  confirmStrongSensitiveAction = async () => true;
+  showConfirmModal = async () => true;
+  getAllPhotoRecords = async () => [];
+  getAllDocumentRecords = async () => [];
+  guardSensitiveAction = () => ({ ok: true });
+  clearPhotoStore = async () => {};
+  restorePhotoRecords = async () => [];
+  render = () => {};
+
+  // Override Object.keys for mock localStorage in tests
+  Object.keys = (obj) => {
+    if (obj === localStorage) {
+      const keys = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k) keys.push(k);
+      }
+      return keys;
+    }
+    return Object.getOwnPropertyNames(obj);
+  };
+
+  // Clear any existing snapshots
+  localStorage.removeItem("nimr-sav-restore-safety-snapshot:last");
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key && key.startsWith("nimr-sav-conflict-safety-snapshot:")) {
+      localStorage.removeItem(key);
+      i--;
+    }
+  }
+`);
+
+// Test A: accept_cloud creates local snapshot and triggers no auto-download
+await app(`
+  state.cases = state.cases.filter(c => c.id !== "case-conflict");
+  state.cases.push(${JSON.stringify(localCase)});
+  state.syncConflicts = [
+    {
+      id: "conf-new-1",
+      type: "case_conflict",
+      caseId: "case-conflict",
+      localCase: ${JSON.stringify(localCase)},
+      remoteCase: ${JSON.stringify(remoteCase)},
+      localValue: ${JSON.stringify(localCase)},
+      remoteValue: ${JSON.stringify(remoteCase)},
+      status: "open"
+    }
+  ];
+  downloadJsonCalls = [];
+  var res = resolveSyncConflict("conf-new-1", "accept_cloud");
+`);
+
+let dlCalls = app("downloadJsonCalls.length");
+assert.equal(dlCalls, 0, "accept_cloud must not trigger any automatic download");
+
+let snap = app('localStorage.getItem("nimr-sav-conflict-safety-snapshot:case-conflict:conf-new-1")');
+assert.ok(snap, "accept_cloud should create a safety snapshot in localStorage");
+let snapPayload = JSON.parse(snap);
+assert.equal(snapPayload.cases[0].id, "case-conflict", "Snapshot case ID should match");
+
+// Test B: keep_local and defer_manual_merge trigger no auto-download
+app(`
+  downloadJsonCalls = [];
+  resolveSyncConflict("conf-new-1", "keep_local");
+`);
+assert.equal(app("downloadJsonCalls.length"), 0, "keep_local must not trigger any automatic download");
+
+app(`
+  state.syncConflicts[0].status = "open"; // Re-open
+  downloadJsonCalls = [];
+  resolveSyncConflict("conf-new-1", "defer_manual_merge");
+`);
+assert.equal(app("downloadJsonCalls.length"), 0, "defer_manual_merge must not trigger any automatic download");
+
+// Test C: confirmRemoteBackupConflict triggers no auto-download and creates global safety snapshot
+app(`
+  downloadJsonCalls = [];
+  localStorage.removeItem("nimr-sav-restore-safety-snapshot:last");
+  remoteConflictMutedUntil = 0;
+  // Set change timestamp to mock unsynced local changes
+  lastKnownCloudUpdatedAt = 1000;
+  getLocalUserChangeAt = () => 5000;
+  var remoteData = { updated_at: new Date(6000).toISOString(), state: { cases: [] } };
+`);
+await app(`confirmRemoteBackupConflict(remoteData, "test_reason")`);
+// It will call showConfirmModal which returns true, then save snapshot
+assert.equal(app("downloadJsonCalls.length"), 0, "confirmRemoteBackupConflict must not trigger auto download");
+assert.ok(app('localStorage.getItem("nimr-sav-restore-safety-snapshot:last")'), "confirmRemoteBackupConflict should create a global safety snapshot");
+
+// Test D: restoreLocalFromSupabase triggers no auto-download and creates global safety snapshot
+app(`
+  downloadJsonCalls = [];
+  localStorage.removeItem("nimr-sav-restore-safety-snapshot:last");
+
+  // Mock Supabase select to succeed
+  var chainMock = {
+    eq: function() { return chainMock; },
+    single: async () => ({ data: { state: { cases: [] }, photos: [] } }),
+    maybeSingle: async () => ({ data: { state: { cases: [] }, photos: [] } })
+  };
+  var clientMock = {
+    auth: { getUser: async () => ({ data: { user: { id: "u-admin", email: "admin@nimr.com" } } }) },
+    from: () => ({
+      select: () => chainMock
+    })
+  };
+  getSupabaseClient = () => clientMock;
+  getSupabaseUser = async () => ({ id: "u-admin", email: "admin@nimr.com" });
+  isSupabaseConfigured = () => true;
+`);
+
+// Trigger restoreLocalFromSupabase
+app(`
+  restoreLocalFromSupabase();
+`);
+
+// Wait a tiny moment for async execution
+await new Promise(resolve => setTimeout(resolve, 100));
+
+assert.equal(app("downloadJsonCalls.length"), 0, "restoreLocalFromSupabase must not trigger auto download");
+assert.ok(app('localStorage.getItem("nimr-sav-restore-safety-snapshot:last")'), "restoreLocalFromSupabase should create a global safety snapshot");
+
+// Test E: snapshot clean-up keeps only the latest snapshot per caseId
+app(`
+  // Clear conflict snapshots
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key && key.startsWith("nimr-sav-conflict-safety-snapshot:")) {
+      localStorage.removeItem(key);
+      i--;
+    }
+  }
+
+  // Create conflict snapshot 1
+  state.cases = [{ id: "case-cleanup-test", clientName: "Original" }];
+  state.syncConflicts = [
+    { id: "conf-cleanup-1", type: "case_conflict", caseId: "case-cleanup-test", remoteValue: { id: "case-cleanup-test", clientName: "New" }, status: "open" }
+  ];
+  resolveSyncConflict("conf-cleanup-1", "accept_cloud");
+`);
+
+// Verify snapshot 1 exists
+assert.ok(app('localStorage.getItem("nimr-sav-conflict-safety-snapshot:case-cleanup-test:conf-cleanup-1")'), "Snapshot 1 should be created");
+
+// Re-open and accept another cloud conflict for the same case but different conflictId
+app(`
+  state.cases = [{ id: "case-cleanup-test", clientName: "Updated" }];
+  state.syncConflicts = [
+    { id: "conf-cleanup-2", type: "case_conflict", caseId: "case-cleanup-test", remoteValue: { id: "case-cleanup-test", clientName: "Latest" }, status: "open" }
+  ];
+  resolveSyncConflict("conf-cleanup-2", "accept_cloud");
+`);
+
+// Snapshot 1 should be deleted, only snapshot 2 should remain
+assert.equal(app('localStorage.getItem("nimr-sav-conflict-safety-snapshot:case-cleanup-test:conf-cleanup-1")'), null, "Snapshot 1 should have been cleaned up");
+assert.ok(app('localStorage.getItem("nimr-sav-conflict-safety-snapshot:case-cleanup-test:conf-cleanup-2")'), "Snapshot 2 should exist");
+
+// Test F: Deduplication prevents duplicate open conflicts
+app(`
+  state.syncConflicts = [];
+  var statsTest = { conflictEntries: [], conflicts: 0, newConflicts: 0 };
+  var localCaseItem = { id: "case-dedup-test", localRevision: 3, syncRevision: 1, clientName: "Local" };
+  var remoteCaseItem = { id: "case-dedup-test", localRevision: 2, syncRevision: 1, clientName: "Remote" };
+  var localStateMock = { syncConflicts: [] };
+
+  // Call mergeCaseEntity first time -> should generate conflict
+  mergeCaseEntity(localCaseItem, remoteCaseItem, statsTest, localStateMock);
+`);
+assert.equal(app("statsTest.conflictEntries.length"), 1, "Should generate one conflict entry");
+
+app(`
+  // Mock pushing the conflict to client state.syncConflicts
+  state.syncConflicts = [statsTest.conflictEntries[0]];
+
+  // Call mergeCaseEntity again on the same case -> should NOT generate another conflict
+  var statsTest2 = { conflictEntries: [], conflicts: 0, newConflicts: 0 };
+  mergeCaseEntity(localCaseItem, remoteCaseItem, statsTest2, state);
+`);
+assert.equal(app("statsTest2.conflictEntries.length"), 0, "Deduplication should prevent duplicate conflict generation");
+
+// Test G: Workstation cleanup deletes the safety snapshots
+app(`
+  localStorage.setItem("nimr-sav-conflict-safety-snapshot:case-cleanup-test:conf-cleanup-2", "{}");
+  localStorage.setItem("nimr-sav-restore-safety-snapshot:last", "{}");
+  showPromptModal = async () => true; // auto-confirm cleanup
+  deleteApplicationIndexedDatabases = async () => {};
+  showWorkstationCleanedScreen = () => {};
+`);
+
+await app(`cleanLocalWorkstation()`);
+
+assert.equal(app('localStorage.getItem("nimr-sav-conflict-safety-snapshot:case-cleanup-test:conf-cleanup-2")'), null, "Cleanup should remove conflict safety snapshots");
+assert.equal(app('localStorage.getItem("nimr-sav-restore-safety-snapshot:last")'), null, "Cleanup should remove restore safety snapshots");
+
+console.log("Additional hotfix assertions OK");
 
 console.log("Tests v23.2.3 offline sync conflict and local data integrity OK");

@@ -738,7 +738,11 @@
                 <button class="ghost-button" type="button" id="supabase-restore">Restaurer Supabase → local</button>
                 <button class="ghost-button" type="button" id="supabase-signout">Déconnexion</button>
               </div>
-              <p class="muted backup-warning">Avant chaque sauvegarde ou restauration cloud, l'application télécharge automatiquement une copie JSON locale de sécurité.</p>
+              <div id="supabase-safety-download-container" style="display: none; margin-top: 10px; padding: 10px; border: 1px dashed var(--border-color, #ccc); border-radius: 4px; background: rgba(255,193,7,0.05);">
+                <p class="muted" style="margin: 0 0 8px 0;">Une copie de sécurité locale est conservée dans l’application avant restauration cloud.</p>
+                <button class="ghost-button" type="button" id="supabase-download-safety-snapshot" style="width: 100%;">Télécharger copie locale avant restauration cloud</button>
+              </div>
+              <p class="muted backup-warning">Avant chaque sauvegarde cloud, l'application télécharge automatiquement une copie JSON locale de sécurité. Avant restauration, une copie locale est conservée silencieusement dans l'application.</p>
               <p class="muted backup-status" id="supabase-status">Supabase non configuré : synchronisation cloud inactive.</p>
               <p class="muted" id="supabase-details">Exécutez le dernier supabase-schema.sql fourni avec cette version si le test indique que cloud_backups, Realtime, app_settings ou les politiques atelier manquent.</p>
             </section>

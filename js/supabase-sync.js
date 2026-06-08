@@ -755,7 +755,16 @@ async function restoreLocalFromSupabase() {
     }
 
     const safetyPayload = await buildBackupPayload();
-    downloadJson(safetyPayload, `nimr-carrosserie-avant-restauration-cloud-${todayKey(new Date())}.json`);
+    localStorage.setItem("nimr-sav-restore-safety-snapshot:last", JSON.stringify(safetyPayload));
+    if (typeof addAuditLog === "function") {
+      addAuditLog("conflict.safety_snapshot.created", {
+        type: "restore_global",
+        timestamp: new Date().toISOString()
+      });
+    }
+    if (typeof refreshSupabasePanel === "function") {
+      setTimeout(refreshSupabasePanel, 0);
+    }
 
     const restoreActor = getCurrentActor();
     state = normalizeState(data.state);
@@ -1007,6 +1016,14 @@ function shouldKeepLocalEntity(localEntity, remoteEntity) {
 }
 
 function pushSyncConflict(stats, conflict) {
+  if (!stats.conflictEntries) stats.conflictEntries = [];
+  const entryKey = typeof buildSyncConflictKey === "function" ? buildSyncConflictKey(conflict) : (conflict.conflictKey || "");
+  const isAlreadyOpen = (
+    stats.conflictEntries.some(e => e.conflictKey === entryKey) ||
+    (state?.syncConflicts || []).some(e => (e.conflictKey === entryKey || (conflict.caseId && e.caseId === conflict.caseId && e.status === "open" && conflict.field === e.field)))
+  );
+  if (isAlreadyOpen) return null;
+
   const entityType = conflict.entityType || conflict.entity || "case";
   let label = conflict.label;
   if (!label) {
@@ -1029,6 +1046,7 @@ function pushSyncConflict(stats, conflict) {
     ...conflict,
     label,
     details,
+    conflictKey: entryKey,
   };
   stats.conflictEntries.push(entry);
   stats.conflicts += 1;
@@ -1329,7 +1347,11 @@ function mergeCaseEntity(localCase, remoteCase, stats, localState = {}, remoteSt
     };
 
     if (!stats.conflictEntries) stats.conflictEntries = [];
-    if (!stats.conflictEntries.some(e => e.conflictKey === conflictKey)) {
+    const isAlreadyOpen = (
+      (localState?.syncConflicts || []).some(e => (e.conflictKey === conflictKey || (e.caseId === localCase.id && e.status === "open" && e.type === "case_conflict"))) ||
+      stats.conflictEntries.some(e => e.conflictKey === conflictKey)
+    );
+    if (!isAlreadyOpen) {
       stats.conflictEntries.push(entry);
       stats.conflicts = (stats.conflicts || 0) + 1;
       stats.newConflicts = (stats.newConflicts || 0) + 1;
@@ -1680,7 +1702,16 @@ async function confirmRemoteBackupConflict(data, reason) {
     return false;
   }
   const safetyPayload = await buildBackupPayload();
-  downloadJson(safetyPayload, `nimr-sav-conflit-local-avant-cloud-${todayKey(new Date())}.json`);
+  localStorage.setItem("nimr-sav-restore-safety-snapshot:last", JSON.stringify(safetyPayload));
+  if (typeof addAuditLog === "function") {
+    addAuditLog("conflict.safety_snapshot.created", {
+      type: "cloud_merge_replace",
+      timestamp: new Date().toISOString()
+    });
+  }
+  if (typeof refreshSupabasePanel === "function") {
+    setTimeout(refreshSupabasePanel, 0);
+  }
   return true;
 }
 
@@ -1811,6 +1842,38 @@ function bindSupabaseActions() {
   $("#supabase-test")?.addEventListener("click", testSupabaseConnection);
   $("#supabase-save")?.addEventListener("click", saveLocalToSupabase);
   $("#supabase-restore")?.addEventListener("click", restoreLocalFromSupabase);
+  $("#supabase-download-safety-snapshot")?.addEventListener("click", () => {
+    if (typeof guardSensitiveAction === "function") {
+      const guard = guardSensitiveAction("export.backup");
+      if (!guard.ok) {
+        notifyUser(guard.message || "Export non autorisé.", "warn");
+        return;
+      }
+    }
+    const snapshotStr = localStorage.getItem("nimr-sav-restore-safety-snapshot:last");
+    if (snapshotStr) {
+      try {
+        const payload = JSON.parse(snapshotStr);
+        if (typeof downloadJson === "function") {
+          downloadJson(payload, `nimr-carrosserie-avant-restauration-cloud-${todayKey(new Date())}.json`);
+          if (typeof addAuditLog === "function") {
+            addAuditLog("conflict.local_downloaded", {
+              type: "restore_safety_snapshot",
+              timestamp: new Date().toISOString()
+            });
+          }
+          notifyUser("Copie de sécurité locale téléchargée.", "success");
+        } else {
+          notifyUser("Téléchargement impossible.", "warn");
+        }
+      } catch (e) {
+        console.error("Lecture snapshot échouée", e);
+        notifyUser("Lecture de la copie de sécurité impossible.", "warn");
+      }
+    } else {
+      notifyUser("Aucune copie de sécurité trouvée.", "warn");
+    }
+  });
   refreshSupabasePanel();
   startSupabaseLiveSync();
   pullLatestSupabaseBackup("initialisation");

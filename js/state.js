@@ -970,6 +970,8 @@ function isApplicationLocalStorageKey(key) {
   return key.startsWith(STORAGE_KEY)
     || key.startsWith("nimr-sav:")
     || key.startsWith("nimr-carrosserie")
+    || key.startsWith("nimr-sav-conflict-safety-snapshot:")
+    || key === "nimr-sav-restore-safety-snapshot:last"
     || normalized.startsWith("sb-")
     || normalized.includes("supabase")
     || normalized.includes("gotrue");
@@ -2773,6 +2775,37 @@ function resolveSyncConflict(conflictIdOrKey, action = "mark_resolved") {
     if (action === "accept_cloud") {
       if (localCaseIdx < 0) return { ok: false, message: "Dossier introuvable localement." };
       if (!conflict.remoteValue) return { ok: false, message: "Version cloud manquante dans le conflit." };
+
+      const localCase = state.cases[localCaseIdx];
+      const conflictId = conflict.id;
+
+      // Clean up older snapshots for the same caseId first
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith(`nimr-sav-conflict-safety-snapshot:${caseId}:`)) {
+          localStorage.removeItem(key);
+          i--;
+        }
+      }
+
+      // Save a silent local case snapshot
+      const snapshotKey = `nimr-sav-conflict-safety-snapshot:${caseId}:${conflictId}`;
+      const snapshotPayload = {
+        version: "v23.2.3",
+        timestamp: new Date().toISOString(),
+        cases: [JSON.parse(JSON.stringify(localCase))],
+        source: "conflict_safety_snapshot"
+      };
+      localStorage.setItem(snapshotKey, JSON.stringify(snapshotPayload));
+
+      if (typeof addAuditLog === "function") {
+        addAuditLog("conflict.safety_snapshot.created", {
+          type: "case_conflict",
+          caseId: caseId,
+          conflictId: conflictId,
+          timestamp: new Date().toISOString()
+        });
+      }
 
       const remoteCaseCopy = JSON.parse(JSON.stringify(conflict.remoteValue));
       remoteCaseCopy.syncRevision = remoteCaseCopy.localRevision;

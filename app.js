@@ -913,6 +913,15 @@ function renderActivityLog() {
             const rmtUser = conflict.remoteCase?.updatedBy || "Non spécifié";
             const rmtRev = conflict.remoteCase?.localRevision ?? 0;
 
+            const showManualDownload = (
+              conflict.type === "case_conflict" &&
+              (conflict.localCase || conflict.localValue) &&
+              (conflict.remoteCase || conflict.remoteValue)
+            );
+            const hasExportPermission = typeof guardSensitiveAction === "function"
+              ? guardSensitiveAction("export.backup", {}, { notify: false }).ok
+              : true;
+
             return `
               <article class="sync-conflict-card case-conflict-card" style="margin-bottom: 15px; padding: 15px; background: var(--bg-card, #ffffff); border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); border: 1px solid var(--border-color, #eef2f6);">
                 <strong style="display: block; font-size: 1.1em; margin-bottom: 5px;">[Dossier] ${escapeHtml(conflict.caseNumber || conflict.caseId || conflict.entityId || "Dossier inconnu")}</strong>
@@ -932,6 +941,13 @@ function renderActivityLog() {
                     <span>Révision : ${escapeHtml(rmtRev)}</span>
                   </div>
                 </div>
+
+                ${showManualDownload ? `
+                <div class="sync-conflict-safety-download" style="margin-top: 10px; padding: 10px; background: rgba(255,193,7,0.05); border-radius: 4px; font-size: 0.9em; border: 1px dashed var(--border-color, #ccc);">
+                  <span class="muted" style="display: block; margin-bottom: 6px;">Une copie de sécurité locale est conservée dans l’application. Vous pouvez la télécharger manuellement si nécessaire.</span>
+                  <button type="button" class="tiny-button" data-sync-conflict-download-id="${escapeAttr(conflict.id)}" ${hasExportPermission ? '' : 'disabled title="Export non autorisé" style="opacity:0.5; cursor:not-allowed;"'}>Télécharger copie locale avant remplacement</button>
+                </div>
+                ` : ''}
 
                 <div class="sync-conflict-actions" style="display: flex; gap: 10px; margin-top: 10px;">
                   <button type="button" class="tiny-button" data-sync-conflict-action="keep_local" data-sync-conflict-id="${escapeAttr(conflict.id)}">Conserver version locale</button>
@@ -970,6 +986,44 @@ function renderActivityLog() {
         renderConflictPanel();
         updateTable();
         if (typeof renderSyncStatusStrip === "function") renderSyncStatusStrip();
+      });
+    });
+
+    conflictPanel.querySelectorAll("[data-sync-conflict-download-id]").forEach((button) => {
+      button.addEventListener("click", () => {
+        if (typeof guardSensitiveAction === "function") {
+          const guard = guardSensitiveAction("export.backup");
+          if (!guard.ok) {
+            notifyUser(guard.message || "Export non autorisé.", "warn");
+            return;
+          }
+        }
+        const conflictId = button.dataset.syncConflictDownloadId;
+        const targetConflict = conflicts.find((c) => c.id === conflictId);
+        const localVal = targetConflict ? (targetConflict.localCase || targetConflict.localValue) : null;
+        if (localVal) {
+          const payload = {
+            version: "v23.2.3",
+            timestamp: new Date().toISOString(),
+            cases: [JSON.parse(JSON.stringify(localVal))],
+            source: "manual_conflict_backup"
+          };
+          if (typeof downloadJson === "function") {
+            downloadJson(payload, `nimr-sav-conflit-local-avant-cloud-${localVal.id || "unknown"}-${todayKey(new Date())}.json`);
+            if (typeof addAuditLog === "function") {
+              addAuditLog("conflict.local_downloaded", {
+                caseId: localVal.id,
+                conflictId: conflictId,
+                timestamp: new Date().toISOString()
+              });
+            }
+            notifyUser("Copie de sécurité locale téléchargée.", "success");
+          } else {
+            notifyUser("Téléchargement impossible.", "warn");
+          }
+        } else {
+          notifyUser("Impossible de trouver la version locale du dossier.", "warn");
+        }
       });
     });
   }

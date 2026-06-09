@@ -775,7 +775,10 @@ function renderSyncStatusStrip() {
     cloudLabel = "Non configuré";
     cloudState = "muted";
   } else if (openConflicts > 0) {
-    cloudLabel = "Conflit détecté";
+    const conflictsList = typeof getOpenSyncConflicts === "function" ? getOpenSyncConflicts() : [];
+    const dossiers = Array.from(new Set(conflictsList.map(c => c.caseNumber || c.caseId || c.entityId || "Dossier inconnu")));
+    const dossiersStr = dossiers.join(", ");
+    cloudLabel = `Conflit détecté (${openConflicts}) : ${dossiersStr} - Résoudre le conflit`;
     cloudState = "warn";
   } else if (cloudError) {
     cloudLabel = "Échec sync";
@@ -798,6 +801,37 @@ function renderSyncStatusStrip() {
   setSyncItem(target, "connection", online ? "En ligne" : "Hors ligne", online ? "ok" : "warn");
   setSyncItem(target, "last-save", formatSyncDate(health.lastSavedAt || safeReadStorageMeta()?.savedAt || ""));
   setSyncItem(target, "pending", pendingText, (pendingCasesCount || pendingOfflineCount) ? "warn" : "ok");
+
+  const cloudEl = target.querySelector("[data-sync-cloud]");
+  if (cloudEl) {
+    if (openConflicts > 0) {
+      cloudEl.style.cursor = "pointer";
+      cloudEl.style.textDecoration = "underline";
+      cloudEl.onclick = () => {
+        if (typeof setActiveTab === "function") {
+          setActiveTab("atelier");
+        }
+        const logPanel = document.getElementById("panel-activity-log");
+        if (logPanel) {
+          logPanel.hidden = false;
+        }
+        const conflictPanel = document.getElementById("sync-conflict-panel");
+        if (conflictPanel) {
+          conflictPanel.hidden = false;
+        }
+        if (typeof renderActivityLog === "function") {
+          renderActivityLog();
+        }
+        if (conflictPanel) {
+          conflictPanel.scrollIntoView({ behavior: "smooth" });
+        }
+      };
+    } else {
+      cloudEl.style.cursor = "";
+      cloudEl.style.textDecoration = "";
+      cloudEl.onclick = null;
+    }
+  }
 }
 
 function setSyncItem(root, key, value, stateName = "") {

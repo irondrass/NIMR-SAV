@@ -511,6 +511,181 @@ await app(`cleanLocalWorkstation()`);
 assert.equal(app('localStorage.getItem("nimr-sav-conflict-safety-snapshot:case-cleanup-test:conf-cleanup-2")'), null, "Cleanup should remove conflict safety snapshots");
 assert.equal(app('localStorage.getItem("nimr-sav-restore-safety-snapshot:last")'), null, "Cleanup should remove restore safety snapshots");
 
-console.log("Additional hotfix assertions OK");
+// Test H: Sync status strip improvement tests
+console.log("Running Sync status strip improvement tests...");
 
+app(`
+  var elements = {};
+  function getOrCreateMockElement(selector) {
+    if (!elements[selector]) {
+      elements[selector] = {
+        value: "",
+        textContent: "",
+        innerHTML: "",
+        hidden: false,
+        disabled: false,
+        title: "",
+        dataset: {},
+        style: {},
+        children: [],
+        elements: {
+          url: { value: "" },
+          anonKey: { value: "" },
+          workshopId: { value: "" },
+          backupKey: { value: "" },
+          email: { value: "" },
+          password: { value: "" },
+        },
+        classList: {
+          add() {},
+          remove() {},
+          toggle() {},
+          contains: () => false
+        },
+        setAttribute() {},
+        removeAttribute() {},
+        remove() {},
+        toggleAttribute() {},
+        append() {},
+        appendChild() {},
+        prepend() {},
+        replaceChildren() {},
+        querySelector: function(sel) { return getOrCreateMockElement(sel); },
+        querySelectorAll: function() { return []; },
+        closest: function() { return null; },
+        addEventListener: function(event, cb) {
+          this.listeners = this.listeners || {};
+          this.listeners[event] = this.listeners[event] || [];
+          this.listeners[event].push(cb);
+        },
+        click: function() {
+          if (this.listeners && this.listeners.click) {
+            this.listeners.click.forEach(cb => cb());
+          }
+          if (this.onclick) this.onclick();
+        },
+        scrollIntoView: function() {
+          this.scrolledIntoView = true;
+        }
+      };
+    }
+    return elements[selector];
+  }
+
+  // Override document methods instead of reassigning constant variables
+  document.querySelector = getOrCreateMockElement;
+  document.getElementById = (id) => getOrCreateMockElement("#" + id);
+  document.querySelectorAll = () => [];
+
+  // Set default tab navigation mocks
+  activeTab = "dossiers";
+  canAccessTab = (tab) => tab === "atelier" || tab === "dossiers";
+  getAllowedTabsForCurrentUser = () => ["atelier", "dossiers"];
+  hasPermission = () => true;
+  getActiveCase = () => null;
+  renderPlanning = () => {};
+  renderTechnicianDashboard = () => {};
+  renderTodayWorkshop = () => {};
+  renderResources = () => {};
+  renderHolidays = () => {};
+  renderResourceLeaves = () => {};
+  renderFastLaneSettings = () => {};
+  renderWorkHoursSettings = () => {};
+  migrateLegacyPhotos = () => {};
+`);
+
+// Load ui-cases.js and app.js into context
+const uiCasesSource = fs.readFileSync("js/ui-cases.js", "utf8");
+const appJsSource = fs.readFileSync("app.js", "utf8");
+vm.runInContext(uiCasesSource, context);
+vm.runInContext(appJsSource, context);
+
+// Test 1: Conflit ouvert => badge “Conflit détecté”
+app(`
+  // Ensure the case exists in state.cases
+  state.cases.push({
+    id: "case-test-strip",
+    caseNumber: "2026-TEST",
+    localRevision: 1,
+    syncRevision: 1,
+    updatedAt: new Date().toISOString(),
+    updatedBy: "Chef",
+    history: []
+  });
+
+  // Mock open sync conflicts with actual differing objects so they don't get auto-resolved
+  state.syncConflicts = [
+    {
+      id: "conf-test-strip",
+      type: "case_conflict",
+      caseId: "case-test-strip",
+      caseNumber: "2026-TEST",
+      localValue: { clientName: "Local Client" },
+      remoteValue: { clientName: "Remote Client" },
+      localCase: { clientName: "Local Client" },
+      remoteCase: { clientName: "Remote Client" },
+      status: "open"
+    }
+  ];
+
+  // Set isSupabaseConfigured to true so cloud sync status is evaluated
+  isSupabaseConfigured = () => true;
+
+  // Run renderSyncStatusStrip
+  renderSyncStatusStrip();
+`);
+
+const cloudText = app('getOrCreateMockElement("[data-sync-cloud]").textContent');
+assert.match(cloudText, /Conflit détecté/, "Le badge Cloud doit mentionner 'Conflit détecté'");
+assert.match(cloudText, /1/, "Le badge Cloud doit afficher le nombre de conflits ouverts");
+assert.match(cloudText, /2026-TEST/, "Le badge Cloud doit mentionner le dossier concerné");
+assert.match(cloudText, /Résoudre le conflit/, "Le badge Cloud doit proposer l'action claire 'Résoudre le conflit'");
+
+// Test 2: Clic badge => panneau conflit visible et navigation
+// Verify initial hidden states
+app(`
+  getOrCreateMockElement("#panel-activity-log").hidden = true;
+  getOrCreateMockElement("#sync-conflict-panel").hidden = true;
+  getOrCreateMockElement("#sync-conflict-panel").scrolledIntoView = false;
+  activeTab = "dossiers";
+`);
+
+// Trigger click on cloud badge
+app('getOrCreateMockElement("[data-sync-cloud]").click()');
+
+// Assert values after click
+assert.equal(app('activeTab'), 'atelier', "setActiveTab('atelier') doit être appelé lors du clic");
+assert.equal(app('getOrCreateMockElement("#panel-activity-log").hidden'), false, "Le panneau Journal d'activité doit être visible");
+assert.equal(app('getOrCreateMockElement("#sync-conflict-panel").hidden'), false, "Le panneau Conflits doit être visible");
+assert.equal(app('getOrCreateMockElement("#sync-conflict-panel").scrolledIntoView'), true, "Le panneau Conflits doit être défilé dans la vue");
+
+// Test 3: Conflit résolu => badge disparaît
+app(`
+  // Resolve conflict
+  resolveSyncConflict("conf-test-strip", "keep_local");
+`);
+
+// The conflict is resolved, so open conflicts length is 0.
+const cloudTextAfter = app('getOrCreateMockElement("[data-sync-cloud]").textContent');
+assert.ok(!cloudTextAfter.includes("Conflit détecté"), "Le badge 'Conflit détecté' doit disparaître après résolution");
+
+// Test 4: localRevision == syncRevision => modifications en attente revient à 0
+app(`
+  // Ensure localRevision == syncRevision for all cases
+  state.cases.forEach(c => {
+    c.localRevision = 5;
+    c.syncRevision = 5;
+  });
+
+  // Ensure offline queue is empty
+  localStorage.setItem("nimr-sav-offline-queue", "[]");
+
+  // Re-run render
+  renderSyncStatusStrip();
+`);
+
+const pendingText = app('getOrCreateMockElement("[data-sync-pending]").textContent');
+assert.equal(pendingText, "0", "Le compteur de modifications en attente doit revenir à 0");
+
+console.log("Additional hotfix assertions OK");
 console.log("Tests v23.2.3 offline sync conflict and local data integrity OK");

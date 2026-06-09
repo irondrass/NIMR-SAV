@@ -2871,6 +2871,7 @@ function resolveSyncConflict(conflictIdOrKey, action = "mark_resolved") {
   state.syncConflicts = normalizeSyncConflicts(conflicts);
   if (action === "keep_local" && typeof rememberLocalUserChangeAt === "function") rememberLocalUserChangeAt(new Date());
   saveState({ flushCloud: action !== "defer_manual_merge" && action !== "mark_resolved" });
+  if (typeof renderSyncStatusStrip === "function") renderSyncStatusStrip();
   return { ok: true, conflict };
 }
 

@@ -831,9 +831,20 @@ function renderActivityLog() {
   const panel = $("#panel-activity-log");
   if (!panel) return;
 
-  const allowed = hasPermission("audit.view");
-  panel.hidden = !allowed;
-  if (!allowed) return;
+  const openConflictsList = typeof getOpenSyncConflicts === "function" ? getOpenSyncConflicts() : [];
+  const openConflictsCount = openConflictsList.length;
+  const hasAuditView = hasPermission("audit.view");
+
+  panel.hidden = !hasAuditView && openConflictsCount === 0;
+
+  // Toggle visibility of activity log specific elements based on hasAuditView
+  const heading = panel.querySelector(".panel-heading");
+  const controls = panel.querySelector(".activity-log-controls");
+  const tableContainer = panel.querySelector(".table-container");
+
+  if (heading) heading.style.display = hasAuditView ? "" : "none";
+  if (controls) controls.style.display = hasAuditView ? "" : "none";
+  if (tableContainer) tableContainer.style.display = hasAuditView ? "" : "none";
 
   const filterSelect = $("#activity-log-filter");
   const searchInput = $("#activity-log-search");
@@ -1026,6 +1037,12 @@ function renderActivityLog() {
         }
       });
     });
+  }
+
+  if (!hasAuditView) {
+    if (tableBody) tableBody.innerHTML = "";
+    renderConflictPanel();
+    return;
   }
 
   // Bind only once

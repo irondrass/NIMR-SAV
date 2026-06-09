@@ -16,6 +16,7 @@ function initApp() {
     if (typeof bindUserSessionIdleEvents === "function") bindUserSessionIdleEvents();
     if (typeof bindLocalSecurityControls === "function") bindLocalSecurityControls();
     bindOfflineStatus();
+    bindSyncConflictUsability();
     if (typeof bindSupabaseActions === "function") bindSupabaseActions();
     bindVehicleLookup();
     bindKeyboardShortcuts();
@@ -83,6 +84,17 @@ function bindOfflineStatus() {
     quietNotify("Mode hors ligne actif. Les données locales restent consultables.", "offline");
   });
   refresh();
+}
+
+function bindSyncConflictUsability() {
+  const fallbackBtn = document.getElementById("fallback-resolve-conflict-btn");
+  if (fallbackBtn) {
+    fallbackBtn.addEventListener("click", () => {
+      if (typeof navigateToConflictsAndFocus === "function") {
+        navigateToConflictsAndFocus();
+      }
+    });
+  }
 }
 
 function configurePdfWorker() {
@@ -816,7 +828,7 @@ function registerServiceWorker() {
   });
   window.addEventListener("load", async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=23.2.3", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=23.2.4", { updateViaCache: "none" });
       registration.update?.();
       if (registration.waiting) showUpdateAvailable(registration);
       window.setInterval(() => registration.update?.(), 10 * 60 * 1000);
@@ -826,6 +838,34 @@ function registerServiceWorker() {
     }
   });
 }
+
+function navigateToConflictsAndFocus() {
+  if (typeof setActiveTab === "function") {
+    setActiveTab("atelier");
+  }
+  const logPanel = document.getElementById("panel-activity-log");
+  if (logPanel) {
+    logPanel.hidden = false;
+  }
+  const conflictPanel = document.getElementById("sync-conflict-panel");
+  if (conflictPanel) {
+    conflictPanel.hidden = false;
+  }
+  if (typeof renderActivityLog === "function") {
+    renderActivityLog();
+  }
+  if (conflictPanel) {
+    conflictPanel.scrollIntoView({ behavior: "smooth" });
+    const firstBtn = conflictPanel.querySelector("button, [data-sync-conflict-action]");
+    if (firstBtn) {
+      firstBtn.focus();
+    } else {
+      conflictPanel.setAttribute("tabindex", "-1");
+      conflictPanel.focus();
+    }
+  }
+}
+window.navigateToConflictsAndFocus = navigateToConflictsAndFocus;
 
 function renderActivityLog() {
   const panel = $("#panel-activity-log");
@@ -1014,7 +1054,7 @@ function renderActivityLog() {
         const localVal = targetConflict ? (targetConflict.localCase || targetConflict.localValue) : null;
         if (localVal) {
           const payload = {
-            version: "v23.2.3",
+            version: "v23.2.4",
             timestamp: new Date().toISOString(),
             cases: [JSON.parse(JSON.stringify(localVal))],
             source: "manual_conflict_backup"

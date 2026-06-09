@@ -1,4 +1,4 @@
-const CACHE_NAME = "nimr-sav-v23.2.3-offline-sync-conflict-local-data-hardening";
+const CACHE_NAME = "nimr-sav-v23.2.4-sync-conflict-badge-usability-hotfix";
 const ASSETS = [
   "./",
   "./index.html",

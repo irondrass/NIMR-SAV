@@ -775,10 +775,7 @@ function renderSyncStatusStrip() {
     cloudLabel = "Non configuré";
     cloudState = "muted";
   } else if (openConflicts > 0) {
-    const conflictsList = typeof getOpenSyncConflicts === "function" ? getOpenSyncConflicts() : [];
-    const dossiers = Array.from(new Set(conflictsList.map(c => c.caseNumber || c.caseId || c.entityId || "Dossier inconnu")));
-    const dossiersStr = dossiers.join(", ");
-    cloudLabel = `Conflit détecté (${openConflicts}) : ${dossiersStr} - Résoudre le conflit`;
+    cloudLabel = openConflicts === 1 ? "— 1 conflit détecté — Résoudre" : `— ${openConflicts} conflits détectés — Résoudre`;
     cloudState = "warn";
   } else if (cloudError) {
     cloudLabel = "Échec sync";
@@ -807,30 +804,39 @@ function renderSyncStatusStrip() {
     if (openConflicts > 0) {
       cloudEl.style.cursor = "pointer";
       cloudEl.style.textDecoration = "underline";
+      cloudEl.removeAttribute("disabled");
+      cloudEl.removeAttribute("aria-disabled");
+      cloudEl.setAttribute("tabindex", "0");
+      cloudEl.setAttribute("aria-label", "Résoudre le conflit de synchronisation");
       cloudEl.onclick = () => {
-        if (typeof setActiveTab === "function") {
-          setActiveTab("atelier");
+        if (typeof navigateToConflictsAndFocus === "function") {
+          navigateToConflictsAndFocus();
         }
-        const logPanel = document.getElementById("panel-activity-log");
-        if (logPanel) {
-          logPanel.hidden = false;
-        }
-        const conflictPanel = document.getElementById("sync-conflict-panel");
-        if (conflictPanel) {
-          conflictPanel.hidden = false;
-        }
-        if (typeof renderActivityLog === "function") {
-          renderActivityLog();
-        }
-        if (conflictPanel) {
-          conflictPanel.scrollIntoView({ behavior: "smooth" });
+      };
+      cloudEl.onkeydown = (e) => {
+        if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
+          e.preventDefault();
+          if (typeof navigateToConflictsAndFocus === "function") {
+            navigateToConflictsAndFocus();
+          }
         }
       };
     } else {
       cloudEl.style.cursor = "";
       cloudEl.style.textDecoration = "";
+      cloudEl.setAttribute("disabled", "true");
+      cloudEl.setAttribute("aria-disabled", "true");
+      cloudEl.setAttribute("tabindex", "-1");
+      cloudEl.removeAttribute("aria-label");
       cloudEl.onclick = null;
+      cloudEl.onkeydown = null;
     }
+  }
+
+  // Handle fallback button visibility
+  const fallbackBtn = document.getElementById("fallback-resolve-conflict-btn");
+  if (fallbackBtn) {
+    fallbackBtn.hidden = openConflicts === 0;
   }
 }
 

@@ -16,8 +16,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <script src="js/version.js?v=23.2.3"></script>
-    <link rel="stylesheet" href="styles.css?v=23.2.3" />
+    <script src="js/version.js?v=23.2.4"></script>
+    <link rel="stylesheet" href="styles.css?v=23.2.4" />
   </head>
   <body>
     <a class="skip-link" href="#main-content">Aller au contenu principal</a>
@@ -107,10 +107,11 @@
 
         <section class="sync-status-strip" id="sync-status-strip" aria-label="État sauvegarde et synchronisation">
           <span class="sync-item"><strong>Local</strong><b data-sync-local>Contrôle...</b></span>
-          <span class="sync-item"><strong>Cloud</strong><b data-sync-cloud>Contrôle...</b></span>
+          <span class="sync-item"><strong>Cloud</strong><button type="button" data-sync-cloud style="background:transparent; border:none; padding:0; font:inherit; color:inherit; text-align:inherit; display:inline;">Contrôle...</button></span>
           <span class="sync-item"><strong>Connexion</strong><b data-sync-connection>Contrôle...</b></span>
           <span class="sync-item"><strong>Dernière sauvegarde</strong><b data-sync-last-save>Jamais</b></span>
           <span class="sync-item"><strong>Modifications en attente</strong><b data-sync-pending>0</b></span>
+          <button type="button" id="fallback-resolve-conflict-btn" class="primary-button" style="min-height:28px; height:28px; padding:2px 10px; font-size:0.76rem; border-radius:999px; background:var(--danger, #dc2626); color:#fff; border:none;" hidden>Résoudre le conflit</button>
         </section>
 
         <section class="view" id="view-reception-workspace" hidden>
@@ -1230,21 +1231,21 @@
     </div>
 
     <script src="vendor/pdf.min.js" defer></script>
-    <script src="js/utils.js?v=23.2.3" defer></script>
-    <script src="js/state.js?v=23.2.3" defer></script>
-    <script src="js/ui-cases.js?v=23.2.3" defer></script>
-    <script src="js/estimate-import.js?v=23.2.3" defer></script>
-    <script src="js/ui-planning.js?v=23.2.3" defer></script>
-    <script src="js/ui-reception.js?v=23.2.3" defer></script>
-    <script src="js/photos.js?v=23.2.3" defer></script>
-    <script src="js/storage.js?v=23.2.3" defer></script>
-    <script src="js/planning.js?v=23.2.3" defer></script>
-    <script src="js/exports.js?v=23.2.3" defer></script>
-    <script src="js/business-rules-v2187.js?v=23.2.3" defer></script>
+    <script src="js/utils.js?v=23.2.4" defer></script>
+    <script src="js/state.js?v=23.2.4" defer></script>
+    <script src="js/ui-cases.js?v=23.2.4" defer></script>
+    <script src="js/estimate-import.js?v=23.2.4" defer></script>
+    <script src="js/ui-planning.js?v=23.2.4" defer></script>
+    <script src="js/ui-reception.js?v=23.2.4" defer></script>
+    <script src="js/photos.js?v=23.2.4" defer></script>
+    <script src="js/storage.js?v=23.2.4" defer></script>
+    <script src="js/planning.js?v=23.2.4" defer></script>
+    <script src="js/exports.js?v=23.2.4" defer></script>
+    <script src="js/business-rules-v2187.js?v=23.2.4" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
-    <script src="js/supabase-config.js?v=23.2.3" defer></script>
-    <script src="js/supabase-client.js?v=23.2.3" defer></script>
-    <script src="js/supabase-sync.js?v=23.2.3" defer></script>
-    <script src="app.js?v=23.2.3" defer></script>
+    <script src="js/supabase-config.js?v=23.2.4" defer></script>
+    <script src="js/supabase-client.js?v=23.2.4" defer></script>
+    <script src="js/supabase-sync.js?v=23.2.4" defer></script>
+    <script src="app.js?v=23.2.4" defer></script>
   </body>
 </html>

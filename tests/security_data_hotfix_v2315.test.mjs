@@ -10,11 +10,11 @@ const storageSource = fs.readFileSync("js/storage.js", "utf8");
 const stateSource = fs.readFileSync("js/state.js", "utf8");
 const versionSource = fs.readFileSync("js/version.js", "utf8");
 const supabaseSchema = fs.readFileSync("supabase-schema.sql", "utf8");
-const EXPECTED_APP_VERSION = "v23.2.3";
-const EXPECTED_QUERY_VERSION = "23.2.3";
-const EXPECTED_CACHE_NAME = "nimr-sav-v23.2.3-offline-sync-conflict-local-data-hardening";
+const EXPECTED_APP_VERSION = "v23.2.4";
+const EXPECTED_QUERY_VERSION = "23.2.4";
+const EXPECTED_CACHE_NAME = "nimr-sav-v23.2.4-sync-conflict-badge-usability-hotfix";
 
-console.log("Démarrage tests sécurité données + version/cache v23.2.3...");
+console.log("Démarrage tests sécurité données + version/cache v23.2.4...");
 
 assert.doesNotThrow(() => JSON.parse(vehicleJson), "data/vehicles.json doit rester un JSON valide");
 const vehicleRecords = JSON.parse(vehicleJson);
@@ -134,4 +134,4 @@ await assertVehicleDatabaseLoadDoesNotCrash(
   "Tableau vide",
 );
 
-console.log("Tests sécurité données + version/cache v23.2.3 OK");
+console.log("Tests sécurité données + version/cache v23.2.4 OK");

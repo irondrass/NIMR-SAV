@@ -16,8 +16,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <script src="js/version.js?v=23.2.4"></script>
-    <link rel="stylesheet" href="styles.css?v=23.2.4" />
+    <script src="js/version.js?v=23.2.5"></script>
+    <link rel="stylesheet" href="styles.css?v=23.2.5" />
   </head>
   <body>
     <a class="skip-link" href="#main-content">Aller au contenu principal</a>
@@ -60,6 +60,10 @@
           <button class="nav-button" type="button" data-tab="technician">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L4 17l3 3 5.3-5.3a4 4 0 0 0 5.4-5.4l-2.4 2.4-3-3 2.4-2.4Z"/><path d="m7 17 3 3"/></svg>
             Technicien
+          </button>
+          <button class="nav-button" type="button" data-tab="qc-workspace">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 12l2 2 4-4"/><path d="M21 12c0 4.97-4.03 9-9 9s-9-4.03-9-9 4.03-9 9-9c2.07 0 3.98.7 5.5 1.86"/><path d="M22 4L12 14l-3-3"/></svg>
+            Contr&#244;le Qualit&#233;
           </button>
           <button class="nav-button" type="button" data-tab="atelier">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -448,6 +452,11 @@
           </section>
         </section>
 
+        <!-- v23.2.5 - Vue Controle Qualite dediee (qualite, directeur_sav, admin) -->
+        <section class="view" id="view-qc-workspace" hidden>
+          <!-- Filled dynamically by renderQcWorkspace() -->
+        </section>
+
         <section class="view" id="view-atelier">
           <div class="settings-grid">
             <section class="panel">
@@ -493,7 +502,7 @@
               </form>
             </section>
 
-            <section class="panel users-roles-panel">
+            <section class="panel users-roles-panel" data-admin-technical-panel>
               <div class="panel-heading">
                 <div>
                   <h1>Utilisateurs & rôles</h1>
@@ -664,7 +673,7 @@
               </div>
             </section>
 
-            <section class="panel security-panel">
+            <section class="panel security-panel" data-admin-technical-panel>
               <div class="panel-heading">
                 <div>
                   <h1>Sécurité du poste</h1>
@@ -692,7 +701,7 @@
               <p class="muted backup-status" id="local-security-status">Sécurité locale non contrôlée.</p>
             </section>
 
-            <section class="panel supabase-panel">
+            <section class="panel supabase-panel" data-admin-technical-panel>
               <div class="panel-heading">
                 <div>
                   <h1>Cloud Supabase</h1>
@@ -1231,21 +1240,21 @@
     </div>
 
     <script src="vendor/pdf.min.js" defer></script>
-    <script src="js/utils.js?v=23.2.4" defer></script>
-    <script src="js/state.js?v=23.2.4" defer></script>
-    <script src="js/ui-cases.js?v=23.2.4" defer></script>
-    <script src="js/estimate-import.js?v=23.2.4" defer></script>
-    <script src="js/ui-planning.js?v=23.2.4" defer></script>
-    <script src="js/ui-reception.js?v=23.2.4" defer></script>
-    <script src="js/photos.js?v=23.2.4" defer></script>
-    <script src="js/storage.js?v=23.2.4" defer></script>
-    <script src="js/planning.js?v=23.2.4" defer></script>
-    <script src="js/exports.js?v=23.2.4" defer></script>
-    <script src="js/business-rules-v2187.js?v=23.2.4" defer></script>
+    <script src="js/utils.js?v=23.2.5" defer></script>
+    <script src="js/state.js?v=23.2.5" defer></script>
+    <script src="js/ui-cases.js?v=23.2.5" defer></script>
+    <script src="js/estimate-import.js?v=23.2.5" defer></script>
+    <script src="js/ui-planning.js?v=23.2.5" defer></script>
+    <script src="js/ui-reception.js?v=23.2.5" defer></script>
+    <script src="js/photos.js?v=23.2.5" defer></script>
+    <script src="js/storage.js?v=23.2.5" defer></script>
+    <script src="js/planning.js?v=23.2.5" defer></script>
+    <script src="js/exports.js?v=23.2.5" defer></script>
+    <script src="js/business-rules-v2187.js?v=23.2.5" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
-    <script src="js/supabase-config.js?v=23.2.4" defer></script>
-    <script src="js/supabase-client.js?v=23.2.4" defer></script>
-    <script src="js/supabase-sync.js?v=23.2.4" defer></script>
-    <script src="app.js?v=23.2.4" defer></script>
+    <script src="js/supabase-config.js?v=23.2.5" defer></script>
+    <script src="js/supabase-client.js?v=23.2.5" defer></script>
+    <script src="js/supabase-sync.js?v=23.2.5" defer></script>
+    <script src="app.js?v=23.2.5" defer></script>
   </body>
 </html>

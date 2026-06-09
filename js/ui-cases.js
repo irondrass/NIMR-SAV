@@ -7,7 +7,7 @@ function render() {
   }
 
   // Block unauthorized view content from rendering to prevent leaks in DOM
-  const tabs = ["dossiers", "today", "pilotage", "planning", "technician", "atelier", "reception-workspace"];
+  const tabs = ["dossiers", "today", "pilotage", "planning", "technician", "atelier", "reception-workspace", "qc-workspace"];
   tabs.forEach((tab) => {
     const view = document.getElementById(`view-${tab}`);
     if (!view) return;
@@ -72,6 +72,9 @@ function render() {
   if (typeof canAccessTab !== "function" || canAccessTab("technician")) {
     renderTechnicianDashboard();
   }
+  if (typeof canAccessTab !== "function" || canAccessTab("qc-workspace")) {
+    if (typeof renderQcWorkspace === "function") renderQcWorkspace();
+  }
   if (typeof canAccessTab !== "function" || canAccessTab("atelier")) {
     renderResources();
     renderHolidays();
@@ -83,6 +86,7 @@ function render() {
 
   renderSyncStatusStrip();
   renderMetrics();
+  if (typeof renderAdminTechnicalVisibility === "function") renderAdminTechnicalVisibility();
   if (typeof renderCurrentSessionIndicator === "function") renderCurrentSessionIndicator();
 }
 
@@ -100,7 +104,54 @@ const UNAUTHORIZED_VIEW_SCRUB_SELECTORS = {
     "#resource-leave-list",
     "#activity-log-table-body",
   ],
+  "qc-workspace": [".qc-workspace-inner"],
 };
+
+function renderNavigationVisibility() {
+  document.querySelectorAll("[data-tab]").forEach((button) => {
+    const tabId = button.dataset.tab;
+    const allowed = typeof canAccessTab !== "function" || canAccessTab(tabId);
+    button.hidden = !allowed;
+    button.style.display = allowed ? "" : "none";
+    button.setAttribute("aria-hidden", allowed ? "false" : "true");
+    if (!allowed) {
+      button.classList.remove("active");
+      button.removeAttribute("aria-current");
+    }
+  });
+  renderAdminTechnicalVisibility();
+}
+
+function setControlVisible(control, visible, message = "Action réservée Admin technique.") {
+  if (!control) return;
+  const target = control.closest("label") || control;
+  target.hidden = !visible;
+  target.style.display = visible ? "" : "none";
+  control.disabled = !visible;
+  if (!visible) {
+    control.setAttribute("aria-disabled", "true");
+    control.title = message;
+  } else {
+    control.removeAttribute("aria-disabled");
+    control.title = "";
+  }
+}
+
+function renderAdminTechnicalVisibility() {
+  const currentUser = state?.currentUserId && typeof getUserById === "function" ? getUserById(state.currentUserId) : null;
+  const isAdminTechnical = typeof hasPermission === "function"
+    && currentUser
+    && hasPermission("users.manage", { user: currentUser })
+    && hasPermission("supabase.configure", { user: currentUser })
+    && hasPermission("settings.edit", { user: currentUser });
+  document.querySelectorAll("[data-admin-technical-panel]").forEach((panel) => {
+    panel.hidden = !isAdminTechnical;
+    panel.style.display = isAdminTechnical ? "" : "none";
+  });
+  const canImportBackup = typeof hasPermission === "function" && currentUser && hasPermission("import.backup", { user: currentUser });
+  setControlVisible(document.getElementById("import-backup"), canImportBackup, "Restauration réservée Admin technique.");
+  setControlVisible(document.getElementById("restore-auto-snapshot"), canImportBackup, "Restauration complète réservée Admin technique.");
+}
 
 function scrubUnauthorizedViewContent(tab, view) {
   const selectors = UNAUTHORIZED_VIEW_SCRUB_SELECTORS[tab] || [];
@@ -2420,6 +2471,7 @@ function renderCaseDetail() {
   renderDossierExport(detail, item);
   renderHistory(detail, item);
   renderCaseSummary(detail, item);
+  renderRoleBasedCaseNotes(detail, item);
 
   $("#photo-input", detail).addEventListener("change", (event) => handlePhotos(event, item, $("#photo-category", detail)?.value));
   $("#claim-form", detail)?.addEventListener("submit", (event) => handleClaimSubmit(event, item));
@@ -2761,6 +2813,71 @@ function renderVehicleIdentityCard(root, item) {
     </dl>
   `;
   setText(root, "arrival-notes", item.arrivalNotes || item.damageNotes || "Aucune observation réception renseignée.");
+}
+
+function renderRoleBasedCaseNotes(root, item) {
+  const panel = root.querySelector("[data-case-panel='claims']");
+  if (!panel || typeof getCaseNotesForRole !== "function") return;
+  panel.querySelector("[data-role-notes-panel]")?.remove();
+
+  const user = state?.currentUserId && typeof getUserById === "function" ? getUserById(state.currentUserId) : null;
+  const role = user?.role || "readonly";
+  const visibleNotes = getCaseNotesForRole(item, role);
+  const noteDefs = [
+    ["reception", "Note réception", "case.edit"],
+    ["technique", "Note technique", "case.edit"],
+    ["qualite", "Note qualité", "quality.validate"],
+    ["direction", "Note direction", "notes.direction"],
+  ].filter(([key]) => Object.prototype.hasOwnProperty.call(visibleNotes, key));
+  if (!noteDefs.length) return;
+
+  const section = document.createElement("section");
+  section.className = "detail-section full-width";
+  section.dataset.roleNotesPanel = "true";
+
+  const heading = document.createElement("div");
+  heading.className = "section-heading";
+  const headingTitle = document.createElement("h2");
+  headingTitle.textContent = "Notes internes";
+  const headingMeta = document.createElement("span");
+  headingMeta.textContent = noteDefs.some(([key]) => key === "direction")
+    ? "Notes direction visibles uniquement aux rôles autorisés."
+    : "Notes visibles selon le rôle connecté.";
+  heading.append(headingTitle, headingMeta);
+  section.appendChild(heading);
+
+  const grid = document.createElement("div");
+  grid.className = "form-grid";
+  noteDefs.forEach(([key, label, permission]) => {
+    const labelEl = document.createElement("label");
+    labelEl.className = "wide";
+    labelEl.textContent = label;
+
+    const textarea = document.createElement("textarea");
+    textarea.rows = 3;
+    textarea.value = visibleNotes[key] || "";
+    textarea.dataset.caseNote = key;
+    const canEdit = typeof canRenderAction === "function"
+      && canRenderAction(permission, { item })
+      && !(typeof isCaseReadonlyArchive === "function" && isCaseReadonlyArchive(item));
+    textarea.disabled = !canEdit;
+    if (!canEdit) textarea.title = typeof getPermissionDeniedMessage === "function" ? getPermissionDeniedMessage(permission, { item }) : "Lecture seule";
+    textarea.addEventListener("change", () => {
+      if (typeof updateCaseNote !== "function") return;
+      const result = updateCaseNote(item.id, key, textarea.value);
+      if (!result.ok) {
+        textarea.value = (getCaseNotesForRole(item, role)[key] || "");
+        if (typeof notifyUser === "function") notifyUser(result.message, "error");
+        return;
+      }
+      if (typeof quietNotify === "function") quietNotify("Note enregistrée.", "success");
+    });
+
+    labelEl.appendChild(textarea);
+    grid.appendChild(labelEl);
+  });
+  section.appendChild(grid);
+  panel.appendChild(section);
 }
 
 function updateCaseHeader(root, item) {
@@ -4458,6 +4575,161 @@ function renderQualityChecklist(root, item) {
   });
 }
 
+
 function qualityChecklistCount(item) {
   return DEFAULT_QUALITY_CHECKS.filter((label) => item.qualityChecklist[label]).length;
+}
+
+// ─── v23.2.5 — Vue Contrôle Qualité dédiée ────────────────────────────────
+function renderQcWorkspace() {
+  const container = document.getElementById("view-qc-workspace");
+  if (!container) return;
+
+  // Vérification d'accès
+  if (typeof canAccessTab === "function" && !canAccessTab("qc-workspace")) return;
+
+  const cases = (typeof state !== "undefined" ? state.cases : []).filter(
+    (c) => !c.deletedAt && !c.archivedAt
+  );
+
+  // Catégories QC
+  const pending = cases.filter((c) => {
+    const rw = c.receptionWorkflow || {};
+    const qStatus = typeof normalizeQualityStatus === "function" ? normalizeQualityStatus(rw.qualityStatus) : rw.qualityStatus;
+    // En attente : travaux terminés, pas livré, pas encore pris en QC (not_started) ou en cours
+    return c.flags?.workCompleted && !c.flags?.delivered &&
+      (!qStatus || qStatus === "not_started" || qStatus === "in_progress" || qStatus === "pending" || qStatus === "");
+  });
+
+  const rejected = cases.filter((c) => {
+    const rw = c.receptionWorkflow || {};
+    const qStatus = typeof normalizeQualityStatus === "function" ? normalizeQualityStatus(rw.qualityStatus) : rw.qualityStatus;
+    return qStatus === "rejected" && !c.flags?.delivered;
+  });
+
+  const reworkDone = cases.filter((c) => {
+    const rw = c.receptionWorkflow || {};
+    const qStatus = typeof normalizeQualityStatus === "function" ? normalizeQualityStatus(rw.qualityStatus) : rw.qualityStatus;
+    return qStatus === "rework" && c.flags?.workCompleted && !c.flags?.delivered;
+  });
+
+  const canValidate = typeof hasPermission === "function" && hasPermission("quality.validate");
+  const canRevalidate = typeof hasPermission === "function" && hasPermission("quality.revalidate");
+  const canReject   = typeof hasPermission === "function" && hasPermission("quality.reject");
+
+  function qcCard(c, actionSet) {
+    const checklist = c.qualityChecklist || {};
+    const total = typeof DEFAULT_QUALITY_CHECKS !== "undefined" ? DEFAULT_QUALITY_CHECKS.length : 0;
+    const done  = total ? DEFAULT_QUALITY_CHECKS.filter((k) => checklist[k]).length : 0;
+    const rw = c.receptionWorkflow || {};
+    const returnReason = rw.qualityReturnReason || "";
+    return `
+      <article class="qc-card" data-qc-case="${escapeAttr(c.id)}">
+        <div class="qc-card-header">
+          <span class="qc-plate">${escapeHtml(c.plate || "—")}</span>
+          <span class="qc-vehicle">${escapeHtml(c.vehicle || "")}</span>
+          <span class="qc-client">${escapeHtml(c.clientName || "")}</span>
+        </div>
+        <div class="qc-card-meta">
+          ${total ? `<span class="qc-checklist-count">Checklist : ${done}/${total}</span>` : ""}
+          ${returnReason ? `<span class="qc-return-reason">Motif retour : ${escapeHtml(returnReason)}</span>` : ""}
+        </div>
+        <div class="qc-card-actions">
+          ${actionSet === "pending" || actionSet === "rework" ? `
+            ${actionSet === "rework"
+              ? (canRevalidate ? `<button type="button" class="primary-button qc-action-revalidate" data-case-id="${escapeAttr(c.id)}">✅ Revalider QC</button>` : "")
+              : (canValidate ? `<button type="button" class="primary-button qc-action-validate" data-case-id="${escapeAttr(c.id)}">✅ Valider QC</button>` : "")}
+            ${canReject ? `
+              <span class="qc-reject-wrap">
+                <input type="text" class="qc-reject-reason" placeholder="Motif refus..." aria-label="Motif de refus QC" style="font-size:0.85rem; padding:4px 8px;" />
+                <button type="button" class="ghost-button qc-action-reject" data-case-id="${escapeAttr(c.id)}">❌ Refuser</button>
+              </span>
+            ` : ""}
+          ` : ""}
+          ${actionSet === "rejected" ? `
+            ${canReject ? `<button type="button" class="ghost-button qc-action-return" data-case-id="${escapeAttr(c.id)}">🔧 Retour atelier</button>` : ""}
+            ${canRevalidate ? `<button type="button" class="primary-button qc-action-revalidate" data-case-id="${escapeAttr(c.id)}">✅ Valider malgré tout</button>` : ""}
+          ` : ""}
+        </div>
+      </article>`;
+  }
+
+  function sectionHtml(title, icon, items, actionSet, emptyMsg) {
+    return `
+      <section class="qc-section">
+        <h2 class="qc-section-title">${escapeHtml(icon)} ${escapeHtml(title)} <span class="status-pill">${items.length}</span></h2>
+        ${items.length === 0
+          ? `<p class="empty-inline">${escapeHtml(emptyMsg)}</p>`
+          : items.map((c) => qcCard(c, actionSet)).join("")}
+      </section>`;
+  }
+
+  container.innerHTML = `
+    <div class="qc-workspace-inner" style="padding: 20px; max-width: 1100px; margin: 0 auto;">
+      <div class="panel-heading">
+        <div>
+          <h1>Contrôle Qualité</h1>
+          <p>Validez, refusez ou renvoyez en atelier les véhicules prêts pour contrôle.</p>
+        </div>
+        <button type="button" class="ghost-button" id="qc-refresh-btn" aria-label="Rafraîchir">↻ Rafraîchir</button>
+      </div>
+      ${sectionHtml("En attente de QC", "🔍", pending, "pending", "Aucun véhicule en attente de contrôle qualité.")}
+      ${sectionHtml("Retravail terminé — à revalider", "🔄", reworkDone, "rework", "Aucun retravail terminé à revalider.")}
+      ${sectionHtml("QC refusé — retour atelier demandé", "❌", rejected, "rejected", "Aucun dossier en état refusé.")}
+    </div>`;
+
+  // Liaison des actions
+  container.querySelectorAll(".qc-action-validate, .qc-action-revalidate").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const caseId = btn.dataset.caseId;
+      if (typeof advanceReceptionWorkflow !== "function") return;
+      const res = advanceReceptionWorkflow(caseId, "update_quality_status", { status: "validated" });
+      if (res.ok) {
+        if (typeof saveState === "function") saveState();
+        renderQcWorkspace();
+      } else {
+        if (typeof notifyUser === "function") notifyUser(res.message, "error");
+      }
+    });
+  });
+
+  container.querySelectorAll(".qc-action-reject").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const caseId = btn.dataset.caseId;
+      const wrap = btn.closest(".qc-reject-wrap");
+      const reasonInput = wrap ? wrap.querySelector(".qc-reject-reason") : null;
+      const reason = reasonInput ? reasonInput.value.trim() : "";
+      if (typeof advanceReceptionWorkflow !== "function") return;
+      const res = advanceReceptionWorkflow(caseId, "update_quality_status", { status: "rejected", reason });
+      if (res.ok) {
+        if (typeof saveState === "function") saveState();
+        renderQcWorkspace();
+      } else {
+        if (typeof notifyUser === "function") notifyUser(res.message, "error");
+      }
+    });
+  });
+
+  container.querySelectorAll(".qc-action-return").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const caseId = btn.dataset.caseId;
+      const card = btn.closest(".qc-card");
+      const reasonInput = card ? card.querySelector(".qc-reject-reason") : null;
+      const reason = reasonInput ? reasonInput.value.trim() : "";
+      if (typeof advanceReceptionWorkflow !== "function") return;
+      const res = advanceReceptionWorkflow(caseId, "return_to_workshop", { reason });
+      if (res.ok) {
+        if (typeof saveState === "function") saveState();
+        renderQcWorkspace();
+      } else {
+        if (typeof notifyUser === "function") notifyUser(res.message, "error");
+      }
+    });
+  });
+
+  document.getElementById("qc-refresh-btn")?.addEventListener("click", renderQcWorkspace);
+}
+
+if (typeof window !== "undefined") {
+  window.renderQcWorkspace = renderQcWorkspace;
 }

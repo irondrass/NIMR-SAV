@@ -340,6 +340,21 @@ function stepStatus(item, key) {
   return "todo";
 }
 
+function buildRepairOrderNotesForSync(item) {
+  const roleNotes = item.notes && typeof item.notes === "object" ? item.notes : {};
+  return [
+    item.damageNotes,
+    item.ownerName ? `Propriétaire/société: ${item.ownerName}` : "",
+    item.driverName ? `Déposant: ${item.driverName}${item.driverPhone ? ` (${item.driverPhone})` : ""}` : "",
+    item.insurance ? `Assurance: ${item.insurance}` : "",
+    item.expertName ? `Expert: ${item.expertName}` : "",
+    roleNotes.reception ? `Note réception: ${roleNotes.reception}` : "",
+    roleNotes.technique ? `Note technique: ${roleNotes.technique}` : "",
+    roleNotes.qualite ? `Note qualité: ${roleNotes.qualite}` : "",
+    roleNotes.direction ? `Note direction: ${roleNotes.direction}` : "",
+  ].filter(Boolean).join("\n");
+}
+
 async function syncBusinessTablesToSupabase(payload, user) {
   const client = getSupabaseClient();
   const localState = normalizeState(payload.state);
@@ -396,13 +411,7 @@ async function syncBusinessTablesToSupabase(payload, user) {
     delivery_done_at: getHistoryIso(item, "vehicle.delivered"),
     estimated_amount: null,
     customer_balance: null,
-    notes: [
-      item.damageNotes,
-      item.ownerName ? `Propriétaire/société: ${item.ownerName}` : "",
-      item.driverName ? `Déposant: ${item.driverName}${item.driverPhone ? ` (${item.driverPhone})` : ""}` : "",
-      item.insurance ? `Assurance: ${item.insurance}` : "",
-      item.expertName ? `Expert: ${item.expertName}` : "",
-    ].filter(Boolean).join("\n"),
+    notes: buildRepairOrderNotesForSync(item),
     updated_at: now,
   }));
   const orderMap = await upsertAndMap(client, "repair_orders", orderRows);

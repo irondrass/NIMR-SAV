@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 
-console.log("Demarrage tests v23.2.4 sync conflict badge usability hotfix...");
+console.log("Demarrage tests v23.2.5 sync conflict badge usability hotfix...");
 
 const scriptFiles = [
   "js/utils.js",
@@ -53,6 +53,10 @@ function stubElement() {
 }
 
 const storage = new Map();
+const fakeTimeout = (callback, ...args) => {
+  if (typeof callback === "function") callback(...args);
+  return 0;
+};
 const context = {
   console,
   localStorage: {
@@ -72,7 +76,7 @@ const context = {
   },
   window: {
     addEventListener() {},
-    setTimeout,
+    setTimeout: fakeTimeout,
     clearTimeout,
     setInterval: () => 0,
     clearInterval: () => {},
@@ -81,7 +85,7 @@ const context = {
   },
   navigator: { onLine: true },
   fetch: async () => ({ ok: false }),
-  setTimeout,
+  setTimeout: fakeTimeout,
   clearTimeout,
   setInterval: () => 0,
   clearInterval: () => {},
@@ -117,11 +121,11 @@ const appSource = fs.readFileSync("app.js", "utf8");
 
 assert.equal(vehiclesSource, "[]", "data/vehicles.json doit rester vide");
 assert.doesNotMatch(swSource, /data\/vehicles\.json/, "data/vehicles.json ne doit pas etre precache");
-assert.match(stateSource, /APP_VERSION\s*=\s*"v23\.2\.4"/, "state.js doit utiliser v23.2.4");
-assert.match(swSource, /CACHE_NAME\s*=\s*"nimr-sav-v23\.2\.4-sync-conflict-badge-usability-hotfix"/, "sw.js doit precacher avec le cache v23.2.4");
-assert.match(versionSource, /APP_VERSION\s*=\s*"v23\.2\.4"/, "version.js doit exposer APP_VERSION v23.2.4");
-assert.match(versionSource, /NIMR_CACHE_NAME\s*=\s*"nimr-sav-v23\.2\.4-sync-conflict-badge-usability-hotfix"/, "version.js doit exposer NIMR_CACHE_NAME v23.2.4");
-assert.match(appSource, /serviceWorker\.register\("sw\.js\?v=23\.2\.4"/, "app.js doit enregistrer sw.js?v=23.2.4");
+assert.match(stateSource, /APP_VERSION\s*=\s*"v23\.2\.5"/, "state.js doit utiliser v23.2.5");
+assert.match(swSource, /CACHE_NAME\s*=\s*"nimr-sav-v23\.2\.5-role-based-workspaces-qc-view"/, "sw.js doit precacher avec le cache v23.2.5");
+assert.match(versionSource, /APP_VERSION\s*=\s*"v23\.2\.5"/, "version.js doit exposer APP_VERSION v23.2.5");
+assert.match(versionSource, /NIMR_CACHE_NAME\s*=\s*"nimr-sav-v23\.2\.5-role-based-workspaces-qc-view"/, "version.js doit exposer NIMR_CACHE_NAME v23.2.5");
+assert.match(appSource, /serviceWorker\.register\("sw\.js\?v=23\.2\.5"/, "app.js doit enregistrer sw.js?v=23.2.5");
 
 // 2. Setup mock UI elements
 app(`
@@ -334,4 +338,4 @@ assert.equal(pendingText, "0", "Le compteur de modifications en attente doit rev
 // Test: aucun téléchargement automatique
 assert.equal(app('downloadJsonCalls.length'), 0, "Aucun téléchargement automatique ne doit être déclenché");
 
-console.log("Tests v23.2.4 sync conflict badge usability hotfix OK");
+console.log("Tests v23.2.5 sync conflict badge usability hotfix OK");

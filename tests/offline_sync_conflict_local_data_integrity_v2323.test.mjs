@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 
-console.log("Demarrage tests v23.2.4 offline sync conflict and local data integrity...");
+console.log("Demarrage tests v23.2.5 offline sync conflict and local data integrity...");
 
 const scriptFiles = [
   "js/utils.js",
@@ -53,6 +53,10 @@ function stubElement() {
 }
 
 const storage = new Map();
+const fakeTimeout = (callback, ...args) => {
+  if (typeof callback === "function") callback(...args);
+  return 0;
+};
 const context = {
   console,
   localStorage: {
@@ -72,7 +76,7 @@ const context = {
   },
   window: {
     addEventListener() {},
-    setTimeout,
+    setTimeout: fakeTimeout,
     clearTimeout,
     setInterval: () => 0,
     clearInterval: () => {},
@@ -81,7 +85,7 @@ const context = {
   },
   navigator: { onLine: true },
   fetch: async () => ({ ok: false }),
-  setTimeout,
+  setTimeout: fakeTimeout,
   clearTimeout,
   setInterval: () => 0,
   clearInterval: () => {},
@@ -309,7 +313,7 @@ assert.equal(resolveDeferResult.conflict.status, "open", "defer_manual_merge sho
 const guardEditAfterDefer = app(`guardAction("case.edit", ${JSON.stringify(caseContext)})`);
 assert.equal(guardEditAfterDefer.ok, false, "Sensitive actions must remain blocked after deferring manual merge");
 
-// --- ADDITIONAL TESTS FOR HOTFIX v23.2.4 ---
+// --- ADDITIONAL TESTS FOR HOTFIX v23.2.5 ---
 console.log("Running additional hotfix assertions...");
 
 await app(`
@@ -691,4 +695,4 @@ const pendingText = app('getOrCreateMockElement("[data-sync-pending]").textConte
 assert.equal(pendingText, "0", "Le compteur de modifications en attente doit revenir à 0");
 
 console.log("Additional hotfix assertions OK");
-console.log("Tests v23.2.4 offline sync conflict and local data integrity OK");
+console.log("Tests v23.2.5 offline sync conflict and local data integrity OK");

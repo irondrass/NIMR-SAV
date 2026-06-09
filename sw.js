@@ -1,4 +1,4 @@
-const CACHE_NAME = "nimr-sav-v23.2.4-sync-conflict-badge-usability-hotfix";
+const CACHE_NAME = "nimr-sav-v23.2.5-role-based-workspaces-qc-view";
 const ASSETS = [
   "./",
   "./index.html",

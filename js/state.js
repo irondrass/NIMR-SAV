@@ -20,7 +20,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v23.2.4";
+const APP_VERSION = "v23.2.5";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const WORKSHOP_NAME = "NIMR SAV";
@@ -283,6 +283,7 @@ const USER_ROLES = {
 const ROLE_PERMISSIONS = {
   admin: ["*"],
   directeur_sav: [
+    // Directeur SAV : vision métier complète mais SANS administration technique
     "audit.view",
     "dashboard.view",
     "case.create",
@@ -296,6 +297,10 @@ const ROLE_PERMISSIONS = {
     "export.backup",
     "print.*",
     "customer_claim.manage",
+    "quality.validate",
+    "quality.reject",
+    "quality.revalidate",
+    "notes.direction",
   ],
   chef_atelier: [
     "audit.view",
@@ -312,6 +317,7 @@ const ROLE_PERMISSIONS = {
     "planning.edit",
     "quality.validate",
     "quality.reject",
+    "quality.revalidate",
     "delivery.complete",
     "case.close",
     "export.backup",
@@ -331,7 +337,7 @@ const ROLE_PERMISSIONS = {
     "customer_claim.manage",
   ],
   technicien: ["task.start", "task.pause", "task.resume", "task.complete", "task.block", "print.task"],
-  qualite: ["quality.validate", "quality.reject", "print.quality"],
+  qualite: ["quality.validate", "quality.reject", "quality.revalidate", "print.quality"],
   readonly: ["dashboard.view", "print.*"],
 };
 
@@ -345,6 +351,7 @@ const MUTATION_PERMISSIONS = [
   "planning.edit",
   "quality.validate",
   "quality.reject",
+  "quality.revalidate",
   "delivery.complete",
   "case.close",
   "case.delete",
@@ -362,6 +369,7 @@ const MUTATION_PERMISSIONS = [
   "users.manage",
   "supabase.configure",
   "audit.view",
+  "notes.direction",
 ];
 
 
@@ -2119,6 +2127,13 @@ function normalizeCase(item, bookings) {
     updatedBy: item.updatedBy || "",
     localRevision: Number(item.localRevision || 0),
     syncRevision: Number(item.syncRevision || 0),
+    // v23.2.5 — Notes par rôle (synchronisées Supabase, visibilité restreinte par getCaseNotesForRole)
+    notes: {
+      reception:  String(item.notes?.reception  ?? item.arrivalNotes ?? ""),
+      technique:  String(item.notes?.technique  ?? ""),
+      qualite:    String(item.notes?.qualite    ?? ""),
+      direction:  String(item.notes?.direction  ?? ""),
+    },
   };
 }
 
@@ -2791,7 +2806,7 @@ function resolveSyncConflict(conflictIdOrKey, action = "mark_resolved") {
       // Save a silent local case snapshot
       const snapshotKey = `nimr-sav-conflict-safety-snapshot:${caseId}:${conflictId}`;
       const snapshotPayload = {
-        version: "v23.2.4",
+        version: "v23.2.5",
         timestamp: new Date().toISOString(),
         cases: [JSON.parse(JSON.stringify(localCase))],
         source: "conflict_safety_snapshot"
@@ -3505,26 +3520,45 @@ function showInputPromptModal({
   });
 }
 
+// v23.2.5 — Workspaces par rôle
+// directeur_sav : vision métier (pas admin technique)
+// qualite : vue QC dédiée (qc-workspace) + dossiers
+// readonly : uniquement pilotage (lecture)
 const ROLE_TABS = {
-  admin: ["reception-workspace", "dossiers", "today", "pilotage", "planning", "technician", "atelier"],
-  directeur_sav: ["reception-workspace", "dossiers", "today", "pilotage", "planning", "technician", "atelier"],
-  chef_atelier: ["reception-workspace", "dossiers", "today", "pilotage", "planning", "technician", "atelier"],
-  reception: ["reception-workspace", "dossiers", "today"],
-  technicien: ["technician"],
-  qualite: ["dossiers", "today"],
-  readonly: ["dossiers", "today", "pilotage", "planning"],
+  admin:         ["reception-workspace", "dossiers", "today", "pilotage", "planning", "technician", "qc-workspace", "atelier"],
+  directeur_sav: ["dossiers", "today", "pilotage", "planning", "qc-workspace", "atelier"],
+  chef_atelier:  ["reception-workspace", "dossiers", "today", "pilotage", "planning", "technician", "atelier"],
+  reception:     ["reception-workspace", "dossiers", "today"],
+  technicien:    ["technician"],
+  qualite:       ["qc-workspace", "dossiers"],
+  readonly:      ["pilotage"],
 };
+
+// Tab par défaut à afficher lors de la connexion selon le rôle
+const ROLE_DEFAULT_TABS = {
+  admin:         "dossiers",
+  directeur_sav: "pilotage",
+  chef_atelier:  "planning",
+  reception:     "reception-workspace",
+  technicien:    "technician",
+  qualite:       "qc-workspace",
+  readonly:      "pilotage",
+};
+
+function getDefaultTabForRole(role) {
+  return ROLE_DEFAULT_TABS[role] || "dossiers";
+}
 
 function getAllowedTabsForRole(role) {
   return ROLE_TABS[role] || [];
 }
 
 function getAllowedTabsForCurrentUser() {
-  const user = getCurrentUser();
+  const user = state?.currentUserId ? getUserById(state.currentUserId) : null;
   if (!user) {
     const activeUsers = (state?.users || []).filter((u) => u.active !== false);
     if (activeUsers.length === 0) {
-      return ["reception-workspace", "dossiers", "today", "pilotage", "planning", "technician", "atelier"];
+      return ["reception-workspace", "dossiers", "today", "pilotage", "planning", "technician", "qc-workspace", "atelier"];
     }
     return [];
   }
@@ -3538,13 +3572,97 @@ function canAccessTab(tabId) {
 
 function ensureCurrentTabAllowed() {
   if (!canAccessTab(activeTab)) {
+    const user = getCurrentUser();
+    const defaultTab = user ? getDefaultTabForRole(user.role) : null;
     const allowed = getAllowedTabsForCurrentUser();
     if (allowed.length > 0) {
-      setActiveTab(allowed[0]);
+      // Privilégier le tab par défaut du rôle s'il est autorisé
+      const target = (defaultTab && allowed.includes(defaultTab)) ? defaultTab : allowed[0];
+      setActiveTab(target);
       return true;
     }
   }
   return false;
+}
+
+// v23.2.5 — Sécurité changement de session
+// Seul l'admin peut gérer librement les sessions.
+// Tous les autres rôles doivent passer par une déconnexion propre.
+function guardUserSwitch() {
+  const user = state?.currentUserId ? getUserById(state.currentUserId) : null;
+  if (!user) return { ok: true }; // pas de session active
+  if (hasPermission("users.manage")) return { ok: true }; // admin uniquement
+  return {
+    ok: false,
+    message: "Pour changer de session, déconnectez-vous d'abord. Seul l'administrateur technique peut gérer les utilisateurs directement.",
+  };
+}
+
+// v23.2.5 — Visibilité des notes par rôle
+// Les notes direction ne sont JAMAIS exposées aux rôles : reception, technicien, qualite, readonly.
+// L'audit est journalisé sans exposer le contenu pour les rôles non autorisés.
+const NOTES_VISIBILITY = {
+  admin:         ["reception", "technique", "qualite", "direction"],
+  directeur_sav: ["reception", "technique", "qualite", "direction"],
+  chef_atelier:  ["reception", "technique", "qualite"],
+  reception:     ["reception", "technique"],
+  technicien:    ["technique"],
+  qualite:       ["technique", "qualite"],
+  readonly:      [],
+};
+
+function getCaseNotesForRole(caseItem, role) {
+  if (!caseItem || !caseItem.notes) return {};
+  const visibleFields = NOTES_VISIBILITY[role] || [];
+  const result = {};
+  for (const field of visibleFields) {
+    result[field] = caseItem.notes[field] || "";
+  }
+  return result;
+}
+
+function updateCaseNote(caseId, noteType, content) {
+  const validNoteTypes = ["reception", "technique", "qualite", "direction"];
+  if (!validNoteTypes.includes(noteType)) {
+    return { ok: false, message: `Type de note invalide: ${noteType}` };
+  }
+  // Vérifier les permissions
+  const permMap = {
+    reception:  "case.edit",
+    technique:  "case.edit",
+    qualite:    "quality.validate",
+    direction:  "notes.direction",
+  };
+  const requiredPerm = permMap[noteType];
+  const guard = guardAction(requiredPerm);
+  if (!guard.ok) return { ok: false, message: guard.message };
+
+  // Vérifier que le rôle courant peut voir ce type de note
+  const user = getCurrentUser();
+  const role = user ? (user.role || "readonly") : "readonly";
+  const visibleFields = NOTES_VISIBILITY[role] || [];
+  if (!visibleFields.includes(noteType)) {
+    return { ok: false, message: `Note '${noteType}' non accessible pour ce rôle.` };
+  }
+
+  const item = (state?.cases || []).find((c) => c.id === caseId);
+  if (!item) return { ok: false, message: "Dossier introuvable." };
+
+  if (!item.notes || typeof item.notes !== "object") {
+    item.notes = { reception: "", technique: "", qualite: "", direction: "" };
+  }
+  item.notes[noteType] = String(content || "");
+  item.localRevision = (Number(item.localRevision) || 0) + 1;
+  item.updatedAt = new Date().toISOString();
+  item.updatedBy = user ? user.id : "";
+
+  // Audit : journaliser l'action sans exposer le contenu pour les notes direction
+  const auditContent = noteType === "direction" ? "[contenu confidentiel]" : String(content || "").slice(0, 100);
+  if (typeof addAuditLog === "function") {
+    addAuditLog("case.note_updated", `Note ${noteType} mise à jour`, auditContent, { caseId });
+  }
+  if (typeof saveState === "function") saveState({ flushCloud: true, cloudReason: "case-note" });
+  return { ok: true };
 }
 
 // ─── RÉCEPTION WORKFLOW — LOGIQUE MÉTIER v23.1C ────────────────────────────
@@ -3777,6 +3895,13 @@ function advanceReceptionWorkflow(caseId, action, payload = {}) {
       };
       if (!QUALITY_STATUS_VALUES.includes(status)) return { ok: false, message: "Statut qualité invalide." };
       if (status === "rejected" && !reason) return { ok: false, message: "Motif obligatoire pour refuser le contrôle qualité." };
+      const isRevalidation = status === "validated" && (previousStatus === "rejected" || previousStatus === "rework");
+      const requiredPermission =
+        status === "validated" ? (isRevalidation ? "quality.revalidate" : "quality.validate") :
+        (status === "rejected" || status === "rework") ? "quality.reject" :
+        "quality.validate";
+      const qualityGuard = guardAction(requiredPermission, { item });
+      if (!qualityGuard.ok) return { ok: false, message: qualityGuard.message };
       rw.qualityStatus = status;
       rw.qualityReviewedAt = now;
       rw.qualityReviewHistory = Array.isArray(rw.qualityReviewHistory) ? rw.qualityReviewHistory : [];
@@ -3851,4 +3976,8 @@ if (typeof window !== "undefined") {
   window.canAdvanceReceptionStep = canAdvanceReceptionStep;
   window.advanceReceptionWorkflow = advanceReceptionWorkflow;
   window.normalizeReceptionWorkflow = normalizeReceptionWorkflow;
+  window.getDefaultTabForRole = getDefaultTabForRole;
+  window.guardUserSwitch = guardUserSwitch;
+  window.getCaseNotesForRole = getCaseNotesForRole;
+  window.updateCaseNote = updateCaseNote;
 }

@@ -115,6 +115,9 @@ function bindMainNavigation() {
       if (tab === "today") renderTodayWorkshop();
       if (tab === "planning") renderPlanning();
       if (tab === "technician") renderTechnicianDashboard();
+      if (tab === "qc-workspace") {
+        if (typeof renderQcWorkspace === "function") renderQcWorkspace();
+      }
       if (tab === "atelier") {
         renderResources();
         renderFastLaneSettings();
@@ -828,7 +831,7 @@ function registerServiceWorker() {
   });
   window.addEventListener("load", async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=23.2.4", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=23.2.5", { updateViaCache: "none" });
       registration.update?.();
       if (registration.waiting) showUpdateAvailable(registration);
       window.setInterval(() => registration.update?.(), 10 * 60 * 1000);
@@ -1054,7 +1057,7 @@ function renderActivityLog() {
         const localVal = targetConflict ? (targetConflict.localCase || targetConflict.localValue) : null;
         if (localVal) {
           const payload = {
-            version: "v23.2.4",
+            version: "v23.2.5",
             timestamp: new Date().toISOString(),
             cases: [JSON.parse(JSON.stringify(localVal))],
             source: "manual_conflict_backup"
@@ -1381,27 +1384,82 @@ function resetSensitiveUiStateForUserSwitch(reason = "user-switch") {
 }
 
 function triggerUserChangeScreen() {
-  resetSensitiveUiStateForUserSwitch("demande utilisateur");
+  // v23.2.5 — Sécurité : seul Admin technique peut changer de session librement.
+  // Tous les autres rôles doivent se déconnecter proprement.
+  const guard = typeof guardUserSwitch === "function" ? guardUserSwitch() : { ok: true };
+  if (guard.ok) {
+    resetSensitiveUiStateForUserSwitch("demande utilisateur");
+    showUserLoginScreen();
+  } else {
+    triggerLogout();
+  }
+}
+
+// v23.2.5 — Déconnexion propre : efface la session sans afficher l'écran admin
+function triggerLogout() {
+  const previousUser = (state.users || []).find(user => user.id === state.currentUserId && user.active !== false);
+  const previousActor = previousUser ? {
+    userId: previousUser.id,
+    userName: previousUser.name || previousUser.email || "Utilisateur",
+    userRole: previousUser.role || "readonly",
+    resourceId: previousUser.resourceId || ""
+  } : null;
+  resetSensitiveUiStateForUserSwitch("déconnexion utilisateur");
+  state.currentUserId = "";
+  window.pendingSelectorUser = null;
+  try {
+    sessionStorage.removeItem("nimr-user-pin-unlocked");
+  } catch (error) {
+    // Session storage peut être indisponible dans certains navigateurs.
+  }
+  if (typeof addAuditLog === "function") {
+    addAuditLog("users.session_logged_out", "Déconnexion utilisateur", previousUser ? `Déconnexion de ${previousUser.name}` : "Session locale effacée", { actor: previousActor });
+  }
+  if (typeof saveState === "function") saveState({ skipCloud: true, skipSnapshot: true });
+  if (typeof renderCurrentSessionIndicator === "function") renderCurrentSessionIndicator();
   showUserLoginScreen();
 }
 
 function renderCurrentSessionIndicator() {
-  const currentUser = getCurrentUser();
+  const currentUser = state.currentUserId && typeof getUserById === "function" ? getUserById(state.currentUserId) : null;
   const sidebarUserName = document.getElementById("sidebar-user-name");
   if (sidebarUserName) {
-    sidebarUserName.textContent = currentUser ? `${currentUser.name} (${currentUser.role === "admin" ? "Admin technique" : currentUser.role})` : "Atelier";
+    const roleLabel = currentUser
+      ? (currentUser.role === "admin" ? "Admin technique" : currentUser.role)
+      : "";
+    sidebarUserName.textContent = currentUser ? `${currentUser.name} (${roleLabel})` : "Atelier";
+  }
+
+  // v23.2.5 — Le bouton sidebar affiche "Changer" uniquement pour Admin.
+  // Pour tous les autres rôles, affiche "Déconnexion".
+  const changeBtn = document.getElementById("sidebar-change-user-btn");
+  if (changeBtn) {
+    const isAdmin = currentUser && currentUser.role === "admin";
+    changeBtn.textContent = isAdmin ? "Changer" : "Déconnexion";
+    changeBtn.title = isAdmin
+      ? "Changer d'utilisateur (Admin technique)"
+      : "Se déconnecter pour changer de session";
+    changeBtn.setAttribute("aria-label", isAdmin ? "Changer d'utilisateur" : "Se déconnecter");
+  }
+
+  const settingsChangeBtn = document.getElementById("change-user-settings-btn");
+  if (settingsChangeBtn) {
+    const isAdmin = currentUser && currentUser.role === "admin";
+    settingsChangeBtn.textContent = isAdmin ? "Changer d'utilisateur" : "Déconnexion";
+    settingsChangeBtn.title = isAdmin
+      ? "Changer d'utilisateur (Admin technique)"
+      : "Se déconnecter proprement avant une nouvelle session";
+    settingsChangeBtn.setAttribute("aria-label", isAdmin ? "Changer d'utilisateur" : "Se déconnecter");
   }
 
   // Mettre à jour l'option checkbox dans les Paramètres
   const alwaysPromptCheckbox = document.getElementById("always-prompt-startup");
   if (alwaysPromptCheckbox) {
     const activeUsers = (state.users || []).filter(user => user.active !== false);
-    // Cochée par défaut si non définie et plusieurs utilisateurs, ou si configurée explicitement à vrai
     const isChecked = state.settings.alwaysPromptUserStartup === true ||
                       (state.settings.alwaysPromptUserStartup !== false && activeUsers.length > 1);
     alwaysPromptCheckbox.checked = isChecked;
 
-    // Seul l'admin peut modifier cette option
     const isAdmin = currentUser && currentUser.role === "admin";
     alwaysPromptCheckbox.disabled = !isAdmin;
     const container = alwaysPromptCheckbox.closest(".check-card");
@@ -1427,7 +1485,8 @@ function bindUserSessionActions() {
     quietNotify("Paramètre de session mis à jour.", "success");
   });
 
-  // Boutons pour changer d'utilisateur
+  // v23.2.5 — Bouton sidebar : "Changer" pour admin, "Déconnexion" pour les autres rôles.
+  // triggerUserChangeScreen() gère lui-même le garde via guardUserSwitch().
   document.getElementById("sidebar-change-user-btn")?.addEventListener("click", () => {
     triggerUserChangeScreen();
   });
@@ -1642,4 +1701,3 @@ window.bindUserSessionIdleEvents = bindUserSessionIdleEvents;
 // --- FIN v22.33C User Selector Startup / Shared Session ---
 
 initApp();
-

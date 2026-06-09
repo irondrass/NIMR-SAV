@@ -1,6 +1,6 @@
-window.APP_VERSION = "v23.2.4";
-window.NIMR_BUILD = "v23.2.4";
-window.NIMR_CACHE_NAME = "nimr-sav-v23.2.4-sync-conflict-badge-usability-hotfix";
+window.APP_VERSION = "v23.2.5";
+window.NIMR_BUILD = "v23.2.5";
+window.NIMR_CACHE_NAME = "nimr-sav-v23.2.5-role-based-workspaces-qc-view";
 
 if ("caches" in window) {
   caches.keys().then((keys) => Promise.all(

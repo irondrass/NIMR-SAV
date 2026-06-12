@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-console.log('Demarrage tests v23.2.5 roles and governance hardening...');
+console.log('Demarrage tests v23.2.6 roles and governance hardening...');
 
 const scriptFiles = [
   'js/utils.js',
@@ -95,12 +95,12 @@ const swSource = fs.readFileSync('sw.js', 'utf8');
 const versionSource = fs.readFileSync('js/version.js', 'utf8');
 const indexSource = fs.readFileSync('index.html', 'utf8');
 
-assert.match(stateSource, /APP_VERSION\s*=\s*"v23\.2\.5"/, 'APP_VERSION v23.2.5 attendu');
-assert.match(appSource, /serviceWorker\.register\("sw\.js\?v=23\.2\.5"/, 'service worker v23.2.5 attendu');
-assert.match(swSource, /nimr-sav-v23\.2\.5-role-based-workspaces-qc-view/, 'cache PWA v23.2.5 attendu');
-assert.match(versionSource, /NIMR_BUILD\s*=\s*"v23\.2\.5"/, 'version.js v23.2.5 attendu');
+assert.match(stateSource, /APP_VERSION\s*=\s*"v23\.2\.6"/, 'APP_VERSION v23.2.6 attendu');
+assert.match(appSource, /serviceWorker\.register\("sw\.js\?v=23\.2\.6"/, 'service worker v23.2.6 attendu');
+assert.match(swSource, /nimr-sav-v23\.2\.6-reception-qc-field-usability/, 'cache PWA v23.2.6 attendu');
+assert.match(versionSource, /NIMR_BUILD\s*=\s*"v23\.2\.6"/, 'version.js v23.2.6 attendu');
 [...indexSource.matchAll(/\?v=(\d+\.\d+(?:\.\d+)?)/g)].forEach((match) => {
-  assert.equal(match[1], '23.2.5', `reference index.html incoherente: ?v=${match[1]}`);
+  assert.equal(match[1], '23.2.6', `reference index.html incoherente: ?v=${match[1]}`);
 });
 assert.match(indexSource, /Admin technique/, 'libelle UI Admin technique attendu');
 assert.match(indexSource, /Directeur SAV[\s\S]*Pilotage métier/, 'resume permissions Directeur SAV attendu');
@@ -202,4 +202,4 @@ assert.equal(app(`hasPermission('print.task')`), true, 'lecture seule conserve i
 assert.equal(app(`guardCaseCreate().ok`), false, 'lecture seule ne cree pas');
 assert.equal(app(`guardSensitiveAction('settings.edit').ok`), false, 'lecture seule ne touche pas aux reglages sensibles');
 
-console.log('Tests v23.2.5 roles and governance hardening OK');
+console.log('Tests v23.2.6 roles and governance hardening OK');

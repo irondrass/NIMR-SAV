@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 
-console.log("Demarrage tests v23.2.5 role-based workspaces and dedicated QC view...");
+console.log("Demarrage tests v23.2.6 role-based workspaces and dedicated QC view...");
 
 const scriptFiles = [
   "js/utils.js",
@@ -120,13 +120,13 @@ const supabaseSyncSource = fs.readFileSync("js/supabase-sync.js", "utf8");
 assert.equal(vehiclesSource, "[]", "data/vehicles.json doit rester vide");
 assert.doesNotMatch(swSource, /data\/vehicles\.json/, "data/vehicles.json ne doit pas etre precache");
 
-assert.match(stateSource, /APP_VERSION\s*=\s*"v23\.2\.5"/, "state.js doit utiliser v23.2.5");
-assert.match(swSource, /CACHE_NAME\s*=\s*"nimr-sav-v23\.2\.5-role-based-workspaces-qc-view"/, "sw.js doit utiliser le cache v23.2.5");
-assert.match(versionSource, /APP_VERSION\s*=\s*"v23\.2\.5"/, "version.js doit exposer APP_VERSION v23.2.5");
-assert.match(versionSource, /NIMR_CACHE_NAME\s*=\s*"nimr-sav-v23\.2\.5-role-based-workspaces-qc-view"/, "version.js doit exposer NIMR_CACHE_NAME v23.2.5");
-assert.match(appSource, /serviceWorker\.register\("sw\.js\?v=23\.2\.5"/, "app.js doit enregistrer sw.js?v=23.2.5");
-assert.match(indexSource, /v=23\.2\.5/, "index.html doit reference v23.2.5");
-console.log("  [OK] Version & cache v23.2.5");
+assert.match(stateSource, /APP_VERSION\s*=\s*"v23\.2\.6"/, "state.js doit utiliser v23.2.6");
+assert.match(swSource, /CACHE_NAME\s*=\s*"nimr-sav-v23\.2\.6-reception-qc-field-usability"/, "sw.js doit utiliser le cache v23.2.6");
+assert.match(versionSource, /APP_VERSION\s*=\s*"v23\.2\.6"/, "version.js doit exposer APP_VERSION v23.2.6");
+assert.match(versionSource, /NIMR_CACHE_NAME\s*=\s*"nimr-sav-v23\.2\.6-reception-qc-field-usability"/, "version.js doit exposer NIMR_CACHE_NAME v23.2.6");
+assert.match(appSource, /serviceWorker\.register\("sw\.js\?v=23\.2\.6"/, "app.js doit enregistrer sw.js?v=23.2.6");
+assert.match(indexSource, /v=23\.2\.6/, "index.html doit reference v23.2.6");
+console.log("  [OK] Version & cache v23.2.6");
 
 // ─── 2. guardUserSwitch ─────────────────────────────────────────────────────
 app(`
@@ -551,4 +551,4 @@ assert.match(stateSource, /\[contenu confidentiel\]/, "audit note direction ne d
 assert.match(stateSource, /saveState\(\{ flushCloud: true, cloudReason: "case-note" \}\)/, "mise a jour note doit declencher sync cloud");
 console.log("  [OK] Notes direction: sync Supabase et audit sans contenu complet");
 
-console.log("\nTous les tests v23.2.5 role-based workspaces and dedicated QC view PASSES.");
+console.log("\nTous les tests v23.2.6 role-based workspaces and dedicated QC view PASSES.");

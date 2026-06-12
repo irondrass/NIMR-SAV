@@ -20,7 +20,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v23.2.5";
+const APP_VERSION = "v23.2.6";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const WORKSHOP_NAME = "NIMR SAV";
@@ -2806,7 +2806,7 @@ function resolveSyncConflict(conflictIdOrKey, action = "mark_resolved") {
       // Save a silent local case snapshot
       const snapshotKey = `nimr-sav-conflict-safety-snapshot:${caseId}:${conflictId}`;
       const snapshotPayload = {
-        version: "v23.2.5",
+        version: "v23.2.6",
         timestamp: new Date().toISOString(),
         cases: [JSON.parse(JSON.stringify(localCase))],
         source: "conflict_safety_snapshot"
@@ -3047,17 +3047,25 @@ function getComparableCaseJSON(caseItem) {
   return JSON.stringify(clone);
 }
 
+function getComparableRuntimeScope() {
+  if (typeof window !== "undefined") return window;
+  if (typeof globalThis !== "undefined") return globalThis;
+  return {};
+}
+
 function initializeLastKnownCasesComparable() {
-  window.lastKnownCasesComparable = {};
+  const runtimeScope = getComparableRuntimeScope();
+  runtimeScope.lastKnownCasesComparable = {};
   if (typeof state !== "undefined" && state && Array.isArray(state.cases)) {
     state.cases.forEach((caseItem) => {
-      window.lastKnownCasesComparable[caseItem.id] = getComparableCaseJSON(caseItem);
+      runtimeScope.lastKnownCasesComparable[caseItem.id] = getComparableCaseJSON(caseItem);
     });
   }
 }
 
 function detectAndIncrementCaseRevisions() {
-  if (!window.lastKnownCasesComparable) {
+  const runtimeScope = getComparableRuntimeScope();
+  if (!runtimeScope.lastKnownCasesComparable) {
     initializeLastKnownCasesComparable();
   }
   const actor = getCurrentActor();
@@ -3067,19 +3075,19 @@ function detectAndIncrementCaseRevisions() {
   if (typeof state !== "undefined" && state && Array.isArray(state.cases)) {
     state.cases.forEach((caseItem) => {
       const currentJSON = getComparableCaseJSON(caseItem);
-      const previousJSON = window.lastKnownCasesComparable[caseItem.id];
+      const previousJSON = runtimeScope.lastKnownCasesComparable[caseItem.id];
 
       if (previousJSON === undefined) {
         caseItem.localRevision = (Number(caseItem.localRevision) || 0) + 1;
         caseItem.updatedAt = caseItem.updatedAt || now;
         caseItem.updatedBy = caseItem.updatedBy || actor.userName || "Atelier";
-        window.lastKnownCasesComparable[caseItem.id] = currentJSON;
+        runtimeScope.lastKnownCasesComparable[caseItem.id] = currentJSON;
         anyIncremented = true;
       } else if (previousJSON !== currentJSON) {
         caseItem.localRevision = (Number(caseItem.localRevision) || 0) + 1;
         caseItem.updatedAt = now;
         caseItem.updatedBy = actor.userName || "Atelier";
-        window.lastKnownCasesComparable[caseItem.id] = currentJSON;
+        runtimeScope.lastKnownCasesComparable[caseItem.id] = currentJSON;
         anyIncremented = true;
       }
     });

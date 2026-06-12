@@ -253,6 +253,24 @@ function buildSavKpis(now = new Date()) {
       level: metrics.blockedCases ? "danger" : "success",
     },
     {
+      label: "Dossiers ouverts",
+      value: String(metrics.openCases),
+      detail: "Non livrés sur le périmètre",
+      level: metrics.openCases ? "info" : "neutral",
+    },
+    {
+      label: "Bloqués > 48h",
+      value: String(metrics.blockedOver48h),
+      detail: "À prioriser atelier / pièces",
+      level: metrics.blockedOver48h ? "danger" : "success",
+    },
+    {
+      label: "Bloqués > 7 jours",
+      value: String(metrics.blockedOver7d),
+      detail: "Escalade Directeur SAV",
+      level: metrics.blockedOver7d ? "danger" : "success",
+    },
+    {
       label: "Accords en attente",
       value: String(metrics.pendingAgreements),
       detail: "Client ou expert",
@@ -265,6 +283,24 @@ function buildSavKpis(now = new Date()) {
       level: metrics.pendingQualityControls ? "warn" : "success",
     },
     {
+      label: "Attente QC",
+      value: String(metrics.pendingQualityControls),
+      detail: "Dossiers prêts pour contrôle",
+      level: metrics.pendingQualityControls ? "warn" : "success",
+    },
+    {
+      label: "QC refusés",
+      value: String(metrics.qcRejectedCases),
+      detail: "Retour atelier à suivre",
+      level: metrics.qcRejectedCases ? "danger" : "success",
+    },
+    {
+      label: "Livrables aujourd'hui",
+      value: String(metrics.deliverableToday),
+      detail: "QC validé, livraison du jour",
+      level: metrics.deliverableToday ? "info" : "neutral",
+    },
+    {
       label: "Charge humaine vs capacité",
       value: `${metrics.humanLoadPercent}%`,
       detail: "Moyenne ressources atelier",
@@ -275,6 +311,24 @@ function buildSavKpis(now = new Date()) {
       value: `${metrics.equipmentLoadPercent}%`,
       detail: `Ponts ${metrics.liftLoadPercent}% · Cabine ${metrics.boothLoadPercent}%`,
       level: loadLevel(Math.max(metrics.equipmentLoadPercent, metrics.liftLoadPercent, metrics.boothLoadPercent)),
+    },
+    {
+      label: "Charge réception",
+      value: String(metrics.receptionLoad),
+      detail: "Créations, RDV et réceptions",
+      level: metrics.receptionLoad > 8 ? "warn" : metrics.receptionLoad ? "info" : "neutral",
+    },
+    {
+      label: "Charge atelier",
+      value: String(metrics.workshopLoad),
+      detail: "Reçus, en réparation ou bloqués",
+      level: metrics.workshopLoad > 12 ? "warn" : metrics.workshopLoad ? "info" : "neutral",
+    },
+    {
+      label: "Charge QC",
+      value: String(metrics.qcLoad),
+      detail: "Attente QC + revalidations",
+      level: metrics.qcLoad ? "warn" : "success",
     },
     {
       label: "Temps moyen cycle dossier",
@@ -351,13 +405,35 @@ function buildSavPerformanceDashboard(now = new Date()) {
   const range = getSavDashboardRange(now);
   const cases = getSavDashboardCases(range);
   const activeCases = cases.periodCases.filter(isSavDashboardActiveCase);
+  const openCases = activeCases.filter((item) => !item.flags?.delivered).length;
   const createdCases = cases.filteredCases.filter((item) => dateInRange(item.createdAt, range)).length;
   const receivedVehicles = cases.filteredCases.filter((item) => dateInRange(getCaseVehicleReceivedAt(item), range)).length;
   const plannedDeliveries = cases.filteredCases.filter((item) => dateInRange(item.appointment?.delivery, range)).length;
   const overdueDeliveries = activeCases.filter((item) => isDeliveryOverdue(item, now)).length;
   const blockedCases = activeCases.filter(isCaseBlocked).length;
+  const blockedOver48h = activeCases.filter((item) => isCaseBlocked(item) && getCaseBlockedHours(item, now) >= 48).length;
+  const blockedOver7d = activeCases.filter((item) => isCaseBlocked(item) && getCaseBlockedHours(item, now) >= 168).length;
   const pendingAgreements = activeCases.filter(caseHasPendingAgreement).length;
   const pendingQualityControls = activeCases.filter(isDashboardQualityPending).length;
+  const qcRejectedCases = activeCases.filter((item) => {
+    const qStatus = normalizeQualityStatus(item.receptionWorkflow?.qualityStatus);
+    return qStatus === "rejected" || qStatus === "rework";
+  }).length;
+  const deliverableToday = activeCases.filter((item) => isCaseDeliverableToday(item, now)).length;
+  const receptionLoad = activeCases.filter((item) => (
+    dateInRange(item.createdAt, range)
+    || dateInRange(item.appointment?.start, range)
+    || dateInRange(getCaseVehicleReceivedAt(item), range)
+  )).length;
+  const workshopLoad = activeCases.filter((item) => (
+    item.flags?.received
+    && !item.flags?.delivered
+    && (!item.flags?.qualityApproved || isCaseBlocked(item) || !item.flags?.workCompleted)
+  )).length;
+  const qcLoad = activeCases.filter((item) => {
+    const qStatus = normalizeQualityStatus(item.receptionWorkflow?.qualityStatus);
+    return !item.flags?.delivered && (isDashboardQualityPending(item) || qStatus === "rejected" || qStatus === "rework");
+  }).length;
   const withoutNextAction = activeCases.filter((item) => caseWithoutScheduledNextAction(item, now)).length;
   const cycleHours = cases.filteredCases
     .map((item) => getCaseCycleHours(item, range))
@@ -379,13 +455,21 @@ function buildSavPerformanceDashboard(now = new Date()) {
     serviceLoads,
     metrics: {
       activeCases: activeCases.length,
+      openCases,
       createdCases,
       receivedVehicles,
       plannedDeliveries,
       overdueDeliveries,
       blockedCases,
+      blockedOver48h,
+      blockedOver7d,
       pendingAgreements,
       pendingQualityControls,
+      qcRejectedCases,
+      deliverableToday,
+      receptionLoad,
+      workshopLoad,
+      qcLoad,
       humanLoadPercent,
       equipmentLoadPercent,
       liftLoadPercent,
@@ -1129,7 +1213,90 @@ function renderPermissionAwareButton(permission, label, action, dataset, classNa
   return `<button class="${className}" type="button" data-tech-action="${escapeAttr(action)}" ${dataset} ${allowed ? "" : `disabled title="${escapeAttr(title)}" aria-label="${escapeAttr(`${label} indisponible : ${title}`)}"`}>${escapeHtml(label)}</button>`;
 }
 
+const WORKSHOP_FIELD_GROUP_CONFIG = [
+  { key: "diagnostic", label: "En attente diagnostic", level: "warn" },
+  { key: "parts", label: "En attente pièce", level: "warn" },
+  { key: "repair", label: "En réparation", level: "info" },
+  { key: "workDoneQc", label: "Travail terminé / attente QC", level: "warn" },
+  { key: "qcReturn", label: "QC refusé / retour atelier", level: "danger" },
+  { key: "deliverableToday", label: "Livrable aujourd'hui", level: "success" },
+  { key: "blocked48", label: "Bloqué > 48h", level: "danger" },
+  { key: "blocked7", label: "Bloqué > 7 jours", level: "danger" },
+];
+
+function buildWorkshopFieldGroups(now = new Date()) {
+  const groups = Object.fromEntries(WORKSHOP_FIELD_GROUP_CONFIG.map((group) => [group.key, []]));
+  (state.cases || [])
+    .filter((item) => item && !item.deletedAt && !item.archivedAt && !item.flags?.delivered)
+    .forEach((item) => {
+      const qStatus = normalizeQualityStatus(item.receptionWorkflow?.qualityStatus);
+      const partsStatus = normalizePartsStatus(item.partsStatus);
+      const blockerReason = normalizeBlockerReason(item.blockerReason);
+      const primaryType = getCasePrimaryType(item);
+      const blockedHours = getCaseBlockedHours(item, now);
+
+      if (
+        !item.flags?.workStarted
+        && !item.flags?.workCompleted
+        && (item.flags?.received || primaryType === "diagnostic" || blockerReason === "waiting_diagnostic")
+      ) {
+        groups.diagnostic.push(item);
+      }
+      if (["waiting_parts", "blocked_parts"].includes(partsStatus) || blockerReason === "waiting_parts") {
+        groups.parts.push(item);
+      }
+      if (item.flags?.workStarted && !item.flags?.workCompleted && qStatus !== "rejected" && qStatus !== "rework") {
+        groups.repair.push(item);
+      }
+      if (item.flags?.workCompleted && !item.flags?.qualityApproved && !["rejected", "rework", "validated"].includes(qStatus)) {
+        groups.workDoneQc.push(item);
+      }
+      if (qStatus === "rejected" || qStatus === "rework") {
+        groups.qcReturn.push(item);
+      }
+      if (isCaseDeliverableToday(item, now)) {
+        groups.deliverableToday.push(item);
+      }
+      if (blockedHours >= 48) groups.blocked48.push(item);
+      if (blockedHours >= 168) groups.blocked7.push(item);
+    });
+  return groups;
+}
+
+function renderWorkshopFieldGroups(now = new Date()) {
+  const groups = buildWorkshopFieldGroups(now);
+  return `
+    <section class="workshop-field-summary" data-workshop-field-groups>
+      <div class="section-heading compact-heading">
+        <div>
+          <h2>Synthèse atelier terrain</h2>
+          <p>Diagnostic, pièces, réparation, QC et livrables du jour.</p>
+        </div>
+      </div>
+      <div class="chief-summary-grid workshop-field-grid">
+        ${WORKSHOP_FIELD_GROUP_CONFIG.map((group) => {
+          const items = groups[group.key] || [];
+          return `
+            <article class="chief-summary-card workshop-field-card ${escapeAttr(group.level)}">
+              <strong>${items.length}</strong>
+              <span>${escapeHtml(group.label)}</span>
+              <small>${items.slice(0, 3).map((item) => escapeHtml(getWorkshopFieldCaseLabel(item))).join("<br>") || "Aucun"}</small>
+            </article>
+          `;
+        }).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function getWorkshopFieldCaseLabel(item) {
+  const reference = item.plate || item.vin || item.orNavNumber || item.id || "Dossier";
+  const type = getClaimTypeLabel(getCasePrimaryType(item));
+  return `${reference} · ${type}`;
+}
+
 function renderWorkshopChiefSummary(dateKey) {
+  const summaryDate = dateKey ? new Date(`${dateKey}T12:00:00`) : new Date();
   const rows = typeof getTechnicianTaskRows === "function" ? getTechnicianTaskRows("", dateKey) : [];
   const byStatus = (status) => rows.filter((row) => row.status === status);
   const activeTechnicianIds = new Set(rows.filter((row) => row.status === "in_progress").map((row) => row.technicianId).filter(Boolean));
@@ -1147,6 +1314,7 @@ function renderWorkshopChiefSummary(dateKey) {
     ["Tâches en retard", rows.filter((row) => row.late)],
   ];
   return `
+    ${renderWorkshopFieldGroups(summaryDate)}
     <div class="chief-summary-grid">
       ${cards.map(([label, items]) => `
         <article class="chief-summary-card">
@@ -1525,14 +1693,19 @@ function buildPilotageAlerts(now = new Date(), options = {}) {
   const sourceCases = Array.isArray(options.cases) ? options.cases : getSavDashboardCases(getSavDashboardRange(now)).periodCases.filter(isSavDashboardActiveCase);
   const limit = Number(options.limit || 8);
   return sourceCases
-    .filter((item) => !item.flags.delivered)
+    .filter((item) => item && item.flags && !item.flags.delivered)
     .flatMap((item) => caseOperationalAlerts(item, now))
     .sort((a, b) => a.priority - b.priority || new Date(a.when || 0) - new Date(b.when || 0))
     .slice(0, limit);
 }
 
 function caseOperationalAlerts(item, now = new Date()) {
+  if (!item || typeof item !== "object") return [];
   const alerts = [];
+  const flags = item.flags || {};
+  const appointment = item.appointment || {};
+  const rw = item.receptionWorkflow || {};
+
   const label = getDashboardCaseReference(item);
   const statusLabel = statusLabels[getCaseStatus(item)] || "Statut à vérifier";
   if (isCaseBlocked(item)) {
@@ -1545,15 +1718,15 @@ function caseOperationalAlerts(item, now = new Date()) {
       when: item.updatedAt || item.createdAt,
     });
   }
-  const qualityStatus = normalizeQualityStatus(item.receptionWorkflow?.qualityStatus);
+  const qualityStatus = normalizeQualityStatus(rw.qualityStatus);
   if (qualityStatus === "rejected") {
     alerts.push({
       caseId: item.id,
       level: "danger",
       priority: 1,
       title: "QC refusé",
-      details: `${label} · ${item.receptionWorkflow?.qualityReturnReason || "Motif à traiter"}`,
-      when: item.receptionWorkflow?.qualityReviewedAt || item.updatedAt || item.createdAt,
+      details: `${label} · ${rw.qualityReturnReason || "Motif à traiter"}`,
+      when: rw.qualityReviewedAt || item.updatedAt || item.createdAt,
     });
   }
   if (qualityStatus === "rework") {
@@ -1563,11 +1736,11 @@ function caseOperationalAlerts(item, now = new Date()) {
       priority: 2,
       title: "Retour atelier / retravail",
       details: `${label} · Reprise à suivre avant revalidation QC`,
-      when: item.receptionWorkflow?.qualityReworkStartedAt || item.updatedAt || item.createdAt,
+      when: rw.qualityReworkStartedAt || item.updatedAt || item.createdAt,
     });
   }
-  if (item.appointment?.start && !item.flags.received) {
-    const start = new Date(item.appointment.start);
+  if (appointment.start && !flags.received) {
+    const start = new Date(appointment.start);
     const ageMinutes = diffMinutes(start, now);
     if (ageMinutes > RECEPTION_GRACE_HOURS * 60) {
       alerts.push({
@@ -1576,25 +1749,26 @@ function caseOperationalAlerts(item, now = new Date()) {
         priority: 1,
         title: 'Réception en retard',
         details: `${label} · RDV prévu ${formatDateTime(start)}`,
-        when: item.appointment.start,
+        when: appointment.start,
       });
     }
   }
-  if (item.appointment?.delivery && !item.flags.delivered) {
-    const delivery = new Date(item.appointment.delivery);
+  if (appointment.delivery && !flags.delivered) {
+    const delivery = new Date(appointment.delivery);
     const minutesToDelivery = diffMinutes(now, delivery);
-    if (minutesToDelivery <= DELIVERY_ALERT_HOURS * 60 && !item.flags.qualityApproved) {
+    if (minutesToDelivery <= DELIVERY_ALERT_HOURS * 60 && !flags.qualityApproved) {
       alerts.push({
         caseId: item.id,
         level: minutesToDelivery < 0 ? 'danger' : 'warn',
         priority: minutesToDelivery < 0 ? 2 : 3,
         title: minutesToDelivery < 0 ? 'Livraison dépassée' : 'Livraison proche',
         details: `${label} · livraison estimée ${formatDateTime(delivery)}`,
-        when: item.appointment.delivery,
+        when: appointment.delivery,
       });
     }
   }
-  if (item.flags.received && !item.flags.workStarted && !state.bookings.some((booking) => booking.caseId === item.id)) {
+  const bookings = Array.isArray(state?.bookings) ? state.bookings : [];
+  if (flags.received && !flags.workStarted && !bookings.some((booking) => booking.caseId === item.id)) {
     alerts.push({
       caseId: item.id,
       level: 'warn',
@@ -1604,7 +1778,7 @@ function caseOperationalAlerts(item, now = new Date()) {
       when: item.createdAt,
     });
   }
-  if (item.flags.workCompleted && !item.flags.qualityApproved && isQualityChecklistComplete(item)) {
+  if (flags.workCompleted && !flags.qualityApproved && isCaseQualityChecklistComplete(item)) {
     alerts.push({
       caseId: item.id,
       level: 'info',
@@ -1647,6 +1821,33 @@ function getDashboardBlockerLabel(item) {
   const partsLabel = PARTS_STATUS_LABELS[normalizePartsStatus(item?.partsStatus)] || "";
   const reasonLabel = BLOCKER_REASON_LABELS[normalizeBlockerReason(item?.blockerReason)] || "";
   return [reasonLabel, partsLabel].filter(Boolean).join(" · ") || "blocage à résoudre";
+}
+
+function getCaseBlockedHours(item, now = new Date()) {
+  if (!item || !isCaseBlocked(item)) return 0;
+  const history = Array.isArray(item.history) ? item.history : [];
+  const blockerEntry = history
+    .slice()
+    .reverse()
+    .find((entry) => /block|blocage|parts|pi[eè]ce/i.test(`${entry.type || ""} ${entry.title || ""}`));
+  const start = new Date(
+    blockerEntry?.at
+    || item.blockedAt
+    || item.partsStatusUpdatedAt
+    || item.updatedAt
+    || item.createdAt
+    || now
+  );
+  if (Number.isNaN(start.getTime())) return 0;
+  return Math.max(0, diffMinutes(start, now) / 60);
+}
+
+function isCaseDeliverableToday(item, now = new Date()) {
+  if (!item || item.flags?.delivered) return false;
+  const qualityStatus = normalizeQualityStatus(item.receptionWorkflow?.qualityStatus);
+  const qcOk = item.flags?.qualityApproved || qualityStatus === "validated";
+  if (!qcOk || isCaseBlocked(item)) return false;
+  return item.appointment?.delivery ? isSameBusinessDay(item.appointment.delivery, now) : false;
 }
 
 
@@ -3341,7 +3542,7 @@ function getBusinessRuleIssues(item, action) {
     if (!item.flags.workStarted) issues.push("Démarrer les travaux avant le contrôle qualité.");
     if (!item.flags.workCompleted) issues.push("Marquer les travaux terminés avant le contrôle qualité.");
     if (!hasAssignments) issues.push("Aucune affectation atelier n'est planifiée pour ce dossier.");
-    if (!isQualityChecklistComplete(item)) issues.push("Compléter toute la checklist qualité.");
+    if (!isCaseQualityChecklistComplete(item)) issues.push("Compléter toute la checklist qualité.");
   }
 
   if (action === "delivered") {
@@ -4565,7 +4766,7 @@ function renderQualityChecklist(root, item) {
         return;
       }
       item.qualityChecklist[input.dataset.qualityCheck] = input.checked;
-      if (!isQualityChecklistComplete(item)) {
+      if (!isCaseQualityChecklistComplete(item)) {
         item.flags.qualityApproved = false;
         item.flags.delivered = false;
       }
@@ -4576,8 +4777,47 @@ function renderQualityChecklist(root, item) {
 }
 
 
+function isCaseQualityChecklistComplete(item) {
+  if (!item || !item.qualityChecklist || typeof item.qualityChecklist !== "object") return false;
+  if (typeof DEFAULT_QUALITY_CHECKS === "undefined" || !Array.isArray(DEFAULT_QUALITY_CHECKS)) return false;
+  return DEFAULT_QUALITY_CHECKS.every((label) => Boolean(item.qualityChecklist[label]));
+}
+
 function qualityChecklistCount(item) {
-  return DEFAULT_QUALITY_CHECKS.filter((label) => item.qualityChecklist[label]).length;
+  if (!item || !item.qualityChecklist || typeof item.qualityChecklist !== "object") return 0;
+  return DEFAULT_QUALITY_CHECKS.filter((label) => Boolean(item.qualityChecklist[label])).length;
+}
+
+const QC_PRESET_REASONS = [
+  "Défaut peinture",
+  "Jeu / alignement à reprendre",
+  "Pièce manquante ou non conforme",
+  "Essai route non concluant",
+  "Nettoyage ou finition insuffisant",
+  "Réclamation client non traitée",
+];
+
+function renderQcPresetReasonButtons(caseId) {
+  return `
+    <div class="qc-preset-row" aria-label="Motifs QC prédéfinis">
+      ${QC_PRESET_REASONS.map((reason) => `
+        <button class="quick-chip qc-preset-reason" type="button"
+          data-case-id="${escapeAttr(caseId)}"
+          data-reason="${escapeAttr(reason)}">
+          ${escapeHtml(reason)}
+        </button>
+      `).join("")}
+    </div>
+  `;
+}
+
+function readQcQuickNote(card) {
+  return String(card?.querySelector(".qc-quality-note")?.value || "").trim();
+}
+
+function saveQcQuickNote(caseId, note) {
+  if (!note || typeof updateCaseNote !== "function") return;
+  updateCaseNote(caseId, "qualite", note);
 }
 
 // ─── v23.2.5 — Vue Contrôle Qualité dédiée ────────────────────────────────
@@ -4636,19 +4876,28 @@ function renderQcWorkspace() {
         </div>
         <div class="qc-card-actions">
           ${actionSet === "pending" || actionSet === "rework" ? `
+            <label class="qc-quick-note">
+              <span>Note qualité rapide</span>
+              <input type="text" class="qc-quality-note" placeholder="Note courte visible au dossier..." />
+            </label>
             ${actionSet === "rework"
               ? (canRevalidate ? `<button type="button" class="primary-button qc-action-revalidate" data-case-id="${escapeAttr(c.id)}">✅ Revalider QC</button>` : "")
-              : (canValidate ? `<button type="button" class="primary-button qc-action-validate" data-case-id="${escapeAttr(c.id)}">✅ Valider QC</button>` : "")}
+              : (canValidate ? `<button type="button" class="primary-button qc-action-validate" data-case-id="${escapeAttr(c.id)}">✅ Valider QC en 1 clic</button>` : "")}
             ${canReject ? `
               <span class="qc-reject-wrap">
+                ${renderQcPresetReasonButtons(c.id)}
                 <input type="text" class="qc-reject-reason" placeholder="Motif refus..." aria-label="Motif de refus QC" style="font-size:0.85rem; padding:4px 8px;" />
                 <button type="button" class="ghost-button qc-action-reject" data-case-id="${escapeAttr(c.id)}">❌ Refuser</button>
               </span>
             ` : ""}
           ` : ""}
           ${actionSet === "rejected" ? `
-            ${canReject ? `<button type="button" class="ghost-button qc-action-return" data-case-id="${escapeAttr(c.id)}">🔧 Retour atelier</button>` : ""}
-            ${canRevalidate ? `<button type="button" class="primary-button qc-action-revalidate" data-case-id="${escapeAttr(c.id)}">✅ Valider malgré tout</button>` : ""}
+            <label class="qc-quick-note">
+              <span>Note qualité rapide</span>
+              <input type="text" class="qc-quality-note" placeholder="Note de reprise ou revalidation..." />
+            </label>
+            ${canReject ? `<button type="button" class="ghost-button qc-action-return" data-case-id="${escapeAttr(c.id)}">🔧 Retour atelier clair</button>` : ""}
+            ${canRevalidate ? `<button type="button" class="primary-button qc-action-revalidate" data-case-id="${escapeAttr(c.id)}">✅ Revalider après correction</button>` : ""}
           ` : ""}
         </div>
       </article>`;
@@ -4679,13 +4928,27 @@ function renderQcWorkspace() {
     </div>`;
 
   // Liaison des actions
+  container.querySelectorAll(".qc-preset-reason").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const wrap = btn.closest(".qc-reject-wrap");
+      const reasonInput = wrap ? wrap.querySelector(".qc-reject-reason") : null;
+      if (reasonInput) {
+        reasonInput.value = btn.dataset.reason || "";
+        reasonInput.focus();
+      }
+    });
+  });
+
   container.querySelectorAll(".qc-action-validate, .qc-action-revalidate").forEach((btn) => {
     btn.addEventListener("click", () => {
       const caseId = btn.dataset.caseId;
+      const card = btn.closest(".qc-card");
+      const note = readQcQuickNote(card);
       if (typeof advanceReceptionWorkflow !== "function") return;
       const res = advanceReceptionWorkflow(caseId, "update_quality_status", { status: "validated" });
       if (res.ok) {
-        if (typeof saveState === "function") saveState();
+        saveQcQuickNote(caseId, note);
+        if (typeof saveState === "function") saveState({ flushCloud: true, cloudReason: "qc-field-validation" });
         renderQcWorkspace();
       } else {
         if (typeof notifyUser === "function") notifyUser(res.message, "error");
@@ -4696,13 +4959,16 @@ function renderQcWorkspace() {
   container.querySelectorAll(".qc-action-reject").forEach((btn) => {
     btn.addEventListener("click", () => {
       const caseId = btn.dataset.caseId;
+      const card = btn.closest(".qc-card");
       const wrap = btn.closest(".qc-reject-wrap");
       const reasonInput = wrap ? wrap.querySelector(".qc-reject-reason") : null;
       const reason = reasonInput ? reasonInput.value.trim() : "";
+      const note = readQcQuickNote(card);
       if (typeof advanceReceptionWorkflow !== "function") return;
       const res = advanceReceptionWorkflow(caseId, "update_quality_status", { status: "rejected", reason });
       if (res.ok) {
-        if (typeof saveState === "function") saveState();
+        saveQcQuickNote(caseId, note);
+        if (typeof saveState === "function") saveState({ flushCloud: true, cloudReason: "qc-field-rejection" });
         renderQcWorkspace();
       } else {
         if (typeof notifyUser === "function") notifyUser(res.message, "error");
@@ -4715,11 +4981,13 @@ function renderQcWorkspace() {
       const caseId = btn.dataset.caseId;
       const card = btn.closest(".qc-card");
       const reasonInput = card ? card.querySelector(".qc-reject-reason") : null;
-      const reason = reasonInput ? reasonInput.value.trim() : "";
+      const reason = reasonInput ? reasonInput.value.trim() : (card?.querySelector(".qc-return-reason")?.textContent || "").replace(/^Motif retour\s*:\s*/i, "").trim();
+      const note = readQcQuickNote(card);
       if (typeof advanceReceptionWorkflow !== "function") return;
       const res = advanceReceptionWorkflow(caseId, "return_to_workshop", { reason });
       if (res.ok) {
-        if (typeof saveState === "function") saveState();
+        saveQcQuickNote(caseId, note);
+        if (typeof saveState === "function") saveState({ flushCloud: true, cloudReason: "qc-return-workshop" });
         renderQcWorkspace();
       } else {
         if (typeof notifyUser === "function") notifyUser(res.message, "error");

@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 
 const root = resolve(process.cwd());
 const defaultPort = Number(process.env.NIMR_BROWSER_TEST_PORT || 8787);
-const targetUrl = process.env.NIMR_BROWSER_TEST_URL || `http://127.0.0.1:${defaultPort}/?browser-smoke=23.2.5`;
+const targetUrl = process.env.NIMR_BROWSER_TEST_URL || `http://127.0.0.1:${defaultPort}/?browser-smoke=23.2.6`;
 const chromePath = process.env.CHROME_PATH || [
   "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
   "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
@@ -149,7 +149,7 @@ async function main() {
       returnByValue: true,
       expression: `Promise.all([
         navigator.serviceWorker?.getRegistration?.().then(Boolean).catch(() => false),
-        caches?.keys?.().then((keys) => keys.some((key) => key.includes('v23.2.5-role-based-workspaces-qc-view'))).catch(() => false),
+        caches?.keys?.().then((keys) => keys.some((key) => key.includes('v23.2.6-reception-qc-field-usability'))).catch(() => false),
       ]).then(([hasServiceWorker, hasExpectedCache]) => ({ hasServiceWorker, hasExpectedCache }))`,
     }, sessionId);
 

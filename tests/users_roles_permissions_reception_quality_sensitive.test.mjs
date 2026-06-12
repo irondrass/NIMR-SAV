@@ -104,7 +104,7 @@ assert.match(exportsSource, /guardSensitiveAction\("case\.delete"/, 'suppression
 assert.match(estimateSource, /guardEstimateImport\(item\)/, 'import devis doit être gardé');
 assert.match(supabaseClientSource, /guardSensitiveAction\("supabase\.configure"/, 'configuration Supabase doit être gardée');
 assert.match(uiCasesSource, /guardWorkflowAction\(action, item, true\)/, 'workflow dossier doit être gardé côté fonction');
-assert.match(swSource, /nimr-sav-v23\.2\.3-offline-sync-conflict-local-data-hardening/, 'cache PWA v23.2.3 attendu');
+assert.match(swSource, /nimr-sav-v23\.2\.6-reception-qc-field-usability/, 'cache PWA v23.2.6 attendu');
 
 function setupRole(role, extra = {}) {
   app(`
@@ -205,7 +205,9 @@ assert.equal(app(`guardSensitiveAction('settings.edit').ok`), false, 'directeur 
 assert.equal(app(`guardSensitiveAction('supabase.configure').ok`), false, 'directeur SAV ne configure pas Supabase');
 assert.equal(app(`guardSensitiveAction('users.manage').ok`), false, 'directeur SAV ne gère pas les permissions critiques');
 assert.equal(app(`guardDeliveryComplete(state.cases[0]).ok`), true, 'directeur SAV peut déclencher override livraison');
-assert.equal(app(`canAdvanceReceptionStep(state.cases[0], 11, { role: 'directeur_sav' }).ok`), true, 'directeur SAV peut passer l’étape livraison en override');
+assert.equal(app(`canAdvanceReceptionStep(state.cases[0], 11, { role: 'directeur_sav' }).ok`), false, 'directeur SAV ne peut pas livrer sans QC validé');
+app(`state.cases[0].flags.qualityApproved = true; state.cases[0].receptionWorkflow.qualityStatus = 'validated';`);
+assert.equal(app(`canAdvanceReceptionStep(state.cases[0], 11, { role: 'directeur_sav' }).ok`), true, 'directeur SAV peut passer l’étape livraison en override après QC validé');
 
 setupRole('chef');
 app(`state.cases[0].flags.qualityApproved = true;`);

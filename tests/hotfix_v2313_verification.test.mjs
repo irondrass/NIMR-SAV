@@ -280,7 +280,7 @@ const rejectedNoVehicleIdentity = await submitReceptionCreate({
 assert.equal(rejectedNoVehicleIdentity.count, 0, 'Aucun dossier ne doit être créé sans véhicule, immatriculation ou VIN');
 assert.deepEqual(
   rejectedNoVehicleIdentity.notification,
-  { msg: "Renseignez au moins le véhicule, l'immatriculation ou le VIN avant de créer le dossier.", type: 'error' },
+  { msg: "Renseignez une immatriculation ou un VIN avant de créer le dossier.", type: 'error' },
   'La création sans identité véhicule doit afficher le message bloquant'
 );
 
@@ -304,14 +304,18 @@ assert.equal(acceptedVinOnly.count, 1, 'Un dossier avec VIN seul doit être acce
 assert.equal(acceptedVinOnly.item.vehicle, 'Véhicule à compléter', 'Le libellé véhicule par défaut doit compléter les dossiers acceptés par VIN seul');
 assert.equal(acceptedVinOnly.item.vin, 'VF3ABCDEF12345678', 'Le VIN seul doit être conservé');
 
-const acceptedVehicleOnly = await submitReceptionCreate({
+const rejectedVehicleOnly = await submitReceptionCreate({
   clientName: 'Client Vehicule Seul',
   vehicle: 'Citroën C3',
   plate: '',
   vin: '',
 });
-assert.equal(acceptedVehicleOnly.count, 1, 'Un dossier avec véhicule seul doit être accepté');
-assert.equal(acceptedVehicleOnly.item.vehicle, 'Citroën C3', 'Le véhicule saisi doit être conservé');
+assert.equal(rejectedVehicleOnly.count, 0, 'Un dossier avec véhicule seul doit être refusé sans immatriculation ni VIN');
+assert.deepEqual(
+  rejectedVehicleOnly.notification,
+  { msg: "Renseignez une immatriculation ou un VIN avant de créer le dossier.", type: 'error' },
+  'La création avec véhicule seul doit afficher le message bloquant'
+);
 
 console.log('-> Test 3 (BUG-VAL-01 identité véhicule) : OK');
 

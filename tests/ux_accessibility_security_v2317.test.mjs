@@ -6,6 +6,7 @@ const appSource = fs.readFileSync("app.js", "utf8");
 const stateSource = fs.readFileSync("js/state.js", "utf8");
 const uiCasesSource = fs.readFileSync("js/ui-cases.js", "utf8");
 const uiReceptionSource = fs.readFileSync("js/ui-reception.js", "utf8");
+const utilsSource = fs.readFileSync("js/utils.js", "utf8");
 const stylesSource = fs.readFileSync("styles.css", "utf8");
 
 console.log("Demarrage tests UX/accessibility/security hardening...");
@@ -69,7 +70,10 @@ sidebarSvgs.forEach((svg) => assert.ok(svg.includes('aria-hidden="true"'), `SVG 
 assert.ok(indexSource.includes("Réception guidée"), "libelle Reception guidee attendu");
 assert.ok(indexSource.includes("Dossier complet"), "libelle Dossier complet attendu");
 assert.ok(indexSource.includes("Le PIN protège l’interface locale, mais ne chiffre pas les données locales."), "avertissement PIN attendu");
-assert.ok(stateSource.includes("Le PIN protège l’interface locale, mais ne chiffre pas les données locales."), "statut PIN local attendu");
+assert.ok(
+  stateSource.includes("Le PIN protège l’interface locale, mais ne chiffre pas les données locales et ne remplace pas une authentification serveur."),
+  "statut PIN local attendu",
+);
 
 assert.ok(appSource.includes("focusUserSessionDialog(overlay, \"#user-login-select\")"), "login: focus initial sur select attendu");
 assert.ok(appSource.includes("focusUserSessionDialog(overlay, \"input[name='newPin']\")"), "PIN: focus initial sur nouveau PIN attendu");
@@ -79,8 +83,8 @@ assert.ok(appSource.includes("restoreUserSessionReturnFocus()"), "login/PIN: ret
 
 assert.ok(appSource.includes("Utilisateur inactif ou invalide. Sélectionnez un compte actif."), "message login utilisateur invalide attendu");
 assert.ok(appSource.includes("PIN incorrect. Vérifiez le code du compte sélectionné."), "message PIN incorrect attendu");
-assert.ok(appSource.includes("Le nom du client est obligatoire pour créer un dossier. Renseignez le propriétaire ou la société."), "message donnees invalides client attendu");
-assert.ok(appSource.includes("Renseignez au moins le véhicule, l'immatriculation ou le VIN avant de créer le dossier."), "message donnees invalides vehicule attendu");
+assert.ok(utilsSource.includes("Le nom du client est obligatoire."), "message donnees invalides client attendu");
+assert.ok(utilsSource.includes("Renseignez une immatriculation ou un VIN avant de créer le dossier."), "message donnees invalides vehicule attendu");
 assert.ok(stateSource.includes("Configuration Supabase réservée administrateur. Connectez-vous avec un administrateur technique."), "message permission Supabase attendu");
 assert.ok(stateSource.includes("Action réservée administrateur technique."), "message admin technique attendu pour les actions critiques");
 

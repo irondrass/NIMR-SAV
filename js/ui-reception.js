@@ -4,6 +4,32 @@
 let activeReceptionFilter = "all";
 let isReceptionCreationMode = false;
 
+const RECEPTION_QUICK_MOTIFS = [
+  { label: "Vidange + filtres", value: "Vidange moteur + filtres", orderType: "vidange" },
+  { label: "Diagnostic bruit", value: "Diagnostic bruit ou vibration", orderType: "diagnostic" },
+  { label: "Contrôle voyant", value: "Diagnostic voyant tableau de bord", orderType: "diagnostic" },
+  { label: "Carrosserie", value: "Réparation carrosserie / peinture", orderType: "client" },
+  { label: "Électricité", value: "Diagnostic électrique", orderType: "electrical_client" },
+  { label: "Expertise assurance", value: "Ouverture dossier assurance / expert", orderType: "assurance" },
+];
+
+const RECEPTION_QUICK_CLAIMS = [
+  "Bruit suspect",
+  "Voyant allumé",
+  "Fuite constatée",
+  "Démarrage difficile",
+  "Vibration en roulant",
+  "Défaut carrosserie",
+];
+
+const RECEPTION_QUICK_REQUESTS = [
+  "Appeler avant travaux",
+  "Prévenir si délai modifié",
+  "Contrôle niveaux",
+  "Devis avant intervention",
+  "Restitution urgente",
+];
+
 function ensureReceptionWorkflow(item) {
   if (!item) return typeof normalizeReceptionWorkflow === "function" ? normalizeReceptionWorkflow(null) : {};
   const normalized = typeof normalizeReceptionWorkflow === "function"
@@ -114,6 +140,8 @@ function renderReceptionWorkspace() {
   const filtered = allCases.filter((item) => {
     if (activeReceptionFilter === "new") {
       if (item.flags.received || item.appointment) return false;
+    } else if (activeReceptionFilter === "created-today") {
+      if (!isSameBusinessDay(item.createdAt, now)) return false;
     } else if (activeReceptionFilter === "today") {
       if (!item.appointment) return false;
       const start = item.appointment.start;
@@ -143,9 +171,9 @@ function renderReceptionWorkspace() {
   const caseListEl = document.getElementById("reception-case-list");
   if (caseListEl) {
     if (filtered.length === 0) {
-      caseListEl.innerHTML = `<div class="empty-inline">Aucun dossier trouvé.</div>`;
+      caseListEl.innerHTML = `${renderReceptionTodayCreatedSummary(allCases, now)}<div class="empty-inline">${escapeHtml(getReceptionEmptyMessage(activeReceptionFilter, query))}</div>`;
     } else {
-      caseListEl.innerHTML = filtered.map((item) => {
+      caseListEl.innerHTML = `${renderReceptionTodayCreatedSummary(allCases, now)}${filtered.map((item) => {
         const active = item.id === activeCaseId ? " active" : "";
         const status = getCaseStatus(item);
         const openClaimsCount = (item.customerClaims || []).filter((c) => ["open", "in_progress", "unresolved"].includes(c.status)).length;
@@ -165,7 +193,7 @@ function renderReceptionWorkspace() {
             </span>
           </button>
         `;
-      }).join("");
+      }).join("")}`;
     }
   }
 
@@ -192,6 +220,39 @@ function renderReceptionWorkspace() {
   }
 
   renderReceptionDetailPanel(activeItem);
+}
+
+function getReceptionEmptyMessage(filter, query = "") {
+  if (query) return "Aucun dossier ne correspond à cette recherche.";
+  const messages = {
+    "created-today": "Aucun dossier créé aujourd'hui. Utilisez Nouveau dossier pour lancer une réception rapide.",
+    today: "Aucun rendez-vous ni livraison prévu aujourd'hui.",
+    expected: "Aucun véhicule attendu aujourd'hui.",
+    arrived: "Aucun véhicule reçu en attente de suite.",
+    "ready-deliver": "Aucun dossier prêt à livrer pour le moment.",
+    "open-claims": "Aucune réclamation client ouverte.",
+  };
+  return messages[filter] || "Aucun dossier trouvé.";
+}
+
+function renderReceptionTodayCreatedSummary(cases, now = new Date()) {
+  const todayCases = cases
+    .filter((item) => isSameBusinessDay(item.createdAt, now))
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  const latest = todayCases.slice(0, 3);
+  return `
+    <section class="reception-today-created-summary" aria-label="Dossiers créés aujourd'hui">
+      <div>
+        <strong>${todayCases.length}</strong>
+        <span>Dossier${todayCases.length > 1 ? "s" : ""} créé${todayCases.length > 1 ? "s" : ""} aujourd'hui</span>
+      </div>
+      ${latest.length ? `
+        <div class="reception-today-created-list">
+          ${latest.map((item) => `<button class="tiny-chip" type="button" data-case="${escapeAttr(item.id)}">${escapeHtml(item.plate || item.vin || item.clientName || "Dossier")}</button>`).join("")}
+        </div>
+      ` : `<small>La liste se remplit dès la première création du jour.</small>`}
+    </section>
+  `;
 }
 
 // ─── PANNEAU CENTRAL ─────────────────────────────────────────────────────────
@@ -274,15 +335,15 @@ function renderStep1_Creation(item, container) {
         <p class="form-error-summary" data-form-errors role="alert" hidden></p>
         <div class="step-form-grid">
           <label class="step-field">
-            <span>Client *</span>
-            <input type="text" name="clientName" value="${escapeAttr(item?.clientName || "")}" placeholder="Nom du client" required />
+            <span>Client / société *</span>
+            <input type="text" name="clientName" value="${escapeAttr(item?.clientName || "")}" placeholder="Nom client ou société" required />
           </label>
           <label class="step-field">
-            <span>Téléphone</span>
+            <span>Tél. client</span>
             <input type="tel" name="phone" value="${escapeAttr(item?.phone || "")}" placeholder="Numéro de téléphone" />
           </label>
           <label class="step-field">
-            <span>Véhicule</span>
+            <span>Véhicule (marque/modèle)</span>
             <input type="text" name="vehicle" value="${escapeAttr(item?.vehicle || "")}" placeholder="Marque et modèle" />
           </label>
           <label class="step-field">
@@ -327,6 +388,15 @@ function renderStep1_Creation(item, container) {
           </label>
         </div>
         ${isCreate ? `
+          <div class="reception-quick-actions" data-reception-quick-actions>
+            <div>
+              <strong>Motifs fréquents</strong>
+              <span>1 clic remplit le motif et le type d'ordre.</span>
+            </div>
+            <div class="quick-chip-row">
+              ${renderReceptionQuickMotiveButtons(RECEPTION_QUICK_MOTIFS, "orderTitle")}
+            </div>
+          </div>
           <label class="step-field" style="margin-top:12px;">
             <span>Motif de l'intervention *</span>
             <input type="text" name="orderTitle" placeholder="Ex: Vidange moteur + filtres" required />
@@ -334,10 +404,16 @@ function renderStep1_Creation(item, container) {
           <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 12px;">
             <label class="step-field">
               <span>Réclamations client (une par ligne)</span>
+              <div class="quick-chip-row compact">
+                ${renderReceptionQuickTextButtons(RECEPTION_QUICK_CLAIMS, "customerClaimsText")}
+              </div>
               <textarea name="customerClaimsText" rows="3" placeholder="Ex: Bruit suspect train avant&#10;Rayure portière gauche"></textarea>
             </label>
             <label class="step-field">
               <span>Demandes client (une par ligne)</span>
+              <div class="quick-chip-row compact">
+                ${renderReceptionQuickTextButtons(RECEPTION_QUICK_REQUESTS, "customerRequestsText")}
+              </div>
               <textarea name="customerRequestsText" rows="3" placeholder="Ex: Lavage intérieur souhaité&#10;Prêt de véhicule de courtoisie"></textarea>
             </label>
           </div>
@@ -359,6 +435,27 @@ function renderStep1_Creation(item, container) {
     container.innerHTML = html;
   }
   return html;
+}
+
+function renderReceptionQuickMotiveButtons(items, targetName) {
+  return items.map((item) => `
+    <button class="quick-chip reception-quick-motif" type="button"
+      data-target="${escapeAttr(targetName)}"
+      data-value="${escapeAttr(item.value)}"
+      data-order-type="${escapeAttr(item.orderType)}">
+      ${escapeHtml(item.label)}
+    </button>
+  `).join("");
+}
+
+function renderReceptionQuickTextButtons(items, targetName) {
+  return items.map((value) => `
+    <button class="quick-chip reception-quick-motif" type="button"
+      data-target="${escapeAttr(targetName)}"
+      data-value="${escapeAttr(value)}">
+      ${escapeHtml(value)}
+    </button>
+  `).join("");
 }
 
 // ─── ÉTAPE 2 — DEMANDE PLANNING ──────────────────────────────────────────────
@@ -1169,6 +1266,13 @@ async function handleReceptionFormSubmit(e) {
 }
 
 async function handleReceptionClick(e) {
+  const quickMotifBtn = e.target.closest(".reception-quick-motif");
+  if (quickMotifBtn) {
+    e.preventDefault();
+    applyReceptionQuickMotif(quickMotifBtn);
+    return;
+  }
+
   // Bouton expliquer au client
   const explainBtn = e.target.closest(".explain-claim-btn");
   if (explainBtn) {
@@ -1200,6 +1304,31 @@ async function handleReceptionClick(e) {
     if (item) await handleDeliveryAction(item);
     return;
   }
+}
+
+function applyReceptionQuickMotif(button) {
+  const form = button.closest("form");
+  if (!form) return;
+  const targetName = button.dataset.target || "orderTitle";
+  const value = String(button.dataset.value || "").trim();
+  if (!value) return;
+  const target = form.querySelector(`[name="${targetName}"]`);
+  if (!target) return;
+
+  if (target.tagName === "TEXTAREA") {
+    const currentLines = String(target.value || "").split("\n").map((line) => line.trim()).filter(Boolean);
+    if (!currentLines.includes(value)) currentLines.push(value);
+    target.value = currentLines.join("\n");
+  } else {
+    target.value = value;
+  }
+
+  const orderType = button.dataset.orderType;
+  const orderSelect = orderType ? form.querySelector('[name="orderType"]') : null;
+  if (orderSelect && Array.from(orderSelect.options).some((option) => option.value === orderType)) {
+    orderSelect.value = orderType;
+  }
+  target.focus();
 }
 
 function handleReceptionChange(e) {

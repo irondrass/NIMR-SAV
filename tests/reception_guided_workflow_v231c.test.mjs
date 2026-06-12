@@ -204,8 +204,10 @@ app('state.cases[0].flags.workCompleted = true');
 const stepAfterWorkCompleted = app('getReceptionWorkflowStep(state.cases[0])');
 assert.equal(stepAfterWorkCompleted, 10, 'Après workCompleted, étape = 10');
 
+app('state.currentUserId = "u-admin"');
 const r10 = app(`advanceReceptionWorkflow("case-wf-1", "update_quality_status", { status: "validated" })`);
 assert.ok(r10.ok, 'La validation qualité doit réussir');
+app('state.currentUserId = "u-reception"');
 
 const caseAfterQC = app('state.cases[0]');
 assert.equal(caseAfterQC.receptionWorkflow.qualityStatus, 'validated', 'qualityStatus doit être validated');
@@ -271,9 +273,9 @@ const actorReception = { role: 'reception' };
 const canDeliver = app(`canAdvanceReceptionStep(state.cases.find(c => c.id === "case-wf-qc"), 11, { role: "reception" })`);
 assert.equal(canDeliver.ok, false, 'La réception ne peut pas livrer sans QC validé');
 
-// Admin peut outrepasser le QC non validé
+// Aucun rôle ne peut outrepasser le QC non validé
 const canDeliverAdmin = app(`canAdvanceReceptionStep(state.cases.find(c => c.id === "case-wf-qc"), 11, { role: "admin" })`);
-assert.ok(canDeliverAdmin.ok, 'L\'admin peut livrer même sans QC validé');
+assert.equal(canDeliverAdmin.ok, false, 'L\'admin ne peut pas livrer sans QC validé');
 
 // ─── Test 13 : Technicien ne peut pas avancer le workflow réception ───────────
 console.log('Test 13 — Technicien bloqué sur le workflow réception...');

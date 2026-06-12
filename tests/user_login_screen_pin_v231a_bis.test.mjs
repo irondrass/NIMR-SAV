@@ -177,6 +177,13 @@ async function main() {
         ];
         createUserLocal({ name: "Alaa", role: "technicien", resourceId: "res-alaa", email: "alaa@nimr.local", active: true });
         createUserLocal({ name: "Karim", role: "technicien", resourceId: "res-karim", email: "karim@nimr.local", active: true });
+
+        const adminUser = state.users.find(user => user.role === "admin");
+        if (adminUser) {
+          adminUser.pinSalt = "legacy-v231a-bis-salt";
+          adminUser.pinHash = "mockhash:0000:" + adminUser.pinSalt;
+          adminUser.updatedAt = new Date().toISOString();
+        }
         
         // Ajouter deux utilisateurs doublons pour tester l'alerte en bypassant createUserLocal pour le second
         createUserLocal({ name: "Dup1", role: "reception", email: "dup@nimr.local", active: true });
@@ -216,6 +223,7 @@ async function main() {
         const pinInput = document.getElementById("user-login-pin");
         const loginForm = document.getElementById("user-login-form");
         const statusEl = document.getElementById("user-login-status");
+        const selectedUser = state.users.find(user => user.id === select.value);
 
         // Tester PIN incorrect
         pinInput.value = "9999";
@@ -223,7 +231,12 @@ async function main() {
         await new Promise(r => setTimeout(r, 100));
 
         if (!statusEl.textContent.includes("incorrect")) {
-          return { ok: false, error: "Le PIN incorrect aurait dû afficher un message d'erreur" };
+          return {
+            ok: false,
+            error: "Le PIN incorrect aurait dû afficher un message d'erreur",
+            status: statusEl.textContent,
+            selectedUser: selectedUser ? { id: selectedUser.id, role: selectedUser.role, hasPin: Boolean(selectedUser.pinHash) } : null
+          };
         }
 
         const hasIncorrectAudit = state.auditLog.some(log => log.type === "users.pin_incorrect");
@@ -234,7 +247,7 @@ async function main() {
         return { ok: true };
       })()`
     }, sessionId);
-    assert.ok(testIncorrectPin.result.value.ok, `Échec test PIN incorrect : ${testIncorrectPin.result.value.error}`);
+    assert.ok(testIncorrectPin.result.value.ok, `Échec test PIN incorrect : ${JSON.stringify(testIncorrectPin.result.value)}`);
 
     // Étape 5 : Saisir PIN bootstrap 0000 -> forcer modification
     console.log("Étape 5 : Saisie PIN bootstrap 0000 -> modification forcée...");
@@ -260,8 +273,8 @@ async function main() {
     }, sessionId);
     assert.ok(testBootstrapRedirect.result.value.ok, `Échec redirection bootstrap : ${testBootstrapRedirect.result.value.error}`);
 
-    // Étape 6 : Renseigner le nouveau PIN (1234) et valider la connexion admin
-    console.log("Étape 6 : Définition nouveau PIN 1234 et activation interface...");
+    // Étape 6 : Renseigner un nouveau PIN robuste et valider la connexion admin
+    console.log("Étape 6 : Définition nouveau PIN robuste et activation interface...");
     const testNewPinSetup = await send("Runtime.evaluate", {
       awaitPromise: true,
       returnByValue: true,
@@ -269,8 +282,8 @@ async function main() {
         const changeOverlay = document.getElementById("user-pin-change-overlay");
         const newPinInput = changeOverlay.querySelector("input[name='newPin']");
         const confirmInput = changeOverlay.querySelector("input[name='confirmNewPin']");
-        newPinInput.value = "1234";
-        confirmInput.value = "1234";
+        newPinInput.value = "739251";
+        confirmInput.value = "739251";
 
         const changeForm = document.getElementById("user-pin-change-form");
         changeForm.dispatchEvent(new Event("submit"));
@@ -320,7 +333,7 @@ async function main() {
           return { ok: false, error: "L'écran de login devrait être affiché après refresh pour l'admin" };
         }
 
-        // Taper le nouveau PIN 1234
+        // Taper le nouveau PIN robuste
         const select = document.getElementById("user-login-select");
         const adminOption = Array.from(select.options).find(o => o.text.includes("Admin"));
         select.value = adminOption.value;
@@ -328,12 +341,12 @@ async function main() {
 
         const pinInput = document.getElementById("user-login-pin");
         const loginForm = document.getElementById("user-login-form");
-        pinInput.value = "1234";
+        pinInput.value = "739251";
         loginForm.dispatchEvent(new Event("submit"));
         await new Promise(r => setTimeout(r, 200));
 
         if (!loginOverlay.hidden) {
-          return { ok: false, error: "L'application aurait dû se déverrouiller avec le PIN 1234" };
+          return { ok: false, error: "L'application aurait dû se déverrouiller avec le PIN robuste" };
         }
         return { ok: true };
       })()`
@@ -420,7 +433,7 @@ async function main() {
 
         const pinInput = document.getElementById("user-login-pin");
         const loginForm = document.getElementById("user-login-form");
-        pinInput.value = "1234";
+        pinInput.value = "739251";
         loginForm.dispatchEvent(new Event("submit"));
         await new Promise(r => setTimeout(r, 200));
 

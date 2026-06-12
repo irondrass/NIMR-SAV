@@ -1316,9 +1316,20 @@ function mergeCaseEntity(localCase, remoteCase, stats, localState = {}, remoteSt
     return localCase;
   }
 
+  const hasRevisionMetadata = [localCase.localRevision, localCase.syncRevision, remoteCase.localRevision, remoteCase.syncRevision]
+    .some((value) => Number(value || 0) > 0);
+  if (!hasRevisionMetadata) {
+    const mergedCriticalCase = { ...localCase };
+    CRITICAL_CASE_SYNC_FIELDS.forEach((field) => {
+      if (localCase[field] === undefined && remoteCase[field] === undefined) return;
+      mergedCriticalCase[field] = mergeCriticalCaseField(localCase, remoteCase, field, stats, localState, remoteState);
+    });
+    return mergedCriticalCase;
+  }
+
   const getComparable = typeof getComparableCaseJSON === "function"
     ? getComparableCaseJSON
-    : (window.getComparableCaseJSON || ((c) => JSON.stringify(c)));
+    : ((typeof window !== "undefined" && window.getComparableCaseJSON) || ((c) => JSON.stringify(c)));
 
   const localModified = Number(localCase.localRevision || 0) > Number(localCase.syncRevision || 0);
   const remoteModified = Number(remoteCase.localRevision || 0) > Number(localCase.syncRevision || 0);

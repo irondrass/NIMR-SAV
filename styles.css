@@ -599,6 +599,7 @@ main {
   min-height: 120px;
   padding: 14px;
   border: 1px solid var(--line);
+  border-left: 4px solid transparent;
   border-radius: var(--radius);
   background: #fbfdff;
 }
@@ -622,6 +623,19 @@ main {
   color: var(--muted);
   line-height: 1.35;
 }
+
+.workshop-field-summary {
+  margin-top: 16px;
+}
+
+.workshop-field-grid {
+  margin-top: 10px;
+}
+
+.workshop-field-card.success { border-left-color: #1f7a54; }
+.workshop-field-card.info { border-left-color: #2563eb; }
+.workshop-field-card.warn { border-left-color: #d97706; }
+.workshop-field-card.danger { border-left-color: #b54040; }
 
 .panel-list {
   position: sticky;
@@ -4534,6 +4548,152 @@ a:focus-visible,
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 12px;
   margin-bottom: 24px;
+}
+
+.reception-today-created-summary {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  margin-bottom: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #f8fbff;
+}
+
+.reception-today-created-summary strong {
+  color: var(--brand);
+  font-size: 1.65rem;
+  line-height: 1;
+}
+
+.reception-today-created-summary span,
+.reception-today-created-summary small {
+  display: block;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.reception-today-created-list,
+.quick-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.quick-chip-row.compact {
+  margin: 6px 0 8px;
+  gap: 6px;
+}
+
+.reception-quick-actions {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #f8fbff;
+}
+
+.reception-quick-actions strong {
+  display: block;
+}
+
+.reception-quick-actions span {
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.quick-chip,
+.tiny-chip {
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  color: var(--ink);
+  font-size: 0.82rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.quick-chip:hover,
+.tiny-chip:hover {
+  border-color: var(--brand);
+  color: var(--brand);
+}
+
+.qc-workspace-inner {
+  display: grid;
+  gap: 18px;
+}
+
+.qc-section {
+  display: grid;
+  gap: 10px;
+}
+
+.qc-section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.qc-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  box-shadow: var(--shadow-sm);
+}
+
+.qc-card-header,
+.qc-card-meta,
+.qc-card-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.qc-plate {
+  font-weight: 850;
+}
+
+.qc-vehicle,
+.qc-client,
+.qc-card-meta {
+  color: var(--muted);
+}
+
+.qc-card-actions {
+  align-items: stretch;
+}
+
+.qc-reject-wrap,
+.qc-quick-note {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.qc-quick-note span {
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.qc-preset-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: 100%;
 }
 .claims-block {
   margin-top: 24px;

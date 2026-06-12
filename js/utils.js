@@ -611,12 +611,13 @@ function renderFormValidationErrors(form, validation = {}, fallbackId = "") {
   if (!form) return;
   const errors = Array.isArray(validation.errors) ? validation.errors : [];
   form.querySelectorAll("[aria-invalid='true']").forEach((control) => {
+    if (typeof control.removeAttribute !== "function") return;
     control.removeAttribute("aria-invalid");
-    const describedBy = String(control.getAttribute("aria-describedby") || "")
+    const describedBy = String(typeof control.getAttribute === "function" ? control.getAttribute("aria-describedby") || "" : "")
       .split(/\s+/)
       .filter((id) => id && id !== fallbackId)
       .join(" ");
-    if (describedBy) control.setAttribute("aria-describedby", describedBy);
+    if (describedBy && typeof control.setAttribute === "function") control.setAttribute("aria-describedby", describedBy);
     else control.removeAttribute("aria-describedby");
   });
   const fallbackTarget = fallbackId && typeof document !== "undefined" && typeof document.getElementById === "function"
@@ -637,11 +638,15 @@ function renderFormValidationErrors(form, validation = {}, fallbackId = "") {
   errors.forEach((error) => {
     const field = form.elements?.[error.field];
     if (!field) return;
-    field.setAttribute("aria-invalid", "true");
+    if (typeof field.setAttribute === "function") {
+      field.setAttribute("aria-invalid", "true");
+    }
     if (fallbackId) {
-      const describedBy = new Set(String(field.getAttribute("aria-describedby") || "").split(/\s+/).filter(Boolean));
+      const describedBy = new Set(String(typeof field.getAttribute === "function" ? field.getAttribute("aria-describedby") || "" : "").split(/\s+/).filter(Boolean));
       describedBy.add(fallbackId);
-      field.setAttribute("aria-describedby", [...describedBy].join(" "));
+      if (typeof field.setAttribute === "function") {
+        field.setAttribute("aria-describedby", [...describedBy].join(" "));
+      }
     }
   });
   const firstField = form.elements?.[errors[0]?.field];

@@ -1,4 +1,5 @@
 import { SavCase } from './sav-case';
+import { areRequiredQcItemsChecked } from './qc-rules';
 
 /**
  * Checks if the case has a validated QC checklist.
@@ -7,12 +8,13 @@ export function isQCValidated(caseObj: SavCase): boolean {
   if (!caseObj.qcChecklist) {
     return false;
   }
-  const hasValidator = !!caseObj.qcChecklist.validatedBy;
-  const allRequiredChecked = caseObj.qcChecklist.items
-    .filter((item) => item.required)
-    .every((item) => item.checked);
-
-  return hasValidator && allRequiredChecked;
+  let hasValidator = false;
+  if (Array.isArray(caseObj.qcChecklist)) {
+    hasValidator = !!caseObj.qcCheckedBy;
+  } else {
+    hasValidator = !!caseObj.qcChecklist.validatedBy;
+  }
+  return hasValidator && areRequiredQcItemsChecked(caseObj.qcChecklist);
 }
 
 /**

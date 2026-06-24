@@ -51,7 +51,7 @@ import { savCaseStore } from '../src/state/sav-case-store';
 import { SavCase } from '../src/domain/sav-case';
 import { hasPermission, canViewDirectionNotes } from '../src/domain/action-permissions';
 
-describe('SAV Chef Atelier Workflow Integration (v24.0.0-alpha.5)', () => {
+describe('SAV Chef Atelier Workflow Integration (v24.0.0-alpha.6)', () => {
 
   beforeEach(() => {
     window.localStorage.clear();
@@ -64,12 +64,12 @@ describe('SAV Chef Atelier Workflow Integration (v24.0.0-alpha.5)', () => {
   });
 
   // 1. Version Check
-  it('has package.json and constants aligned to v24.0.0-alpha.5', () => {
-    expect(APP_VERSION).toBe('v24.0.0-alpha.5');
+  it('has package.json and constants aligned to v24.0.0-alpha.6', () => {
+    expect(APP_VERSION).toBe('v24.0.0-alpha.6');
 
     const pkgPath = resolve(__dirname, '../package.json');
     const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
-    expect(pkg.version).toBe('24.0.0-alpha.5');
+    expect(pkg.version).toBe('24.0.0-alpha.6');
   });
 
   // 2. Demo Technicians check

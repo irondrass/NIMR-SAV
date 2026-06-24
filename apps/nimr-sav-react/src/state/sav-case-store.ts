@@ -1,7 +1,8 @@
-import { SavCase, WorkshopTask } from '../domain/sav-case';
+import { SavCase, WorkshopTask, QcChecklistItem } from '../domain/sav-case';
 import { AuditLogEntry, createAuditLog } from '../domain/audit-log';
 import { DEMO_CASES } from '../domain/case-fixtures';
 import { LS_PREFIX } from '../constants/version';
+import { DEMO_QC_CHECKLIST } from '../constants/qc-checklist';
 import { Role } from '../types';
 import { CaseStatus } from '../domain/case-status';
 import { hasPermission } from '../domain/action-permissions';
@@ -432,5 +433,277 @@ export const savCaseStore = {
       `Intervention terminée par le technicien ${actor.id}.`
     );
     this.addLog(completeLog);
+  },
+
+  getQualityCases(): SavCase[] {
+    return cases.filter((c) =>
+      c.status === 'work_completed' ||
+      c.status === 'quality_pending' ||
+      c.status === 'quality_rejected' ||
+      c.status === 'quality_rework'
+    );
+  },
+
+  startQualityCheck(caseId: string, actor: { id: string; role: Role }) {
+    const caseObj = cases.find((c) => c.id === caseId);
+    if (!caseObj) throw new Error(`Case ${caseId} not found.`);
+
+    if (actor.role !== 'qualite') {
+      throw new Error('Only QC role can perform this action.');
+    }
+
+    if (caseObj.status === 'closed' || caseObj.status === 'cancelled') {
+      throw new Error(`Cases in ${caseObj.status} status cannot be modified.`);
+    }
+
+    if (!hasPermission(actor.role, 'start_quality_check')) {
+      throw new Error(`Role ${actor.role} is not permitted to start quality check.`);
+    }
+
+    const result = transitionCase(caseObj, 'quality_pending', actor);
+    if (!result.success || !result.updatedCase || !result.auditLog) {
+      throw new Error(result.error || 'Failed to start quality check.');
+    }
+
+    let checklist = result.updatedCase.qcChecklist;
+    if (!checklist || (Array.isArray(checklist) && checklist.length === 0)) {
+      checklist = JSON.parse(JSON.stringify(DEMO_QC_CHECKLIST));
+    }
+
+    const updatedCase: SavCase = {
+      ...result.updatedCase,
+      qcStatus: 'in_progress',
+      qcChecklist: checklist,
+      updatedAt: new Date().toISOString(),
+    };
+
+    this.addCase(updatedCase);
+    this.addLog(result.auditLog);
+
+    const log = createAuditLog(
+      caseId,
+      actor.id,
+      actor.role,
+      'qc_start_check',
+      caseObj.status,
+      'quality_pending',
+      `Contrôle qualité démarré par ${actor.id}.`
+    );
+    this.addLog(log);
+  },
+
+  updateQualityChecklist(caseId: string, checklist: QcChecklistItem[], actor: { id: string; role: Role }) {
+    const caseObj = cases.find((c) => c.id === caseId);
+    if (!caseObj) throw new Error(`Case ${caseId} not found.`);
+
+    if (actor.role !== 'qualite') {
+      throw new Error('Only QC role can perform this action.');
+    }
+
+    if (caseObj.status === 'closed' || caseObj.status === 'cancelled') {
+      throw new Error(`Cases in ${caseObj.status} status cannot be modified.`);
+    }
+
+    if (!hasPermission(actor.role, 'validate_qc')) {
+      throw new Error(`Role ${actor.role} is not permitted to update checklist.`);
+    }
+
+    const updatedCase: SavCase = {
+      ...caseObj,
+      qcChecklist: checklist,
+      qcStatus: 'in_progress',
+      updatedAt: new Date().toISOString(),
+    };
+
+    this.addCase(updatedCase);
+
+    const log = createAuditLog(
+      caseId,
+      actor.id,
+      actor.role,
+      'qc_update_checklist',
+      caseObj.status,
+      caseObj.status,
+      `Checklist QC mise à jour par ${actor.id}.`
+    );
+    this.addLog(log);
+  },
+
+  approveQualityCheck(caseId: string, actor: { id: string; role: Role }) {
+    const caseObj = cases.find((c) => c.id === caseId);
+    if (!caseObj) throw new Error(`Case ${caseId} not found.`);
+
+    if (actor.role !== 'qualite') {
+      throw new Error('Only QC role can perform this action.');
+    }
+
+    if (caseObj.status === 'closed' || caseObj.status === 'cancelled') {
+      throw new Error(`Cases in ${caseObj.status} status cannot be modified.`);
+    }
+
+    if (!hasPermission(actor.role, 'validate_qc')) {
+      throw new Error(`Role ${actor.role} is not permitted to validate QC.`);
+    }
+
+    const items = Array.isArray(caseObj.qcChecklist) ? caseObj.qcChecklist : (caseObj.qcChecklist?.items || []);
+    const hasUnfinishedRequired = items.some((item) => item.required && !item.checked);
+    if (hasUnfinishedRequired) {
+      throw new Error('Cannot approve Quality Control: not all required checklist items are checked.');
+    }
+
+    const result = transitionCase(caseObj, 'quality_approved', actor);
+    if (!result.success || !result.updatedCase || !result.auditLog) {
+      throw new Error(result.error || 'Failed to approve quality check.');
+    }
+
+    const nowStr = new Date().toISOString();
+    let updatedChecklist = result.updatedCase.qcChecklist;
+    if (updatedChecklist && !Array.isArray(updatedChecklist)) {
+      updatedChecklist = {
+        ...updatedChecklist,
+        validatedBy: actor.id,
+        validatedAt: nowStr,
+      };
+    }
+
+    const updatedCase: SavCase = {
+      ...result.updatedCase,
+      qcStatus: 'approved',
+      qcCheckedAt: nowStr,
+      qcCheckedBy: actor.id,
+      qcChecklist: updatedChecklist,
+      updatedAt: nowStr,
+    };
+
+    this.addCase(updatedCase);
+    this.addLog(result.auditLog);
+
+    const log = createAuditLog(
+      caseId,
+      actor.id,
+      actor.role,
+      'qc_approve',
+      caseObj.status,
+      'quality_approved',
+      `Contrôle qualité validé par ${actor.id}.`
+    );
+    this.addLog(log);
+  },
+
+  rejectQualityCheck(caseId: string, reason: string, actor: { id: string; role: Role }) {
+    const caseObj = cases.find((c) => c.id === caseId);
+    if (!caseObj) throw new Error(`Case ${caseId} not found.`);
+
+    if (actor.role !== 'qualite') {
+      throw new Error('Only QC role can perform this action.');
+    }
+
+    if (caseObj.status === 'closed' || caseObj.status === 'cancelled') {
+      throw new Error(`Cases in ${caseObj.status} status cannot be modified.`);
+    }
+
+    if (!hasPermission(actor.role, 'reject_qc')) {
+      throw new Error(`Role ${actor.role} is not permitted to reject QC.`);
+    }
+
+    if (!reason || reason.trim() === '') {
+      throw new Error('Rejection reason is required.');
+    }
+
+    const caseWithReason: SavCase = {
+      ...caseObj,
+      qcRejectionReason: reason,
+    };
+
+    const result = transitionCase(caseWithReason, 'quality_rejected', actor);
+    if (!result.success || !result.updatedCase || !result.auditLog) {
+      throw new Error(result.error || 'Failed to reject quality check.');
+    }
+
+    const nowStr = new Date().toISOString();
+    let updatedChecklist = result.updatedCase.qcChecklist;
+    if (updatedChecklist && !Array.isArray(updatedChecklist)) {
+      updatedChecklist = {
+        ...updatedChecklist,
+        rejectionReason: reason,
+      };
+    }
+
+    const updatedCase: SavCase = {
+      ...result.updatedCase,
+      qcStatus: 'rejected',
+      qcRejectionReason: reason,
+      qcCheckedAt: nowStr,
+      qcCheckedBy: actor.id,
+      qcChecklist: updatedChecklist,
+      updatedAt: nowStr,
+    };
+
+    this.addCase(updatedCase);
+    this.addLog(result.auditLog);
+
+    const log = createAuditLog(
+      caseId,
+      actor.id,
+      actor.role,
+      'qc_reject',
+      caseObj.status,
+      'quality_rejected',
+      `Contrôle qualité rejeté par ${actor.id}. Motif: ${reason}`
+    );
+    this.addLog(log);
+  },
+
+  sendQualityCaseToRework(caseId: string, reason: string, actor: { id: string; role: Role }) {
+    const caseObj = cases.find((c) => c.id === caseId);
+    if (!caseObj) throw new Error(`Case ${caseId} not found.`);
+
+    if (actor.role !== 'qualite') {
+      throw new Error('Only QC role can perform this action.');
+    }
+
+    if (caseObj.status === 'closed' || caseObj.status === 'cancelled') {
+      throw new Error(`Cases in ${caseObj.status} status cannot be modified.`);
+    }
+
+    if (!hasPermission(actor.role, 'send_to_rework')) {
+      throw new Error(`Role ${actor.role} is not permitted to send case to rework.`);
+    }
+
+    if (!reason || reason.trim() === '') {
+      throw new Error('Rework reason is required.');
+    }
+
+    const caseWithReason: SavCase = {
+      ...caseObj,
+      qcReworkReason: reason,
+    };
+
+    const result = transitionCase(caseWithReason, 'quality_rework', actor);
+    if (!result.success || !result.updatedCase || !result.auditLog) {
+      throw new Error(result.error || 'Failed to send case to rework.');
+    }
+
+    const nowStr = new Date().toISOString();
+    const updatedCase: SavCase = {
+      ...result.updatedCase,
+      qcReworkReason: reason,
+      qcStatus: 'in_progress',
+      updatedAt: nowStr,
+    };
+
+    this.addCase(updatedCase);
+    this.addLog(result.auditLog);
+
+    const log = createAuditLog(
+      caseId,
+      actor.id,
+      actor.role,
+      'qc_send_rework',
+      caseObj.status,
+      'quality_rework',
+      `Dossier envoyé en reprise atelier par ${actor.id}. Motif: ${reason}`
+    );
+    this.addLog(log);
   },
 };

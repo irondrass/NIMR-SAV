@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { savCaseStore } from './sav-case-store';
-import { SavCase, WorkshopTask } from '../domain/sav-case';
+import { SavCase, WorkshopTask, QcChecklistItem } from '../domain/sav-case';
 import { AuditLogEntry } from '../domain/audit-log';
 import { Role } from '../types';
 import { CaseStatus } from '../domain/case-status';
@@ -41,5 +41,17 @@ export function useSavCases() {
       savCaseStore.updateWorkshopTaskStatus(caseId, taskId, nextStatus, actor),
     completeTechnicianWork: (caseId: string, actor: { id: string; role: Role }) =>
       savCaseStore.completeTechnicianWork(caseId, actor),
+    getQualityCases: () =>
+      savCaseStore.getQualityCases(),
+    startQualityCheck: (caseId: string, actor: { id: string; role: Role }) =>
+      savCaseStore.startQualityCheck(caseId, actor),
+    updateQualityChecklist: (caseId: string, checklist: QcChecklistItem[], actor: { id: string; role: Role }) =>
+      savCaseStore.updateQualityChecklist(caseId, checklist, actor),
+    approveQualityCheck: (caseId: string, actor: { id: string; role: Role }) =>
+      savCaseStore.approveQualityCheck(caseId, actor),
+    rejectQualityCheck: (caseId: string, reason: string, actor: { id: string; role: Role }) =>
+      savCaseStore.rejectQualityCheck(caseId, reason, actor),
+    sendQualityCaseToRework: (caseId: string, reason: string, actor: { id: string; role: Role }) =>
+      savCaseStore.sendQualityCaseToRework(caseId, reason, actor),
   };
 }

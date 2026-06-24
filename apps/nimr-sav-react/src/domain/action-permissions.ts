@@ -23,7 +23,11 @@ export type Action =
   | 'start_task'
   | 'complete_task'
   | 'update_task_status'
-  | 'complete_work';
+  | 'complete_work'
+  | 'view_quality_cases'
+  | 'start_quality_check'
+  | 'send_to_rework'
+  | 'view_qc_history';
 
 /**
  * Checks if a specific role is allowed to perform a given action.
@@ -74,6 +78,10 @@ export function hasPermission(role: Role, action: Action): boolean {
     case 'validate_qc':
     case 'reject_qc':
     case 'request_rework':
+    case 'view_quality_cases':
+    case 'start_quality_check':
+    case 'send_to_rework':
+    case 'view_qc_history':
       return role === 'qualite';
 
     case 'deliver_case':

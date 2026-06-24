@@ -1,15 +1,27 @@
-import { SavCase } from './sav-case';
+import { SavCase, QcChecklistItem, QCChecklist } from './sav-case';
+
+/**
+ * Normalizes checklist into a flat array of items.
+ */
+export function normalizeQcChecklist(checklist: QcChecklistItem[] | QCChecklist | undefined): QcChecklistItem[] {
+  if (!checklist) return [];
+  if (Array.isArray(checklist)) return checklist;
+  return checklist.items || [];
+}
+
+/**
+ * Checks if all required QC checklist items are checked.
+ */
+export function areRequiredQcItemsChecked(checklist: QcChecklistItem[] | QCChecklist | undefined): boolean {
+  const items = normalizeQcChecklist(checklist);
+  return items.filter((item) => item.required).every((item) => item.checked);
+}
 
 /**
  * Checks if all required items in the QC checklist are checked.
  */
 export function isQCComplete(caseObj: SavCase): boolean {
-  if (!caseObj.qcChecklist || caseObj.qcChecklist.items.length === 0) {
-    return true; // No checklist or empty checklist means nothing required is unchecked
-  }
-  return caseObj.qcChecklist.items
-    .filter((item) => item.required)
-    .every((item) => item.checked);
+  return areRequiredQcItemsChecked(caseObj.qcChecklist);
 }
 
 /**

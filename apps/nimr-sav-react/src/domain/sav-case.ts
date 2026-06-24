@@ -1,11 +1,13 @@
 import { CaseStatus } from './case-status';
 
-export interface QCChecklistItem {
+export interface QcChecklistItem {
   id: string;
   label: string;
   checked: boolean;
   required: boolean;
 }
+
+export type QCChecklistItem = QcChecklistItem;
 
 export interface QCChecklist {
   items: QCChecklistItem[];
@@ -43,7 +45,12 @@ export interface SavCase {
   estimatedReadyDate?: string; // ISO DateTime
   deliveryDate?: string; // ISO DateTime
   closedDate?: string; // ISO DateTime
-  qcChecklist?: QCChecklist;
+  qcChecklist?: QcChecklistItem[] | QCChecklist;
+  qcStatus?: 'pending' | 'in_progress' | 'approved' | 'rejected';
+  qcRejectionReason?: string;
+  qcCheckedAt?: string; // ISO DateTime
+  qcCheckedBy?: string;
+  qcReworkReason?: string;
   directionNotes?: string;
   createdAt: string; // ISO DateTime
   updatedAt: string; // ISO DateTime

@@ -2,6 +2,7 @@ import { CaseStatus } from './case-status';
 import { SavCase } from './sav-case';
 import { AuditLogEntry, createAuditLog } from './audit-log';
 import { canDeliverCase } from './delivery-rules';
+import { isQCComplete } from './qc-rules';
 import { Role } from '../types';
 
 export interface TransitionResult {
@@ -136,6 +137,52 @@ export function transitionCase(
       if (hasUnfinishedTasks) {
         return { success: false, error: 'Cannot complete work: some workshop tasks are not completed.' };
       }
+    }
+  }
+
+  // - Quality Control (qualite/qc) authorized transitions restriction (run after standard and protection checks)
+  if (user.role === 'qualite' && !isExceptionalAdminAction) {
+    const isAuthorized = (
+      (caseObj.status === 'work_completed' && targetStatus === 'quality_pending') ||
+      (caseObj.status === 'quality_pending' && targetStatus === 'quality_approved') ||
+      (caseObj.status === 'quality_pending' && targetStatus === 'quality_rejected') ||
+      (caseObj.status === 'quality_rejected' && targetStatus === 'quality_rework')
+    );
+    if (!isAuthorized) {
+      return { success: false, error: `Quality Control role is not authorized to transition from ${caseObj.status} to ${targetStatus}.` };
+    }
+
+    if (targetStatus === 'quality_approved') {
+      if (!isQCComplete(caseObj)) {
+        return { success: false, error: 'Cannot approve Quality Control: not all required checklist items are checked.' };
+      }
+    }
+
+    if (targetStatus === 'quality_rejected') {
+      const reason = caseObj.qcRejectionReason;
+      if (!reason || reason.trim() === '') {
+        return { success: false, error: 'Rejection reason is required.' };
+      }
+    }
+
+    if (targetStatus === 'quality_rework') {
+      const reason = caseObj.qcReworkReason;
+      if (!reason || reason.trim() === '') {
+        return { success: false, error: 'Rework reason is required.' };
+      }
+    }
+  }
+
+  // - Restrict who can transition to QC statuses
+  if (['quality_pending', 'quality_approved', 'quality_rejected'].includes(targetStatus) && !isExceptionalAdminAction) {
+    if (user.role !== 'qualite') {
+      return { success: false, error: `Only Quality Control role is authorized to transition to ${targetStatus}.` };
+    }
+  }
+
+  if (targetStatus === 'quality_rework' && !isExceptionalAdminAction) {
+    if (user.role !== 'qualite' && user.role !== 'chef-atelier') {
+      return { success: false, error: `Only Quality Control or Chef Atelier roles are authorized to transition to ${targetStatus}.` };
     }
   }
 

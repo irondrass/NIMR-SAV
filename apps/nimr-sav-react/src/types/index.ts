@@ -14,7 +14,8 @@ export type Role =
   | 'qualite'
   | 'directeur-sav'
   | 'admin'
-  | 'lecture-seule';
+  | 'lecture-seule'
+  | 'livraison';
 
 export const ALL_ROLES: readonly Role[] = [
   'reception',
@@ -24,6 +25,7 @@ export const ALL_ROLES: readonly Role[] = [
   'directeur-sav',
   'admin',
   'lecture-seule',
+  'livraison',
 ] as const;
 
 /** Default view route for each role */
@@ -35,6 +37,7 @@ export const ROLE_DEFAULT_VIEW: Record<Role, string> = {
   'directeur-sav': '/pilotage',
   admin: '/admin',
   'lecture-seule': '/lecture',
+  livraison: '/livraison',
 } as const;
 
 /** Tabs visible per role */
@@ -46,6 +49,7 @@ export const ROLE_ALLOWED_TABS: Record<Role, readonly string[]> = {
   'directeur-sav': ['pilotage', 'dossiers', 'today', 'planning', 'controle-qualite', 'suivi-atelier'],
   admin: ['pilotage', 'dossiers', 'planning', 'controle-qualite', 'suivi-atelier', 'admin', 'utilisateurs'],
   'lecture-seule': ['lecture'],
+  livraison: ['livraison', 'dossiers'],
 } as const;
 
 // ─── Auth / User ──────────────────────────────────────────────────────────────

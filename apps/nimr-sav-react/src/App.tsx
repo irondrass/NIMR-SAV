@@ -40,6 +40,8 @@ function renderViewForRole(user: User, activeTab: string): React.ReactNode {
       return <AdminView user={user} />;
     case 'lecture':
       return <ReadOnlyView user={user} />;
+    case 'livraison':
+      return <DashboardView user={user} />;
     default:
       return <DashboardView user={user} />;
   }
@@ -57,6 +59,7 @@ const TAB_LABELS: Record<string, string> = {
   admin: 'Admin',
   utilisateurs: 'Utilisateurs',
   lecture: 'Consultation',
+  livraison: 'Livraison',
 };
 
 export const App: React.FC = () => {

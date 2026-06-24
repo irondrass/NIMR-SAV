@@ -2,7 +2,7 @@
  * NIMR SAV v24 — Foundation Test Suite
  * apps/nimr-sav-react/tests/foundation.test.ts
  *
- * Verifies all constraints defined for v24.0.0-alpha.1:
+ * Verifies all constraints defined for v24.0.0-alpha.2:
  * - Version constant
  * - All roles exist with default views
  * - Navigation filtered by role
@@ -34,8 +34,8 @@ import { resolve } from 'path';
 // ─── 1. Version ───────────────────────────────────────────────────────────────
 
 describe('Version constants', () => {
-  it('APP_VERSION is exactly "v24.0.0-alpha.1"', () => {
-    expect(APP_VERSION).toBe('v24.0.0-alpha.1');
+  it('APP_VERSION is exactly "v24.0.0-alpha.2"', () => {
+    expect(APP_VERSION).toBe('v24.0.0-alpha.2');
   });
 
   it('RESERVED_CACHE_NAME is "nimr-sav-react-v24-alpha"', () => {
@@ -71,10 +71,11 @@ describe('Roles definition', () => {
     'directeur-sav',
     'admin',
     'lecture-seule',
+    'livraison',
   ];
 
-  it('ALL_ROLES contains all 7 required roles', () => {
-    expect(ALL_ROLES).toHaveLength(7);
+  it('ALL_ROLES contains all 8 required roles', () => {
+    expect(ALL_ROLES).toHaveLength(8);
     for (const role of REQUIRED_ROLES) {
       expect(ALL_ROLES).toContain(role);
     }
@@ -151,6 +152,11 @@ describe('Navigation filtering per role', () => {
   it('lecture-seule role has only lecture tab', () => {
     const tabs = ROLE_ALLOWED_TABS['lecture-seule'];
     expect(tabs).toEqual(['lecture']);
+  });
+
+  it('livraison role has access to livraison and dossiers tabs', () => {
+    const tabs = ROLE_ALLOWED_TABS['livraison'];
+    expect(tabs).toEqual(['livraison', 'dossiers']);
   });
 
   it('default view for each role starts with "/"', () => {

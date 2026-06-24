@@ -12,6 +12,7 @@ const ROLE_LABELS: Record<Role, string> = {
   'directeur-sav': 'Directeur SAV',
   admin: 'Admin Technique',
   'lecture-seule': 'Lecture Seule',
+  livraison: 'Livraison',
 };
 
 interface LoginScreenProps {

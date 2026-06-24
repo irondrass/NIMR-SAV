@@ -67,8 +67,7 @@ export function hasPermission(role: Role, action: Action): boolean {
       return role === 'qualite';
 
     case 'deliver_case':
-      // Both reception and livraison (as well as chef-atelier/admin) can perform delivery
-      return role === 'reception' || role === 'livraison' || role === 'chef-atelier';
+      return role === 'livraison' || role === 'chef-atelier';
 
     case 'close_case':
       // Réception and Livraison cannot close cases

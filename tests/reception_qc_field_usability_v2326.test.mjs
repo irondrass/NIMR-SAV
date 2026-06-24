@@ -333,4 +333,3 @@ assert.match(uiCasesSource, /qc-preset-reason/, "Motifs QC predefinis doivent et
 assert.match(uiReceptionSource, /applyReceptionQuickMotif/, "Raccourcis reception doivent etre relies au formulaire");
 
 console.log("Tests v23.2.6 reception and QC field usability polish OK");
-

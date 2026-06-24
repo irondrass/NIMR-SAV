@@ -76,7 +76,7 @@ export function transitionCase(
   // 4. Late cancellation restrictions (repair and beyond)
   const isLateCancel = targetStatus === 'cancelled' &&
     !['draft', 'received', 'diagnosis', 'waiting_parts'].includes(caseObj.status);
-  
+
   if (isLateCancel) {
     if (user.role === 'admin') {
       isExceptionalAdminAction = true;

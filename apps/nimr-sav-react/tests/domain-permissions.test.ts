@@ -64,7 +64,7 @@ describe('SAV Role Permissions & Protections', () => {
   it('restricts direction notes visibility strictly to SAV Director and Admin', () => {
     expect(canViewDirectionNotes('directeur-sav')).toBe(true);
     expect(canViewDirectionNotes('admin')).toBe(true);
-    
+
     expect(canViewDirectionNotes('reception')).toBe(false);
     expect(canViewDirectionNotes('technicien')).toBe(false);
     expect(canViewDirectionNotes('chef-atelier')).toBe(false);

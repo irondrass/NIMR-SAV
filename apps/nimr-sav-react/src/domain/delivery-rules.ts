@@ -11,7 +11,7 @@ export function isQCValidated(caseObj: SavCase): boolean {
   const allRequiredChecked = caseObj.qcChecklist.items
     .filter((item) => item.required)
     .every((item) => item.checked);
-  
+
   return hasValidator && allRequiredChecked;
 }
 

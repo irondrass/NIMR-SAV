@@ -53,5 +53,11 @@ export function useSavCases() {
       savCaseStore.rejectQualityCheck(caseId, reason, actor),
     sendQualityCaseToRework: (caseId: string, reason: string, actor: { id: string; role: Role }) =>
       savCaseStore.sendQualityCaseToRework(caseId, reason, actor),
+    getDeliveryCases: () =>
+      savCaseStore.getDeliveryCases(),
+    prepareDelivery: (caseId: string, actor: { id: string; role: Role }) =>
+      savCaseStore.prepareDelivery(caseId, actor),
+    deliverCase: (caseId: string, deliveryPayload: { recipientName: string; proofReference: string; notes?: string }, actor: { id: string; role: Role }) =>
+      savCaseStore.deliverCase(caseId, deliveryPayload, actor),
   };
 }

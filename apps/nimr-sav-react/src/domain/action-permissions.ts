@@ -27,7 +27,11 @@ export type Action =
   | 'view_quality_cases'
   | 'start_quality_check'
   | 'send_to_rework'
-  | 'view_qc_history';
+  | 'view_qc_history'
+  | 'view_delivery_cases'
+  | 'prepare_delivery'
+  | 'add_delivery_proof'
+  | 'view_delivery_history';
 
 /**
  * Checks if a specific role is allowed to perform a given action.
@@ -84,8 +88,12 @@ export function hasPermission(role: Role, action: Action): boolean {
     case 'view_qc_history':
       return role === 'qualite';
 
+    case 'view_delivery_cases':
+    case 'prepare_delivery':
     case 'deliver_case':
-      return role === 'livraison';
+    case 'add_delivery_proof':
+    case 'view_delivery_history':
+      return role === 'livraison' || role === 'directeur-sav';
 
     case 'close_case':
       // Only directeur-sav (and admin) can close cases

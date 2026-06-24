@@ -10,6 +10,8 @@ export interface AuditLogEntry {
   toStatus?: CaseStatus;
   timestamp: string; // ISO DateTime
   details?: string;
+  recipientName?: string;
+  proofReference?: string;
 }
 
 export function createAuditLog(
@@ -19,7 +21,9 @@ export function createAuditLog(
   action: string,
   fromStatus?: CaseStatus,
   toStatus?: CaseStatus,
-  details?: string
+  details?: string,
+  recipientName?: string,
+  proofReference?: string
 ): AuditLogEntry {
   return {
     id: `log-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -31,5 +35,7 @@ export function createAuditLog(
     toStatus,
     timestamp: new Date().toISOString(),
     details,
+    recipientName,
+    proofReference,
   };
 }

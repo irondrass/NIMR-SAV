@@ -1,4 +1,4 @@
-# NIMR SAV React — v24.0.0-alpha.6
+# NIMR SAV React — v24.0.0-alpha.7
 
 Application React + TypeScript pour NIMR Carrosserie SAV.
 
@@ -57,6 +57,6 @@ tests/
 
 ## Version
 
-`v24.0.0-alpha.6` — Fondation React TypeScript
+`v24.0.0-alpha.7` — Fondation React TypeScript
 Ne pas démarrer v23.1D.
 Ne pas pousser sans validation complète.

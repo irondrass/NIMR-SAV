@@ -54,7 +54,7 @@ import { hasPermission, canViewDirectionNotes } from '../src/domain/action-permi
 import { savCaseStore } from '../src/state/sav-case-store';
 import { SavCase } from '../src/domain/sav-case';
 
-describe('SAV Reception Workflow Integration (v24.0.0-alpha.6)', () => {
+describe('SAV Reception Workflow Integration (v24.0.0-alpha.7)', () => {
 
   // Clean localStorage before and after each test
   beforeEach(() => {
@@ -68,12 +68,12 @@ describe('SAV Reception Workflow Integration (v24.0.0-alpha.6)', () => {
   });
 
   // 1. Version Check
-  it('has package.json and constants aligned to v24.0.0-alpha.6', () => {
-    expect(APP_VERSION).toBe('v24.0.0-alpha.6');
+  it('has package.json and constants aligned to v24.0.0-alpha.7', () => {
+    expect(APP_VERSION).toBe('v24.0.0-alpha.7');
 
     const pkgPath = resolve(__dirname, '../package.json');
     const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
-    expect(pkg.version).toBe('24.0.0-alpha.6');
+    expect(pkg.version).toBe('24.0.0-alpha.7');
   });
 
   // 2. Draft Creation, Transitions, and Audit Logging

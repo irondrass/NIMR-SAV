@@ -10,6 +10,7 @@ import { PlanningView } from '@/features/chef-atelier/PlanningView';
 import { DashboardView } from '@/features/directeur/DashboardView';
 import { AdminView } from '@/features/admin/AdminView';
 import { ReadOnlyView } from '@/features/lecture-seule/ReadOnlyView';
+import { DeliveryView } from '@/features/delivery/DeliveryView';
 import { Button } from '@/components/ui/Button';
 
 /**
@@ -41,7 +42,7 @@ function renderViewForRole(user: User, activeTab: string): React.ReactNode {
     case 'lecture':
       return <ReadOnlyView user={user} />;
     case 'livraison':
-      return <DashboardView user={user} />;
+      return <DeliveryView user={user} />;
     default:
       return <DashboardView user={user} />;
   }

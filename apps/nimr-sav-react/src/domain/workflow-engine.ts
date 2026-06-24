@@ -1,7 +1,7 @@
 import { CaseStatus } from './case-status';
 import { SavCase } from './sav-case';
 import { AuditLogEntry, createAuditLog } from './audit-log';
-import { canDeliverCase } from './delivery-rules';
+import { canDeliverCase, isQCValidated } from './delivery-rules';
 import { isQCComplete } from './qc-rules';
 import { Role } from '../types';
 
@@ -186,8 +186,38 @@ export function transitionCase(
     }
   }
 
+  // - Restrict who can transition to delivery statuses
+  if (['ready_delivery', 'delivered'].includes(targetStatus) && !isExceptionalAdminAction) {
+    if (user.role !== 'livraison' && user.role !== 'directeur-sav') {
+      return { success: false, error: `Only Livraison or Directeur SAV roles are authorized to transition to ${targetStatus}.` };
+    }
+  }
+
+  // - Livraison authorized transitions restriction
+  if (user.role === 'livraison' && !isExceptionalAdminAction) {
+    const isAuthorized = (
+      (caseObj.status === 'quality_approved' && targetStatus === 'ready_delivery') ||
+      (caseObj.status === 'ready_delivery' && targetStatus === 'delivered')
+    );
+    if (!isAuthorized) {
+      return { success: false, error: `Livraison role is not authorized to transition from ${caseObj.status} to ${targetStatus}.` };
+    }
+  }
+
   // 6. Delivery checks
+  if (targetStatus === 'ready_delivery' && !isExceptionalAdminAction) {
+    if (!isQCValidated(caseObj)) {
+      return { success: false, error: 'Cannot prepare delivery: QC is not approved/validated.' };
+    }
+  }
+
   if (targetStatus === 'delivered' && !isExceptionalAdminAction) {
+    if (!caseObj.deliveryRecipientName || caseObj.deliveryRecipientName.trim() === '') {
+      return { success: false, error: 'Cannot deliver case: Recipient name is required.' };
+    }
+    if (!caseObj.deliveryProofReference || caseObj.deliveryProofReference.trim() === '') {
+      return { success: false, error: 'Cannot deliver case: Proof reference is required.' };
+    }
     if (!canDeliverCase(caseObj)) {
       return { success: false, error: 'Cannot deliver case: QC checklist must be validated and status must be ready_delivery.' };
     }

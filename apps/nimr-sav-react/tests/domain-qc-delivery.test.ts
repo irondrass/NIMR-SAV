@@ -61,6 +61,8 @@ describe('SAV QC & Delivery Rules', () => {
         validatedBy: 'qualite-1',
         validatedAt: '2026-06-24T13:00:00Z',
       },
+      deliveryRecipientName: 'Client Fictif',
+      deliveryProofReference: 'PREUVE-001',
     };
     expect(canDeliverCase(caseValidatedQC)).toBe(true);
 

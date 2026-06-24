@@ -44,6 +44,13 @@ export interface SavCase {
   receptionDate: string; // ISO DateTime
   estimatedReadyDate?: string; // ISO DateTime
   deliveryDate?: string; // ISO DateTime
+  deliveryPreparedAt?: string; // ISO DateTime
+  deliveryPreparedBy?: string;
+  deliveredAt?: string; // ISO DateTime
+  deliveredBy?: string;
+  deliveryRecipientName?: string;
+  deliveryProofReference?: string;
+  deliveryNotes?: string;
   closedDate?: string; // ISO DateTime
   qcChecklist?: QcChecklistItem[] | QCChecklist;
   qcStatus?: 'pending' | 'in_progress' | 'approved' | 'rejected';

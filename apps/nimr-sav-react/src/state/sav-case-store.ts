@@ -706,4 +706,160 @@ export const savCaseStore = {
     );
     this.addLog(log);
   },
+
+  getDeliveryCases(): SavCase[] {
+    return cases.filter(
+      (c) =>
+        c.status === 'quality_approved' ||
+        c.status === 'ready_delivery' ||
+        c.status === 'delivered'
+    );
+  },
+
+  prepareDelivery(caseId: string, actor: { id: string; role: Role }) {
+    const caseObj = cases.find((c) => c.id === caseId);
+    if (!caseObj) throw new Error(`Case ${caseId} not found.`);
+
+    if (actor.role !== 'livraison') {
+      throw new Error('Only Livraison role can perform this action.');
+    }
+
+    if (caseObj.status === 'closed' || caseObj.status === 'cancelled') {
+      throw new Error(`Cases in ${caseObj.status} status cannot be modified.`);
+    }
+
+    if (!hasPermission(actor.role, 'prepare_delivery')) {
+      throw new Error(`Role ${actor.role} is not permitted to prepare delivery.`);
+    }
+
+    const result = transitionCase(caseObj, 'ready_delivery', actor);
+    if (!result.success || !result.updatedCase || !result.auditLog) {
+      throw new Error(result.error || 'Failed to prepare delivery.');
+    }
+
+    const nowStr = new Date().toISOString();
+    const updatedCase: SavCase = {
+      ...result.updatedCase,
+      deliveryPreparedAt: nowStr,
+      deliveryPreparedBy: actor.id,
+      updatedAt: nowStr,
+    };
+
+    this.addCase(updatedCase);
+    this.addLog(result.auditLog);
+
+    const transitionStatusLog = createAuditLog(
+      caseId,
+      actor.id,
+      actor.role,
+      'transition_status',
+      caseObj.status,
+      'ready_delivery',
+      `Statut mis à jour: ${caseObj.status} -> ready_delivery`
+    );
+    this.addLog(transitionStatusLog);
+
+    const log = createAuditLog(
+      caseId,
+      actor.id,
+      actor.role,
+      'delivery_prepare',
+      caseObj.status,
+      'ready_delivery',
+      `Préparation de la livraison par ${actor.id}.`
+    );
+    this.addLog(log);
+  },
+
+  deliverCase(
+    caseId: string,
+    deliveryPayload: { recipientName: string; proofReference: string; notes?: string },
+    actor: { id: string; role: Role }
+  ) {
+    const caseObj = cases.find((c) => c.id === caseId);
+    if (!caseObj) throw new Error(`Case ${caseId} not found.`);
+
+    if (actor.role !== 'livraison') {
+      throw new Error('Only Livraison role can perform this action.');
+    }
+
+    if (caseObj.status === 'closed' || caseObj.status === 'cancelled') {
+      throw new Error(`Cases in ${caseObj.status} status cannot be modified.`);
+    }
+
+    if (!hasPermission(actor.role, 'deliver_case')) {
+      throw new Error(`Role ${actor.role} is not permitted to deliver case.`);
+    }
+
+    const { recipientName, proofReference, notes } = deliveryPayload;
+    if (!recipientName || recipientName.trim() === '') {
+      throw new Error('Recipient name is required.');
+    }
+    if (!proofReference || proofReference.trim() === '') {
+      throw new Error('Proof reference is required.');
+    }
+
+    const caseWithPayload: SavCase = {
+      ...caseObj,
+      deliveryRecipientName: recipientName,
+      deliveryProofReference: proofReference,
+      deliveryNotes: notes,
+    };
+
+    const result = transitionCase(caseWithPayload, 'delivered', actor);
+    if (!result.success || !result.updatedCase || !result.auditLog) {
+      throw new Error(result.error || 'Failed to deliver case.');
+    }
+
+    const nowStr = new Date().toISOString();
+    const updatedCase: SavCase = {
+      ...result.updatedCase,
+      deliveredAt: nowStr,
+      deliveredBy: actor.id,
+      deliveryDate: nowStr,
+      updatedAt: nowStr,
+    };
+
+    this.addCase(updatedCase);
+    this.addLog(result.auditLog);
+
+    const transitionStatusLog = createAuditLog(
+      caseId,
+      actor.id,
+      actor.role,
+      'transition_status',
+      caseObj.status,
+      'delivered',
+      `Statut mis à jour: ${caseObj.status} -> delivered`,
+      recipientName,
+      proofReference
+    );
+    this.addLog(transitionStatusLog);
+
+    const proofLog = createAuditLog(
+      caseId,
+      actor.id,
+      actor.role,
+      'delivery_proof_added',
+      caseObj.status,
+      caseObj.status,
+      `Preuve de livraison ajoutée par ${actor.id}. Réf: ${proofReference}, Récipiendaire: ${recipientName}.`,
+      recipientName,
+      proofReference
+    );
+    this.addLog(proofLog);
+
+    const completeLog = createAuditLog(
+      caseId,
+      actor.id,
+      actor.role,
+      'delivery_complete',
+      caseObj.status,
+      'delivered',
+      `Livraison effectuée avec succès par ${actor.id}.`,
+      recipientName,
+      proofReference
+    );
+    this.addLog(completeLog);
+  },
 };

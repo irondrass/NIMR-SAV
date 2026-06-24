@@ -57,6 +57,10 @@ export function transitionCase(
   if (targetStatus === 'closed' && user.role === 'reception') {
     return { success: false, error: 'Reception role cannot close cases.' };
   }
+  // - Chef Atelier cannot close cases
+  if (targetStatus === 'closed' && user.role === 'chef-atelier') {
+    return { success: false, error: 'Chef Atelier role cannot close cases.' };
+  }
   // - Livraison cannot close cases
   if (targetStatus === 'closed' && user.role === 'livraison') {
     return { success: false, error: 'Livraison role cannot close cases.' };
@@ -90,6 +94,21 @@ export function transitionCase(
     const allowed = ALLOWED_TRANSITIONS[caseObj.status] || [];
     if (!allowed.includes(targetStatus)) {
       return { success: false, error: `Invalid transition from ${caseObj.status} to ${targetStatus}.` };
+    }
+  }
+
+  // - Chef Atelier authorized transitions restriction (run after standard and protection checks)
+  if (user.role === 'chef-atelier' && !isExceptionalAdminAction) {
+    const isAuthorized = (
+      (caseObj.status === 'received' && targetStatus === 'diagnosis') ||
+      (caseObj.status === 'diagnosis' && targetStatus === 'waiting_parts') ||
+      (caseObj.status === 'diagnosis' && targetStatus === 'repair') ||
+      (caseObj.status === 'waiting_parts' && targetStatus === 'repair') ||
+      (caseObj.status === 'repair' && targetStatus === 'work_completed') ||
+      (caseObj.status === 'quality_rejected' && targetStatus === 'quality_rework')
+    );
+    if (!isAuthorized) {
+      return { success: false, error: `Chef Atelier role is not authorized to transition from ${caseObj.status} to ${targetStatus}.` };
     }
   }
 

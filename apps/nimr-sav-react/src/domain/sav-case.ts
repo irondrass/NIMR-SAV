@@ -14,6 +14,16 @@ export interface QCChecklist {
   rejectionReason?: string;
 }
 
+export type WorkshopTaskStatus = 'pending' | 'in_progress' | 'done';
+
+export interface WorkshopTask {
+  id: string;
+  label: string;
+  status: WorkshopTaskStatus;
+  estimatedDurationMinutes?: number;
+  createdAt: string; // ISO DateTime
+}
+
 export interface SavCase {
   id: string;
   immatriculation: string;
@@ -22,6 +32,13 @@ export interface SavCase {
   telephone: string;
   status: CaseStatus;
   assignedTechnicianId?: string;
+  assignedTechnicianName?: string;
+  workshopPriority?: 'basse' | 'normale' | 'haute';
+  workshopBay?: string;
+  estimatedDurationMinutes?: number;
+  workshopTasks?: WorkshopTask[];
+  plannedStartAt?: string; // ISO DateTime
+  plannedEndAt?: string; // ISO DateTime
   receptionDate: string; // ISO DateTime
   estimatedReadyDate?: string; // ISO DateTime
   deliveryDate?: string; // ISO DateTime

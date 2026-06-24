@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
 import { savCaseStore } from './sav-case-store';
-import { SavCase } from '../domain/sav-case';
+import { SavCase, WorkshopTask } from '../domain/sav-case';
 import { AuditLogEntry } from '../domain/audit-log';
+import { Role } from '../types';
+import { CaseStatus } from '../domain/case-status';
 
 export function useSavCases() {
   const [cases, setCases] = useState<SavCase[]>(savCaseStore.getCases());
@@ -23,5 +25,13 @@ export function useSavCases() {
     addLog: (log: AuditLogEntry) => savCaseStore.addLog(log),
     resetStore: () => savCaseStore.reset(),
     clearStore: () => savCaseStore.clearAll(),
+    assignTechnician: (caseId: string, technicianId: string, actor: { id: string; role: Role }) =>
+      savCaseStore.assignTechnician(caseId, technicianId, actor),
+    setWorkshopPriority: (caseId: string, priority: 'basse' | 'normale' | 'haute', actor: { id: string; role: Role }) =>
+      savCaseStore.setWorkshopPriority(caseId, priority, actor),
+    planWorkshopTask: (caseId: string, payload: { bay?: string; duration?: number; tasks?: WorkshopTask[]; startAt?: string; endAt?: string }, actor: { id: string; role: Role }) =>
+      savCaseStore.planWorkshopTask(caseId, payload, actor),
+    transitionWorkshopCase: (caseId: string, nextStatus: CaseStatus, actor: { id: string; role: Role }) =>
+      savCaseStore.transitionWorkshopCase(caseId, nextStatus, actor),
   };
 }

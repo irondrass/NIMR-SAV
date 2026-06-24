@@ -67,11 +67,11 @@ export function hasPermission(role: Role, action: Action): boolean {
       return role === 'qualite';
 
     case 'deliver_case':
-      return role === 'livraison' || role === 'chef-atelier';
+      return role === 'livraison';
 
     case 'close_case':
-      // Réception and Livraison cannot close cases
-      return role === 'chef-atelier' || role === 'directeur-sav';
+      // Only directeur-sav (and admin) can close cases
+      return role === 'directeur-sav';
 
     case 'view_direction_notes':
       return role === 'directeur-sav';

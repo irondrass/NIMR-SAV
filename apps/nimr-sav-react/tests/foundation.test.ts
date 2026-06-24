@@ -2,7 +2,7 @@
  * NIMR SAV v24 — Foundation Test Suite
  * apps/nimr-sav-react/tests/foundation.test.ts
  *
- * Verifies all constraints defined for v24.0.0-alpha.3:
+ * Verifies all constraints defined for v24.0.0-alpha.4:
  * - Version constant
  * - All roles exist with default views
  * - Navigation filtered by role
@@ -34,8 +34,8 @@ import { resolve } from 'path';
 // ─── 1. Version ───────────────────────────────────────────────────────────────
 
 describe('Version constants', () => {
-  it('APP_VERSION is exactly "v24.0.0-alpha.3"', () => {
-    expect(APP_VERSION).toBe('v24.0.0-alpha.3');
+  it('APP_VERSION is exactly "v24.0.0-alpha.4"', () => {
+    expect(APP_VERSION).toBe('v24.0.0-alpha.4');
   });
 
   it('RESERVED_CACHE_NAME is "nimr-sav-react-v24-alpha"', () => {

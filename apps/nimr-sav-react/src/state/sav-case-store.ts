@@ -1,7 +1,12 @@
-import { SavCase } from '../domain/sav-case';
-import { AuditLogEntry } from '../domain/audit-log';
+import { SavCase, WorkshopTask } from '../domain/sav-case';
+import { AuditLogEntry, createAuditLog } from '../domain/audit-log';
 import { DEMO_CASES } from '../domain/case-fixtures';
 import { LS_PREFIX } from '../constants/version';
+import { Role } from '../types';
+import { CaseStatus } from '../domain/case-status';
+import { hasPermission } from '../domain/action-permissions';
+import { transitionCase } from '../domain/workflow-engine';
+import { DEMO_TECHNICIANS } from '../constants/demo-technicians';
 
 const CASES_KEY = `${LS_PREFIX}cases`;
 const LOGS_KEY = `${LS_PREFIX}audit_logs`;
@@ -122,5 +127,136 @@ export const savCaseStore = {
       console.error('[NIMR v24] Failed to clear localStorage:', e);
     }
     notify();
+  },
+
+  assignTechnician(caseId: string, technicianId: string, actor: { id: string; role: Role }) {
+    const caseObj = cases.find((c) => c.id === caseId);
+    if (!caseObj) throw new Error(`Case ${caseId} not found.`);
+
+    if ((caseObj.status === 'closed' || caseObj.status === 'cancelled') && actor.role !== 'admin') {
+      throw new Error(`Cases in ${caseObj.status} status cannot be modified except by Admin.`);
+    }
+
+    if (!hasPermission(actor.role, 'assign_technician')) {
+      throw new Error(`Role ${actor.role} is not permitted to assign technicians.`);
+    }
+
+    const tech = DEMO_TECHNICIANS.find((t) => t.id === technicianId);
+    if (!tech) throw new Error(`Technician ${technicianId} not found.`);
+
+    const updatedCase: SavCase = {
+      ...caseObj,
+      assignedTechnicianId: tech.id,
+      assignedTechnicianName: tech.name,
+      updatedAt: new Date().toISOString(),
+    };
+
+    this.addCase(updatedCase);
+
+    const log = createAuditLog(
+      caseId,
+      actor.id,
+      actor.role,
+      'assign_technician',
+      caseObj.status,
+      caseObj.status,
+      `Technicien ${tech.name} (${tech.id}) affecté au dossier.`
+    );
+    this.addLog(log);
+  },
+
+  setWorkshopPriority(caseId: string, priority: 'basse' | 'normale' | 'haute', actor: { id: string; role: Role }) {
+    const caseObj = cases.find((c) => c.id === caseId);
+    if (!caseObj) throw new Error(`Case ${caseId} not found.`);
+
+    if ((caseObj.status === 'closed' || caseObj.status === 'cancelled') && actor.role !== 'admin') {
+      throw new Error(`Cases in ${caseObj.status} status cannot be modified except by Admin.`);
+    }
+
+    if (!hasPermission(actor.role, 'change_workshop_status')) {
+      throw new Error(`Role ${actor.role} is not permitted to change workshop priority.`);
+    }
+
+    const updatedCase: SavCase = {
+      ...caseObj,
+      workshopPriority: priority,
+      updatedAt: new Date().toISOString(),
+    };
+
+    this.addCase(updatedCase);
+
+    const log = createAuditLog(
+      caseId,
+      actor.id,
+      actor.role,
+      'set_workshop_priority',
+      caseObj.status,
+      caseObj.status,
+      `Priorité atelier définie à : ${priority}.`
+    );
+    this.addLog(log);
+  },
+
+  planWorkshopTask(
+    caseId: string,
+    payload: {
+      bay?: string;
+      duration?: number;
+      tasks?: WorkshopTask[];
+      startAt?: string;
+      endAt?: string;
+    },
+    actor: { id: string; role: Role }
+  ) {
+    const caseObj = cases.find((c) => c.id === caseId);
+    if (!caseObj) throw new Error(`Case ${caseId} not found.`);
+
+    if ((caseObj.status === 'closed' || caseObj.status === 'cancelled') && actor.role !== 'admin') {
+      throw new Error(`Cases in ${caseObj.status} status cannot be modified except by Admin.`);
+    }
+
+    if (!hasPermission(actor.role, 'schedule_case')) {
+      throw new Error(`Role ${actor.role} is not permitted to plan workshop tasks.`);
+    }
+
+    const updatedCase: SavCase = {
+      ...caseObj,
+      workshopBay: payload.bay !== undefined ? payload.bay : caseObj.workshopBay,
+      estimatedDurationMinutes: payload.duration !== undefined ? payload.duration : caseObj.estimatedDurationMinutes,
+      workshopTasks: payload.tasks !== undefined ? payload.tasks : caseObj.workshopTasks,
+      plannedStartAt: payload.startAt !== undefined ? payload.startAt : caseObj.plannedStartAt,
+      plannedEndAt: payload.endAt !== undefined ? payload.endAt : caseObj.plannedEndAt,
+      updatedAt: new Date().toISOString(),
+    };
+
+    this.addCase(updatedCase);
+
+    const log = createAuditLog(
+      caseId,
+      actor.id,
+      actor.role,
+      'plan_workshop_task',
+      caseObj.status,
+      caseObj.status,
+      `Planification atelier mise à jour. Baie: ${updatedCase.workshopBay}, Durée: ${updatedCase.estimatedDurationMinutes} min.`
+    );
+    this.addLog(log);
+  },
+
+  transitionWorkshopCase(caseId: string, nextStatus: CaseStatus, actor: { id: string; role: Role }) {
+    const caseObj = cases.find((c) => c.id === caseId);
+    if (!caseObj) throw new Error(`Case ${caseId} not found.`);
+
+    if ((caseObj.status === 'closed' || caseObj.status === 'cancelled') && actor.role !== 'admin') {
+      throw new Error(`Cases in ${caseObj.status} status cannot be modified except by Admin.`);
+    }
+
+    const result = transitionCase(caseObj, nextStatus, actor);
+    if (!result.success || !result.updatedCase || !result.auditLog) {
+      throw new Error(result.error || 'Failed to transition workshop case.');
+    }
+
+    this.addCase(result.updatedCase);
+    this.addLog(result.auditLog);
   },
 };

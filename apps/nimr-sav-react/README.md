@@ -57,6 +57,6 @@ tests/
 
 ## Version
 
-`v24.0.0-alpha.0` — Fondation React TypeScript  
-Ne pas démarrer v23.1D.  
+`v24.0.0-alpha.0` — Fondation React TypeScript
+Ne pas démarrer v23.1D.
 Ne pas pousser sans validation complète.

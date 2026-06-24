@@ -33,5 +33,13 @@ export function useSavCases() {
       savCaseStore.planWorkshopTask(caseId, payload, actor),
     transitionWorkshopCase: (caseId: string, nextStatus: CaseStatus, actor: { id: string; role: Role }) =>
       savCaseStore.transitionWorkshopCase(caseId, nextStatus, actor),
+    getCasesForTechnician: (technicianId: string) =>
+      savCaseStore.getCasesForTechnician(technicianId),
+    startTechnicianWork: (caseId: string, actor: { id: string; role: Role }) =>
+      savCaseStore.startTechnicianWork(caseId, actor),
+    updateWorkshopTaskStatus: (caseId: string, taskId: string, nextStatus: 'pending' | 'in_progress' | 'done', actor: { id: string; role: Role }) =>
+      savCaseStore.updateWorkshopTaskStatus(caseId, taskId, nextStatus, actor),
+    completeTechnicianWork: (caseId: string, actor: { id: string; role: Role }) =>
+      savCaseStore.completeTechnicianWork(caseId, actor),
   };
 }

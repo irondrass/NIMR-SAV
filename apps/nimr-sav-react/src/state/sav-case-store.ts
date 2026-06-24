@@ -259,4 +259,178 @@ export const savCaseStore = {
     this.addCase(result.updatedCase);
     this.addLog(result.auditLog);
   },
+
+  getCasesForTechnician(technicianId: string): SavCase[] {
+    return cases.filter((c) => c.assignedTechnicianId === technicianId);
+  },
+
+  startTechnicianWork(caseId: string, actor: { id: string; role: Role }) {
+    const caseObj = cases.find((c) => c.id === caseId);
+    if (!caseObj) throw new Error(`Case ${caseId} not found.`);
+
+    if (actor.role !== 'technicien') {
+      throw new Error('Only technicians can perform this action.');
+    }
+
+    if (caseObj.assignedTechnicianId !== actor.id) {
+      throw new Error('This dossier is not assigned to you.');
+    }
+
+    if (caseObj.status === 'closed' || caseObj.status === 'cancelled') {
+      throw new Error(`Cases in ${caseObj.status} status cannot be modified.`);
+    }
+
+    if (!hasPermission(actor.role, 'start_repair')) {
+      throw new Error('You do not have permission to start repair.');
+    }
+
+    if (caseObj.status === 'repair') {
+      const infoLog = createAuditLog(
+        caseId,
+        actor.id,
+        actor.role,
+        'technician_start_work',
+        'repair',
+        'repair',
+        `Intervention déjà en cours de réparation (déjà au statut repair).`
+      );
+      this.addLog(infoLog);
+      return;
+    }
+
+    const result = transitionCase(caseObj, 'repair', actor);
+    if (!result.success || !result.updatedCase || !result.auditLog) {
+      throw new Error(result.error || 'Failed to start technician work.');
+    }
+
+    this.addCase(result.updatedCase);
+    this.addLog(result.auditLog);
+
+    const startLog = createAuditLog(
+      caseId,
+      actor.id,
+      actor.role,
+      'technician_start_work',
+      caseObj.status,
+      'repair',
+      `Intervention démarrée par le technicien ${actor.id}.`
+    );
+    this.addLog(startLog);
+  },
+
+  updateWorkshopTaskStatus(
+    caseId: string,
+    taskId: string,
+    nextStatus: 'pending' | 'in_progress' | 'done',
+    actor: { id: string; role: Role }
+  ) {
+    const caseObj = cases.find((c) => c.id === caseId);
+    if (!caseObj) throw new Error(`Case ${caseId} not found.`);
+
+    if (actor.role !== 'technicien') {
+      throw new Error('Only technicians can perform this action.');
+    }
+
+    if (caseObj.assignedTechnicianId !== actor.id) {
+      throw new Error('This dossier is not assigned to you.');
+    }
+
+    if (caseObj.status === 'closed' || caseObj.status === 'cancelled') {
+      throw new Error(`Cases in ${caseObj.status} status cannot be modified.`);
+    }
+
+    if (!hasPermission(actor.role, 'update_task_status')) {
+      throw new Error('You do not have permission to update task status.');
+    }
+
+    const tasks = caseObj.workshopTasks || [];
+    const task = tasks.find((t) => t.id === taskId);
+    if (!task) throw new Error(`Task ${taskId} not found.`);
+
+    const currentStatus = task.status;
+    const isValidTransition =
+      (currentStatus === 'pending' && nextStatus === 'in_progress') ||
+      (currentStatus === 'in_progress' && nextStatus === 'done');
+
+    if (!isValidTransition) {
+      throw new Error(`Invalid task transition from ${currentStatus} to ${nextStatus}.`);
+    }
+
+    const updatedTasks = tasks.map((t) =>
+      t.id === taskId ? { ...t, status: nextStatus } : t
+    );
+
+    const updatedCase: SavCase = {
+      ...caseObj,
+      workshopTasks: updatedTasks,
+      updatedAt: new Date().toISOString(),
+    };
+
+    this.addCase(updatedCase);
+
+    const log = createAuditLog(
+      caseId,
+      actor.id,
+      actor.role,
+      'technician_update_task',
+      caseObj.status,
+      caseObj.status,
+      `Tâche "${task.label}" passée de ${currentStatus} à ${nextStatus}.`
+    );
+    this.addLog(log);
+  },
+
+  completeTechnicianWork(caseId: string, actor: { id: string; role: Role }) {
+    const caseObj = cases.find((c) => c.id === caseId);
+    if (!caseObj) throw new Error(`Case ${caseId} not found.`);
+
+    if (actor.role !== 'technicien') {
+      throw new Error('Only technicians can perform this action.');
+    }
+
+    if (caseObj.assignedTechnicianId !== actor.id) {
+      throw new Error('This dossier is not assigned to you.');
+    }
+
+    if (caseObj.status === 'closed' || caseObj.status === 'cancelled') {
+      throw new Error(`Cases in ${caseObj.status} status cannot be modified.`);
+    }
+
+    if (!hasPermission(actor.role, 'complete_work')) {
+      throw new Error('You do not have permission to complete work.');
+    }
+
+    if (caseObj.status !== 'repair') {
+      throw new Error(`Cannot complete work: current status must be repair, got ${caseObj.status}.`);
+    }
+
+    const tasks = caseObj.workshopTasks || [];
+    if (tasks.length === 0) {
+      throw new Error('Cannot complete work: no workshop tasks exist.');
+    }
+
+    const hasUnfinished = tasks.some((t) => t.status !== 'done');
+    if (hasUnfinished) {
+      throw new Error('Cannot complete work: some workshop tasks are not completed.');
+    }
+
+    const result = transitionCase(caseObj, 'work_completed', actor);
+    if (!result.success || !result.updatedCase || !result.auditLog) {
+      throw new Error(result.error || 'Failed to complete work.');
+    }
+
+    this.addCase(result.updatedCase);
+    this.addLog(result.auditLog);
+
+    const completeLog = createAuditLog(
+      caseId,
+      actor.id,
+      actor.role,
+      'technician_complete_work',
+      caseObj.status,
+      'work_completed',
+      `Intervention terminée par le technicien ${actor.id}.`
+    );
+    this.addLog(completeLog);
+  },
 };

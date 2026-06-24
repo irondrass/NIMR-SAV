@@ -18,7 +18,12 @@ export type Action =
   | 'close_case'
   | 'view_direction_notes'
   | 'edit_direction_notes'
-  | 'admin_action';
+  | 'admin_action'
+  | 'view_assigned_cases'
+  | 'start_task'
+  | 'complete_task'
+  | 'update_task_status'
+  | 'complete_work';
 
 /**
  * Checks if a specific role is allowed to perform a given action.
@@ -53,6 +58,11 @@ export function hasPermission(role: Role, action: Action): boolean {
 
     case 'start_repair':
     case 'complete_repair':
+    case 'view_assigned_cases':
+    case 'start_task':
+    case 'complete_task':
+    case 'update_task_status':
+    case 'complete_work':
       return role === 'technicien';
 
     case 'assign_technician':

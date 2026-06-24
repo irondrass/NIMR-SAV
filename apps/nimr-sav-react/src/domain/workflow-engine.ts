@@ -112,6 +112,33 @@ export function transitionCase(
     }
   }
 
+  // - Technicien authorized transitions restriction (run after standard and protection checks)
+  if (user.role === 'technicien' && !isExceptionalAdminAction) {
+    if (caseObj.assignedTechnicianId !== user.id) {
+      return { success: false, error: 'This dossier is not assigned to you.' };
+    }
+
+    const isAuthorized = (
+      (caseObj.status === 'diagnosis' && targetStatus === 'repair') ||
+      (caseObj.status === 'waiting_parts' && targetStatus === 'repair') ||
+      (caseObj.status === 'repair' && targetStatus === 'work_completed')
+    );
+    if (!isAuthorized) {
+      return { success: false, error: `Technician role is not authorized to transition from ${caseObj.status} to ${targetStatus}.` };
+    }
+
+    if (targetStatus === 'work_completed') {
+      const tasks = caseObj.workshopTasks || [];
+      if (tasks.length === 0) {
+        return { success: false, error: 'Cannot complete work: no workshop tasks exist.' };
+      }
+      const hasUnfinishedTasks = tasks.some(t => t.status !== 'done');
+      if (hasUnfinishedTasks) {
+        return { success: false, error: 'Cannot complete work: some workshop tasks are not completed.' };
+      }
+    }
+  }
+
   // 6. Delivery checks
   if (targetStatus === 'delivered' && !isExceptionalAdminAction) {
     if (!canDeliverCase(caseObj)) {

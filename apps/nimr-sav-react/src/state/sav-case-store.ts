@@ -874,7 +874,7 @@ export const savCaseStore = {
   },
 
   getDirectorCases() {
-    return cases;
+    return cases.map((c) => ({ ...c }));
   },
 
   getDirectorAlerts(now?: Date) {
@@ -894,11 +894,11 @@ export const savCaseStore = {
   },
 
   getReadOnlyCases() {
-    return cases;
+    return cases.map((c) => ({ ...c }));
   },
 
   getReadOnlyLogs() {
-    return logs;
+    return logs.map((l) => ({ ...l }));
   },
 
   getSystemInvariants() {

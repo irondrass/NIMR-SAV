@@ -104,4 +104,57 @@ describe('SAV Role Permissions & Protections', () => {
     expect(hasPermission('livraison', 'validate_qc')).toBe(false);
     expect(hasPermission('livraison', 'close_case')).toBe(false);
   });
+
+  it('enforces reception exclusions: cannot do chef-atelier / QC / livraison / admin actions', () => {
+    expect(hasPermission('reception', 'assign_technician')).toBe(false);
+    expect(hasPermission('reception', 'schedule_case')).toBe(false);
+    expect(hasPermission('reception', 'change_workshop_status')).toBe(false);
+    expect(hasPermission('reception', 'validate_qc')).toBe(false);
+    expect(hasPermission('reception', 'reject_qc')).toBe(false);
+    expect(hasPermission('reception', 'deliver_case')).toBe(false);
+    expect(hasPermission('reception', 'prepare_delivery')).toBe(false);
+    expect(hasPermission('reception', 'admin_action')).toBe(false);
+    expect(hasPermission('reception', 'view_admin_console')).toBe(false);
+  });
+
+  it('enforces chef-atelier exclusions: cannot do QC / livraison / admin actions', () => {
+    expect(hasPermission('chef-atelier', 'validate_qc')).toBe(false);
+    expect(hasPermission('chef-atelier', 'reject_qc')).toBe(false);
+    expect(hasPermission('chef-atelier', 'deliver_case')).toBe(false);
+    expect(hasPermission('chef-atelier', 'prepare_delivery')).toBe(false);
+    expect(hasPermission('chef-atelier', 'admin_action')).toBe(false);
+    expect(hasPermission('chef-atelier', 'view_admin_console')).toBe(false);
+  });
+
+  it('enforces technicien exclusions: cannot do affectation / QC / livrer / admin actions', () => {
+    expect(hasPermission('technicien', 'assign_technician')).toBe(false);
+    expect(hasPermission('technicien', 'validate_qc')).toBe(false);
+    expect(hasPermission('technicien', 'reject_qc')).toBe(false);
+    expect(hasPermission('technicien', 'deliver_case')).toBe(false);
+    expect(hasPermission('technicien', 'prepare_delivery')).toBe(false);
+    expect(hasPermission('technicien', 'admin_action')).toBe(false);
+    expect(hasPermission('technicien', 'view_admin_console')).toBe(false);
+  });
+
+  it('enforces qualite exclusions: cannot do receptionner / planifier / livrer / admin actions', () => {
+    expect(hasPermission('qualite', 'create_case')).toBe(false);
+    expect(hasPermission('qualite', 'receive_case')).toBe(false);
+    expect(hasPermission('qualite', 'assign_technician')).toBe(false);
+    expect(hasPermission('qualite', 'schedule_case')).toBe(false);
+    expect(hasPermission('qualite', 'deliver_case')).toBe(false);
+    expect(hasPermission('qualite', 'prepare_delivery')).toBe(false);
+    expect(hasPermission('qualite', 'admin_action')).toBe(false);
+    expect(hasPermission('qualite', 'view_admin_console')).toBe(false);
+  });
+
+  it('enforces livraison exclusions: cannot do receptionner / planifier / QC / admin actions', () => {
+    expect(hasPermission('livraison', 'create_case')).toBe(false);
+    expect(hasPermission('livraison', 'receive_case')).toBe(false);
+    expect(hasPermission('livraison', 'assign_technician')).toBe(false);
+    expect(hasPermission('livraison', 'schedule_case')).toBe(false);
+    expect(hasPermission('livraison', 'validate_qc')).toBe(false);
+    expect(hasPermission('livraison', 'reject_qc')).toBe(false);
+    expect(hasPermission('livraison', 'admin_action')).toBe(false);
+    expect(hasPermission('livraison', 'view_admin_console')).toBe(false);
+  });
 });

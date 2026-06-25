@@ -146,7 +146,8 @@ export function transitionCase(
       (caseObj.status === 'work_completed' && targetStatus === 'quality_pending') ||
       (caseObj.status === 'quality_pending' && targetStatus === 'quality_approved') ||
       (caseObj.status === 'quality_pending' && targetStatus === 'quality_rejected') ||
-      (caseObj.status === 'quality_rejected' && targetStatus === 'quality_rework')
+      (caseObj.status === 'quality_rejected' && targetStatus === 'quality_rework') ||
+      (caseObj.status === 'quality_rework' && targetStatus === 'quality_pending')
     );
     if (!isAuthorized) {
       return { success: false, error: `Quality Control role is not authorized to transition from ${caseObj.status} to ${targetStatus}.` };
@@ -190,6 +191,34 @@ export function transitionCase(
   if (['ready_delivery', 'delivered'].includes(targetStatus) && !isExceptionalAdminAction) {
     if (user.role !== 'livraison' && user.role !== 'directeur-sav') {
       return { success: false, error: `Only Livraison or Directeur SAV roles are authorized to transition to ${targetStatus}.` };
+    }
+  }
+
+  // - Restrict who can transition to received status
+  if (targetStatus === 'received' && !isExceptionalAdminAction) {
+    if (user.role !== 'reception' && user.role !== 'admin') {
+      return { success: false, error: `Only Reception role is authorized to transition to received.` };
+    }
+  }
+
+  // - Restrict who can transition to closed status
+  if (targetStatus === 'closed' && !isExceptionalAdminAction) {
+    if (user.role !== 'directeur-sav' && user.role !== 'admin') {
+      return { success: false, error: `Only SAV Director role is authorized to transition to closed.` };
+    }
+  }
+
+  // - Restrict who can transition to workshop statuses
+  if (['diagnosis', 'waiting_parts', 'repair'].includes(targetStatus) && !isExceptionalAdminAction) {
+    if (user.role !== 'chef-atelier' && user.role !== 'technicien' && user.role !== 'admin') {
+      return { success: false, error: `Only Chef Atelier or Technician roles are authorized to transition to ${targetStatus}.` };
+    }
+  }
+
+  // - Restrict who can transition to work completed status
+  if (targetStatus === 'work_completed' && !isExceptionalAdminAction) {
+    if (user.role !== 'technicien' && user.role !== 'chef-atelier' && user.role !== 'admin') {
+      return { success: false, error: `Only Technician or Chef Atelier roles are authorized to transition to work_completed.` };
     }
   }
 

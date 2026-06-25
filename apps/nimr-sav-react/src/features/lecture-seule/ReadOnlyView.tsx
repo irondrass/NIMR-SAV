@@ -214,7 +214,7 @@ export const ReadOnlyView: React.FC<ReadOnlyViewProps> = ({ user }) => {
           fontSize: '0.9rem',
         }}
       >
-        ℹ️ Mode lecture seule — aucune action de modification disponible.
+        ℹ️ Mode lecture seule — aucune action de modification disponible. Version de stabilisation alpha.10 (non RC).
       </div>
 
       {/* Main Grid */}

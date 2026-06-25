@@ -1,4 +1,4 @@
-# NIMR SAV React — v24.0.0-alpha.9
+# NIMR SAV React — v24.0.0-alpha.10
 
 Application React + TypeScript pour NIMR Carrosserie SAV.
 
@@ -57,6 +57,9 @@ tests/
 
 ## Version
 
-`v24.0.0-alpha.9` — Fondation React TypeScript
-Ne pas démarrer v23.1D.
-Ne pas pousser sans validation complète.
+`v24.0.0-alpha.10` — Stabilisation globale / Release Candidate readiness interne.
+- Cette version n'est pas une Release Candidate (RC) et n'est pas prête pour la production.
+- Aucun tag de version v24 ou push ne doit être créé sur cette version.
+- Le pilote stable actuel reste exclusivement `v23.2.6`.
+- Le fichier `data/vehicles.json` reste strictement vide (`[]`).
+- L'application React fonctionne sans Service Worker actif, sans dépendances backend, et sans Supabase.

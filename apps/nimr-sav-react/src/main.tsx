@@ -4,7 +4,7 @@ import { App } from './App'
 import './styles/index.css'
 
 /**
- * NIMR SAV v24.0.0-alpha.9 — React entry point
+ * NIMR SAV v24.0.0-alpha.10 — React entry point
  *
  * NO service worker registration here.
  * Reserved cache name: nimr-sav-react-v24-alpha (future use only)

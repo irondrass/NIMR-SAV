@@ -3,6 +3,7 @@ import type { User } from '@/types';
 import { useSavCases } from '@/state/useSavCases';
 import { APP_VERSION } from '@/constants/version';
 import { ROLE_GOVERNANCE_LABELS } from '@/domain/role-governance';
+import { validateReleaseReadiness, getReleaseReadinessChecklist } from '@/domain/release-readiness';
 
 interface AdminViewProps {
   user: User;
@@ -31,6 +32,15 @@ export const AdminView: React.FC<AdminViewProps> = ({ user }) => {
   const selectedRoleEntry = useMemo(() => {
     return matrix.find((m) => m.role === selectedRole) || null;
   }, [matrix, selectedRole]);
+
+  // Compute release readiness report
+  const readinessReport = useMemo(() => {
+    return validateReleaseReadiness(cases, logs, { appVersion: APP_VERSION });
+  }, [cases, logs]);
+
+  const staticChecklist = useMemo(() => {
+    return getReleaseReadinessChecklist();
+  }, []);
 
   return (
     <div
@@ -103,7 +113,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ user }) => {
       >
         <span>⚠️</span>
         <span>
-          <strong>Avertissement :</strong> Console de gouvernance en lecture / supervision. Aucune action destructive (reset, suppression, modification de rôles/utilisateurs) n'est disponible dans cette version alpha.9.
+          <strong>Avertissement :</strong> Console de gouvernance en lecture / supervision. Aucune action destructive (reset, suppression, modification de rôles/utilisateurs) n'est disponible dans cette version alpha.10 (non RC).
         </span>
       </div>
 
@@ -111,6 +121,111 @@ export const AdminView: React.FC<AdminViewProps> = ({ user }) => {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr', gap: '1.5rem', flex: 1 }}>
         {/* Left column: invariants & summaries */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          {/* Release Readiness Report */}
+          <div
+            style={{
+              background: '#1e1e24',
+              borderRadius: '8px',
+              padding: '1.25rem',
+              border: '1px solid rgba(255,255,255,0.05)',
+            }}
+          >
+            <h2
+              style={{
+                fontSize: '1.05rem',
+                fontWeight: 600,
+                marginBottom: '1rem',
+                borderBottom: '1px solid rgba(255,255,255,0.05)',
+                paddingBottom: '0.5rem',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}
+            >
+              <span>Rapport de Conformité (Release Readiness)</span>
+              <span
+                style={{
+                  fontSize: '0.75rem',
+                  padding: '2px 8px',
+                  borderRadius: '4px',
+                  background: readinessReport.isReadyForRcEvaluation ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
+                  color: readinessReport.isReadyForRcEvaluation ? '#10b981' : '#ef4444',
+                  border: `1px solid ${readinessReport.isReadyForRcEvaluation ? 'rgba(16,185,129,0.2)' : 'rgba(239,68,68,0.2)'}`,
+                }}
+              >
+                {readinessReport.isReadyForRcEvaluation ? 'Prêt pour revue RC' : 'Bloqueurs détectés'}
+              </span>
+            </h2>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              <div style={{ fontSize: '0.85rem', color: '#a1a1aa' }}>
+                <strong>Recommandation :</strong> {readinessReport.recommendation}
+              </div>
+
+              {readinessReport.blockers.length > 0 && (
+                <div
+                  style={{
+                    background: 'rgba(239, 68, 68, 0.08)',
+                    border: '1px solid rgba(239, 68, 68, 0.2)',
+                    borderRadius: '6px',
+                    padding: '0.5rem 0.75rem',
+                    fontSize: '0.8rem',
+                    color: '#ef4444',
+                  }}
+                >
+                  <strong>Bloqueurs ({readinessReport.blockers.length}) :</strong>
+                  <ul style={{ margin: '0.25rem 0 0 1.25rem', padding: 0 }}>
+                    {readinessReport.blockers.map((b, idx) => (
+                      <li key={idx} style={{ marginTop: '0.15rem' }}>{b}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {readinessReport.warnings.length > 0 && (
+                <div
+                  style={{
+                    background: 'rgba(245, 158, 11, 0.08)',
+                    border: '1px solid rgba(245, 158, 11, 0.2)',
+                    borderRadius: '6px',
+                    padding: '0.5rem 0.75rem',
+                    fontSize: '0.8rem',
+                    color: '#f59e0b',
+                  }}
+                >
+                  <strong>Avertissements ({readinessReport.warnings.length}) :</strong>
+                  <ul style={{ margin: '0.25rem 0 0 1.25rem', padding: 0 }}>
+                    {readinessReport.warnings.map((w, idx) => (
+                      <li key={idx} style={{ marginTop: '0.15rem' }}>{w}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              <div>
+                <strong style={{ fontSize: '0.85rem', color: '#e4e4e7', display: 'block', marginBottom: '0.35rem' }}>
+                  Checklist Readiness :
+                </strong>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                  {staticChecklist.map((item) => (
+                    <div
+                      key={item.id}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        fontSize: '0.75rem',
+                        color: '#a1a1aa',
+                      }}
+                    >
+                      <span style={{ color: '#10b981' }}>✓</span>
+                      <span>{item.label}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* System Invariants */}
           <div
             style={{

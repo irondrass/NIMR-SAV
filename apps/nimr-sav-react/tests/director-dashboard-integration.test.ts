@@ -51,7 +51,7 @@ import { savCaseStore } from '../src/state/sav-case-store';
 import { SavCase } from '../src/domain/sav-case';
 import { calculateDirectorDashboard, calculateBlockingAlerts } from '../src/domain/director-kpis';
 
-describe('SAV Director Dashboard Integration (v24.0.0-alpha.11)', () => {
+describe('SAV Director Dashboard Integration (v24.0.0-alpha.12)', () => {
   beforeEach(() => {
     window.localStorage.clear();
     savCaseStore.clearAll();
@@ -63,20 +63,20 @@ describe('SAV Director Dashboard Integration (v24.0.0-alpha.11)', () => {
   });
 
   // 1. Version checks
-  it('APP_VERSION is exactly v24.0.0-alpha.11', () => {
-    expect(APP_VERSION).toBe('v24.0.0-alpha.11');
+  it('APP_VERSION is exactly v24.0.0-alpha.12', () => {
+    expect(APP_VERSION).toBe('v24.0.0-alpha.12');
   });
 
-  it('package.json version matches 24.0.0-alpha.11', () => {
+  it('package.json version matches 24.0.0-alpha.12', () => {
     const pkgPath = resolve(__dirname, '../package.json');
     const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
-    expect(pkg.version).toBe('24.0.0-alpha.11');
+    expect(pkg.version).toBe('24.0.0-alpha.12');
   });
 
-  it('package-lock.json version matches 24.0.0-alpha.11', () => {
+  it('package-lock.json version matches 24.0.0-alpha.12', () => {
     const lockPath = resolve(__dirname, '../package-lock.json');
     const lock = JSON.parse(readFileSync(lockPath, 'utf-8'));
-    expect(lock.version).toBe('24.0.0-alpha.11');
+    expect(lock.version).toBe('24.0.0-alpha.12');
   });
 
   // 2. Pure KPI Calculations
@@ -236,8 +236,9 @@ describe('SAV Director Dashboard Integration (v24.0.0-alpha.11)', () => {
       expect(hasPermission('directeur-sav', 'validate_qc')).toBe(false);
       expect(hasPermission('directeur-sav', 'reject_qc')).toBe(false);
       expect(hasPermission('directeur-sav', 'send_to_rework')).toBe(false);
-      // note: hasPermission allows 'prepare_delivery' and 'deliver_case' to support existing delivery/rework engine,
-      // but the director UI doesn't expose it. We verify direct write methods in the store.
+      expect(hasPermission('directeur-sav', 'prepare_delivery')).toBe(false);
+      expect(hasPermission('directeur-sav', 'deliver_case')).toBe(false);
+      expect(hasPermission('directeur-sav', 'add_delivery_proof')).toBe(false);
     });
   });
 

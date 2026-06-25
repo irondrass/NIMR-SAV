@@ -45,6 +45,11 @@ export function transitionCase(
     return { success: false, error: 'Read-only users cannot perform modifications.' };
   }
 
+  // Delivered is forward-only: the only valid next state is closed.
+  if (caseObj.status === 'delivered' && targetStatus !== 'closed') {
+    return { success: false, error: 'Delivered cases cannot move backward in the workflow.' };
+  }
+
   // 2. Role-workflow specific boundaries
   // - Technicians cannot validate or reject QC
   if ((targetStatus === 'quality_approved' || targetStatus === 'quality_rejected') && user.role === 'technicien') {
@@ -189,8 +194,8 @@ export function transitionCase(
 
   // - Restrict who can transition to delivery statuses
   if (['ready_delivery', 'delivered'].includes(targetStatus) && !isExceptionalAdminAction) {
-    if (user.role !== 'livraison' && user.role !== 'directeur-sav') {
-      return { success: false, error: `Only Livraison or Directeur SAV roles are authorized to transition to ${targetStatus}.` };
+    if (user.role !== 'livraison') {
+      return { success: false, error: `Only Livraison role is authorized to transition to ${targetStatus}.` };
     }
   }
 

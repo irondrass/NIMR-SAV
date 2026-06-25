@@ -155,7 +155,7 @@ export const ReadOnlyView: React.FC<ReadOnlyViewProps> = ({ user }) => {
           fontWeight: 500,
         }}
       >
-        ℹ️ Aucune action disponible (lecture seule). Version de stabilisation alpha.11 (non RC).
+        ℹ️ Aucune action disponible (lecture seule). Version de recette métier alpha.12 (non RC).
       </div>
 
       {/* Main Grid */}

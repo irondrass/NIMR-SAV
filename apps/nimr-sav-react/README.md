@@ -1,4 +1,4 @@
-# NIMR SAV React — v24.0.0-alpha.11
+# NIMR SAV React — v24.0.0-alpha.12
 
 Application React + TypeScript pour NIMR Carrosserie SAV.
 
@@ -46,9 +46,24 @@ npm test
 
 ## Version
 
-`v24.0.0-alpha.11` — Pré-RC UX terrain / cohérence finale des écrans.
-- Cette version n'est pas une Release Candidate (RC) et n'est pas prête pour la production.
-- Aucun tag de version v24 ou push ne doit être créé sur cette version.
+`v24.0.0-alpha.12` — Recette métier terrain / simulation multi-dossiers.
+
+- Cette version est une alpha interne, non RC et non destinée à la production.
+- Aucun tag ni push n'est créé pour cette version.
 - Le pilote stable actuel reste exclusivement `v23.2.6`.
 - Le fichier `data/vehicles.json` reste strictement vide (`[]`).
 - L'application React fonctionne sans Service Worker actif, sans dépendances backend, et sans Supabase.
+
+## Recette métier alpha.12
+
+La simulation couvre cinq dossiers fictifs en parallèle :
+
+- un flux complet réception → atelier → technicien → contrôle qualité → livraison ;
+- un dossier bloqué en `waiting_parts` ;
+- un rejet qualité suivi d'une reprise atelier ;
+- une tentative de livraison bloquée avant approbation qualité ;
+- un dossier annulé selon le workflow existant.
+
+Les consultations Direction SAV, Admin/Gouvernance et Lecture seule sont contrôlées sans mutation des dossiers ni création de logs. Les timelines restent isolées par dossier et traçables par `caseId`, y compris avec des données locales vides ou partielles.
+
+Prochaine étape possible : `alpha.13`, préparation à l'évaluation RC et gel fonctionnel.

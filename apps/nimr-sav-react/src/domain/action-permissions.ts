@@ -119,12 +119,14 @@ export function hasPermission(role: Role, action: Action): boolean {
     case 'view_qc_history':
       return role === 'qualite';
 
+    case 'view_delivery_history':
+      return role === 'livraison' || role === 'directeur-sav';
     case 'view_delivery_cases':
+      return role === 'livraison' || role === 'directeur-sav';
     case 'prepare_delivery':
     case 'deliver_case':
     case 'add_delivery_proof':
-    case 'view_delivery_history':
-      return role === 'livraison' || role === 'directeur-sav';
+      return role === 'livraison';
 
     case 'close_case':
       // Only directeur-sav (and admin) can close cases

@@ -51,7 +51,7 @@ import { savCaseStore } from '../src/state/sav-case-store';
 import { SavCase } from '../src/domain/sav-case';
 import { hasPermission, canViewDirectionNotes } from '../src/domain/action-permissions';
 
-describe('SAV Technician Workflow Integration (v24.0.0-alpha.11)', () => {
+describe('SAV Technician Workflow Integration (v24.0.0-alpha.12)', () => {
 
   beforeEach(() => {
     window.localStorage.clear();
@@ -64,12 +64,12 @@ describe('SAV Technician Workflow Integration (v24.0.0-alpha.11)', () => {
   });
 
   // 1. Version Check
-  it('has package.json and constants aligned to v24.0.0-alpha.11', () => {
-    expect(APP_VERSION).toBe('v24.0.0-alpha.11');
+  it('has package.json and constants aligned to v24.0.0-alpha.12', () => {
+    expect(APP_VERSION).toBe('v24.0.0-alpha.12');
 
     const pkgPath = resolve(__dirname, '../package.json');
     const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
-    expect(pkg.version).toBe('24.0.0-alpha.11');
+    expect(pkg.version).toBe('24.0.0-alpha.12');
   });
 
   // 2. Demo Technicians check

@@ -49,7 +49,7 @@ import { LS_PREFIX } from '../src/constants/version';
 import { hasPermission, canViewDirectionNotes } from '../src/domain/action-permissions';
 import { savCaseStore } from '../src/state/sav-case-store';
 
-describe('SAV ReadOnly Governance Integration (v24.0.0-alpha.11)', () => {
+describe('SAV ReadOnly Governance Integration (v24.0.0-alpha.12)', () => {
   beforeEach(() => {
     window.localStorage.clear();
     savCaseStore.clearAll();

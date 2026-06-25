@@ -37,11 +37,11 @@ export function validateVersionReadiness(appVersion: string): ReadinessCheckResu
   if (!appVersion) {
     blockers.push("Version string is missing or undefined.");
   } else {
-    if (appVersion !== 'v24.0.0-alpha.11') {
-      blockers.push(`Version mismatch: expected 'v24.0.0-alpha.11', got '${appVersion}'.`);
+    if (appVersion !== 'v24.0.0-alpha.12') {
+      blockers.push(`Version mismatch: expected 'v24.0.0-alpha.12', got '${appVersion}'.`);
     }
     if (appVersion.includes('RC')) {
-      blockers.push("Version name contains 'RC' but alpha.11 is not a Release Candidate.");
+      blockers.push("Version name contains 'RC' but alpha.12 is not a Release Candidate.");
     }
     if (appVersion.includes('production')) {
       blockers.push("Version name contains 'production' but this is an internal alpha version.");
@@ -210,6 +210,13 @@ export function validatePermissionReadiness(): ReadinessCheckResult {
     blockers.push("Security violation: Role 'lecture-seule' has permission to view direction notes.");
   }
 
+  // H. Direction dashboard remains consultative for delivery operations
+  for (const act of ['prepare_delivery', 'deliver_case', 'add_delivery_proof'] as Action[]) {
+    if (hasPermission('directeur-sav', act)) {
+      blockers.push(`Permission violation: Role 'directeur-sav' is allowed to perform '${act}'.`);
+    }
+  }
+
   return {
     success: blockers.length === 0,
     blockers,
@@ -308,7 +315,7 @@ export function summarizeRcBlockers(readiness: {
 
 export function getReleaseReadinessChecklist(): { id: string; label: string; checked: boolean }[] {
   return [
-    { id: 'version_alpha11', label: 'Version calée sur v24.0.0-alpha.11', checked: true },
+    { id: 'version_alpha12', label: 'Version calée sur v24.0.0-alpha.12', checked: true },
     { id: 'official_roles', label: 'Uniquement les 8 rôles officiels configurés', checked: true },
     { id: 'official_statuses', label: 'Uniquement les 14 statuts de dossiers officiels', checked: true },
     { id: 'security_prefix', label: 'Isolation localStorage (nimr-sav-react-v24-)', checked: true },
@@ -325,7 +332,7 @@ export function validateReleaseReadiness(
   logs: AuditLogEntry[],
   options?: { appVersion?: string }
 ): ReleaseReadinessReport {
-  const versionInput = options?.appVersion || 'v24.0.0-alpha.11';
+  const versionInput = options?.appVersion || 'v24.0.0-alpha.12';
 
   const versionResult = validateVersionReadiness(versionInput);
   const rolesResult = validateRoleReadiness();
@@ -365,8 +372,8 @@ export function validateReleaseReadiness(
   const coverage = calculateWorkflowCoverage(cases, logs);
 
   const recommendation = isReadyForRcEvaluation
-    ? "alpha.11 prête pour revue UX terrain interne (aucun bloqueur critique détecté)"
-    : "alpha.11 présente des bloqueurs critiques à résoudre avant évaluation UX terrain";
+    ? "alpha.12 prête pour recette métier interne (aucun bloqueur critique détecté, non RC)"
+    : "alpha.12 présente des bloqueurs critiques à résoudre avant la recette métier interne";
 
   return {
     appVersion: versionInput,

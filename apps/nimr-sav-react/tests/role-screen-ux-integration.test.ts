@@ -7,7 +7,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
 
-describe('Role Screen UX Integration (v24.0.0-alpha.11)', () => {
+describe('Role Screen UX Integration (v24.0.0-alpha.12)', () => {
   const views = {
     reception: resolve(__dirname, '../src/features/reception/ReceptionView.tsx'),
     planning: resolve(__dirname, '../src/features/chef-atelier/PlanningView.tsx'),
@@ -51,10 +51,10 @@ describe('Role Screen UX Integration (v24.0.0-alpha.11)', () => {
     expect(readonlyContent).toContain('Mode Lecture Seule');
   });
 
-  // 2. AdminView displays alpha.11 and not RC
-  it('AdminView displays alpha.11 warning notice and is not marked as RC', () => {
+  // 2. AdminView displays alpha.12 and not RC
+  it('AdminView displays alpha.12 warning notice and is not marked as RC', () => {
     const adminContent = getFileContent(views.admin);
-    expect(adminContent).toContain('alpha.11');
+    expect(adminContent).toContain('alpha.12');
     expect(adminContent).toContain('non RC');
     expect(adminContent).not.toContain(['RC', 'publiée'].join(' '));
     expect(adminContent).not.toContain(['release candidate', 'publiée'].join(' '));

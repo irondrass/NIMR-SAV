@@ -50,22 +50,22 @@ import { validateReleaseReadiness } from '../src/domain/release-readiness';
 import { SavCase } from '../src/domain/sav-case';
 import { AuditLogEntry } from '../src/domain/audit-log';
 
-describe('SAV Release Readiness & Invariants Integration (v24.0.0-alpha.11)', () => {
+describe('SAV Release Readiness & Invariants Integration (v24.0.0-alpha.12)', () => {
   // 1. Version matches
-  it('APP_VERSION is exactly v24.0.0-alpha.11', () => {
-    expect(APP_VERSION).toBe('v24.0.0-alpha.11');
+  it('APP_VERSION is exactly v24.0.0-alpha.12', () => {
+    expect(APP_VERSION).toBe('v24.0.0-alpha.12');
   });
 
-  it('package.json version matches 24.0.0-alpha.11', () => {
+  it('package.json version matches 24.0.0-alpha.12', () => {
     const pkgPath = resolve(__dirname, '../package.json');
     const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
-    expect(pkg.version).toBe('24.0.0-alpha.11');
+    expect(pkg.version).toBe('24.0.0-alpha.12');
   });
 
-  it('package-lock.json version matches 24.0.0-alpha.11', () => {
+  it('package-lock.json version matches 24.0.0-alpha.12', () => {
     const lockPath = resolve(__dirname, '../package-lock.json');
     const lock = JSON.parse(readFileSync(lockPath, 'utf-8'));
-    expect(lock.version).toBe('24.0.0-alpha.11');
+    expect(lock.version).toBe('24.0.0-alpha.12');
   });
 
   // 2. data/vehicles.json is strictly []
@@ -131,10 +131,10 @@ describe('SAV Release Readiness & Invariants Integration (v24.0.0-alpha.11)', ()
       details: 'Dossier créé',
     };
 
-    const report = validateReleaseReadiness([mockCase], [mockLog], { appVersion: 'v24.0.0-alpha.11' });
+    const report = validateReleaseReadiness([mockCase], [mockLog], { appVersion: 'v24.0.0-alpha.12' });
     expect(report.isReadyForRcEvaluation).toBe(true);
     expect(report.blockers).toHaveLength(0);
-    expect(report.recommendation).toContain('alpha.11 prête pour revue UX terrain interne');
+    expect(report.recommendation).toContain('alpha.12 prête pour recette métier interne');
   });
 
   it('detects blockers for unofficial roles, statuses, or corrupted workflow state', () => {
@@ -176,7 +176,7 @@ describe('SAV Release Readiness & Invariants Integration (v24.0.0-alpha.11)', ()
       details: 'Dossier créé',
     };
 
-    const report = validateReleaseReadiness([mockCaseBadStatus, mockCaseNoQc], [mockLogBadRole], { appVersion: 'v24.0.0-alpha.11' });
+    const report = validateReleaseReadiness([mockCaseBadStatus, mockCaseNoQc], [mockLogBadRole], { appVersion: 'v24.0.0-alpha.12' });
     expect(report.isReadyForRcEvaluation).toBe(false);
     expect(report.blockers.length).toBeGreaterThanOrEqual(3);
 

@@ -1,7 +1,8 @@
 import { SavCase, WorkshopTask, QcChecklistItem } from '../domain/sav-case';
 import { AuditLogEntry, createAuditLog } from '../domain/audit-log';
 import { DEMO_CASES } from '../domain/case-fixtures';
-import { LS_PREFIX } from '../constants/version';
+import { LS_PREFIX, APP_VERSION, RESERVED_CACHE_NAME } from '../constants/version';
+import { getRoleGovernanceMatrix } from '../domain/role-governance';
 import { DEMO_QC_CHECKLIST } from '../constants/qc-checklist';
 import { Role } from '../types';
 import { CaseStatus } from '../domain/case-status';
@@ -882,5 +883,32 @@ export const savCaseStore = {
 
   getDirectorTechnicianLoad() {
     return calculateTechnicianLoad(cases);
+  },
+
+  getAdminGovernanceSummary() {
+    return {
+      matrix: getRoleGovernanceMatrix(),
+      totalCases: cases.length,
+      totalLogs: logs.length,
+    };
+  },
+
+  getReadOnlyCases() {
+    return cases;
+  },
+
+  getReadOnlyLogs() {
+    return logs;
+  },
+
+  getSystemInvariants() {
+    return {
+      localStoragePrefix: LS_PREFIX,
+      appVersion: APP_VERSION,
+      reservedCacheName: RESERVED_CACHE_NAME,
+      v23Status: 'v23.2.6 reste stable / pilote',
+      vehiclesJsonConstraint: 'data/vehicles.json doit rester []',
+      serviceWorkerStatus: 'aucun service worker React actif',
+    };
   },
 };

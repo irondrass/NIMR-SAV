@@ -1,29 +1,438 @@
-import React from 'react';
+import React, { useState, useMemo } from 'react';
 import type { User } from '@/types';
+import { useSavCases } from '@/state/useSavCases';
+import { APP_VERSION } from '@/constants/version';
+import { ROLE_GOVERNANCE_LABELS } from '@/domain/role-governance';
 
 interface AdminViewProps {
   user: User;
 }
 
 export const AdminView: React.FC<AdminViewProps> = ({ user }) => {
+  const {
+    cases,
+    logs,
+    getAdminGovernanceSummary,
+    getSystemInvariants,
+  } = useSavCases();
+
+  const [selectedRole, setSelectedRole] = useState<string>('lecture-seule');
+
+  // Read-only governance data and invariants from the store
+  const { matrix } = useMemo(() => {
+    return getAdminGovernanceSummary();
+  }, [getAdminGovernanceSummary]);
+
+  const invariants = useMemo(() => {
+    return getSystemInvariants();
+  }, [getSystemInvariants]);
+
+  // Find the selected role entry in matrix
+  const selectedRoleEntry = useMemo(() => {
+    return matrix.find((m) => m.role === selectedRole) || null;
+  }, [matrix, selectedRole]);
+
   return (
-    <div className="view-container" id="admin-view">
-      <header className="view-header">
-        <h1 className="view-title">Paramètres Techniques</h1>
-        <p className="view-subtitle">Admin : {user.name}</p>
-      </header>
-      <main className="view-main">
-        <div className="view-placeholder">
-          <span className="view-placeholder-icon">⚙️</span>
-          <p>Administration technique — à implémenter en v24.1</p>
-          <ul className="view-feature-list">
-            <li>Gestion des utilisateurs</li>
-            <li>Configuration Supabase</li>
-            <li>Permissions et rôles</li>
-            <li>Nettoyage et restauration</li>
-          </ul>
+    <div
+      className="view-container"
+      id="admin-view"
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '1.5rem',
+        padding: '1.5rem',
+        color: '#fff',
+        minHeight: '100vh',
+        background: '#121214',
+        fontFamily: 'Inter, sans-serif',
+      }}
+    >
+      {/* Header section */}
+      <header
+        className="view-header"
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          borderBottom: '1px solid rgba(255,255,255,0.08)',
+          paddingBottom: '1rem',
+          flexWrap: 'wrap',
+          gap: '1rem',
+        }}
+      >
+        <div>
+          <h1 className="view-title" style={{ margin: 0, fontSize: '1.75rem', fontWeight: 700 }}>
+            Console Admin NIMR SAV
+          </h1>
+          <p
+            className="view-subtitle"
+            style={{ margin: '0.25rem 0 0 0', color: '#a1a1aa', fontSize: '0.9rem' }}
+          >
+            Supervision Technique & Gouvernance — Admin :{' '}
+            <strong style={{ color: '#fff' }}>{user.name}</strong>
+          </p>
         </div>
-      </main>
+        <span
+          style={{
+            fontSize: '0.8rem',
+            color: '#3b82f6',
+            fontWeight: 600,
+            background: 'rgba(59,130,246,0.1)',
+            padding: '0.25rem 0.75rem',
+            borderRadius: '9999px',
+            border: '1px solid rgba(59,130,246,0.2)',
+          }}
+        >
+          {APP_VERSION}
+        </span>
+      </header>
+
+      {/* Warning banner */}
+      <div
+        style={{
+          background: 'rgba(245, 158, 11, 0.08)',
+          border: '1px solid rgba(245, 158, 11, 0.2)',
+          borderRadius: '8px',
+          padding: '0.75rem 1.25rem',
+          color: '#f59e0b',
+          fontSize: '0.9rem',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.75rem',
+        }}
+      >
+        <span>⚠️</span>
+        <span>
+          <strong>Avertissement :</strong> Console de gouvernance en lecture / supervision. Aucune action destructive (reset, suppression, modification de rôles/utilisateurs) n'est disponible dans cette version alpha.9.
+        </span>
+      </div>
+
+      {/* Main layout grid */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr', gap: '1.5rem', flex: 1 }}>
+        {/* Left column: invariants & summaries */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          {/* System Invariants */}
+          <div
+            style={{
+              background: '#1e1e24',
+              borderRadius: '8px',
+              padding: '1.25rem',
+              border: '1px solid rgba(255,255,255,0.05)',
+            }}
+          >
+            <h2
+              style={{
+                fontSize: '1.05rem',
+                fontWeight: 600,
+                marginBottom: '1rem',
+                borderBottom: '1px solid rgba(255,255,255,0.05)',
+                paddingBottom: '0.5rem',
+              }}
+            >
+              Invariants Système
+            </h2>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              {[
+                { label: 'Version Application', val: invariants.appVersion },
+                { label: 'Préfixe LocalStorage', val: invariants.localStoragePrefix },
+                { label: 'Cache React réservé', val: invariants.reservedCacheName },
+                { label: 'Statut v23 Production', val: invariants.v23Status },
+                { label: 'Contrainte data/vehicles.json', val: invariants.vehiclesJsonConstraint },
+                { label: 'Statut Service Worker', val: invariants.serviceWorkerStatus },
+              ].map((item, idx) => (
+                <div
+                  key={idx}
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    fontSize: '0.85rem',
+                    padding: '0.35rem 0',
+                    borderBottom: '1px solid rgba(255,255,255,0.02)',
+                  }}
+                >
+                  <span style={{ color: '#a1a1aa' }}>{item.label}</span>
+                  <code style={{ color: '#3b82f6', background: 'rgba(0,0,0,0.2)', padding: '2px 6px', borderRadius: '4px' }}>
+                    {item.val}
+                  </code>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Dossiers & Logs Statistics */}
+          <div
+            style={{
+              background: '#1e1e24',
+              borderRadius: '8px',
+              padding: '1.25rem',
+              border: '1px solid rgba(255,255,255,0.05)',
+            }}
+          >
+            <h2
+              style={{
+                fontSize: '1.05rem',
+                fontWeight: 600,
+                marginBottom: '1rem',
+                borderBottom: '1px solid rgba(255,255,255,0.05)',
+                paddingBottom: '0.5rem',
+              }}
+            >
+              Statistiques d'Activité
+            </h2>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+              <div
+                style={{
+                  background: 'rgba(255,255,255,0.02)',
+                  padding: '1rem',
+                  borderRadius: '6px',
+                  border: '1px solid rgba(255,255,255,0.04)',
+                  textAlign: 'center',
+                }}
+              >
+                <div style={{ fontSize: '1.5rem', fontWeight: 700, color: '#3b82f6' }}>
+                  {cases.length}
+                </div>
+                <div style={{ fontSize: '0.8rem', color: '#a1a1aa', marginTop: '0.25rem' }}>
+                  Dossiers SAV actifs
+                </div>
+              </div>
+              <div
+                style={{
+                  background: 'rgba(255,255,255,0.02)',
+                  padding: '1rem',
+                  borderRadius: '6px',
+                  border: '1px solid rgba(255,255,255,0.04)',
+                  textAlign: 'center',
+                }}
+              >
+                <div style={{ fontSize: '1.5rem', fontWeight: 700, color: '#10b981' }}>
+                  {logs.length}
+                </div>
+                <div style={{ fontSize: '0.8rem', color: '#a1a1aa', marginTop: '0.25rem' }}>
+                  Entrées Audit Log
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Audit Logs list */}
+          <div
+            style={{
+              background: '#1e1e24',
+              borderRadius: '8px',
+              padding: '1.25rem',
+              border: '1px solid rgba(255,255,255,0.05)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.75rem',
+            }}
+          >
+            <h2
+              style={{
+                fontSize: '1.05rem',
+                fontWeight: 600,
+                margin: 0,
+                borderBottom: '1px solid rgba(255,255,255,0.05)',
+                paddingBottom: '0.5rem',
+              }}
+            >
+              Derniers événements audit log
+            </h2>
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.5rem',
+                maxHeight: '200px',
+                overflowY: 'auto',
+              }}
+            >
+              {logs.length === 0 ? (
+                <div style={{ padding: '1rem', color: '#71717a', textAlign: 'center', fontSize: '0.85rem' }}>
+                  Aucun log disponible.
+                </div>
+              ) : (
+                logs.slice(0, 10).map((log) => (
+                  <div
+                    key={log.id}
+                    style={{
+                      padding: '0.5rem 0.75rem',
+                      background: 'rgba(0,0,0,0.15)',
+                      borderRadius: '4px',
+                      fontSize: '0.8rem',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                    }}
+                  >
+                    <div>
+                      <strong style={{ color: '#e4e4e7' }}>{log.action}</strong>
+                      <span style={{ color: '#a1a1aa', marginLeft: '0.5rem' }}>{log.details}</span>
+                    </div>
+                    <span style={{ color: '#71717a', fontSize: '0.75rem' }}>
+                      {log.userId} ({log.userRole})
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Right column: role governance matrix */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          {/* Roles Matrix Selection */}
+          <div
+            style={{
+              background: '#1e1e24',
+              borderRadius: '8px',
+              padding: '1.25rem',
+              border: '1px solid rgba(255,255,255,0.05)',
+            }}
+          >
+            <h2
+              style={{
+                fontSize: '1.05rem',
+                fontWeight: 600,
+                marginBottom: '1rem',
+                borderBottom: '1px solid rgba(255,255,255,0.05)',
+                paddingBottom: '0.5rem',
+              }}
+            >
+              Matrice de Gouvernance des Rôles
+            </h2>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+                gap: '0.5rem',
+                marginBottom: '1.5rem',
+              }}
+            >
+              {matrix.map((item) => (
+                <button
+                  key={item.role}
+                  onClick={() => setSelectedRole(item.role)}
+                  style={{
+                    padding: '0.6rem 0.5rem',
+                    background: selectedRole === item.role ? 'rgba(59,130,246,0.1)' : 'rgba(255,255,255,0.01)',
+                    border: `1px solid ${selectedRole === item.role ? '#3b82f6' : 'rgba(255,255,255,0.05)'}`,
+                    borderRadius: '6px',
+                    color: '#fff',
+                    fontSize: '0.8rem',
+                    cursor: 'pointer',
+                    fontWeight: selectedRole === item.role ? 'bold' : 'normal',
+                    textAlign: 'center',
+                    transition: 'all 0.2s',
+                  }}
+                >
+                  {ROLE_GOVERNANCE_LABELS[item.role] || item.role}
+                </button>
+              ))}
+            </div>
+
+            {selectedRoleEntry && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                {/* Role Details */}
+                <div style={{ padding: '0.75rem', background: 'rgba(0,0,0,0.15)', borderRadius: '6px' }}>
+                  <div style={{ fontSize: '0.9rem', fontWeight: 'bold', color: '#3b82f6' }}>
+                    Libellé : {selectedRoleEntry.label} (code: {selectedRoleEntry.role})
+                  </div>
+                  <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.85rem', color: '#d4d4d8' }}>
+                    {selectedRoleEntry.scope}
+                  </p>
+                </div>
+
+                {/* Parameters matrix */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.75rem' }}>
+                  <div style={{ background: 'rgba(255,255,255,0.01)', padding: '0.5rem', borderRadius: '4px', textAlign: 'center', border: '1px solid rgba(255,255,255,0.03)' }}>
+                    <div style={{ fontSize: '0.75rem', color: '#a1a1aa' }}>Notes Direction</div>
+                    <div style={{ fontSize: '0.9rem', fontWeight: 'bold', color: selectedRoleEntry.canReadDirectionNotes ? '#10b981' : '#ef4444', marginTop: '0.25rem' }}>
+                      {selectedRoleEntry.canReadDirectionNotes ? 'Lecture' : 'Interdit'}
+                    </div>
+                  </div>
+                  <div style={{ background: 'rgba(255,255,255,0.01)', padding: '0.5rem', borderRadius: '4px', textAlign: 'center', border: '1px solid rgba(255,255,255,0.03)' }}>
+                    <div style={{ fontSize: '0.75rem', color: '#a1a1aa' }}>Écriture Workflow</div>
+                    <div style={{ fontSize: '0.9rem', fontWeight: 'bold', color: selectedRoleEntry.canWriteWorkflow ? '#f59e0b' : '#10b981', marginTop: '0.25rem' }}>
+                      {selectedRoleEntry.canWriteWorkflow ? 'Oui' : 'Non (Lecture seule)'}
+                    </div>
+                  </div>
+                  <div style={{ background: 'rgba(255,255,255,0.01)', padding: '0.5rem', borderRadius: '4px', textAlign: 'center', border: '1px solid rgba(255,255,255,0.03)' }}>
+                    <div style={{ fontSize: '0.75rem', color: '#a1a1aa' }}>Accès Admin</div>
+                    <div style={{ fontSize: '0.9rem', fontWeight: 'bold', color: selectedRoleEntry.hasAdminAccess ? '#ef4444' : '#71717a', marginTop: '0.25rem' }}>
+                      {selectedRoleEntry.hasAdminAccess ? 'Total' : 'Aucun'}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Onglets visibles */}
+                <div>
+                  <div style={{ fontSize: '0.85rem', color: '#a1a1aa', marginBottom: '0.25rem' }}>
+                    Onglets autorisés dans l'application :
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
+                    {selectedRoleEntry.visibleTabs.map((tab) => (
+                      <span
+                        key={tab}
+                        style={{
+                          fontSize: '0.75rem',
+                          background: 'rgba(59,130,246,0.1)',
+                          color: '#3b82f6',
+                          padding: '2px 8px',
+                          borderRadius: '4px',
+                          border: '1px solid rgba(59,130,246,0.2)',
+                        }}
+                      >
+                        {tab}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Actions allowed vs forbidden split layout */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                  {/* Allowed Actions */}
+                  <div>
+                    <div style={{ fontSize: '0.85rem', color: '#10b981', fontWeight: 600, marginBottom: '0.5rem' }}>
+                      Actions Autorisées ({selectedRoleEntry.allowedActions.length})
+                    </div>
+                    <div style={{ maxHeight: '180px', overflowY: 'auto', background: 'rgba(16,185,129,0.02)', padding: '0.5rem', borderRadius: '4px', border: '1px solid rgba(16,185,129,0.08)', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                      {selectedRoleEntry.allowedActions.map((action) => (
+                        <code key={action} style={{ fontSize: '0.75rem', color: '#34d399' }}>
+                          ✓ {action}
+                        </code>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Forbidden Actions */}
+                  <div>
+                    <div style={{ fontSize: '0.85rem', color: '#ef4444', fontWeight: 600, marginBottom: '0.5rem' }}>
+                      Actions Interdites ({selectedRoleEntry.forbiddenActions.length})
+                    </div>
+                    <div style={{ maxHeight: '180px', overflowY: 'auto', background: 'rgba(239,68,68,0.02)', padding: '0.5rem', borderRadius: '4px', border: '1px solid rgba(239,68,68,0.08)', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                      {selectedRoleEntry.forbiddenActions.map((action) => (
+                        <code key={action} style={{ fontSize: '0.75rem', color: '#f87171' }}>
+                          ✗ {action}
+                        </code>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Footer */}
+      <footer style={{ marginTop: 'auto', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '1rem', textAlign: 'center' }}>
+        <div style={{ fontSize: '0.75rem', color: '#71717a' }}>
+          Indicateur : data/vehicles.json non utilisé (migration v24 active) | Rôle : {user.role}
+        </div>
+      </footer>
     </div>
   );
 };

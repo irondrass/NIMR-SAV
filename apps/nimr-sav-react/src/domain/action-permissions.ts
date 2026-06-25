@@ -36,7 +36,13 @@ export type Action =
   | 'view_all_cases'
   | 'view_operational_kpis'
   | 'view_blocking_alerts'
-  | 'view_technician_load';
+  | 'view_technician_load'
+  | 'view_admin_console'
+  | 'view_role_governance'
+  | 'view_permission_matrix'
+  | 'view_system_invariants'
+  | 'view_audit_summary'
+  | 'view_readonly_console';
 
 /**
  * Checks if a specific role is allowed to perform a given action.
@@ -51,15 +57,21 @@ export function hasPermission(role: Role, action: Action): boolean {
     return (
       action === 'view_cases' ||
       action === 'view_tasks' ||
-      action === 'view_director_dashboard' ||
-      action === 'view_all_cases' ||
-      action === 'view_operational_kpis' ||
-      action === 'view_blocking_alerts' ||
-      action === 'view_technician_load'
+      action === 'view_readonly_console' ||
+      action === 'view_audit_summary'
     );
   }
 
   switch (action) {
+    case 'view_admin_console':
+    case 'view_role_governance':
+    case 'view_permission_matrix':
+    case 'view_system_invariants':
+      return false; // Only Admin (handled above)
+    case 'view_readonly_console':
+      return (role as Role) === 'lecture-seule';
+    case 'view_audit_summary':
+      return (role as Role) === 'lecture-seule' || role === 'directeur-sav'; // Allow directeur-sav to view audit summary too if needed
     case 'view_director_dashboard':
     case 'view_all_cases':
     case 'view_operational_kpis':

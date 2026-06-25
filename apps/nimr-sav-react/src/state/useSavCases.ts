@@ -67,5 +67,13 @@ export function useSavCases() {
       savCaseStore.getDirectorAlerts(now),
     getDirectorTechnicianLoad: () =>
       savCaseStore.getDirectorTechnicianLoad(),
+    getAdminGovernanceSummary: () =>
+      savCaseStore.getAdminGovernanceSummary(),
+    getReadOnlyCases: () =>
+      savCaseStore.getReadOnlyCases(),
+    getReadOnlyLogs: () =>
+      savCaseStore.getReadOnlyLogs(),
+    getSystemInvariants: () =>
+      savCaseStore.getSystemInvariants(),
   };
 }

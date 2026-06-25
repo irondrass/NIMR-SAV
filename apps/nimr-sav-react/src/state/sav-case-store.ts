@@ -8,6 +8,11 @@ import { CaseStatus } from '../domain/case-status';
 import { hasPermission } from '../domain/action-permissions';
 import { transitionCase } from '../domain/workflow-engine';
 import { DEMO_TECHNICIANS } from '../constants/demo-technicians';
+import {
+  calculateDirectorDashboard,
+  calculateBlockingAlerts,
+  calculateTechnicianLoad,
+} from '../domain/director-kpis';
 
 const CASES_KEY = `${LS_PREFIX}cases`;
 const LOGS_KEY = `${LS_PREFIX}audit_logs`;
@@ -861,5 +866,21 @@ export const savCaseStore = {
       proofReference
     );
     this.addLog(completeLog);
+  },
+
+  getDirectorDashboard(now?: Date) {
+    return calculateDirectorDashboard(cases, logs, now);
+  },
+
+  getDirectorCases() {
+    return cases;
+  },
+
+  getDirectorAlerts(now?: Date) {
+    return calculateBlockingAlerts(cases, now);
+  },
+
+  getDirectorTechnicianLoad() {
+    return calculateTechnicianLoad(cases);
   },
 };

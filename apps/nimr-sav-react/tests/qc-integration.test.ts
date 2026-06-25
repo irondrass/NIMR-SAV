@@ -51,7 +51,7 @@ import { SavCase } from '../src/domain/sav-case';
 import { hasPermission, canViewDirectionNotes } from '../src/domain/action-permissions';
 import { transitionCase } from '../src/domain/workflow-engine';
 
-describe('SAV Quality Control Integration (v24.0.0-alpha.7)', () => {
+describe('SAV Quality Control Integration (v24.0.0-alpha.8)', () => {
   beforeEach(() => {
     window.localStorage.clear();
     savCaseStore.clearAll();
@@ -63,16 +63,16 @@ describe('SAV Quality Control Integration (v24.0.0-alpha.7)', () => {
   });
 
   // 1. Version Check
-  it('has package.json and constants aligned to v24.0.0-alpha.7', () => {
-    expect(APP_VERSION).toBe('v24.0.0-alpha.7');
+  it('has package.json and constants aligned to v24.0.0-alpha.8', () => {
+    expect(APP_VERSION).toBe('v24.0.0-alpha.8');
 
     const pkgPath = resolve(__dirname, '../package.json');
     const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
-    expect(pkg.version).toBe('24.0.0-alpha.7');
+    expect(pkg.version).toBe('24.0.0-alpha.8');
 
     const lockPath = resolve(__dirname, '../package-lock.json');
     const lock = JSON.parse(readFileSync(lockPath, 'utf-8'));
-    expect(lock.version).toBe('24.0.0-alpha.7');
+    expect(lock.version).toBe('24.0.0-alpha.8');
   });
 
   // 2. Case Filtering

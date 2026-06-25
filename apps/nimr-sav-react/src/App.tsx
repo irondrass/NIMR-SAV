@@ -35,7 +35,7 @@ function renderViewForRole(user: User, activeTab: string): React.ReactNode {
     case 'pilotage':
     case 'today':
     case 'dossiers':
-      return <DashboardView user={user} />;
+      return <DashboardView user={user} activeTab={tab} />;
     case 'admin':
     case 'utilisateurs':
       return <AdminView user={user} />;

@@ -59,5 +59,13 @@ export function useSavCases() {
       savCaseStore.prepareDelivery(caseId, actor),
     deliverCase: (caseId: string, deliveryPayload: { recipientName: string; proofReference: string; notes?: string }, actor: { id: string; role: Role }) =>
       savCaseStore.deliverCase(caseId, deliveryPayload, actor),
+    getDirectorDashboard: (now?: Date) =>
+      savCaseStore.getDirectorDashboard(now),
+    getDirectorCases: () =>
+      savCaseStore.getDirectorCases(),
+    getDirectorAlerts: (now?: Date) =>
+      savCaseStore.getDirectorAlerts(now),
+    getDirectorTechnicianLoad: () =>
+      savCaseStore.getDirectorTechnicianLoad(),
   };
 }

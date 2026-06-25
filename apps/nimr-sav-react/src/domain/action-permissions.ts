@@ -31,7 +31,12 @@ export type Action =
   | 'view_delivery_cases'
   | 'prepare_delivery'
   | 'add_delivery_proof'
-  | 'view_delivery_history';
+  | 'view_delivery_history'
+  | 'view_director_dashboard'
+  | 'view_all_cases'
+  | 'view_operational_kpis'
+  | 'view_blocking_alerts'
+  | 'view_technician_load';
 
 /**
  * Checks if a specific role is allowed to perform a given action.
@@ -43,10 +48,24 @@ export function hasPermission(role: Role, action: Action): boolean {
 
   // Lecture seule cannot modify anything (only view actions)
   if (role === 'lecture-seule') {
-    return action === 'view_cases' || action === 'view_tasks';
+    return (
+      action === 'view_cases' ||
+      action === 'view_tasks' ||
+      action === 'view_director_dashboard' ||
+      action === 'view_all_cases' ||
+      action === 'view_operational_kpis' ||
+      action === 'view_blocking_alerts' ||
+      action === 'view_technician_load'
+    );
   }
 
   switch (action) {
+    case 'view_director_dashboard':
+    case 'view_all_cases':
+    case 'view_operational_kpis':
+    case 'view_blocking_alerts':
+    case 'view_technician_load':
+      return role === 'directeur-sav';
     case 'create_case':
     case 'receive_case':
       return role === 'reception';

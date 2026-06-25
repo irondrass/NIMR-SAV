@@ -2,7 +2,11 @@ import React, { useState, useMemo } from 'react';
 import type { User } from '@/types';
 import { useSavCases } from '@/state/useSavCases';
 import { APP_VERSION } from '@/constants/version';
-import { CaseStatus } from '@/domain/case-status';
+import { StatusBadge } from '@/components/StatusBadge';
+import { PriorityBadge } from '@/components/PriorityBadge';
+import { EmptyState } from '@/components/EmptyState';
+import { VersionBanner } from '@/components/VersionBanner';
+import { getRoleFieldGuidance } from '@/domain/ui-field-guidelines';
 
 interface DashboardViewProps {
   user: User;
@@ -61,89 +65,21 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ user, activeTab = 
       >
         <span style={{ fontSize: '3rem', marginBottom: '1rem' }}>📊</span>
         <h2 style={{ fontSize: '1.5rem', fontWeight: 600, color: '#fff', marginBottom: '0.5rem' }}>
-          Pilotage Direction SAV
+          Tableau de Bord Directeur SAV
         </h2>
         <p style={{ color: '#a1a1aa', fontSize: '1rem', marginBottom: '1.5rem' }}>
-          Aucun dossier SAV disponible pour le pilotage.
+          {getRoleFieldGuidance('directeur-sav')}
         </p>
+        <p style={{ color: '#f87171', fontSize: '0.9rem', marginBottom: '1.5rem', fontWeight: 'bold' }}>
+          Mode Consultation uniquement — Aucune action d’écriture autorisée.
+        </p>
+        <EmptyState role="directeur-sav" />
         <div style={{ fontSize: '0.75rem', color: '#71717a' }}>
           Indicateur: data/vehicles.json non utilisé (migration v24 active) — Version {APP_VERSION}
         </div>
       </div>
     );
   }
-
-  // Get status label helper
-  const getStatusLabel = (status: CaseStatus): string => {
-    switch (status) {
-      case 'draft':
-        return 'Brouillon';
-      case 'received':
-        return 'Réceptionné';
-      case 'diagnosis':
-        return 'Diagnostic';
-      case 'waiting_parts':
-        return 'Attente Pièces';
-      case 'repair':
-        return 'Réparation';
-      case 'work_completed':
-        return 'Travaux Finis';
-      case 'quality_pending':
-        return 'QC en attente';
-      case 'quality_rejected':
-        return 'QC Rejeté';
-      case 'quality_rework':
-        return 'Reprise Atelier';
-      case 'quality_approved':
-        return 'QC Approuvé';
-      case 'ready_delivery':
-        return 'Prêt Livraison';
-      case 'delivered':
-        return 'Livré';
-      case 'closed':
-        return 'Clôturé';
-      case 'cancelled':
-        return 'Annulé';
-      default:
-        return status;
-    }
-  };
-
-  // Get status color helper
-  const getStatusColor = (status: CaseStatus): string => {
-    switch (status) {
-      case 'draft':
-        return '#94a3b8';
-      case 'received':
-        return '#3b82f6';
-      case 'diagnosis':
-        return '#6366f1';
-      case 'waiting_parts':
-        return '#f97316';
-      case 'repair':
-        return '#eab308';
-      case 'work_completed':
-        return '#10b981';
-      case 'quality_pending':
-        return '#e0f2fe';
-      case 'quality_rejected':
-        return '#ef4444';
-      case 'quality_rework':
-        return '#f43f5e';
-      case 'quality_approved':
-        return '#059669';
-      case 'ready_delivery':
-        return '#10b981';
-      case 'delivered':
-        return '#111827';
-      case 'closed':
-        return '#4b5563';
-      case 'cancelled':
-        return '#374151';
-      default:
-        return '#6b7280';
-    }
-  };
 
   // Render different sub-tab contents
   return (
@@ -161,6 +97,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ user, activeTab = 
         fontFamily: 'Inter, sans-serif',
       }}
     >
+      <VersionBanner />
       {/* View Header */}
       <header
         className="view-header"
@@ -176,13 +113,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ user, activeTab = 
       >
         <div>
           <h1 className="view-title" style={{ margin: 0, fontSize: '1.75rem', fontWeight: 700 }}>
-            Direction SAV
+            Tableau de Bord Directeur SAV
           </h1>
           <p
             className="view-subtitle"
             style={{ margin: '0.25rem 0 0 0', color: '#a1a1aa', fontSize: '0.9rem' }}
           >
-            Pilotage stratégique — Directeur : <strong style={{ color: '#fff' }}>{user.name}</strong>
+            {getRoleFieldGuidance('directeur-sav')}
+          </p>
+          <p
+            className="view-subtitle"
+            style={{ margin: '0.25rem 0 0 0', color: '#a1a1aa', fontSize: '0.9rem' }}
+          >
+            Directeur : <strong style={{ color: '#fff' }}>{user.name}</strong>
           </p>
         </div>
 
@@ -231,6 +174,21 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ user, activeTab = 
           </span>
         </div>
       </header>
+
+      {/* Read-Only Notice */}
+      <div
+        style={{
+          background: 'rgba(59, 130, 246, 0.08)',
+          border: '1px solid rgba(59, 130, 246, 0.2)',
+          borderRadius: '8px',
+          padding: '0.75rem 1.25rem',
+          color: '#3b82f6',
+          fontSize: '0.9rem',
+          fontWeight: 500,
+        }}
+      >
+        ℹ️ Mode Consultation & Pilotage — Aucune action d’écriture ou de modification autorisée.
+      </div>
 
       {/* KPI Cards */}
       <section
@@ -535,18 +493,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ user, activeTab = 
                         }}
                       >
                         <strong style={{ color: '#fff' }}>{alert.immatriculation}</strong>
-                        <span
-                          style={{
-                            fontSize: '0.7rem',
-                            padding: '0.125rem 0.375rem',
-                            borderRadius: '4px',
-                            background: getStatusColor(alert.status),
-                            color: '#000',
-                            fontWeight: 600,
-                          }}
-                        >
-                          {getStatusLabel(alert.status)}
-                        </span>
+                        <StatusBadge status={alert.status} />
                       </div>
                       <p style={{ margin: 0, fontSize: '0.85rem', color: '#d4d4d8' }}>
                         {alert.description}
@@ -820,18 +767,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ user, activeTab = 
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ fontWeight: 'bold' }}>{c.immatriculation}</span>
-                    <span
-                      style={{
-                        fontSize: '0.7rem',
-                        padding: '1px 5px',
-                        borderRadius: '4px',
-                        background: getStatusColor(c.status),
-                        color: '#000',
-                        fontWeight: 600,
-                      }}
-                    >
-                      {getStatusLabel(c.status)}
-                    </span>
+                    <StatusBadge status={c.status} />
                   </div>
                   <div style={{ fontSize: '0.8rem', color: '#a1a1aa', marginTop: '0.25rem' }}>
                     VIN: {c.vin}
@@ -858,17 +794,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ user, activeTab = 
                 <header style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '1rem' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <h2 style={{ margin: 0, fontSize: '1.5rem' }}>Dossier {selectedCase.immatriculation}</h2>
-                    <span
-                      style={{
-                        padding: '0.25rem 0.75rem',
-                        borderRadius: '6px',
-                        fontWeight: 600,
-                        background: getStatusColor(selectedCase.status),
-                        color: '#000',
-                      }}
-                    >
-                      {getStatusLabel(selectedCase.status)}
-                    </span>
+                    <StatusBadge status={selectedCase.status} />
                   </div>
                   <p style={{ margin: '0.25rem 0 0 0', color: '#a1a1aa', fontSize: '0.85rem' }}>
                     Créé le : {new Date(selectedCase.createdAt).toLocaleString()} | Dernière mise à jour :{' '}
@@ -921,7 +847,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ user, activeTab = 
                   </p>
                   <p style={{ fontSize: '0.9rem', margin: '0.25rem 0' }}>
                     <span style={{ color: '#71717a' }}>Priorité Atelier :</span>{' '}
-                    <span style={{ fontWeight: 'bold' }}>{selectedCase.workshopPriority || 'non définie'}</span>
+                    {selectedCase.workshopPriority ? (
+                      <PriorityBadge priority={selectedCase.workshopPriority as 'low' | 'normal' | 'high' | 'urgent'} />
+                    ) : (
+                      <span style={{ color: '#71717a' }}>non définie</span>
+                    )}
                   </p>
                   <p style={{ fontSize: '0.9rem', margin: '0.25rem 0' }}>
                     <span style={{ color: '#71717a' }}>Baie Atelier :</span> {selectedCase.workshopBay || 'N/A'}

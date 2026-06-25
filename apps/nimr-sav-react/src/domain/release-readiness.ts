@@ -37,11 +37,11 @@ export function validateVersionReadiness(appVersion: string): ReadinessCheckResu
   if (!appVersion) {
     blockers.push("Version string is missing or undefined.");
   } else {
-    if (appVersion !== 'v24.0.0-alpha.10') {
-      blockers.push(`Version mismatch: expected 'v24.0.0-alpha.10', got '${appVersion}'.`);
+    if (appVersion !== 'v24.0.0-alpha.11') {
+      blockers.push(`Version mismatch: expected 'v24.0.0-alpha.11', got '${appVersion}'.`);
     }
     if (appVersion.includes('RC')) {
-      blockers.push("Version name contains 'RC' but alpha.10 is not a Release Candidate.");
+      blockers.push("Version name contains 'RC' but alpha.11 is not a Release Candidate.");
     }
     if (appVersion.includes('production')) {
       blockers.push("Version name contains 'production' but this is an internal alpha version.");
@@ -308,7 +308,7 @@ export function summarizeRcBlockers(readiness: {
 
 export function getReleaseReadinessChecklist(): { id: string; label: string; checked: boolean }[] {
   return [
-    { id: 'version_alpha10', label: 'Version calée sur v24.0.0-alpha.10', checked: true },
+    { id: 'version_alpha11', label: 'Version calée sur v24.0.0-alpha.11', checked: true },
     { id: 'official_roles', label: 'Uniquement les 8 rôles officiels configurés', checked: true },
     { id: 'official_statuses', label: 'Uniquement les 14 statuts de dossiers officiels', checked: true },
     { id: 'security_prefix', label: 'Isolation localStorage (nimr-sav-react-v24-)', checked: true },
@@ -325,7 +325,7 @@ export function validateReleaseReadiness(
   logs: AuditLogEntry[],
   options?: { appVersion?: string }
 ): ReleaseReadinessReport {
-  const versionInput = options?.appVersion || 'v24.0.0-alpha.10';
+  const versionInput = options?.appVersion || 'v24.0.0-alpha.11';
 
   const versionResult = validateVersionReadiness(versionInput);
   const rolesResult = validateRoleReadiness();
@@ -365,8 +365,8 @@ export function validateReleaseReadiness(
   const coverage = calculateWorkflowCoverage(cases, logs);
 
   const recommendation = isReadyForRcEvaluation
-    ? "alpha.10 prête pour revue RC interne (aucun bloqueur critique détecté)"
-    : "alpha.10 présente des bloqueurs critiques à résoudre avant évaluation RC";
+    ? "alpha.11 prête pour revue UX terrain interne (aucun bloqueur critique détecté)"
+    : "alpha.11 présente des bloqueurs critiques à résoudre avant évaluation UX terrain";
 
   return {
     appVersion: versionInput,

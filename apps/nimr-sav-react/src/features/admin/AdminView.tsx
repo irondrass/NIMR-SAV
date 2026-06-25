@@ -4,6 +4,8 @@ import { useSavCases } from '@/state/useSavCases';
 import { APP_VERSION } from '@/constants/version';
 import { ROLE_GOVERNANCE_LABELS } from '@/domain/role-governance';
 import { validateReleaseReadiness, getReleaseReadinessChecklist } from '@/domain/release-readiness';
+import { VersionBanner } from '@/components/VersionBanner';
+import { getRoleFieldGuidance } from '@/domain/ui-field-guidelines';
 
 interface AdminViewProps {
   user: User;
@@ -57,6 +59,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ user }) => {
         fontFamily: 'Inter, sans-serif',
       }}
     >
+      <VersionBanner />
       {/* Header section */}
       <header
         className="view-header"
@@ -72,14 +75,19 @@ export const AdminView: React.FC<AdminViewProps> = ({ user }) => {
       >
         <div>
           <h1 className="view-title" style={{ margin: 0, fontSize: '1.75rem', fontWeight: 700 }}>
-            Console Admin NIMR SAV
+            Gouvernance & Readiness
           </h1>
           <p
             className="view-subtitle"
             style={{ margin: '0.25rem 0 0 0', color: '#a1a1aa', fontSize: '0.9rem' }}
           >
-            Supervision Technique & Gouvernance — Admin :{' '}
-            <strong style={{ color: '#fff' }}>{user.name}</strong>
+            {getRoleFieldGuidance('admin')}
+          </p>
+          <p
+            className="view-subtitle"
+            style={{ margin: '0.25rem 0 0 0', color: '#a1a1aa', fontSize: '0.9rem' }}
+          >
+            Admin : <strong style={{ color: '#fff' }}>{user.name}</strong>
           </p>
         </div>
         <span
@@ -113,7 +121,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ user }) => {
       >
         <span>⚠️</span>
         <span>
-          <strong>Avertissement :</strong> Console de gouvernance en lecture / supervision. Aucune action destructive (reset, suppression, modification de rôles/utilisateurs) n'est disponible dans cette version alpha.10 (non RC).
+          <strong>Avertissement :</strong> Aucune action destructive ou modification utilisateur n’est disponible. Version de stabilisation alpha.11 (non RC).
         </span>
       </div>
 

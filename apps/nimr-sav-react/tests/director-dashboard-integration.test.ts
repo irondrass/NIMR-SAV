@@ -51,7 +51,7 @@ import { savCaseStore } from '../src/state/sav-case-store';
 import { SavCase } from '../src/domain/sav-case';
 import { calculateDirectorDashboard, calculateBlockingAlerts } from '../src/domain/director-kpis';
 
-describe('SAV Director Dashboard Integration (v24.0.0-alpha.10)', () => {
+describe('SAV Director Dashboard Integration (v24.0.0-alpha.11)', () => {
   beforeEach(() => {
     window.localStorage.clear();
     savCaseStore.clearAll();
@@ -63,20 +63,20 @@ describe('SAV Director Dashboard Integration (v24.0.0-alpha.10)', () => {
   });
 
   // 1. Version checks
-  it('APP_VERSION is exactly v24.0.0-alpha.10', () => {
-    expect(APP_VERSION).toBe('v24.0.0-alpha.10');
+  it('APP_VERSION is exactly v24.0.0-alpha.11', () => {
+    expect(APP_VERSION).toBe('v24.0.0-alpha.11');
   });
 
-  it('package.json version matches 24.0.0-alpha.10', () => {
+  it('package.json version matches 24.0.0-alpha.11', () => {
     const pkgPath = resolve(__dirname, '../package.json');
     const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
-    expect(pkg.version).toBe('24.0.0-alpha.10');
+    expect(pkg.version).toBe('24.0.0-alpha.11');
   });
 
-  it('package-lock.json version matches 24.0.0-alpha.10', () => {
+  it('package-lock.json version matches 24.0.0-alpha.11', () => {
     const lockPath = resolve(__dirname, '../package-lock.json');
     const lock = JSON.parse(readFileSync(lockPath, 'utf-8'));
-    expect(lock.version).toBe('24.0.0-alpha.10');
+    expect(lock.version).toBe('24.0.0-alpha.11');
   });
 
   // 2. Pure KPI Calculations

@@ -6,6 +6,11 @@ import { hasPermission } from '@/domain/action-permissions';
 import { SavCase, WorkshopTask } from '@/domain/sav-case';
 import { CaseStatus } from '@/domain/case-status';
 import { Button } from '@/components/ui/Button';
+import { EmptyState } from '@/components/EmptyState';
+import { StatusBadge } from '@/components/StatusBadge';
+import { PriorityBadge } from '@/components/PriorityBadge';
+import { VersionBanner } from '@/components/VersionBanner';
+import { getRoleFieldGuidance, getStatusDisplay } from '@/domain/ui-field-guidelines';
 
 interface PlanningViewProps {
   user: User;
@@ -181,325 +186,423 @@ export const PlanningView: React.FC<PlanningViewProps> = ({ user }) => {
   }, [logs, selectedCaseId]);
 
   return (
-    <div className="view-container" id="planning-view" style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '2rem', padding: '1rem' }}>
-
-      {/* Left panel: List by status tabs */}
-      <div className="planning-list-panel" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-        <header className="view-header" style={{ marginBottom: 0 }}>
-          <h1 className="view-title">Planning & Suivi Atelier</h1>
-          <p className="view-subtitle">Rôle : Chef Atelier | Utilisateur : {user.name}</p>
-        </header>
-
-        {/* Workshop status tabs */}
-        <div className="status-tabs" style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.1)', gap: '0.5rem', paddingBottom: '0.25rem', overflowX: 'auto' }}>
-          {(['received', 'diagnosis', 'waiting_parts', 'repair', 'work_completed'] as CaseStatus[]).map((status) => (
-            <button
-              key={status}
-              onClick={() => { setActiveTab(status); setSelectedCaseId(null); }}
-              style={{
-                background: 'none',
-                border: 'none',
-                color: activeTab === status ? '#2196f3' : '#aaa',
-                borderBottom: activeTab === status ? '2px solid #2196f3' : 'none',
-                padding: '0.5rem 0.75rem',
-                cursor: 'pointer',
-                fontWeight: activeTab === status ? 'bold' : 'normal',
-                whiteSpace: 'nowrap'
-              }}
-            >
-              {status.toUpperCase().replace('_', ' ')}
-            </button>
-          ))}
+    <div
+      className="view-container"
+      id="planning-view"
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '1.5rem',
+        padding: '1.5rem',
+        background: '#121214',
+        color: '#fff',
+        minHeight: '100vh',
+        fontFamily: 'Inter, sans-serif',
+      }}
+    >
+      <header className="view-header" style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '1rem' }}>
+        <h1 className="view-title" style={{ margin: 0, fontSize: '1.75rem', fontWeight: 700 }}>
+          Planification Atelier
+        </h1>
+        <p className="view-subtitle" style={{ margin: '0.25rem 0 0 0', color: '#a1a1aa', fontSize: '0.9rem' }}>
+          planifier les interventions, priorités, tâches et affectations
+        </p>
+        <div style={{ marginTop: '0.75rem', fontSize: '0.85rem', color: '#3b82f6', fontStyle: 'italic' }}>
+          {getRoleFieldGuidance(user.role)}
         </div>
+      </header>
 
-        {/* Case list */}
-        <div style={{ flex: 1, maxHeight: '600px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-          {filteredCases.length === 0 ? (
-            <p style={{ color: '#888', fontStyle: 'italic' }}>Aucun dossier dans ce statut.</p>
-          ) : (
-            filteredCases.map((c) => (
-              <div
-                key={c.id}
-                onClick={() => handleSelectCase(c)}
+      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '2rem' }}>
+        {/* Left panel: List by status tabs */}
+        <div className="planning-list-panel" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          {/* Workshop status tabs */}
+          <div
+            className="status-tabs"
+            style={{
+              display: 'flex',
+              borderBottom: '1px solid rgba(255,255,255,0.1)',
+              gap: '0.5rem',
+              paddingBottom: '0.25rem',
+              overflowX: 'auto',
+            }}
+          >
+            {(['received', 'diagnosis', 'waiting_parts', 'repair', 'work_completed'] as CaseStatus[]).map((status) => (
+              <button
+                key={status}
+                onClick={() => {
+                  setActiveTab(status);
+                  setSelectedCaseId(null);
+                }}
                 style={{
-                  background: selectedCaseId === c.id ? 'rgba(33, 150, 243, 0.15)' : 'rgba(255,255,255,0.03)',
-                  border: selectedCaseId === c.id ? '1px solid #2196f3' : '1px solid transparent',
-                  padding: '1rem',
-                  borderRadius: '6px',
+                  background: 'none',
+                  border: 'none',
+                  color: activeTab === status ? '#3b82f6' : '#888',
+                  borderBottom: activeTab === status ? '2px solid #3b82f6' : 'none',
+                  padding: '0.5rem 0.75rem',
                   cursor: 'pointer',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center'
+                  fontWeight: activeTab === status ? 'bold' : 'normal',
+                  whiteSpace: 'nowrap',
                 }}
               >
-                <div>
-                  <h4 style={{ margin: 0 }}>{c.immatriculation} — {c.vin}</h4>
-                  <p style={{ margin: '0.25rem 0 0', fontSize: '0.85rem', color: '#aaa' }}>
-                    Tech : {c.assignedTechnicianName || 'Non affecté'} | Priorité : <span style={{ fontWeight: 'bold' }}>{c.workshopPriority || 'non définie'}</span>
-                  </p>
-                  <p style={{ margin: '0.25rem 0 0', fontSize: '0.8rem', color: '#888' }}>
-                    Reçu le : {new Date(c.receptionDate).toLocaleDateString()}
-                  </p>
-                </div>
-                <span style={{ fontSize: '1.5rem' }}>➡️</span>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
-
-      {/* Right panel: Details, Planning & Actions */}
-      <div className="planning-detail-panel" style={{ background: 'rgba(255,255,255,0.05)', padding: '1.5rem', borderRadius: '8px', display: 'flex', flexDirection: 'column', gap: '1.5rem', maxHeight: '700px', overflowY: 'auto' }}>
-
-        {!selectedCase ? (
-          <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100%', color: '#888' }}>
-            <span style={{ fontSize: '3rem', marginBottom: '1rem' }}>📋</span>
-            <p>Sélectionnez un dossier de l'atelier pour planifier ou effectuer des actions.</p>
+                {getStatusDisplay(status)}
+              </button>
+            ))}
           </div>
-        ) : (
-          <>
-            <div>
-              <h2 style={{ margin: 0 }}>Détail : {selectedCase.immatriculation}</h2>
-              <p style={{ margin: '0.25rem 0 0', color: '#888', fontSize: '0.9rem' }}>ID: {selectedCase.id} | Statut : <strong style={{ color: '#ff9800' }}>{selectedCase.status}</strong></p>
-            </div>
 
-            {errorMsg && (
-              <div style={{ background: '#b71c1c', color: '#fff', padding: '0.75rem', borderRadius: '4px', fontSize: '0.9rem' }}>
-                {errorMsg}
-              </div>
-            )}
-
-            {infoMsg && (
-              <div style={{ background: '#1b5e20', color: '#fff', padding: '0.75rem', borderRadius: '4px', fontSize: '0.9rem' }}>
-                {infoMsg}
-              </div>
-            )}
-
-            {/* Step 1: Assignment & Priority */}
-            <div style={{ borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '1.5rem' }}>
-              <h3>Affectation & Priorité</h3>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginTop: '0.5rem' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.85rem', color: '#aaa', marginBottom: '0.25rem' }}>Affecter un technicien</label>
-                  <select
-                    disabled={!canAssign}
-                    className="form-select"
-                    value={selectedCase.assignedTechnicianId || ''}
-                    onChange={(e) => handleAssignTech(e.target.value)}
-                  >
-                    <option value="">— Non affecté —</option>
-                    {DEMO_TECHNICIANS.map((t) => (
-                      <option key={t.id} value={t.id}>{t.name}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.85rem', color: '#aaa', marginBottom: '0.25rem' }}>Priorité Atelier</label>
-                  <select
-                    disabled={!canSetPriority}
-                    className="form-select"
-                    value={selectedCase.workshopPriority || ''}
-                    onChange={(e) => handleSetPriority(e.target.value as 'basse' | 'normale' | 'haute')}
-                  >
-                    <option value="">— Non définie —</option>
-                    <option value="basse">Basse</option>
-                    <option value="normale">Normale</option>
-                    <option value="haute">Haute</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-
-            {/* Step 2: Planning Details */}
-            <div style={{ borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '1.5rem' }}>
-              <h3>Planification de l'intervention</h3>
-
-              <form onSubmit={handleSavePlanning} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '0.5rem' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+          {/* Case list */}
+          <div style={{ flex: 1, maxHeight: '600px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            {filteredCases.length === 0 ? (
+              <EmptyState role="chef-atelier" messageOverride={`Aucun dossier avec le statut : ${getStatusDisplay(activeTab)}.`} />
+            ) : (
+              filteredCases.map((c) => (
+                <div
+                  key={c.id}
+                  onClick={() => handleSelectCase(c)}
+                  style={{
+                    background: selectedCaseId === c.id ? 'rgba(59, 130, 246, 0.15)' : 'rgba(255,255,255,0.03)',
+                    border: selectedCaseId === c.id ? '1px solid #3b82f6' : '1px solid rgba(255,255,255,0.05)',
+                    padding: '1rem',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    transition: 'all 0.2s',
+                  }}
+                >
                   <div>
-                    <label style={{ display: 'block', fontSize: '0.85rem', color: '#aaa' }}>Baie Atelier</label>
-                    <input
-                      disabled={!canPlan}
-                      type="text"
-                      className="form-input"
-                      value={bay}
-                      onChange={(e) => setBay(e.target.value)}
-                      placeholder="Ex: Baie A"
-                    />
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.85rem', color: '#aaa' }}>Durée estimée (min)</label>
-                    <input
-                      disabled={!canPlan}
-                      type="number"
-                      className="form-input"
-                      value={duration}
-                      onChange={(e) => setDuration(e.target.value === '' ? '' : Number(e.target.value))}
-                      placeholder="Ex: 60"
-                    />
-                  </div>
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.85rem', color: '#aaa' }}>Début Planifié</label>
-                    <input
-                      disabled={!canPlan}
-                      type="datetime-local"
-                      className="form-input"
-                      value={startAt}
-                      onChange={(e) => setStartAt(e.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.85rem', color: '#aaa' }}>Fin Planifiée</label>
-                    <input
-                      disabled={!canPlan}
-                      type="datetime-local"
-                      className="form-input"
-                      value={endAt}
-                      onChange={(e) => setEndAt(e.target.value)}
-                    />
-                  </div>
-                </div>
-
-                {canPlan && (
-                  <Button type="submit" size="sm" variant="ghost" style={{ marginTop: '0.5rem' }}>
-                    Enregistrer Planification
-                  </Button>
-                )}
-              </form>
-            </div>
-
-            {/* Step 3: Tasks List */}
-            <div style={{ borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '1.5rem' }}>
-              <h3>Tâches Atelier ({selectedCase.workshopTasks?.length || 0})</h3>
-
-              {/* Add task form */}
-              {canPlan && (
-                <form onSubmit={handleAddTask} style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem', marginBottom: '0.75rem' }}>
-                  <input
-                    type="text"
-                    className="form-input"
-                    value={taskLabel}
-                    onChange={(e) => setTaskLabel(e.target.value)}
-                    placeholder="Nouvelle tâche (ex: Remplacement plaquettes)"
-                  />
-                  <Button type="submit" size="sm">Ajouter</Button>
-                </form>
-              )}
-
-              {/* Tasks List */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                {!selectedCase.workshopTasks || selectedCase.workshopTasks.length === 0 ? (
-                  <p style={{ color: '#888', fontStyle: 'italic', fontSize: '0.9rem' }}>Aucune tâche planifiée.</p>
-                ) : (
-                  selectedCase.workshopTasks.map((t) => (
+                    <h4 style={{ margin: 0, fontSize: '0.95rem' }}>
+                      {c.immatriculation} — {c.vin}
+                    </h4>
                     <div
-                      key={t.id}
-                      onClick={() => handleToggleTaskStatus(t)}
                       style={{
-                        background: 'rgba(255,255,255,0.02)',
-                        padding: '0.5rem 0.75rem',
-                        borderRadius: '4px',
+                        margin: '0.25rem 0 0',
+                        fontSize: '0.85rem',
+                        color: '#aaa',
                         display: 'flex',
-                        justifyContent: 'space-between',
                         alignItems: 'center',
-                        cursor: 'pointer',
-                        borderLeft: t.status === 'done' ? '4px solid #4caf50' : t.status === 'in_progress' ? '4px solid #ff9800' : '4px solid #9e9e9e'
+                        gap: '0.5rem',
+                        flexWrap: 'wrap',
                       }}
                     >
-                      <span>{t.label}</span>
-                      <span style={{ fontSize: '0.8rem', color: '#aaa' }}>
-                        {t.status.toUpperCase().replace('_', ' ')}
+                      <span>Tech : {c.assignedTechnicianName || 'Non affecté'}</span>
+                      <span>|</span>
+                      <span>
+                        Priorité :{' '}
+                        {c.workshopPriority ? (
+                           <PriorityBadge priority={c.workshopPriority as 'low' | 'normal' | 'high' | 'urgent'} />
+                        ) : (
+                          <span style={{ fontSize: '0.75rem', color: '#71717a' }}>non définie</span>
+                        )}
                       </span>
                     </div>
-                  ))
-                )}
-              </div>
+                    <p style={{ margin: '0.25rem 0 0', fontSize: '0.8rem', color: '#888' }}>
+                      Reçu le : {new Date(c.receptionDate).toLocaleDateString()}
+                    </p>
+                  </div>
+                  <span style={{ fontSize: '1.2rem', color: '#3b82f6' }}>➡️</span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* Right panel: Details, Planning & Actions */}
+        <div
+          className="planning-detail-panel"
+          style={{
+            background: 'rgba(255,255,255,0.03)',
+            padding: '1.5rem',
+            borderRadius: '8px',
+            border: '1px solid rgba(255,255,255,0.05)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '1.5rem',
+            maxHeight: '700px',
+            overflowY: 'auto',
+          }}
+        >
+          {!selectedCase ? (
+            <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100%', minHeight: '300px', color: '#888' }}>
+              <span style={{ fontSize: '2.5rem', marginBottom: '1rem' }}>📋</span>
+              <p style={{ fontSize: '0.95rem', textAlign: 'center' }}>Sélectionnez un dossier de l'atelier pour planifier ou effectuer des actions.</p>
             </div>
+          ) : (
+            <>
+              <div>
+                <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 600 }}>Détail : {selectedCase.immatriculation}</h2>
+                <div style={{ margin: '0.25rem 0 0', color: '#888', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <span>ID: {selectedCase.id}</span>
+                  <span>|</span>
+                  <span>
+                    Statut : <StatusBadge status={selectedCase.status} />
+                  </span>
+                </div>
+              </div>
 
-            {/* Step 4: Workflow Actions */}
-            <div style={{ borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '1.5rem' }}>
-              <h3>Transitions Atelier</h3>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.5rem' }}>
+              {errorMsg && (
+                <div style={{ background: '#b71c1c', color: '#fff', padding: '0.75rem', borderRadius: '4px', fontSize: '0.9rem' }}>
+                  {errorMsg}
+                </div>
+              )}
 
-                {selectedCase.status === 'received' && (
-                  <Button onClick={() => handleTransition('diagnosis')}>
-                    Lancer Diagnostic
-                  </Button>
+              {infoMsg && (
+                <div style={{ background: '#1b5e20', color: '#fff', padding: '0.75rem', borderRadius: '4px', fontSize: '0.9rem' }}>
+                  {infoMsg}
+                </div>
+              )}
+
+              {/* Step 1: Assignment & Priority */}
+              <div style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '1.5rem' }}>
+                <h3 style={{ fontSize: '1rem', fontWeight: 600, margin: '0 0 0.75rem 0' }}>Affectation & Priorité</h3>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.85rem', color: '#a1a1aa', marginBottom: '0.5rem' }}>Affecter un technicien</label>
+                    <select
+                      disabled={!canAssign}
+                      className="form-select"
+                      value={selectedCase.assignedTechnicianId || ''}
+                      onChange={(e) => handleAssignTech(e.target.value)}
+                      style={{ width: '100%', padding: '0.5rem', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.15)', background: '#18181b', color: '#fff' }}
+                    >
+                      <option value="">— Non affecté —</option>
+                      {DEMO_TECHNICIANS.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.85rem', color: '#a1a1aa', marginBottom: '0.5rem' }}>Priorité Atelier</label>
+                    <select
+                      disabled={!canSetPriority}
+                      className="form-select"
+                      value={selectedCase.workshopPriority || ''}
+                      onChange={(e) => handleSetPriority(e.target.value as 'basse' | 'normale' | 'haute')}
+                      style={{ width: '100%', padding: '0.5rem', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.15)', background: '#18181b', color: '#fff' }}
+                    >
+                      <option value="">— Non définie —</option>
+                      <option value="basse">Basse</option>
+                      <option value="normale">Normale</option>
+                      <option value="haute">Haute</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Step 2: Planning Details */}
+              <div style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '1.5rem' }}>
+                <h3 style={{ fontSize: '1rem', fontWeight: 600, margin: '0 0 0.75rem 0' }}>Planification de l'intervention</h3>
+
+                <form onSubmit={handleSavePlanning} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.85rem', color: '#a1a1aa', marginBottom: '0.25rem' }}>Baie Atelier</label>
+                      <input
+                        disabled={!canPlan}
+                        type="text"
+                        className="form-input"
+                        value={bay}
+                        onChange={(e) => setBay(e.target.value)}
+                        placeholder="Ex: Baie A"
+                        style={{ width: '100%', padding: '0.5rem', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.15)', background: '#18181b', color: '#fff' }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.85rem', color: '#a1a1aa', marginBottom: '0.25rem' }}>Durée estimée (min)</label>
+                      <input
+                        disabled={!canPlan}
+                        type="number"
+                        className="form-input"
+                        value={duration}
+                        onChange={(e) => setDuration(e.target.value === '' ? '' : Number(e.target.value))}
+                        placeholder="Ex: 60"
+                        style={{ width: '100%', padding: '0.5rem', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.15)', background: '#18181b', color: '#fff' }}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.85rem', color: '#a1a1aa', marginBottom: '0.25rem' }}>Début Planifié</label>
+                      <input
+                        disabled={!canPlan}
+                        type="datetime-local"
+                        className="form-input"
+                        value={startAt}
+                        onChange={(e) => setStartAt(e.target.value)}
+                        style={{ width: '100%', padding: '0.5rem', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.15)', background: '#18181b', color: '#fff' }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.85rem', color: '#a1a1aa', marginBottom: '0.25rem' }}>Fin Planifiée</label>
+                      <input
+                        disabled={!canPlan}
+                        type="datetime-local"
+                        className="form-input"
+                        value={endAt}
+                        onChange={(e) => setEndAt(e.target.value)}
+                        style={{ width: '100%', padding: '0.5rem', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.15)', background: '#18181b', color: '#fff' }}
+                      />
+                    </div>
+                  </div>
+
+                  {canPlan && (
+                    <Button type="submit" variant="ghost" style={{ marginTop: '0.5rem' }}>
+                      Enregistrer Planification
+                    </Button>
+                  )}
+                </form>
+              </div>
+
+              {/* Step 3: Workshop Tasks Management */}
+              <div style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.05)', paddingBottom: '1.5rem' }}>
+                <h3 style={{ fontSize: '1rem', fontWeight: 600, margin: '0 0 0.75rem 0' }}>Tâches Atelier</h3>
+
+                {/* Add task form */}
+                {canPlan && (
+                  <form onSubmit={handleAddTask} style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={taskLabel}
+                      onChange={(e) => setTaskLabel(e.target.value)}
+                      placeholder="Nouvelle tâche (ex: Ponçage)"
+                      style={{ flex: 1, padding: '0.5rem', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.15)', background: '#18181b', color: '#fff' }}
+                    />
+                    <Button type="submit" variant="ghost" size="sm">
+                      Ajouter
+                    </Button>
+                  </form>
                 )}
 
-                {selectedCase.status === 'diagnosis' && (
-                  <>
-                    <Button variant="ghost" onClick={() => handleTransition('waiting_parts')}>
-                      Attente Pièces
+                {/* Tasks list */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  {(selectedCase.workshopTasks || []).length === 0 ? (
+                    <p style={{ color: '#888', fontStyle: 'italic', fontSize: '0.85rem', margin: 0 }}>Aucune tâche atelier.</p>
+                  ) : (
+                    (selectedCase.workshopTasks || []).map((t) => (
+                      <div
+                        key={t.id}
+                        onClick={() => canPlan && handleToggleTaskStatus(t)}
+                        style={{
+                          background: 'rgba(255,255,255,0.02)',
+                          padding: '0.6rem 0.8rem',
+                          borderRadius: '4px',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          cursor: canPlan ? 'pointer' : 'default',
+                          border: '1px solid rgba(255,255,255,0.03)',
+                        }}
+                      >
+                        <span style={{ fontSize: '0.85rem' }}>{t.label}</span>
+                        <span
+                          style={{
+                            fontSize: '0.75rem',
+                            fontWeight: 600,
+                            padding: '0.2rem 0.5rem',
+                            borderRadius: '4px',
+                            background: t.status === 'done' ? 'rgba(16, 185, 129, 0.15)' : t.status === 'in_progress' ? 'rgba(245, 158, 11, 0.15)' : 'rgba(255,255,255,0.08)',
+                            color: t.status === 'done' ? '#10b981' : t.status === 'in_progress' ? '#f59e0b' : '#888',
+                          }}
+                        >
+                          {t.status === 'done' ? 'Terminée' : t.status === 'in_progress' ? 'En cours' : 'En attente'}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* Step 4: Workflow transitions */}
+              <div style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '1.5rem' }}>
+                <h3 style={{ fontSize: '1rem', fontWeight: 600, margin: '0 0 0.75rem 0' }}>Workflow Actions</h3>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem' }}>
+                  {selectedCase.status === 'received' && (
+                    <Button onClick={() => handleTransition('diagnosis')}>
+                      Lancer Diagnostic
                     </Button>
+                  )}
+
+                  {selectedCase.status === 'diagnosis' && (
+                    <>
+                      <Button onClick={() => handleTransition('waiting_parts')} variant="ghost">
+                        Mettre en Attente Pièces
+                      </Button>
+                      <Button onClick={() => handleTransition('repair')}>
+                        Lancer Réparation
+                      </Button>
+                    </>
+                  )}
+
+                  {selectedCase.status === 'waiting_parts' && (
                     <Button onClick={() => handleTransition('repair')}>
                       Lancer Réparation
                     </Button>
-                  </>
-                )}
+                  )}
 
-                {selectedCase.status === 'waiting_parts' && (
-                  <Button onClick={() => handleTransition('repair')}>
-                    Lancer Réparation
-                  </Button>
-                )}
+                  {selectedCase.status === 'repair' && (
+                    <Button onClick={() => handleTransition('work_completed')}>
+                      Terminer Intervention
+                    </Button>
+                  )}
 
-                {selectedCase.status === 'repair' && (
-                  <Button onClick={() => handleTransition('work_completed')}>
-                    Terminer Intervention
-                  </Button>
-                )}
+                  {selectedCase.status === 'quality_rejected' && (
+                    <Button onClick={() => handleTransition('quality_rework')}>
+                      Relancer pour Reprise
+                    </Button>
+                  )}
 
-                {selectedCase.status === 'quality_rejected' && (
-                  <Button onClick={() => handleTransition('quality_rework')}>
-                    Relancer pour Reprise
-                  </Button>
-                )}
-
-                {/* If no transition matches role guidelines */}
-                {!['received', 'diagnosis', 'waiting_parts', 'repair', 'quality_rejected'].includes(selectedCase.status) && (
-                  <p style={{ color: '#888', fontStyle: 'italic', fontSize: '0.9rem' }}>
-                    Aucune transition atelier disponible pour ce statut actuel ({selectedCase.status}).
-                  </p>
-                )}
-
+                  {/* If no transition matches role guidelines */}
+                  {!['received', 'diagnosis', 'waiting_parts', 'repair', 'quality_rejected'].includes(selectedCase.status) && (
+                    <p style={{ color: '#888', fontStyle: 'italic', fontSize: '0.9rem', margin: 0 }}>
+                      Aucune transition atelier disponible pour le statut : {getStatusDisplay(selectedCase.status)}.
+                    </p>
+                  )}
+                </div>
               </div>
-            </div>
 
-            {/* Step 5: Audit logs */}
-            <div>
-              <h3>Logs d'Audit du Dossier ({caseLogs.length})</h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.5rem', maxHeight: '200px', overflowY: 'auto' }}>
-                {caseLogs.length === 0 ? (
-                  <p style={{ color: '#888', fontStyle: 'italic', fontSize: '0.9rem' }}>Aucun log disponible pour ce dossier.</p>
-                ) : (
-                  caseLogs.map((log) => (
-                    <div key={log.id} style={{ background: 'rgba(255,255,255,0.01)', padding: '0.5rem', borderRadius: '4px', fontSize: '0.8rem' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', color: '#ff9800' }}>
-                        <span>{log.action}</span>
-                        <span style={{ color: '#888' }}>{new Date(log.timestamp).toLocaleTimeString()}</span>
+              {/* Step 5: Audit logs */}
+              <div>
+                <h3 style={{ fontSize: '1rem', fontWeight: 600, margin: '0 0 0.75rem 0' }}>Logs d'Audit du Dossier ({caseLogs.length})</h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: '200px', overflowY: 'auto' }}>
+                  {caseLogs.length === 0 ? (
+                    <p style={{ color: '#888', fontStyle: 'italic', fontSize: '0.9rem', margin: 0 }}>Aucun log disponible pour ce dossier.</p>
+                  ) : (
+                    caseLogs.map((log) => (
+                      <div
+                        key={log.id}
+                        style={{
+                          background: 'rgba(255,255,255,0.01)',
+                          padding: '0.5rem',
+                          borderRadius: '4px',
+                          fontSize: '0.8rem',
+                          border: '1px solid rgba(255,255,255,0.03)',
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', color: '#f59e0b' }}>
+                          <span>{log.action}</span>
+                          <span style={{ color: '#888' }}>{new Date(log.timestamp).toLocaleTimeString()}</span>
+                        </div>
+                        <p style={{ margin: '0.25rem 0 0', color: '#ddd' }}>{log.details}</p>
+                        <p style={{ margin: '0.1rem 0 0', fontSize: '0.75rem', color: '#666' }}>
+                          Acteur : {log.userRole}
+                          {log.fromStatus && ` (${log.fromStatus} -> ${log.toStatus})`}
+                        </p>
                       </div>
-                      <p style={{ margin: '0.25rem 0 0' }}>{log.details}</p>
-                      <p style={{ margin: '0.1rem 0 0', fontSize: '0.75rem', color: '#666' }}>
-                        Acteur : {log.userRole}
-                        {log.fromStatus && ` (${log.fromStatus} -> ${log.toStatus})`}
-                      </p>
-                    </div>
-                  ))
-                )}
+                    ))
+                  )}
+                </div>
               </div>
-            </div>
-
-          </>
-        )}
-
+            </>
+          )}
+        </div>
       </div>
-
+      <VersionBanner />
     </div>
   );
 };

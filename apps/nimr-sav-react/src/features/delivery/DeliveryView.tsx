@@ -2,6 +2,10 @@ import React, { useState, useMemo } from 'react';
 import type { User } from '@/types';
 import { useSavCases } from '@/state/useSavCases';
 import { Button } from '@/components/ui/Button';
+import { StatusBadge } from '@/components/StatusBadge';
+import { EmptyState } from '@/components/EmptyState';
+import { BlockedNotice } from '@/components/BlockedNotice';
+import { getRoleFieldGuidance } from '@/domain/ui-field-guidelines';
 
 interface DeliveryViewProps {
   user: User;
@@ -25,12 +29,10 @@ export const DeliveryView: React.FC<DeliveryViewProps> = ({ user }) => {
     };
   }, [user]);
 
-  // Filter cases visible to Livraison: quality_approved, ready_delivery, delivered
+  // Filter cases visible to Livraison (all except draft and cancelled, to show blocked/notices)
   const deliveryCases = useMemo(() => {
     return cases.filter((c) =>
-      c.status === 'quality_approved' ||
-      c.status === 'ready_delivery' ||
-      c.status === 'delivered'
+      c.status !== 'draft' && c.status !== 'cancelled'
     );
   }, [cases]);
 
@@ -97,38 +99,14 @@ export const DeliveryView: React.FC<DeliveryViewProps> = ({ user }) => {
     }
   };
 
-  // Translate case status for display
-  const getStatusLabel = (status: string) => {
-    switch (status) {
-      case 'quality_approved':
-        return 'Prêt à préparer';
-      case 'ready_delivery':
-        return 'Prêt à livrer';
-      case 'delivered':
-        return 'Livré';
-      default:
-        return status;
-    }
-  };
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'quality_approved':
-        return '#10b981'; // green
-      case 'ready_delivery':
-        return '#3b82f6'; // blue
-      case 'delivered':
-        return '#6b7280'; // gray
-      default:
-        return '#6b7280';
-    }
-  };
-
   return (
     <div className="view-container" id="delivery-view" style={{ display: 'flex', flexDirection: 'column', gap: '1rem', padding: '1rem', color: '#fff', minHeight: '100vh', background: '#121214' }}>
       <header className="view-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '1rem', flexWrap: 'wrap', gap: '1rem' }}>
         <div>
-          <h1 className="view-title" style={{ margin: 0, fontSize: '1.5rem', fontWeight: 600 }}>Service Livraison</h1>
+          <h1 className="view-title" style={{ margin: 0, fontSize: '1.5rem', fontWeight: 600 }}>Livraison Client</h1>
+          <p className="view-subtitle" style={{ margin: '0.25rem 0 0 0', color: '#a1a1aa', fontSize: '0.875rem' }}>
+            {getRoleFieldGuidance('livraison')}
+          </p>
           <p className="view-subtitle" style={{ margin: '0.25rem 0 0 0', color: '#a1a1aa', fontSize: '0.875rem' }}>
             Session de : <strong style={{ color: '#fff' }}>{actor.name} ({actor.role})</strong>
           </p>
@@ -142,10 +120,7 @@ export const DeliveryView: React.FC<DeliveryViewProps> = ({ user }) => {
           <h2 style={{ fontSize: '1.1rem', margin: 0, fontWeight: 600 }}>Dossiers livraison ({deliveryCases.length})</h2>
 
           {deliveryCases.length === 0 ? (
-            <div style={{ padding: '2rem 1rem', textAlign: 'center', color: '#71717a' }} id="no-delivery-cases">
-              <span style={{ fontSize: '2rem', display: 'block', marginBottom: '0.5rem' }}>📦</span>
-              <p style={{ margin: 0, fontSize: '0.9rem' }}>Aucun dossier prêt pour livraison.</p>
-            </div>
+            <EmptyState role="livraison" />
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', overflowY: 'auto', flex: 1 }}>
               {deliveryCases.map((c) => (
@@ -170,18 +145,7 @@ export const DeliveryView: React.FC<DeliveryViewProps> = ({ user }) => {
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
                     <span style={{ fontWeight: 'bold', fontSize: '0.95rem' }}>{c.immatriculation}</span>
-                    <span
-                      style={{
-                        padding: '0.125rem 0.375rem',
-                        borderRadius: '4px',
-                        fontSize: '0.7rem',
-                        fontWeight: 600,
-                        background: getStatusColor(c.status),
-                        color: '#000',
-                      }}
-                    >
-                      {getStatusLabel(c.status)}
-                    </span>
+                    <StatusBadge status={c.status} />
                   </div>
                   <div style={{ fontSize: '0.8rem', color: '#a1a1aa' }}>VIN: {c.vin}</div>
                   <div style={{ fontSize: '0.8rem', color: '#71717a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', width: '100%' }}>
@@ -207,10 +171,7 @@ export const DeliveryView: React.FC<DeliveryViewProps> = ({ user }) => {
           )}
 
           {!selectedCase ? (
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#71717a', textAlign: 'center' }}>
-              <span style={{ fontSize: '3rem', marginBottom: '1rem' }}>🔍</span>
-              <h3>Sélectionnez un dossier dans la liste pour commencer ou finaliser sa livraison.</h3>
-            </div>
+            <EmptyState role="livraison" messageOverride="Sélectionnez un dossier dans la liste pour commencer ou finaliser sa livraison." />
           ) : (
             <>
               {/* Case Header Details */}
@@ -225,18 +186,7 @@ export const DeliveryView: React.FC<DeliveryViewProps> = ({ user }) => {
                     </p>
                   </div>
                   <div style={{ textAlign: 'right' }}>
-                    <span
-                      style={{
-                        padding: '0.25rem 0.5rem',
-                        borderRadius: '4px',
-                        fontSize: '0.85rem',
-                        fontWeight: 'bold',
-                        background: getStatusColor(selectedCase.status),
-                        color: '#000',
-                      }}
-                    >
-                      {getStatusLabel(selectedCase.status)}
-                    </span>
+                    <StatusBadge status={selectedCase.status} />
                     <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.8rem', color: '#71717a' }}>
                       Reçu le : {new Date(selectedCase.receptionDate).toLocaleString()}
                     </p>
@@ -252,7 +202,9 @@ export const DeliveryView: React.FC<DeliveryViewProps> = ({ user }) => {
                 </div>
                 <div>
                   <h4 style={{ margin: '0 0 0.25rem 0', color: '#71717a', fontSize: '0.75rem', textTransform: 'uppercase' }}>Statut Contrôle QC</h4>
-                  <span style={{ fontSize: '0.9rem', color: '#22c55e', fontWeight: 600 }}>✓ Validé (Approuvé)</span>
+                  <span style={{ fontSize: '0.9rem', color: selectedCase.qcCheckedAt ? '#22c55e' : '#ef4444', fontWeight: 600 }}>
+                    {selectedCase.qcCheckedAt ? '✓ Validé (Approuvé)' : '✗ Non approuvé'}
+                  </span>
                 </div>
                 <div>
                   <h4 style={{ margin: '0 0 0.25rem 0', color: '#71717a', fontSize: '0.75rem', textTransform: 'uppercase' }}>Date Validation QC</h4>
@@ -302,6 +254,11 @@ export const DeliveryView: React.FC<DeliveryViewProps> = ({ user }) => {
                   <strong style={{ color: '#a1a1aa', display: 'block', marginBottom: '0.25rem' }}>Remarques de livraison :</strong>
                   {selectedCase.deliveryNotes}
                 </div>
+              )}
+
+              {/* Blocked notice if QC not approved */}
+              {selectedCase.status !== 'quality_approved' && selectedCase.status !== 'ready_delivery' && selectedCase.status !== 'delivered' && (
+                <BlockedNotice status={selectedCase.status} role="livraison" />
               )}
 
               {/* Interactive Pilot */}

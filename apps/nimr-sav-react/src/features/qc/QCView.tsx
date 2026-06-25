@@ -3,6 +3,10 @@ import type { User } from '@/types';
 import { useSavCases } from '@/state/useSavCases';
 import { Button } from '@/components/ui/Button';
 import { normalizeQcChecklist } from '@/domain/qc-rules';
+import { StatusBadge } from '@/components/StatusBadge';
+import { PriorityBadge } from '@/components/PriorityBadge';
+import { EmptyState } from '@/components/EmptyState';
+import { getRoleFieldGuidance } from '@/domain/ui-field-guidelines';
 
 interface QCViewProps {
   user: User;
@@ -143,42 +147,14 @@ export const QCView: React.FC<QCViewProps> = ({ user }) => {
     return items.filter((item) => item.required).every((item) => item.checked);
   }, [selectedCase]);
 
-  // Translate case status for display
-  const getStatusLabel = (status: string) => {
-    switch (status) {
-      case 'work_completed':
-        return 'Prêt pour QC';
-      case 'quality_pending':
-        return 'QC en cours';
-      case 'quality_rejected':
-        return 'Rejeté';
-      case 'quality_rework':
-        return 'En reprise';
-      default:
-        return status;
-    }
-  };
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'work_completed':
-        return '#3b82f6';
-      case 'quality_pending':
-        return '#eab308';
-      case 'quality_rejected':
-        return '#ef4444';
-      case 'quality_rework':
-        return '#f97316';
-      default:
-        return '#6b7280';
-    }
-  };
-
   return (
     <div className="view-container" id="qc-view" style={{ display: 'flex', flexDirection: 'column', gap: '1rem', padding: '1rem', color: '#fff', minHeight: '100vh', background: '#121214' }}>
       <header className="view-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '1rem', flexWrap: 'wrap', gap: '1rem' }}>
         <div>
           <h1 className="view-title" style={{ margin: 0, fontSize: '1.5rem', fontWeight: 600 }}>Contrôle Qualité</h1>
+          <p className="view-subtitle" style={{ margin: '0.25rem 0 0 0', color: '#a1a1aa', fontSize: '0.875rem' }}>
+            {getRoleFieldGuidance('qualite')}
+          </p>
           <p className="view-subtitle" style={{ margin: '0.25rem 0 0 0', color: '#a1a1aa', fontSize: '0.875rem' }}>
             Session de : <strong style={{ color: '#fff' }}>{actor.name} ({actor.role})</strong>
           </p>
@@ -192,10 +168,7 @@ export const QCView: React.FC<QCViewProps> = ({ user }) => {
           <h2 style={{ fontSize: '1.1rem', margin: 0, fontWeight: 600 }}>Dossiers à contrôler ({qcCases.length})</h2>
 
           {qcCases.length === 0 ? (
-            <div style={{ padding: '2rem 1rem', textAlign: 'center', color: '#71717a' }}>
-              <span style={{ fontSize: '2rem', display: 'block', marginBottom: '0.5rem' }}>📋</span>
-              <p style={{ margin: 0, fontSize: '0.9rem' }}>Aucun dossier en attente de contrôle qualité.</p>
-            </div>
+            <EmptyState role="qualite" />
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', overflowY: 'auto', flex: 1 }}>
               {qcCases.map((c) => (
@@ -220,18 +193,7 @@ export const QCView: React.FC<QCViewProps> = ({ user }) => {
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
                     <span style={{ fontWeight: 'bold', fontSize: '0.95rem' }}>{c.immatriculation}</span>
-                    <span
-                      style={{
-                        padding: '0.125rem 0.375rem',
-                        borderRadius: '4px',
-                        fontSize: '0.7rem',
-                        fontWeight: 600,
-                        background: getStatusColor(c.status),
-                        color: '#000',
-                      }}
-                    >
-                      {getStatusLabel(c.status)}
-                    </span>
+                    <StatusBadge status={c.status} />
                   </div>
                   <div style={{ fontSize: '0.8rem', color: '#a1a1aa' }}>VIN: {c.vin}</div>
                   <div style={{ fontSize: '0.8rem', color: '#71717a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', width: '100%' }}>
@@ -257,10 +219,7 @@ export const QCView: React.FC<QCViewProps> = ({ user }) => {
           )}
 
           {!selectedCase ? (
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#71717a', textAlign: 'center' }}>
-              <span style={{ fontSize: '3rem', marginBottom: '1rem' }}>🔍</span>
-              <h3>Sélectionnez un dossier dans la liste pour commencer le contrôle qualité.</h3>
-            </div>
+            <EmptyState role="qualite" messageOverride="Sélectionnez un dossier dans la liste pour commencer le contrôle qualité." />
           ) : (
             <>
               {/* Case Header Details */}
@@ -275,18 +234,7 @@ export const QCView: React.FC<QCViewProps> = ({ user }) => {
                     </p>
                   </div>
                   <div style={{ textAlign: 'right' }}>
-                    <span
-                      style={{
-                        padding: '0.25rem 0.5rem',
-                        borderRadius: '4px',
-                        fontSize: '0.85rem',
-                        fontWeight: 'bold',
-                        background: getStatusColor(selectedCase.status),
-                        color: '#000',
-                      }}
-                    >
-                      {getStatusLabel(selectedCase.status)}
-                    </span>
+                    <StatusBadge status={selectedCase.status} />
                     <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.8rem', color: '#71717a' }}>
                       Reçu le : {new Date(selectedCase.receptionDate).toLocaleString()}
                     </p>
@@ -302,7 +250,9 @@ export const QCView: React.FC<QCViewProps> = ({ user }) => {
                 </div>
                 <div>
                   <h4 style={{ margin: '0 0 0.25rem 0', color: '#71717a', fontSize: '0.75rem', textTransform: 'uppercase' }}>Priorité Atelier</h4>
-                  <span style={{ fontSize: '0.9rem', textTransform: 'capitalize' }}>{selectedCase.workshopPriority || 'Normale'}</span>
+                  <div>
+                    <PriorityBadge priority={selectedCase.workshopPriority || 'normal'} />
+                  </div>
                 </div>
                 <div>
                   <h4 style={{ margin: '0 0 0.25rem 0', color: '#71717a', fontSize: '0.75rem', textTransform: 'uppercase' }}>Baie Atelier</h4>

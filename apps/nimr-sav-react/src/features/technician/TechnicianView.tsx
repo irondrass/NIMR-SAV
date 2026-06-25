@@ -3,6 +3,12 @@ import type { User } from '@/types';
 import { useSavCases } from '@/state/useSavCases';
 import { DEMO_TECHNICIANS } from '@/constants/demo-technicians';
 import { Button } from '@/components/ui/Button';
+import { EmptyState } from '@/components/EmptyState';
+import { StatusBadge } from '@/components/StatusBadge';
+import { PriorityBadge } from '@/components/PriorityBadge';
+import { BlockedNotice } from '@/components/BlockedNotice';
+import { VersionBanner } from '@/components/VersionBanner';
+import { getRoleFieldGuidance } from '@/domain/ui-field-guidelines';
 
 interface TechnicianViewProps {
   user: User;
@@ -94,19 +100,57 @@ export const TechnicianView: React.FC<TechnicianViewProps> = ({ user }) => {
   };
 
   return (
-    <div className="view-container" id="technician-view" style={{ display: 'flex', flexDirection: 'column', gap: '1rem', padding: '1rem', color: '#fff', minHeight: '100vh', background: '#121214' }}>
-
+    <div
+      className="view-container"
+      id="technician-view"
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '1.5rem',
+        padding: '1.5rem',
+        background: '#121214',
+        color: '#fff',
+        minHeight: '100vh',
+        fontFamily: 'Inter, sans-serif',
+      }}
+    >
       {/* Header and Simulation Mode Selector */}
-      <header className="view-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '1rem', flexWrap: 'wrap', gap: '1rem' }}>
+      <header
+        className="view-header"
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          borderBottom: '1px solid rgba(255,255,255,0.08)',
+          paddingBottom: '1rem',
+          flexWrap: 'wrap',
+          gap: '1rem',
+        }}
+      >
         <div>
-          <h1 className="view-title" style={{ margin: 0, fontSize: '1.75rem', fontWeight: '700', background: 'linear-gradient(45deg, #00b0ff, #00e5ff)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>Espace Technicien</h1>
-          <p className="view-subtitle" style={{ margin: '0.25rem 0 0', color: '#aaa', fontSize: '0.9rem' }}>
-            Connecté en tant que : <strong style={{ color: '#fff' }}>{user.name}</strong> ({user.role})
+          <h1 className="view-title" style={{ margin: 0, fontSize: '1.75rem', fontWeight: 700 }}>
+            Espace Technicien
+          </h1>
+          <p className="view-subtitle" style={{ margin: '0.25rem 0 0 0', color: '#a1a1aa', fontSize: '0.9rem' }}>
+            suivre ses dossiers affectés et valider les tâches sur sa tablette
           </p>
+          <div style={{ marginTop: '0.75rem', fontSize: '0.85rem', color: '#3b82f6', fontStyle: 'italic' }}>
+            {getRoleFieldGuidance(user.role)}
+          </div>
         </div>
 
         {/* Demo Technician Simulator picker */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', background: 'rgba(255,255,255,0.04)', padding: '0.5rem 1rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)' }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.75rem',
+            background: 'rgba(255,255,255,0.04)',
+            padding: '0.5rem 1rem',
+            borderRadius: '8px',
+            border: '1px solid rgba(255,255,255,0.08)',
+          }}
+        >
           <label htmlFor="tech-simulator-select" style={{ fontSize: '0.85rem', color: '#aaa', fontWeight: '500' }}>
             Simuler Technicien :
           </label>
@@ -120,13 +164,13 @@ export const TechnicianView: React.FC<TechnicianViewProps> = ({ user }) => {
               setSuccessMsg('');
             }}
             style={{
-              background: '#1a1a1e',
+              background: '#18181b',
               color: '#fff',
               border: '1px solid rgba(255,255,255,0.15)',
               padding: '0.25rem 0.5rem',
               borderRadius: '4px',
               fontSize: '0.85rem',
-              cursor: 'pointer'
+              cursor: 'pointer',
             }}
           >
             {DEMO_TECHNICIANS.map((tech) => (
@@ -140,19 +184,27 @@ export const TechnicianView: React.FC<TechnicianViewProps> = ({ user }) => {
 
       {/* Main Layout Grid */}
       <div className="view-main" style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr', gap: '1.5rem', flex: 1, minHeight: 0 }}>
-
         {/* Left Side: List of Assigned Cases */}
-        <div className="cases-list-panel" style={{ background: '#1a1a1e', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '12px', padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem', minHeight: 0 }}>
-          <h2 style={{ margin: 0, fontSize: '1.2rem', color: '#fff', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <span>📋</span> Dossiers Assignés ({assignedCases.length})
+        <div
+          className="cases-list-panel"
+          style={{
+            background: 'rgba(255,255,255,0.03)',
+            border: '1px solid rgba(255,255,255,0.05)',
+            borderRadius: '8px',
+            padding: '1.25rem',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '1rem',
+            minHeight: 0,
+          }}
+        >
+          <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 600, color: '#fff', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span>🔧</span> Mes Dossiers Affectés ({assignedCases.length})
           </h2>
 
-          <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.75rem', paddingRight: '0.25rem' }}>
+          <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
             {assignedCases.length === 0 ? (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#888', textAlign: 'center', padding: '2rem' }}>
-                <span style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>📭</span>
-                <p style={{ margin: 0, fontSize: '0.9rem' }}>Aucun dossier affecté à ce technicien.</p>
-              </div>
+              <EmptyState role="technicien" />
             ) : (
               assignedCases.map((c) => (
                 <div
@@ -160,33 +212,31 @@ export const TechnicianView: React.FC<TechnicianViewProps> = ({ user }) => {
                   id={`case-card-${c.id}`}
                   onClick={() => handleSelectCase(c.id)}
                   style={{
-                    background: selectedCaseId === c.id ? 'rgba(0, 176, 255, 0.12)' : 'rgba(255,255,255,0.02)',
-                    border: selectedCaseId === c.id ? '1px solid #00b0ff' : '1px solid rgba(255,255,255,0.05)',
+                    background: selectedCaseId === c.id ? 'rgba(59, 130, 246, 0.15)' : 'rgba(255,255,255,0.02)',
+                    border: selectedCaseId === c.id ? '1px solid #3b82f6' : '1px solid rgba(255,255,255,0.05)',
                     borderRadius: '8px',
                     padding: '1rem',
                     cursor: 'pointer',
                     transition: 'all 0.2s ease',
                     display: 'flex',
                     flexDirection: 'column',
-                    gap: '0.5rem'
+                    gap: '0.5rem',
                   }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontWeight: '700', color: '#fff' }}>{c.immatriculation}</span>
-                    <span style={{
-                      fontSize: '0.75rem',
-                      padding: '0.2rem 0.5rem',
-                      borderRadius: '4px',
-                      fontWeight: 'bold',
-                      background: c.status === 'repair' ? '#ff9800' : c.status === 'work_completed' ? '#4caf50' : '#757575',
-                      color: '#fff'
-                    }}>
-                      {c.status.toUpperCase().replace('_', ' ')}
-                    </span>
+                    <span style={{ fontWeight: 700, color: '#fff' }}>{c.immatriculation}</span>
+                    <StatusBadge status={c.status} />
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', color: '#aaa', fontSize: '0.8rem' }}>
                     <span>VIN: {c.vin}</span>
-                    <span>Priorité: <strong style={{ color: c.workshopPriority === 'haute' ? '#f44336' : c.workshopPriority === 'normale' ? '#ff9800' : '#4caf50' }}>{c.workshopPriority || 'aucune'}</strong></span>
+                    <span>
+                      Priorité:{' '}
+                      {c.workshopPriority ? (
+                        <PriorityBadge priority={c.workshopPriority as 'low' | 'normal' | 'high' | 'urgent'} />
+                      ) : (
+                        <span style={{ color: '#71717a' }}>aucune</span>
+                      )}
+                    </span>
                   </div>
                 </div>
               ))
@@ -195,42 +245,44 @@ export const TechnicianView: React.FC<TechnicianViewProps> = ({ user }) => {
         </div>
 
         {/* Right Side: Detailed View and Technician Controls */}
-        <div className="case-detail-panel" style={{ background: '#1a1a1e', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '12px', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem', minHeight: 0, overflowY: 'auto' }}>
-
+        <div
+          className="case-detail-panel"
+          style={{
+            background: 'rgba(255,255,255,0.03)',
+            border: '1px solid rgba(255,255,255,0.05)',
+            borderRadius: '8px',
+            padding: '1.5rem',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '1.25rem',
+            minHeight: 0,
+            overflowY: 'auto',
+          }}
+        >
           {!selectedCase ? (
-            <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100%', color: '#888' }}>
-              <span style={{ fontSize: '3rem', marginBottom: '1rem' }}>🔧</span>
-              <p style={{ margin: 0 }}>Sélectionnez un dossier à gauche pour afficher les tâches et démarrer l'intervention.</p>
+            <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100%', minHeight: '300px', color: '#888' }}>
+              <span style={{ fontSize: '2.5rem', marginBottom: '1rem' }}>⚙️</span>
+              <p style={{ margin: 0, fontSize: '0.95rem', textAlign: 'center' }}>Sélectionnez un dossier à gauche pour afficher les tâches et démarrer l'intervention.</p>
             </div>
           ) : (
             <>
               {/* Header Details */}
-              <div style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '1rem' }}>
+              <div style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '1rem' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
-                  <h2 style={{ margin: 0, fontSize: '1.5rem' }}>Détails : {selectedCase.immatriculation}</h2>
-                  <span style={{
-                    fontSize: '0.85rem',
-                    padding: '0.25rem 0.6rem',
-                    borderRadius: '6px',
-                    fontWeight: 'bold',
-                    background: 'rgba(0, 176, 255, 0.15)',
-                    border: '1px solid #00b0ff',
-                    color: '#00b0ff'
-                  }}>
-                    {selectedCase.status.toUpperCase().replace('_', ' ')}
-                  </span>
+                  <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 600 }}>Détails : {selectedCase.immatriculation}</h2>
+                  <StatusBadge status={selectedCase.status} />
                 </div>
                 <p style={{ margin: '0.25rem 0 0', color: '#aaa', fontSize: '0.85rem' }}>VIN : {selectedCase.vin}</p>
               </div>
 
               {/* Status messages */}
               {errorMsg && (
-                <div style={{ background: '#d32f2f', color: '#fff', padding: '0.75rem 1rem', borderRadius: '6px', fontSize: '0.9rem', fontWeight: '500' }}>
+                <div style={{ background: '#d32f2f', color: '#fff', padding: '0.75rem 1rem', borderRadius: '6px', fontSize: '0.9rem', fontWeight: 500 }}>
                   ⚠️ {errorMsg}
                 </div>
               )}
               {successMsg && (
-                <div style={{ background: '#388e3c', color: '#fff', padding: '0.75rem 1rem', borderRadius: '6px', fontSize: '0.9rem', fontWeight: '500' }}>
+                <div style={{ background: '#388e3c', color: '#fff', padding: '0.75rem 1rem', borderRadius: '6px', fontSize: '0.9rem', fontWeight: 500 }}>
                   ✅ {successMsg}
                 </div>
               )}
@@ -243,8 +295,12 @@ export const TechnicianView: React.FC<TechnicianViewProps> = ({ user }) => {
                 </div>
                 <div style={{ background: 'rgba(255,255,255,0.02)', padding: '0.75rem 1rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)' }}>
                   <span style={{ fontSize: '0.8rem', color: '#aaa', display: 'block' }}>Priorité</span>
-                  <span style={{ fontSize: '1rem', fontWeight: 'bold', color: selectedCase.workshopPriority === 'haute' ? '#f44336' : selectedCase.workshopPriority === 'normale' ? '#ff9800' : '#4caf50' }}>
-                    {selectedCase.workshopPriority?.toUpperCase() || 'NORMALE'}
+                  <span>
+                    {selectedCase.workshopPriority ? (
+                      <PriorityBadge priority={selectedCase.workshopPriority as 'low' | 'normal' | 'high' | 'urgent'} />
+                    ) : (
+                      <span style={{ fontSize: '1rem', fontWeight: 'bold', color: '#71717a' }}>NORMALE</span>
+                    )}
                   </span>
                 </div>
                 <div style={{ background: 'rgba(255,255,255,0.02)', padding: '0.75rem 1rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)' }}>
@@ -256,18 +312,25 @@ export const TechnicianView: React.FC<TechnicianViewProps> = ({ user }) => {
               </div>
 
               {/* Client Demand */}
-              <div style={{ background: 'rgba(0, 176, 255, 0.04)', borderLeft: '4px solid #00b0ff', padding: '0.75rem 1rem', borderRadius: '4px' }}>
-                <strong style={{ display: 'block', fontSize: '0.85rem', color: '#00b0ff', marginBottom: '0.25rem' }}>Demande Client / Motif de Réception :</strong>
+              <div style={{ background: 'rgba(59, 130, 246, 0.05)', borderLeft: '4px solid #3b82f6', padding: '0.75rem 1rem', borderRadius: '4px' }}>
+                <strong style={{ display: 'block', fontSize: '0.85rem', color: '#3b82f6', marginBottom: '0.25rem' }}>Demande Client / Motif de Réception :</strong>
                 <p style={{ margin: 0, fontSize: '0.9rem', color: '#eee', lineHeight: '1.4' }}>
                   {caseLogs.find(l => l.action === 'create_case')?.details?.split('Motif: ')[1]?.split('. Kilométrage')[0] || 'Entretien général / diagnostic demandé'}
                 </p>
               </div>
 
-              {/* Controls and Status transition actions */}
-              <div style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '1.25rem' }}>
-                <h3 style={{ margin: '0 0 0.75rem 0', fontSize: '1.1rem' }}>Actions Intervention</h3>
-                <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+              {/* Blocked state notice for unfinished tasks */}
+              {selectedCase.status === 'repair' &&
+                (!selectedCase.workshopTasks ||
+                  selectedCase.workshopTasks.length === 0 ||
+                  selectedCase.workshopTasks.some((t) => t.status !== 'done')) && (
+                  <BlockedNotice status={selectedCase.status} role="technicien" />
+                )}
 
+              {/* Controls and Status transition actions */}
+              <div style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '1.25rem' }}>
+                <h3 style={{ margin: '0 0 0.75rem 0', fontSize: '1rem', fontWeight: 600 }}>Actions Intervention</h3>
+                <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
                   {/* Start Work Action */}
                   {(selectedCase.status === 'diagnosis' || selectedCase.status === 'waiting_parts') && (
                     <Button onClick={() => handleStartWork(selectedCase.id)} variant="primary" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -277,7 +340,7 @@ export const TechnicianView: React.FC<TechnicianViewProps> = ({ user }) => {
 
                   {/* Already in repair status message */}
                   {selectedCase.status === 'repair' && (
-                    <span style={{ color: '#aaa', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'rgba(255,152,0,0.08)', padding: '0.5rem 1rem', borderRadius: '6px', border: '1px solid rgba(255,152,0,0.2)' }}>
+                    <span style={{ color: '#aaa', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'rgba(245,158,11,0.08)', padding: '0.5rem 1rem', borderRadius: '6px', border: '1px solid rgba(245,158,11,0.2)' }}>
                       <span>⚙️</span> Intervention en cours... complétez toutes les tâches ci-dessous pour terminer.
                     </span>
                   )}
@@ -288,24 +351,17 @@ export const TechnicianView: React.FC<TechnicianViewProps> = ({ user }) => {
                       onClick={() => handleCompleteWork(selectedCase.id)}
                       variant="primary"
                       disabled={!(selectedCase.workshopTasks && selectedCase.workshopTasks.length > 0 && selectedCase.workshopTasks.every(t => t.status === 'done'))}
-                      style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: '#388e3c', borderColor: '#388e3c' }}
+                      style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: '#10b981', borderColor: '#10b981' }}
                     >
                       <span>🏁</span> Terminer l'intervention
                     </Button>
-                  )}
-
-                  {/* Other statuses info */}
-                  {!['diagnosis', 'waiting_parts', 'repair'].includes(selectedCase.status) && (
-                    <span style={{ color: '#aaa', fontSize: '0.85rem', fontStyle: 'italic' }}>
-                      Aucune action disponible pour le statut actuel ({selectedCase.status}).
-                    </span>
                   )}
                 </div>
               </div>
 
               {/* Tasks List */}
-              <div style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '1.25rem' }}>
-                <h3 style={{ margin: '0 0 0.75rem 0', fontSize: '1.1rem' }}>Tâches Atelier ({selectedCase.workshopTasks?.length || 0})</h3>
+              <div style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '1.25rem' }}>
+                <h3 style={{ margin: '0 0 0.75rem 0', fontSize: '1rem', fontWeight: 600 }}>Tâches Atelier ({selectedCase.workshopTasks?.length || 0})</h3>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                   {!selectedCase.workshopTasks || selectedCase.workshopTasks.length === 0 ? (
@@ -324,13 +380,13 @@ export const TechnicianView: React.FC<TechnicianViewProps> = ({ user }) => {
                           alignItems: 'center',
                           flexWrap: 'wrap',
                           gap: '0.75rem',
-                          borderLeft: t.status === 'done' ? '4px solid #4caf50' : t.status === 'in_progress' ? '4px solid #ff9800' : '4px solid #9e9e9e'
+                          borderLeft: t.status === 'done' ? '4px solid #10b981' : t.status === 'in_progress' ? '4px solid #f59e0b' : '4px solid #9e9e9e',
                         }}
                       >
                         <div>
                           <span style={{ fontWeight: '500', color: '#fff', fontSize: '0.95rem' }}>{t.label}</span>
                           <span style={{ display: 'block', fontSize: '0.75rem', color: '#aaa', marginTop: '0.15rem' }}>
-                            Statut : <strong style={{ color: t.status === 'done' ? '#4caf50' : t.status === 'in_progress' ? '#ff9800' : '#aaa' }}>{t.status.toUpperCase().replace('_', ' ')}</strong>
+                            Statut : <strong style={{ color: t.status === 'done' ? '#10b981' : t.status === 'in_progress' ? '#f59e0b' : '#aaa' }}>{t.status === 'done' ? 'Terminée' : t.status === 'in_progress' ? 'En cours' : 'En attente'}</strong>
                           </span>
                         </div>
 
@@ -342,12 +398,12 @@ export const TechnicianView: React.FC<TechnicianViewProps> = ({ user }) => {
                             </Button>
                           )}
                           {t.status === 'in_progress' && selectedCase.status === 'repair' && (
-                            <Button size="sm" variant="ghost" onClick={() => handleUpdateTaskStatus(selectedCase.id, t.id, 'done')} style={{ borderColor: '#4caf50', color: '#4caf50' }}>
+                            <Button size="sm" variant="ghost" onClick={() => handleUpdateTaskStatus(selectedCase.id, t.id, 'done')} style={{ borderColor: '#10b981', color: '#10b981' }}>
                               ✅ Terminer
                             </Button>
                           )}
                           {t.status === 'done' && (
-                            <span style={{ fontSize: '0.85rem', color: '#4caf50', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                            <span style={{ fontSize: '0.85rem', color: '#10b981', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
                               <span>✓</span> Complétée
                             </span>
                           )}
@@ -360,7 +416,7 @@ export const TechnicianView: React.FC<TechnicianViewProps> = ({ user }) => {
 
               {/* History / Audit Logs */}
               <div>
-                <h3 style={{ margin: '0 0 0.75rem 0', fontSize: '1.1rem' }}>Historique du Dossier</h3>
+                <h3 style={{ margin: '0 0 0.75rem 0', fontSize: '1rem', fontWeight: 600 }}>Historique du Dossier</h3>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: '180px', overflowY: 'auto', paddingRight: '0.25rem' }}>
                   {caseLogs.length === 0 ? (
                     <p style={{ color: '#888', fontStyle: 'italic', fontSize: '0.9rem', margin: 0 }}>Aucun historique disponible.</p>
@@ -381,14 +437,11 @@ export const TechnicianView: React.FC<TechnicianViewProps> = ({ user }) => {
                   )}
                 </div>
               </div>
-
             </>
           )}
-
         </div>
-
       </div>
-
+      <VersionBanner />
     </div>
   );
 };

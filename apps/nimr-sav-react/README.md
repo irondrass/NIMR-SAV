@@ -1,4 +1,4 @@
-# NIMR SAV React — v24.0.0-alpha.10
+# NIMR SAV React — v24.0.0-alpha.11
 
 Application React + TypeScript pour NIMR Carrosserie SAV.
 
@@ -33,31 +33,20 @@ npm run lint
 npm test
 ```
 
-## Structure
+## Écrans par rôle
 
-```
-src/
-├── constants/version.ts    ← APP_VERSION, LS_PREFIX, cache name
-├── types/index.ts          ← Types: Role, User, Vehicle, QC, Sync
-├── hooks/useLocalStorage.ts← Hook localStorage avec préfixe forcé
-├── components/ui/          ← Composants réutilisables
-├── features/               ← Vues par rôle
-│   ├── auth/LoginScreen.tsx
-│   ├── reception/
-│   ├── technician/
-│   ├── qc/
-│   ├── chef-atelier/
-│   ├── directeur/
-│   ├── admin/
-│   └── lecture-seule/
-└── styles/index.css        ← Design system NIMR v24
-tests/
-└── foundation.test.ts      ← Tests fondation
-```
+- **Réception SAV** : Créer et qualifier les dossiers atelier lors de la prise en charge.
+- **Planification Atelier** : Chef d'Atelier planifie les dossiers, affecte les techniciens et gère la priorité.
+- **Espace Technicien** : Suivi des tâches affectées sur tablette tactile et validation d'avancement.
+- **Contrôle Qualité** : Validation technique de conformité avec checklist et gestion des reprises.
+- **Livraison Client** : Préparation, preuve de livraison et confirmation finale de la remise.
+- **Directeur SAV** : Consultation du tableau de bord KPI et des alertes opérationnelles (lecture seule).
+- **Console Administration** : Supervision de la gouvernance et de la conformité technique (lecture seule).
+- **Mode Lecture Seule** : Consultation passive globale sans aucune action d'écriture ou modification.
 
 ## Version
 
-`v24.0.0-alpha.10` — Stabilisation globale / Release Candidate readiness interne.
+`v24.0.0-alpha.11` — Pré-RC UX terrain / cohérence finale des écrans.
 - Cette version n'est pas une Release Candidate (RC) et n'est pas prête pour la production.
 - Aucun tag de version v24 ou push ne doit être créé sur cette version.
 - Le pilote stable actuel reste exclusivement `v23.2.6`.

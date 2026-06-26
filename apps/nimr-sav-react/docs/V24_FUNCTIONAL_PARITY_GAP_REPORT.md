@@ -3,21 +3,22 @@
 
 ---
 
+### Résumé Consolidé & Décision Officielle
+
+* **Validation Technique** : La version `v24.0.0-rc.1` est **techniquement validée** (les tests unitaires et d'intégration passent à 100%, la compilation de production avec Vite réussit sans warning, l'analyse statique ESLint est vierge et npm audit ne rapporte aucune vulnérabilité).
+* **Validation Métier Terrain** : La version `v24.0.0-rc.1` est un **NO-GO absolu pour le terrain**. Elle ne peut pas être déployée en l'état car plus de 60% de la couverture opérationnelle métier de la v23.x est manquante.
+* **Statut Release Candidate (RC)** : Tout passage ou préparation d'une version `v24.0.0-rc.2` est **formellement interdit** tant que l'ensemble des écarts prioritaires de niveau **P0** (bloquants terrain) ne sont pas intégralement résolus.
+* **Production Finale** : Le déploiement de la version `v24.0.0` finale est **interdit** à ce stade.
+* **Version Active Stable** : La version **v23.2.6 (Racine)** reste l'unique version stable et pilote officielle en exploitation.
+* **Recommandation Architecturale** : Il est vivement recommandé d'effectuer un **retour en phase de développement actif sous version Alpha (v24.0.0-alpha.14)** afin de réintégrer les modules métier complexes.
+
+---
+
 ### Résumé exécutif
 
 Ce rapport présente l'analyse d'écart fonctionnel (gap analysis) réalisée entre l'application historique stable de production (NIMR SAV v23.2.6 racine) et la nouvelle mouture réécrite en React (NIMR SAV v24.0.0-rc.1). 
 
 L'objectif de cette réécriture était de moderniser la stack technique (passage sous React/TypeScript/Vite) tout en stabilisant les règles de gestion et la sécurité. Cependant, la confrontation de la version v24.0.0-rc.1 aux exigences de validation sur le terrain fait remonter un manque critique de fonctionnalités opérationnelles clés indispensables à l'activité quotidienne de l'atelier de carrosserie.
-
----
-
-### Décision : rc.1 techniquement OK mais terrain NO-GO
-
-> [!CAUTION]
-> **DÉCISION FINALE : NO-GO POUR LA PRODUCTION**
-> Bien que la version **v24.0.0-rc.1** soit techniquement stable (compilation réussie, tests automatisés à 100% au vert, linter propre et zéro vulnérabilité npm), elle est **inexploitable en conditions réelles sur le terrain**. 
-> 
-> Le durcissement excessif de la validation des données (obligation de saisir des préfixes fictifs de démo) et l'absence totale des modules d'importation de devis, de gestion multi-sinistres (Claims), d'exports ZIP/PDF et de synchronisation réseau bloquent le flux opérationnel réel des utilisateurs.
 
 ---
 

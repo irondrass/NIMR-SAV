@@ -15,7 +15,7 @@ function flattenChecklistText(): string {
   });
 }
 
-describe('RC evaluation checklist (v24.0.0-rc.1)', () => {
+describe('RC evaluation checklist (v24.0.0-alpha.14)', () => {
   it('contains the technical checklist', () => {
     const sections = getRcEvaluationChecklist();
 

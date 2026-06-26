@@ -1,6 +1,6 @@
-# Matrice de Parité Fonctionnelle — v23.x vs v24.0.0-rc.1
+# Matrice de Parité Fonctionnelle — v23.x vs v24.0.0-alpha.14
 
-Ce document détaille la matrice comparative exhaustive de toutes les fonctionnalités de l'ancienne version v23.x et leur état de parité dans la version v24.0.0-rc.1, avec la solution proposée pour combler chaque écart.
+Ce document détaille la matrice comparative exhaustive de toutes les fonctionnalités de l'ancienne version v23.x et leur état de parité dans la version v24.0.0-alpha.14, avec la solution proposée pour combler chaque écart.
 
 ---
 

@@ -12,7 +12,9 @@ import {
   validateNoConsultationMutation,
 } from './business-acceptance-scenarios';
 
-export const FUNCTIONAL_FREEZE_VERSION = 'v24.0.0-rc.1' as const;
+// Historique : v24.0.0-alpha.14 a existé et a été validée techniquement mais a reçu un NO-GO terrain.
+// alpha.14 est un retour en phase alpha de développement.
+export const FUNCTIONAL_FREEZE_VERSION = 'v24.0.0-alpha.14' as const;
 export const STABLE_PILOT_VERSION = 'v23.2.6' as const;
 export const FUNCTIONAL_FREEZE_LABEL = 'gel fonctionnel alpha.13 conservé' as const;
 
@@ -118,7 +120,7 @@ export function validateNoProductionExposure(
   const tagsPointingAtHead = [...(options.tagsPointingAtHead ?? [])];
   const isExpectedRc = appVersion === FUNCTIONAL_FREEZE_VERSION;
   const isInternalReleaseCandidate =
-    options.releaseCandidateDeclared === true || /-rc\./i.test(appVersion);
+    options.releaseCandidateDeclared === true || /-rc\.|-alpha\./i.test(appVersion);
   const isFinalRelease = appVersion === 'v24.0.0';
   const isProduction = options.productionExposureDeclared === true || /prod/i.test(appVersion);
   const hasUnexpectedTag = tagsPointingAtHead.length > 0;
@@ -128,7 +130,7 @@ export function validateNoProductionExposure(
     blockers.push(`Version attendue ${FUNCTIONAL_FREEZE_VERSION}, version reçue ${appVersion}.`);
   }
   if (!isInternalReleaseCandidate) {
-    blockers.push('rc.1 doit rester identifiée comme Release Candidate interne.');
+    blockers.push('rc.1 ou alpha.14 doit rester identifiée comme version interne.');
   }
   if (isFinalRelease) {
     blockers.push('rc.1 ne doit pas être assimilée à la version finale.');

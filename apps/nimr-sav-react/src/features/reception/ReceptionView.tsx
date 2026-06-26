@@ -21,10 +21,10 @@ export const ReceptionView: React.FC<ReceptionViewProps> = ({ user }) => {
   const { cases, logs, addCase, addLog } = useSavCases();
 
   // Form states
-  const [immatriculation, setImmatriculation] = useState('DEMO-');
-  const [vin, setVin] = useState('VIN-DEMO-');
-  const [clientName, setClientName] = useState('Client Démo ');
-  const [telephone, setTelephone] = useState('00000000');
+  const [immatriculation, setImmatriculation] = useState('');
+  const [vin, setVin] = useState('');
+  const [clientName, setClientName] = useState('');
+  const [telephone, setTelephone] = useState('');
   const [kilometrage, setKilometrage] = useState<number | ''>('');
   const [modele, setModele] = useState('');
   const [motif, setMotif] = useState('');
@@ -54,10 +54,10 @@ export const ReceptionView: React.FC<ReceptionViewProps> = ({ user }) => {
 
   // Form helper: reset fields
   const handleResetForm = () => {
-    setImmatriculation('DEMO-');
-    setVin('VIN-DEMO-');
-    setClientName('Client Démo ');
-    setTelephone('00000000');
+    setImmatriculation('');
+    setVin('');
+    setClientName('');
+    setTelephone('');
     setKilometrage('');
     setModele('');
     setMotif('');
@@ -73,16 +73,8 @@ export const ReceptionView: React.FC<ReceptionViewProps> = ({ user }) => {
       setFormError('L\'immatriculation est requise.');
       return false;
     }
-    if (!vin.trim()) {
-      setFormError('Le VIN est requis.');
-      return false;
-    }
     if (!clientName.trim()) {
       setFormError('Le nom du client est requis.');
-      return false;
-    }
-    if (!telephone.trim()) {
-      setFormError('Le numéro de téléphone est requis.');
       return false;
     }
     if (kilometrage === '' || kilometrage < 0) {
@@ -98,12 +90,12 @@ export const ReceptionView: React.FC<ReceptionViewProps> = ({ user }) => {
       return false;
     }
 
-    // Strict fictive validation
+    // Relaxed validation
     const fictiveError = validateFictiveFields({
       immatriculation,
-      vin,
+      vin: vin || undefined,
       clientName,
-      telephone,
+      telephone: telephone || undefined,
     });
 
     if (fictiveError) {

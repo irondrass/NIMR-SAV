@@ -1,16 +1,16 @@
-# NIMR SAV React — v24.0.0-rc.1
+# NIMR SAV React — v24.0.0-alpha.14
 
-Release Candidate interne / validation terrain finale.
+Version de rattrapage fonctionnel / retour en phase alpha.
 
 Application React + TypeScript pour NIMR Carrosserie SAV.
 
-> RC interne — cette étape organise la validation terrain finale. Elle n’est pas destinée à la production, n’est pas la version finale et ne crée aucun tag automatiquement.
+> Version de rattrapage — cette étape organise le retour en développement alpha après le refus terrain de la rc.1 (NO-GO). Elle n’est pas destinée à la production, n’est pas une version finale/RC, et ne crée aucun tag ni push automatique.
 
 ## Séparation stricte de v23.x
 
 | Élément | v23.x (racine) | v24 React |
 |---|---|---|
-| Statut | Pilote stable `v23.2.6` | RC interne de validation |
+| Statut | Pilote stable `v23.2.6` | Rattrapage fonctionnel alpha.14 |
 | Port | Serveur statique | 5173 (Vite) |
 | localStorage | `nimr-sav-*` | `nimr-sav-react-v24-*` |
 | Service Worker | `sw.js` actif côté v23 | Aucun service worker React actif |
@@ -40,9 +40,9 @@ npm audit --registry=https://registry.npmjs.org/
 
 ## Version
 
-`v24.0.0-rc.1` — Release Candidate interne / validation terrain finale.
+`v24.0.0-alpha.14` — Version de rattrapage fonctionnel / retour en développement alpha (rc.1 historique non modifiée).
 
-- rc.1 interne uniquement.
+- alpha.14 interne uniquement.
 - Non destinée à la production.
 - Non finale.
 - Aucun tag automatique.
@@ -56,12 +56,12 @@ npm audit --registry=https://registry.npmjs.org/
 - Le gel fonctionnel alpha.13 est conservé.
 - `v24.0.0` final reste hors périmètre.
 
-## Readiness RC interne
+## Readiness alpha.14
 
-rc.1 confirme :
+alpha.14 confirme :
 
-- version alignée sur `v24.0.0-rc.1` ;
-- statut Release Candidate interne ;
+- version alignée sur `v24.0.0-alpha.14` ;
+- statut de développement alpha de rattrapage ;
 - absence d’exposition production ;
 - absence de version finale ;
 - absence de tag automatique ;

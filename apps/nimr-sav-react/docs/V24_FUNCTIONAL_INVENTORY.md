@@ -1,4 +1,4 @@
-# Inventaire Fonctionnel Complet — NIMR SAV React v24.0.0-rc.1
+# Inventaire Fonctionnel Complet — NIMR SAV React v24.0.0-alpha.14
 
 Ce document recense les fonctionnalités implémentées dans la nouvelle version React de l'application (`apps/nimr-sav-react`).
 

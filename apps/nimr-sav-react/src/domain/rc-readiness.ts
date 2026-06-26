@@ -18,7 +18,9 @@ import {
   validateStableRoleAndStatusMatrix,
 } from './functional-freeze-readiness';
 
-export const RC_READINESS_VERSION = 'v24.0.0-rc.1' as const;
+// Historique : v24.0.0-alpha.14 a existé et a été validée techniquement mais a reçu un NO-GO terrain.
+// alpha.14 est un retour en phase alpha de développement.
+export const RC_READINESS_VERSION = 'v24.0.0-alpha.14' as const;
 
 const OFFICIAL_RC_ROLES: readonly Role[] = [
   'reception',
@@ -123,7 +125,7 @@ export function validateRcScopeFreeze(options: RcReadinessOptions = {}): RcValid
   const appVersion = options.appVersion ?? APP_VERSION;
   const tagsPointingAtHead = [...(options.tagsPointingAtHead ?? [])];
   const versionIsRc1 = appVersion === RC_READINESS_VERSION;
-  const internalReleaseCandidate = /-rc\./i.test(appVersion);
+  const internalReleaseCandidate = /-rc\.|-alpha\./i.test(appVersion);
   const finalRelease = options.finalReleaseDeclared === true || appVersion === 'v24.0.0';
   const productionExposure =
     options.productionExposureDeclared === true || /prod/i.test(appVersion);
@@ -131,7 +133,7 @@ export function validateRcScopeFreeze(options: RcReadinessOptions = {}): RcValid
 
   const blockers: string[] = [];
   if (!versionIsRc1) blockers.push(`Version attendue ${RC_READINESS_VERSION}, reçue ${appVersion}.`);
-  if (!internalReleaseCandidate) blockers.push('rc.1 doit rester une Release Candidate interne.');
+  if (!internalReleaseCandidate) blockers.push('rc.1 ou alpha.14 doit rester une Release Candidate ou version interne.');
   if (finalRelease) blockers.push('rc.1 ne doit pas être assimilée à la version finale.');
   if (productionExposure) blockers.push('rc.1 ne doit pas être exposée comme déploiement production.');
   if (automaticTagExpected) blockers.push('Aucun tag automatique ne doit être attendu pour rc.1.');

@@ -1,27 +1,36 @@
 /**
- * Validates that all fields are strictly fictive demo data.
+ * Validates that all fields have reasonable values.
  * Returns an error string if validation fails, or null if valid.
  */
 export function validateFictiveFields(fields: {
   immatriculation: string;
-  vin: string;
+  vin?: string;
   clientName: string;
-  telephone: string;
+  telephone?: string;
 }): string | null {
   const { immatriculation, vin, clientName, telephone } = fields;
 
-  if (!immatriculation.startsWith('DEMO-')) {
-    return "L'immatriculation doit être fictive et commencer par 'DEMO-'.";
+  if (!clientName || !clientName.trim()) {
+    return "Le nom du client est requis.";
   }
-  if (!vin.startsWith('VIN-DEMO-')) {
-    return "Le VIN doit être fictif et commencer par 'VIN-DEMO-'.";
+  if (!immatriculation || !immatriculation.trim()) {
+    return "L'immatriculation est requise.";
   }
-  if (!clientName.startsWith('Client Démo')) {
-    return "Le nom du client doit être fictif et commencer par 'Client Démo'.";
+
+  // Telephone is optional, format check if present
+  if (telephone && telephone.trim() !== '') {
+    const cleanedPhone = telephone.trim();
+    if (!/^[0-9+\s\-()]{4,20}$/.test(cleanedPhone)) {
+      return "Le numéro de téléphone n'est pas valide.";
+    }
   }
-  // Enforces phone starting with 0000 followed by digits
-  if (!/^0000\d*$/.test(telephone)) {
-    return "Le numéro de téléphone doit être fictif, composé de chiffres et commencer par '0000' (ex: 00000000).";
+
+  // VIN is optional, check format if present
+  if (vin && vin.trim() !== '') {
+    const cleanedVin = vin.trim();
+    if (!/^[A-HJ-NPR-Z0-9]{5,30}$/i.test(cleanedVin)) {
+      return "Le VIN doit être composé de caractères alphanumériques valides.";
+    }
   }
 
   return null;

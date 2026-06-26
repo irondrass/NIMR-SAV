@@ -1,12 +1,12 @@
 # Audit d'Écart Fonctionnel (Functional Parity Gap Report)
-## NIMR SAV v23.x (Racine) vs NIMR SAV v24.0.0-rc.1 (React)
+## NIMR SAV v23.x (Racine) vs NIMR SAV v24.0.0-alpha.14 (React)
 
 ---
 
 ### Résumé Consolidé & Décision Officielle
 
-* **Validation Technique** : La version `v24.0.0-rc.1` est **techniquement validée** (les tests unitaires et d'intégration passent à 100%, la compilation de production avec Vite réussit sans warning, l'analyse statique ESLint est vierge et npm audit ne rapporte aucune vulnérabilité).
-* **Validation Métier Terrain** : La version `v24.0.0-rc.1` est un **NO-GO absolu pour le terrain**. Elle ne peut pas être déployée en l'état car plus de 60% de la couverture opérationnelle métier de la v23.x est manquante.
+* **Validation Technique** : La version `v24.0.0-alpha.14` est **techniquement validée** (les tests unitaires et d'intégration passent à 100%, la compilation de production avec Vite réussit sans warning, l'analyse statique ESLint est vierge et npm audit ne rapporte aucune vulnérabilité).
+* **Validation Métier Terrain** : La version `v24.0.0-alpha.14` est un **NO-GO absolu pour le terrain**. Elle ne peut pas être déployée en l'état car plus de 60% de la couverture opérationnelle métier de la v23.x est manquante.
 * **Statut Release Candidate (RC)** : Tout passage ou préparation d'une version `v24.0.0-rc.2` est **formellement interdit** tant que l'ensemble des écarts prioritaires de niveau **P0** (bloquants terrain) ne sont pas intégralement résolus.
 * **Production Finale** : Le déploiement de la version `v24.0.0` finale est **interdit** à ce stade.
 * **Version Active Stable** : La version **v23.2.6 (Racine)** reste l'unique version stable et pilote officielle en exploitation.
@@ -16,15 +16,15 @@
 
 ### Résumé exécutif
 
-Ce rapport présente l'analyse d'écart fonctionnel (gap analysis) réalisée entre l'application historique stable de production (NIMR SAV v23.2.6 racine) et la nouvelle mouture réécrite en React (NIMR SAV v24.0.0-rc.1). 
+Ce rapport présente l'analyse d'écart fonctionnel (gap analysis) réalisée entre l'application historique stable de production (NIMR SAV v23.2.6 racine) et la nouvelle mouture réécrite en React (NIMR SAV v24.0.0-alpha.14).
 
-L'objectif de cette réécriture était de moderniser la stack technique (passage sous React/TypeScript/Vite) tout en stabilisant les règles de gestion et la sécurité. Cependant, la confrontation de la version v24.0.0-rc.1 aux exigences de validation sur le terrain fait remonter un manque critique de fonctionnalités opérationnelles clés indispensables à l'activité quotidienne de l'atelier de carrosserie.
+L'objectif de cette réécriture était de moderniser la stack technique (passage sous React/TypeScript/Vite) tout en stabilisant les règles de gestion et la sécurité. Cependant, la confrontation de la version v24.0.0-alpha.14 aux exigences de validation sur le terrain fait remonter un manque critique de fonctionnalités opérationnelles clés indispensables à l'activité quotidienne de l'atelier de carrosserie.
 
 ---
 
-### Tableau comparatif v23.x vs v24.0.0-rc.1
+### Tableau comparatif v23.x vs v24.0.0-alpha.14
 
-| Périmètre Fonctionnel | Version v23.x (Stable) | Version v24.0.0-rc.1 (React) | Statut de Parité |
+| Périmètre Fonctionnel | Version v23.x (Stable) | Version v24.0.0-alpha.14 (React) | Statut de Parité |
 | :--- | :--- | :--- | :--- |
 | **Saisie des Données** | Données réelles client (libres) | Données fictives forcées (préfixes `DEMO-`, `Client Démo...`) | ❌ **Régression Bloquante** |
 | **Importation Devis** | Importateur intelligent de devis chiffrés (PDF/TXT, calcul HT/TVA/TTC, heures) | Aucun importateur (saisie manuelle des tâches uniquement) | ❌ **Manquant** |
@@ -96,8 +96,8 @@ L'objectif de cette réécriture était de moderniser la stack technique (passag
 
 > [!IMPORTANT]
 > **RECOMMANDATION DU LEAD ARCHITECTE**
-> Compte tenu du volume exceptionnel de fonctionnalités métier manquantes (représentant plus de 60 % de la couverture opérationnelle de la v23), il est **vivement déconseillé de préparer une version v24.0.0-rc.2**. 
-> 
+> Compte tenu du volume exceptionnel de fonctionnalités métier manquantes (représentant plus de 60 % de la couverture opérationnelle de la v23), il est **vivement déconseillé de préparer une version v24.0.0-rc.2**.
+>
 > Nous recommandons un **retour en phase de développement actif Alpha (v24.0.0-alpha.14)**. Le statut de Release Candidate (RC) doit être réservé à une application dont le périmètre fonctionnel est gelé et jugé équivalent (parité) à la version de production précédente.
 
 ---

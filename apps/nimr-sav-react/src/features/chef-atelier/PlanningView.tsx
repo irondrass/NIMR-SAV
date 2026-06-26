@@ -12,6 +12,18 @@ import { PriorityBadge } from '@/components/PriorityBadge';
 import { VersionBanner } from '@/components/VersionBanner';
 import { getRoleFieldGuidance, getStatusDisplay } from '@/domain/ui-field-guidelines';
 
+// Advanced planning imports
+import { GanttChart } from '@/components/GanttChart';
+import { getDefaultWorkshopResources, summarizeWorkshopCapacity, WorkshopResource } from '@/domain/resource-manager';
+import { PlanningBooking, getBlockingCollisionReasons, summarizePlanningConflicts } from '@/domain/collision-engine';
+import { generateAppointmentOptions, AppointmentOption } from '@/domain/appointment-scheduler';
+import { detectNewPartsPreparationNeed, suggestParallelNewPartsPreparation, summarizePartsPreparationPlan } from '@/domain/parts-planning';
+
+interface ExtendedSavCase extends SavCase {
+  typeIntervention?: string;
+  observations?: string;
+}
+
 interface PlanningViewProps {
   user: User;
 }
@@ -41,10 +53,53 @@ export const PlanningView: React.FC<PlanningViewProps> = ({ user }) => {
   // Active list tab in the panel
   const [activeTab, setActiveTab] = useState<CaseStatus>('received');
 
+  // Advanced planning state
+  const [viewDate, setViewDate] = useState<Date>(new Date());
+  const [resourcesList] = useState<WorkshopResource[]>(getDefaultWorkshopResources());
+  const [suggestions, setSuggestions] = useState<AppointmentOption[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
   // Authorization checks
   const canAssign = hasPermission(user.role, 'assign_technician');
   const canSetPriority = hasPermission(user.role, 'change_workshop_status');
   const canPlan = hasPermission(user.role, 'schedule_case');
+
+  // Derive existing bookings from all active cases
+  const existingBookings = useMemo(() => {
+    const list: PlanningBooking[] = [];
+    cases.forEach((c) => {
+      if (c.plannedStartAt && c.plannedEndAt) {
+        const start = new Date(c.plannedStartAt);
+        const end = new Date(c.plannedEndAt);
+        if (c.assignedTechnicianId) {
+          list.push({
+            id: `${c.id}-tech`,
+            resourceId: c.assignedTechnicianId,
+            start,
+            end,
+            caseId: c.id,
+            label: `Dossier ${c.immatriculation} (Tech)`,
+          });
+        }
+        if (c.workshopBay) {
+          list.push({
+            id: `${c.id}-bay`,
+            resourceId: c.workshopBay,
+            start,
+            end,
+            caseId: c.id,
+            label: `Dossier ${c.immatriculation} (Poste)`,
+          });
+        }
+      }
+    });
+    return list;
+  }, [cases]);
+
+  // Compute planning conflicts
+  const planningConflicts = useMemo(() => {
+    return summarizePlanningConflicts(existingBookings, resourcesList);
+  }, [existingBookings, resourcesList]);
 
   // Compute selected case details
   const selectedCase = useMemo(() => {
@@ -61,6 +116,8 @@ export const PlanningView: React.FC<PlanningViewProps> = ({ user }) => {
     setTaskLabel('');
     setErrorMsg('');
     setInfoMsg('');
+    setSuggestions([]);
+    setShowSuggestions(false);
   };
 
   // Filter cases for the active status tab
@@ -70,7 +127,28 @@ export const PlanningView: React.FC<PlanningViewProps> = ({ user }) => {
 
   // Actions
   const handleAssignTech = (techId: string) => {
-    if (!selectedCaseId) return;
+    if (!selectedCaseId || !selectedCase) return;
+
+    // Collision check before assigning technician
+    if (techId && startAt && endAt) {
+      const start = new Date(startAt);
+      const end = new Date(endAt);
+      const techBooking: PlanningBooking = {
+        id: `${selectedCaseId}-tech-temp`,
+        resourceId: techId,
+        start,
+        end,
+        caseId: selectedCaseId,
+      };
+
+      const reasons = getBlockingCollisionReasons(techBooking, existingBookings, resourcesList, selectedCase.status);
+      if (reasons.length > 0) {
+        setErrorMsg(`Affectation refusée pour cause de collision : ${reasons.join(' | ')}`);
+        setInfoMsg('');
+        return;
+      }
+    }
+
     try {
       assignTechnician(selectedCaseId, techId, user);
       setInfoMsg('Technicien affecté avec succès.');
@@ -94,6 +172,46 @@ export const PlanningView: React.FC<PlanningViewProps> = ({ user }) => {
   const handleSavePlanning = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedCaseId || !selectedCase) return;
+    const extCase = selectedCase as ExtendedSavCase;
+
+    if (startAt && endAt) {
+      const start = new Date(startAt);
+      const end = new Date(endAt);
+
+      // Validate technician availability and collisions
+      if (selectedCase.assignedTechnicianId) {
+        const techBooking: PlanningBooking = {
+          id: `${selectedCaseId}-tech-new`,
+          resourceId: selectedCase.assignedTechnicianId,
+          start,
+          end,
+          caseId: selectedCaseId,
+        };
+        const techReasons = getBlockingCollisionReasons(techBooking, existingBookings, resourcesList, selectedCase.status);
+        if (techReasons.length > 0) {
+          setErrorMsg(`Planification refusée (Technicien indisponible) : ${techReasons.join(' | ')}`);
+          return;
+        }
+      }
+
+      // Validate bay/equipment availability and collisions
+      if (bay.trim()) {
+        const matchingRes = resourcesList.find((r) => r.id === bay.trim() || r.label === bay.trim());
+        const resId = matchingRes ? matchingRes.id : bay.trim();
+        const bayBooking: PlanningBooking = {
+          id: `${selectedCaseId}-bay-new`,
+          resourceId: resId,
+          start,
+          end,
+          caseId: selectedCaseId,
+        };
+        const bayReasons = getBlockingCollisionReasons(bayBooking, existingBookings, resourcesList, selectedCase.status);
+        if (bayReasons.length > 0) {
+          setErrorMsg(`Planification refusée (Poste indisponible) : ${bayReasons.join(' | ')}`);
+          return;
+        }
+      }
+    }
 
     try {
       const payload: {
@@ -109,10 +227,57 @@ export const PlanningView: React.FC<PlanningViewProps> = ({ user }) => {
       };
 
       planWorkshopTask(selectedCaseId, payload, user);
-      setInfoMsg('Planification enregistrée avec succès.');
+
+      // Auto suggest parts prep if applicable
+      const partsNeeded = detectNewPartsPreparationNeed(extCase.typeIntervention || 'mecanique', extCase.observations || '');
+      if (partsNeeded && startAt) {
+        const prepPlan = suggestParallelNewPartsPreparation(selectedCaseId, extCase.typeIntervention || 'mecanique', extCase.observations || '', new Date(startAt));
+        setInfoMsg(`Planification enregistrée. Suggestion de pièces : ${summarizePartsPreparationPlan(prepPlan)}`);
+      } else {
+        setInfoMsg('Planification enregistrée avec succès.');
+      }
+
       setErrorMsg('');
     } catch (e) {
       setErrorMsg((e as Error).message || 'Erreur lors de l\'enregistrement de la planification.');
+    }
+  };
+
+  const handleGenerateSuggestions = () => {
+    if (!selectedCase) return;
+    const extCase = selectedCase as ExtendedSavCase;
+    const durationMin = duration === '' ? 120 : Number(duration);
+    const options = generateAppointmentOptions(
+      extCase.typeIntervention || 'mecanique',
+      durationMin,
+      existingBookings,
+      resourcesList,
+      new Date()
+    );
+    setSuggestions(options);
+    setShowSuggestions(true);
+    setInfoMsg(`Généré ${options.length} suggestions de créneaux.`);
+    setErrorMsg('');
+  };
+
+  const handleApplySuggestion = (opt: AppointmentOption) => {
+    const toLocalISO = (d: Date) => {
+      const pad = (n: number) => n.toString().padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    };
+
+    setStartAt(toLocalISO(opt.workStartDate));
+    setEndAt(toLocalISO(opt.workEndDate));
+    setBay(opt.equipmentId);
+
+    if (selectedCaseId) {
+      try {
+        assignTechnician(selectedCaseId, opt.technicianId, user);
+        setInfoMsg('Créneau suggéré sélectionné (dates pré-remplies, technicien assigné). Cliquez sur Enregistrer.');
+        setErrorMsg('');
+      } catch (e) {
+        setErrorMsg((e as Error).message || 'Erreur lors de l\'affectation.');
+      }
     }
   };
 
@@ -211,6 +376,55 @@ export const PlanningView: React.FC<PlanningViewProps> = ({ user }) => {
           {getRoleFieldGuidance(user.role)}
         </div>
       </header>
+
+      {/* Capacity Summary & Date Picker */}
+      <div className="capacity-summary-bar" style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        background: 'rgba(255,255,255,0.02)',
+        border: '1px solid rgba(255,255,255,0.06)',
+        padding: '1rem 1.5rem',
+        borderRadius: '8px',
+      }}>
+        <div style={{ display: 'flex', gap: '2rem' }}>
+          <div>
+            <div style={{ fontSize: '0.8rem', color: '#a1a1aa', textTransform: 'uppercase' }}>Capacité active</div>
+            <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#10b981' }}>
+              {summarizeWorkshopCapacity(resourcesList).totalCapacityMinutes} min / jour
+            </div>
+          </div>
+          <div>
+            <div style={{ fontSize: '0.8rem', color: '#a1a1aa', textTransform: 'uppercase' }}>Ressources actives</div>
+            <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#3b82f6' }}>
+              {summarizeWorkshopCapacity(resourcesList).activeCount} / {summarizeWorkshopCapacity(resourcesList).totalCount}
+            </div>
+          </div>
+          <div>
+            <div style={{ fontSize: '0.8rem', color: '#a1a1aa', textTransform: 'uppercase' }}>Conflits détectés</div>
+            <div style={{ fontSize: '1.25rem', fontWeight: 700, color: planningConflicts.length > 0 ? '#ef4444' : '#10b981' }}>
+              {planningConflicts.length}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <label style={{ fontSize: '0.9rem', color: '#a1a1aa' }}>Visualiser le :</label>
+          <input
+            type="date"
+            value={viewDate.toISOString().split('T')[0]}
+            onChange={(e) => setViewDate(new Date(e.target.value))}
+            style={{
+              padding: '0.4rem 0.8rem',
+              borderRadius: '6px',
+              border: '1px solid rgba(255,255,255,0.15)',
+              background: '#18181b',
+              color: '#fff',
+              outline: 'none',
+            }}
+          />
+        </div>
+      </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '2rem' }}>
         {/* Left panel: List by status tabs */}
@@ -451,9 +665,53 @@ export const PlanningView: React.FC<PlanningViewProps> = ({ user }) => {
                   </div>
 
                   {canPlan && (
-                    <Button type="submit" variant="ghost" style={{ marginTop: '0.5rem' }}>
-                      Enregistrer Planification
-                    </Button>
+                    <div style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
+                      <Button type="submit" variant="ghost" style={{ flex: '1 1 180px' }}>
+                        Enregistrer Planification
+                      </Button>
+                      <Button type="button" onClick={handleGenerateSuggestions} style={{ flex: '1 1 180px', background: 'rgba(59, 130, 246, 0.1)', color: '#3b82f6', border: '1px solid #3b82f6' }}>
+                        💡 Suggérer créneaux
+                      </Button>
+                    </div>
+                  )}
+
+                  {showSuggestions && suggestions.length > 0 && (
+                    <div style={{
+                      background: 'rgba(255,255,255,0.02)',
+                      border: '1px solid rgba(255,255,255,0.06)',
+                      padding: '1rem',
+                      borderRadius: '6px',
+                      marginTop: '0.75rem',
+                    }}>
+                      <h4 style={{ margin: '0 0 0.75rem 0', fontSize: '0.9rem', fontWeight: 600, color: '#f59e0b' }}>
+                        Suggestions de réservation automatique :
+                      </h4>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                        {suggestions.map((opt, idx) => (
+                          <div key={idx} style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            background: 'rgba(255,255,255,0.03)',
+                            padding: '0.6rem',
+                            borderRadius: '4px',
+                            border: '1px solid rgba(255,255,255,0.04)',
+                          }}>
+                            <div style={{ fontSize: '0.8rem' }}>
+                              <strong>{opt.workStartDate.toLocaleDateString('fr-FR')}</strong> de{' '}
+                              {opt.workStartDate.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })} à{' '}
+                              {opt.workEndDate.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                              <div style={{ color: '#aaa', fontSize: '0.75rem', marginTop: '2px' }}>
+                                Score: {opt.score}/100 | Tech: {resourcesList.find(r => r.id === opt.technicianId)?.label || opt.technicianId}
+                              </div>
+                            </div>
+                            <Button type="button" size="sm" onClick={() => handleApplySuggestion(opt)} style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}>
+                              Appliquer
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   )}
                 </form>
               </div>
@@ -601,6 +859,47 @@ export const PlanningView: React.FC<PlanningViewProps> = ({ user }) => {
             </>
           )}
         </div>
+      {/* Gantt Chart Section */}
+      <div className="gantt-section" style={{ marginTop: '2rem' }}>
+        <h2 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: '1rem' }}>
+          Vue Gantt de l'Atelier
+        </h2>
+        <GanttChart
+          resources={resourcesList}
+          bookings={existingBookings}
+          viewDate={viewDate}
+          onSelectBooking={(bId) => {
+            const booking = existingBookings.find(b => b.id === bId);
+            if (booking) {
+              setSelectedCaseId(booking.caseId);
+              setInfoMsg(`Sélectionné dossier ${booking.caseId} depuis le Gantt.`);
+              setErrorMsg('');
+            }
+          }}
+        />
+      </div>
+
+      {/* Conflicts section if any */}
+      {planningConflicts.length > 0 && (
+        <div style={{
+          background: 'rgba(239, 68, 68, 0.1)',
+          border: '1px solid #ef4444',
+          borderRadius: '8px',
+          padding: '1rem 1.5rem',
+          marginTop: '1.5rem',
+        }}>
+          <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 600, color: '#ef4444', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            ⚠️ Conflits de planification détectés ({planningConflicts.length})
+          </h3>
+          <ul style={{ margin: '0.5rem 0 0 0', paddingLeft: '1.2rem', fontSize: '0.85rem', color: '#fca5a5' }}>
+            {planningConflicts.map((conf, idx) => (
+              <li key={idx} style={{ marginBottom: '4px' }}>
+                Dossier <strong>{conf.caseId}</strong>: {conf.reason}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       </div>
       <VersionBanner />
     </div>

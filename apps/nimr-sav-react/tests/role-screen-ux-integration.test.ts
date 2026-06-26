@@ -7,7 +7,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
 
-describe('Role Screen UX Integration (v24.0.0-rc.1)', () => {
+describe('Role Screen UX Integration (v24.0.0-alpha.14)', () => {
   const views = {
     reception: resolve(__dirname, '../src/features/reception/ReceptionView.tsx'),
     planning: resolve(__dirname, '../src/features/chef-atelier/PlanningView.tsx'),

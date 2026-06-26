@@ -54,7 +54,7 @@ import { hasPermission, canViewDirectionNotes } from '../src/domain/action-permi
 import { savCaseStore } from '../src/state/sav-case-store';
 import { SavCase } from '../src/domain/sav-case';
 
-describe('SAV Reception Workflow Integration (v24.0.0-rc.1)', () => {
+describe('SAV Reception Workflow Integration (v24.0.0-alpha.14)', () => {
 
   // Clean localStorage before and after each test
   beforeEach(() => {
@@ -68,12 +68,12 @@ describe('SAV Reception Workflow Integration (v24.0.0-rc.1)', () => {
   });
 
   // 1. Version Check
-  it('has package.json and constants aligned to v24.0.0-rc.1', () => {
-    expect(APP_VERSION).toBe('v24.0.0-rc.1');
+  it('has package.json and constants aligned to v24.0.0-alpha.14', () => {
+    expect(APP_VERSION).toBe('v24.0.0-alpha.14');
 
     const pkgPath = resolve(__dirname, '../package.json');
     const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
-    expect(pkg.version).toBe('24.0.0-rc.1');
+    expect(pkg.version).toBe('24.0.0-alpha.14');
   });
 
   // 2. Draft Creation, Transitions, and Audit Logging
@@ -139,51 +139,51 @@ describe('SAV Reception Workflow Integration (v24.0.0-rc.1)', () => {
   });
 
   // 3. Validation against real plates, VINs, names, phones
-  it('validates demo fields strictly, rejecting real data', () => {
-    // Valid Demo Values
+  it('validates realistic fields, accepting real data and rejecting invalid values', () => {
+    // Valid Real/Demo Values
     const valid = validateFictiveFields({
-      immatriculation: 'DEMO-123',
-      vin: 'VIN-DEMO-999',
-      clientName: 'Client Démo Martin',
-      telephone: '00000000',
+      immatriculation: 'AA-123-AA',
+      vin: 'VF37C5FS888888',
+      clientName: 'Martin Alice',
+      telephone: '+33123456789',
     });
     expect(valid).toBeNull();
 
-    // Invalid plate
+    // Empty immatriculation
     const badPlate = validateFictiveFields({
-      immatriculation: 'AA-123-AA', // Real French plate format
-      vin: 'VIN-DEMO-999',
-      clientName: 'Client Démo Martin',
-      telephone: '00000000',
+      immatriculation: '',
+      vin: 'VF37C5FS888888',
+      clientName: 'Martin Alice',
+      telephone: '+33123456789',
     });
-    expect(badPlate).toContain("L'immatriculation doit être fictive");
+    expect(badPlate).toContain("L'immatriculation est requise");
 
-    // Invalid VIN
-    const badVin = validateFictiveFields({
-      immatriculation: 'DEMO-123',
-      vin: 'VF37C5FS888888', // Real VIN format
-      clientName: 'Client Démo Martin',
-      telephone: '00000000',
-    });
-    expect(badVin).toContain('Le VIN doit être fictif');
-
-    // Invalid Client Name
+    // Empty client name
     const badName = validateFictiveFields({
-      immatriculation: 'DEMO-123',
-      vin: 'VIN-DEMO-999',
-      clientName: 'Martin Alice', // Real name
-      telephone: '00000000',
+      immatriculation: 'AA-123-AA',
+      vin: 'VF37C5FS888888',
+      clientName: '',
+      telephone: '+33123456789',
     });
-    expect(badName).toContain('Le nom du client doit être fictif');
+    expect(badName).toContain('Le nom du client est requis');
 
-    // Invalid Phone
+    // Invalid Phone with alphabetical letters
     const badPhone = validateFictiveFields({
-      immatriculation: 'DEMO-123',
-      vin: 'VIN-DEMO-999',
-      clientName: 'Client Démo Martin',
-      telephone: '+21699999999', // Real phone number format
+      immatriculation: 'AA-123-AA',
+      vin: 'VF37C5FS888888',
+      clientName: 'Martin Alice',
+      telephone: 'phone12345',
     });
-    expect(badPhone).toContain('Le numéro de téléphone doit être fictif');
+    expect(badPhone).toContain("Le numéro de téléphone n'est pas valide");
+
+    // Invalid VIN containing special chars
+    const badVin = validateFictiveFields({
+      immatriculation: 'AA-123-AA',
+      vin: 'VF3_7C5FS8888',
+      clientName: 'Martin Alice',
+      telephone: '+33123456789',
+    });
+    expect(badVin).toContain('Le VIN doit être composé de caractères alphanumériques');
   });
 
   // 4. Presets Validation

@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { validateFictiveFields } from '../src/domain/validation-rules';
 import { APP_VERSION } from '../src/constants/version';
 
-describe('Reception Real Data Validation (v24.0.0-alpha.14)', () => {
-  it('verifies APP_VERSION is exactly v24.0.0-alpha.14', () => {
-    expect(APP_VERSION).toBe('v24.0.0-alpha.14');
+describe('Reception Real Data Validation (v24.0.0-alpha.15)', () => {
+  it('verifies APP_VERSION is exactly v24.0.0-alpha.15', () => {
+    expect(APP_VERSION).toBe('v24.0.0-alpha.15');
   });
 
   it('accepts realistic workshop data without DEMO prefix', () => {

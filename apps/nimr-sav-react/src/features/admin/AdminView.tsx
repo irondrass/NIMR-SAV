@@ -6,6 +6,7 @@ import { ROLE_GOVERNANCE_LABELS } from '@/domain/role-governance';
 import { validateReleaseReadiness, getReleaseReadinessChecklist } from '@/domain/release-readiness';
 import { VersionBanner } from '@/components/VersionBanner';
 import { getRoleFieldGuidance } from '@/domain/ui-field-guidelines';
+import { getBlockingClaimsReasons } from '@/domain/claims';
 
 interface AdminViewProps {
   user: User;
@@ -17,6 +18,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ user }) => {
     logs,
     getAdminGovernanceSummary,
     getSystemInvariants,
+    overrideClaims,
   } = useSavCases();
 
   const [selectedRole, setSelectedRole] = useState<string>('lecture-seule');
@@ -399,6 +401,139 @@ export const AdminView: React.FC<AdminViewProps> = ({ user }) => {
                   </div>
                 ))
               )}
+            </div>
+          </div>
+
+          {/* Bypass Claims Section */}
+          <div
+            style={{
+              background: '#1e1e24',
+              borderRadius: '8px',
+              padding: '1.25rem',
+              border: '1px solid rgba(255,255,255,0.05)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.75rem',
+            }}
+          >
+            <h2
+              style={{
+                fontSize: '1.05rem',
+                fontWeight: 600,
+                margin: 0,
+                borderBottom: '1px solid rgba(255,255,255,0.05)',
+                paddingBottom: '0.5rem',
+              }}
+            >
+              Dérogations & Bypasses de Sinistres
+            </h2>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              {(() => {
+                const blockedCases = cases.filter(
+                  (c) => getBlockingClaimsReasons(c.claims || [], c.claimsOverridden).length > 0
+                );
+                const overriddenCases = cases.filter((c) => c.claimsOverridden);
+
+                return (
+                  <>
+                    <h3 style={{ fontSize: '0.85rem', color: '#ef4444', margin: '0.25rem 0' }}>
+                      Dossiers bloqués par des accords manquants ({blockedCases.length})
+                    </h3>
+                    {blockedCases.length === 0 ? (
+                      <div style={{ padding: '0.5rem', color: '#71717a', fontSize: '0.8rem', background: 'rgba(0,0,0,0.1)', borderRadius: '4px' }}>
+                        Aucun dossier bloqué.
+                      </div>
+                    ) : (
+                      blockedCases.map((c) => {
+                        const reasons = getBlockingClaimsReasons(c.claims || [], c.claimsOverridden);
+                        return (
+                          <div
+                            key={c.id}
+                            style={{
+                              padding: '0.5rem 0.75rem',
+                              background: 'rgba(239, 68, 68, 0.04)',
+                              border: '1px solid rgba(239, 68, 68, 0.1)',
+                              borderRadius: '4px',
+                              fontSize: '0.8rem',
+                            }}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <strong>{c.immatriculation}</strong>
+                              <button
+                                onClick={() => {
+                                  const reason = window.prompt("Motif de dérogation obligatoire pour forcer la planification :");
+                                  if (reason === null) return; // User cancelled
+                                  if (!reason.trim()) {
+                                    window.alert("Le motif de dérogation is obligatoire.");
+                                    return;
+                                  }
+                                  try {
+                                    overrideClaims(c.id, reason.trim(), { id: user.id, role: user.role });
+                                  } catch (e: unknown) {
+                                    window.alert(e instanceof Error ? e.message : "Erreur lors de l'override");
+                                  }
+                                }}
+                                style={{
+                                  padding: '2px 8px',
+                                  background: '#ef4444',
+                                  color: '#fff',
+                                  border: 'none',
+                                  borderRadius: '4px',
+                                  fontSize: '0.75rem',
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                Override accords
+                              </button>
+                            </div>
+                            <div style={{ color: '#a1a1aa', fontSize: '0.75rem', marginTop: '0.25rem' }}>
+                              Client: {c.clientName}
+                            </div>
+                            <ul style={{ margin: '0.25rem 0 0 1rem', padding: 0, color: '#f87171', fontSize: '0.75rem' }}>
+                              {reasons.map((r, idx) => (
+                                <li key={idx}>{r}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        );
+                      })
+                    )}
+
+                    <h3 style={{ fontSize: '0.85rem', color: '#10b981', margin: '0.75rem 0 0.25rem 0' }}>
+                      Dérogations actives ({overriddenCases.length})
+                    </h3>
+                    {overriddenCases.length === 0 ? (
+                      <div style={{ padding: '0.5rem', color: '#71717a', fontSize: '0.8rem', background: 'rgba(0,0,0,0.1)', borderRadius: '4px' }}>
+                        Aucune dérogation active.
+                      </div>
+                    ) : (
+                      overriddenCases.map((c) => (
+                        <div
+                          key={c.id}
+                          style={{
+                            padding: '0.5rem 0.75rem',
+                            background: 'rgba(16, 185, 129, 0.04)',
+                            border: '1px solid rgba(16, 185, 129, 0.1)',
+                            borderRadius: '4px',
+                            fontSize: '0.8rem',
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <strong>{c.immatriculation}</strong>
+                            <span style={{ color: '#10b981', fontSize: '0.75rem' }}>Bypassé</span>
+                          </div>
+                          <div style={{ fontSize: '0.75rem', color: '#a1a1aa', marginTop: '0.25rem' }}>
+                            Motif: "{c.claimsOverrideReason}"
+                          </div>
+                          <div style={{ fontSize: '0.7rem', color: '#71717a' }}>
+                            Par: {c.claimsOverrideBy} le {c.claimsOverrideAt ? new Date(c.claimsOverrideAt).toLocaleString() : 'N/A'}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </>
+                );
+              })()}
             </div>
           </div>
         </div>

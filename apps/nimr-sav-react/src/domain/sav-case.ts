@@ -59,6 +59,31 @@ export interface SavCase {
   qcCheckedBy?: string;
   qcReworkReason?: string;
   directionNotes?: string;
+  claims?: Claim[];
+  claimsOverridden?: boolean;
+  claimsOverrideReason?: string;
+  claimsOverrideAt?: string; // ISO DateTime
+  claimsOverrideBy?: string;
+  createdAt: string; // ISO DateTime
+  updatedAt: string; // ISO DateTime
+}
+
+export interface Claim {
+  id: string;
+  label: string;
+  claimType: 'insurance' | 'customer' | 'warranty' | 'internal' | 'mixed';
+  payerType: 'assurance' | 'client' | 'garantie' | 'interne';
+  status: 'draft' | 'estimate_pending' | 'expert_pending' | 'client_pending' | 'approved' | 'rejected' | 'cancelled';
+  description: string;
+  estimatedAmount?: number;
+  expertApproved: boolean;
+  clientApproved: boolean;
+  expertApprovalAt?: string; // ISO DateTime
+  clientApprovalAt?: string; // ISO DateTime
+  expertName?: string;
+  clientApprovalReference?: string;
+  requiredApprovals: string[];
+  notes?: string;
   createdAt: string; // ISO DateTime
   updatedAt: string; // ISO DateTime
 }

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { savCaseStore } from './sav-case-store';
-import { SavCase, WorkshopTask, QcChecklistItem } from '../domain/sav-case';
+import { SavCase, WorkshopTask, QcChecklistItem, Claim } from '../domain/sav-case';
 import { AuditLogEntry } from '../domain/audit-log';
 import { Role } from '../types';
 import { CaseStatus } from '../domain/case-status';
@@ -75,5 +75,19 @@ export function useSavCases() {
       savCaseStore.getReadOnlyLogs(),
     getSystemInvariants: () =>
       savCaseStore.getSystemInvariants(),
+    addClaim: (caseId: string, claim: Partial<Claim>, actor: { id: string; role: Role }) =>
+      savCaseStore.addClaim(caseId, claim, actor),
+    updateClaim: (caseId: string, claimId: string, updatedFields: Partial<Claim>, actor: { id: string; role: Role }) =>
+      savCaseStore.updateClaim(caseId, claimId, updatedFields, actor),
+    approveClaimExpert: (caseId: string, claimId: string, expertName: string, actor: { id: string; role: Role }) =>
+      savCaseStore.approveClaimExpert(caseId, claimId, expertName, actor),
+    approveClaimClient: (caseId: string, claimId: string, reference: string, actor: { id: string; role: Role }) =>
+      savCaseStore.approveClaimClient(caseId, claimId, reference, actor),
+    rejectClaim: (caseId: string, claimId: string, reason: string, actor: { id: string; role: Role }) =>
+      savCaseStore.rejectClaim(caseId, claimId, reason, actor),
+    cancelClaim: (caseId: string, claimId: string, actor: { id: string; role: Role }) =>
+      savCaseStore.cancelClaim(caseId, claimId, actor),
+    overrideClaims: (caseId: string, reason: string, actor: { id: string; role: Role }) =>
+      savCaseStore.overrideClaims(caseId, reason, actor),
   };
 }

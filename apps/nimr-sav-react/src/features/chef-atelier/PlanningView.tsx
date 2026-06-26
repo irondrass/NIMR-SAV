@@ -18,6 +18,7 @@ import { getDefaultWorkshopResources, summarizeWorkshopCapacity, WorkshopResourc
 import { PlanningBooking, getBlockingCollisionReasons, summarizePlanningConflicts } from '@/domain/collision-engine';
 import { generateAppointmentOptions, AppointmentOption } from '@/domain/appointment-scheduler';
 import { detectNewPartsPreparationNeed, suggestParallelNewPartsPreparation, summarizePartsPreparationPlan } from '@/domain/parts-planning';
+import { getBlockingClaimsReasons } from '@/domain/claims';
 
 interface ExtendedSavCase extends SavCase {
   typeIntervention?: string;
@@ -129,6 +130,13 @@ export const PlanningView: React.FC<PlanningViewProps> = ({ user }) => {
   const handleAssignTech = (techId: string) => {
     if (!selectedCaseId || !selectedCase) return;
 
+    const blockingReasons = getBlockingClaimsReasons(selectedCase.claims || [], selectedCase.claimsOverridden);
+    if (blockingReasons.length > 0) {
+      setErrorMsg('Planification bloquée : accord expert/client manquant');
+      setInfoMsg('');
+      return;
+    }
+
     // Collision check before assigning technician
     if (techId && startAt && endAt) {
       const start = new Date(startAt);
@@ -173,6 +181,12 @@ export const PlanningView: React.FC<PlanningViewProps> = ({ user }) => {
     e.preventDefault();
     if (!selectedCaseId || !selectedCase) return;
     const extCase = selectedCase as ExtendedSavCase;
+
+    const blockingReasons = getBlockingClaimsReasons(extCase.claims || [], extCase.claimsOverridden);
+    if (blockingReasons.length > 0) {
+      setErrorMsg('Planification bloquée : accord expert/client manquant');
+      return;
+    }
 
     if (startAt && endAt) {
       const start = new Date(startAt);
@@ -246,6 +260,13 @@ export const PlanningView: React.FC<PlanningViewProps> = ({ user }) => {
   const handleGenerateSuggestions = () => {
     if (!selectedCase) return;
     const extCase = selectedCase as ExtendedSavCase;
+
+    const blockingReasons = getBlockingClaimsReasons(extCase.claims || [], extCase.claimsOverridden);
+    if (blockingReasons.length > 0) {
+      setErrorMsg('Planification bloquée : accord expert/client manquant');
+      return;
+    }
+
     const durationMin = duration === '' ? 120 : Number(duration);
     const options = generateAppointmentOptions(
       extCase.typeIntervention || 'mecanique',
@@ -261,6 +282,13 @@ export const PlanningView: React.FC<PlanningViewProps> = ({ user }) => {
   };
 
   const handleApplySuggestion = (opt: AppointmentOption) => {
+    if (!selectedCase) return;
+    const blockingReasons = getBlockingClaimsReasons(selectedCase.claims || [], selectedCase.claimsOverridden);
+    if (blockingReasons.length > 0) {
+      setErrorMsg('Planification bloquée : accord expert/client manquant');
+      return;
+    }
+
     const toLocalISO = (d: Date) => {
       const pad = (n: number) => n.toString().padStart(2, '0');
       return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
@@ -563,6 +591,36 @@ export const PlanningView: React.FC<PlanningViewProps> = ({ user }) => {
               {infoMsg && (
                 <div style={{ background: '#1b5e20', color: '#fff', padding: '0.75rem', borderRadius: '4px', fontSize: '0.9rem' }}>
                   {infoMsg}
+                </div>
+              )}
+
+              {/* Claims summary block */}
+              {selectedCase.claims && selectedCase.claims.length > 0 && (
+                <div style={{ background: 'rgba(255,255,255,0.02)', padding: '0.75rem', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.05)', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  <h4 style={{ margin: 0, fontSize: '0.9rem', color: '#fff', fontWeight: 600 }}>Sinistres / OR</h4>
+                  {selectedCase.claims.map(claim => {
+                    const claimBlockages = getBlockingClaimsReasons([claim]);
+                    return (
+                      <div key={claim.id} style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.85rem', paddingBottom: '0.5rem', borderBottom: '1px solid rgba(255,255,255,0.02)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ color: '#aaa', fontWeight: 500 }}>{claim.label}</span>
+                          <span style={{ fontWeight: 600, color: claim.status === 'approved' ? '#10b981' : claim.status === 'rejected' ? '#ef4444' : '#f59e0b' }}>
+                            {claim.status.toUpperCase()}
+                          </span>
+                        </div>
+                        {claimBlockages.length > 0 && (
+                          <div style={{ color: '#f87171', fontSize: '0.75rem' }}>
+                            Planification bloquée : {claimBlockages.join(' ')}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {selectedCase.claimsOverridden && (
+                    <div style={{ fontSize: '0.75rem', color: '#10b981', fontStyle: 'italic' }}>
+                      Bypass actif : {selectedCase.claimsOverrideReason}
+                    </div>
+                  )}
                 </div>
               )}
 

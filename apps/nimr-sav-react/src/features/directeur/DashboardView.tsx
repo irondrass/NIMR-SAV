@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import type { User } from '@/types';
 import { useSavCases } from '@/state/useSavCases';
 import { APP_VERSION } from '@/constants/version';
+import { getBlockingClaimsReasons } from '@/domain/claims';
 import { StatusBadge } from '@/components/StatusBadge';
 import { PriorityBadge } from '@/components/PriorityBadge';
 import { EmptyState } from '@/components/EmptyState';
@@ -27,6 +28,30 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ user, activeTab = 
     void logs;
     return getDirectorDashboard();
   }, [cases, logs, getDirectorDashboard]);
+
+  const claimsMetrics = useMemo(() => {
+    let dossiersBloques = 0;
+    let attenteExpert = 0;
+    let attenteClient = 0;
+
+    cases.forEach((c) => {
+      const claims = c.claims || [];
+      const blockingReasons = getBlockingClaimsReasons(claims, c.claimsOverridden);
+      if (blockingReasons.length > 0) {
+        dossiersBloques++;
+      }
+      claims.forEach((claim) => {
+        if (claim.status === 'expert_pending') {
+          attenteExpert++;
+        }
+        if (claim.status === 'client_pending') {
+          attenteClient++;
+        }
+      });
+    });
+
+    return { dossiersBloques, attenteExpert, attenteClient };
+  }, [cases]);
 
   // Handle case details selection
   const selectedCase = useMemo(() => {
@@ -266,6 +291,53 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ user, activeTab = 
           </div>
           <div style={{ fontSize: '2rem', fontWeight: 700, color: '#10b981', marginTop: '0.25rem' }}>
             {dashboardData.dossiersClotures + dashboardData.livres}
+          </div>
+        </div>
+        <div
+          style={{
+            background: '#1e1e24',
+            border: '1px solid rgba(255,255,255,0.05)',
+            padding: '1.25rem',
+            borderRadius: '8px',
+          }}
+        >
+          <div style={{ fontSize: '0.85rem', color: '#a1a1aa', fontWeight: 500 }}>
+            Dossiers bloqués par accord
+          </div>
+          <div style={{ fontSize: '2rem', fontWeight: 700, color: '#ef4444', marginTop: '0.25rem' }}>
+            {claimsMetrics.dossiersBloques}
+          </div>
+        </div>
+
+        <div
+          style={{
+            background: '#1e1e24',
+            border: '1px solid rgba(255,255,255,0.05)',
+            padding: '1.25rem',
+            borderRadius: '8px',
+          }}
+        >
+          <div style={{ fontSize: '0.85rem', color: '#a1a1aa', fontWeight: 500 }}>
+            Claims en attente Expert
+          </div>
+          <div style={{ fontSize: '2rem', fontWeight: 700, color: '#f59e0b', marginTop: '0.25rem' }}>
+            {claimsMetrics.attenteExpert}
+          </div>
+        </div>
+
+        <div
+          style={{
+            background: '#1e1e24',
+            border: '1px solid rgba(255,255,255,0.05)',
+            padding: '1.25rem',
+            borderRadius: '8px',
+          }}
+        >
+          <div style={{ fontSize: '0.85rem', color: '#a1a1aa', fontWeight: 500 }}>
+            Claims en attente Client
+          </div>
+          <div style={{ fontSize: '2rem', fontWeight: 700, color: '#3b82f6', marginTop: '0.25rem' }}>
+            {claimsMetrics.attenteClient}
           </div>
         </div>
       </section>

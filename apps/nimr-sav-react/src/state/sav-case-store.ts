@@ -1,4 +1,4 @@
-import { SavCase, WorkshopTask, QcChecklistItem } from '../domain/sav-case';
+import { SavCase, WorkshopTask, QcChecklistItem, Claim } from '../domain/sav-case';
 import { AuditLogEntry, createAuditLog } from '../domain/audit-log';
 import { DEMO_CASES } from '../domain/case-fixtures';
 import { LS_PREFIX, APP_VERSION, RESERVED_CACHE_NAME } from '../constants/version';
@@ -9,6 +9,7 @@ import { CaseStatus } from '../domain/case-status';
 import { hasPermission } from '../domain/action-permissions';
 import { transitionCase } from '../domain/workflow-engine';
 import { DEMO_TECHNICIANS } from '../constants/demo-technicians';
+import { getBlockingClaimsReasons, normalizeClaim, approveClaimExpert, approveClaimClient, rejectClaim, cancelClaim } from '../domain/claims';
 import {
   calculateDirectorDashboard,
   calculateBlockingAlerts,
@@ -24,6 +25,9 @@ let logs: AuditLogEntry[] = loadInitialLogs();
 const listeners = new Set<() => void>();
 
 function loadInitialCases(): SavCase[] {
+  if (typeof window === 'undefined') {
+    return [...DEMO_CASES];
+  }
   try {
     const item = window.localStorage.getItem(CASES_KEY);
     if (item) {
@@ -46,6 +50,9 @@ function loadInitialCases(): SavCase[] {
 }
 
 function loadInitialLogs(): AuditLogEntry[] {
+  if (typeof window === 'undefined') {
+    return [];
+  }
   try {
     const item = window.localStorage.getItem(LOGS_KEY);
     return item ? (JSON.parse(item) as AuditLogEntry[]) : [];
@@ -78,10 +85,12 @@ export const savCaseStore = {
       }
     }
     cases = unique;
-    try {
-      window.localStorage.setItem(CASES_KEY, JSON.stringify(cases));
-    } catch (e) {
-      console.error('[NIMR v24] Failed to save cases to localStorage:', e);
+    if (typeof window !== 'undefined') {
+      try {
+        window.localStorage.setItem(CASES_KEY, JSON.stringify(cases));
+      } catch (e) {
+        console.error('[NIMR v24] Failed to save cases to localStorage:', e);
+      }
     }
     notify();
   },
@@ -97,10 +106,12 @@ export const savCaseStore = {
 
   addLog(log: AuditLogEntry) {
     logs = [log, ...logs];
-    try {
-      window.localStorage.setItem(LOGS_KEY, JSON.stringify(logs));
-    } catch (e) {
-      console.error('[NIMR v24] Failed to save logs to localStorage:', e);
+    if (typeof window !== 'undefined') {
+      try {
+        window.localStorage.setItem(LOGS_KEY, JSON.stringify(logs));
+      } catch (e) {
+        console.error('[NIMR v24] Failed to save logs to localStorage:', e);
+      }
     }
     notify();
   },
@@ -115,11 +126,13 @@ export const savCaseStore = {
   reset() {
     cases = [...DEMO_CASES];
     logs = [];
-    try {
-      window.localStorage.setItem(CASES_KEY, JSON.stringify(cases));
-      window.localStorage.setItem(LOGS_KEY, JSON.stringify(logs));
-    } catch (e) {
-      console.error('[NIMR v24] Failed to reset localStorage:', e);
+    if (typeof window !== 'undefined') {
+      try {
+        window.localStorage.setItem(CASES_KEY, JSON.stringify(cases));
+        window.localStorage.setItem(LOGS_KEY, JSON.stringify(logs));
+      } catch (e) {
+        console.error('[NIMR v24] Failed to reset localStorage:', e);
+      }
     }
     notify();
   },
@@ -127,11 +140,13 @@ export const savCaseStore = {
   clearAll() {
     cases = [];
     logs = [];
-    try {
-      window.localStorage.removeItem(CASES_KEY);
-      window.localStorage.removeItem(LOGS_KEY);
-    } catch (e) {
-      console.error('[NIMR v24] Failed to clear localStorage:', e);
+    if (typeof window !== 'undefined') {
+      try {
+        window.localStorage.removeItem(CASES_KEY);
+        window.localStorage.removeItem(LOGS_KEY);
+      } catch (e) {
+        console.error('[NIMR v24] Failed to clear localStorage:', e);
+      }
     }
     notify();
   },
@@ -224,6 +239,11 @@ export const savCaseStore = {
 
     if (!hasPermission(actor.role, 'schedule_case')) {
       throw new Error(`Role ${actor.role} is not permitted to plan workshop tasks.`);
+    }
+
+    const blockingReasons = getBlockingClaimsReasons(caseObj.claims || [], caseObj.claimsOverridden);
+    if (blockingReasons.length > 0 && actor.role !== 'admin') {
+      throw new Error('Planification bloquée : accord expert/client manquant');
     }
 
     const updatedCase: SavCase = {
@@ -910,5 +930,223 @@ export const savCaseStore = {
       vehiclesJsonConstraint: 'data/vehicles.json doit rester []',
       serviceWorkerStatus: 'aucun service worker React actif',
     };
+  },
+
+  addClaim(caseId: string, claim: Partial<Claim>, actor: { id: string; role: Role }) {
+    const caseObj = cases.find((c) => c.id === caseId);
+    if (!caseObj) throw new Error(`Case ${caseId} not found.`);
+    if (!hasPermission(actor.role, 'manage_claims')) {
+      throw new Error(`Role ${actor.role} is not permitted to manage claims.`);
+    }
+    const normalized = normalizeClaim(claim);
+    const existingClaims = caseObj.claims || [];
+    const updatedCase: SavCase = {
+      ...caseObj,
+      claims: [...existingClaims, normalized],
+      updatedAt: new Date().toISOString(),
+    };
+    this.addCase(updatedCase);
+
+    const log = createAuditLog(
+      caseId,
+      actor.id,
+      actor.role,
+      'add_claim',
+      caseObj.status,
+      caseObj.status,
+      `Sinistre "${normalized.label}" ajouté (Type: ${normalized.claimType}, Payeur: ${normalized.payerType}).`
+    );
+    this.addLog(log);
+  },
+
+  updateClaim(caseId: string, claimId: string, updatedFields: Partial<Claim>, actor: { id: string; role: Role }) {
+    const caseObj = cases.find((c) => c.id === caseId);
+    if (!caseObj) throw new Error(`Case ${caseId} not found.`);
+    if (!hasPermission(actor.role, 'manage_claims')) {
+      throw new Error(`Role ${actor.role} is not permitted to manage claims.`);
+    }
+    const existingClaims = caseObj.claims || [];
+    const updatedClaims = existingClaims.map((claim) => {
+      if (claim.id === claimId) {
+        return normalizeClaim({ ...claim, ...updatedFields, updatedAt: new Date().toISOString() });
+      }
+      return claim;
+    });
+    const updatedCase: SavCase = {
+      ...caseObj,
+      claims: updatedClaims,
+      updatedAt: new Date().toISOString(),
+    };
+    this.addCase(updatedCase);
+
+    const log = createAuditLog(
+      caseId,
+      actor.id,
+      actor.role,
+      'update_claim',
+      caseObj.status,
+      caseObj.status,
+      `Sinistre "${claimId}" mis à jour.`
+    );
+    this.addLog(log);
+  },
+
+  approveClaimExpert(caseId: string, claimId: string, expertName: string, actor: { id: string; role: Role }) {
+    const caseObj = cases.find((c) => c.id === caseId);
+    if (!caseObj) throw new Error(`Case ${caseId} not found.`);
+    if (!hasPermission(actor.role, 'approve_claim_expert')) {
+      throw new Error(`Role ${actor.role} is not permitted to approve claims as expert.`);
+    }
+    const existingClaims = caseObj.claims || [];
+    const updatedClaims = existingClaims.map((claim) => {
+      if (claim.id === claimId) {
+        return approveClaimExpert(claim, expertName);
+      }
+      return claim;
+    });
+    const updatedCase: SavCase = {
+      ...caseObj,
+      claims: updatedClaims,
+      updatedAt: new Date().toISOString(),
+    };
+    this.addCase(updatedCase);
+
+    const log = createAuditLog(
+      caseId,
+      actor.id,
+      actor.role,
+      'approve_claim_expert',
+      caseObj.status,
+      caseObj.status,
+      `Accord expert validé par ${expertName} pour le sinistre "${claimId}".`
+    );
+    this.addLog(log);
+  },
+
+  approveClaimClient(caseId: string, claimId: string, reference: string, actor: { id: string; role: Role }) {
+    const caseObj = cases.find((c) => c.id === caseId);
+    if (!caseObj) throw new Error(`Case ${caseId} not found.`);
+    if (!hasPermission(actor.role, 'approve_claim_client')) {
+      throw new Error(`Role ${actor.role} is not permitted to approve claims as client.`);
+    }
+    const existingClaims = caseObj.claims || [];
+    const updatedClaims = existingClaims.map((claim) => {
+      if (claim.id === claimId) {
+        return approveClaimClient(claim, reference);
+      }
+      return claim;
+    });
+    const updatedCase: SavCase = {
+      ...caseObj,
+      claims: updatedClaims,
+      updatedAt: new Date().toISOString(),
+    };
+    this.addCase(updatedCase);
+
+    const log = createAuditLog(
+      caseId,
+      actor.id,
+      actor.role,
+      'approve_claim_client',
+      caseObj.status,
+      caseObj.status,
+      `Accord client validé (Réf: ${reference}) pour le sinistre "${claimId}".`
+    );
+    this.addLog(log);
+  },
+
+  rejectClaim(caseId: string, claimId: string, reason: string, actor: { id: string; role: Role }) {
+    const caseObj = cases.find((c) => c.id === caseId);
+    if (!caseObj) throw new Error(`Case ${caseId} not found.`);
+    if (!hasPermission(actor.role, 'manage_claims')) {
+      throw new Error(`Role ${actor.role} is not permitted to reject claims.`);
+    }
+    const existingClaims = caseObj.claims || [];
+    const updatedClaims = existingClaims.map((claim) => {
+      if (claim.id === claimId) {
+        return rejectClaim(claim, reason);
+      }
+      return claim;
+    });
+    const updatedCase: SavCase = {
+      ...caseObj,
+      claims: updatedClaims,
+      updatedAt: new Date().toISOString(),
+    };
+    this.addCase(updatedCase);
+
+    const log = createAuditLog(
+      caseId,
+      actor.id,
+      actor.role,
+      'reject_claim',
+      caseObj.status,
+      caseObj.status,
+      `Sinistre "${claimId}" rejeté pour la raison : ${reason}.`
+    );
+    this.addLog(log);
+  },
+
+  cancelClaim(caseId: string, claimId: string, actor: { id: string; role: Role }) {
+    const caseObj = cases.find((c) => c.id === caseId);
+    if (!caseObj) throw new Error(`Case ${caseId} not found.`);
+    if (!hasPermission(actor.role, 'manage_claims')) {
+      throw new Error(`Role ${actor.role} is not permitted to cancel claims.`);
+    }
+    const existingClaims = caseObj.claims || [];
+    const updatedClaims = existingClaims.map((claim) => {
+      if (claim.id === claimId) {
+        return cancelClaim(claim);
+      }
+      return claim;
+    });
+    const updatedCase: SavCase = {
+      ...caseObj,
+      claims: updatedClaims,
+      updatedAt: new Date().toISOString(),
+    };
+    this.addCase(updatedCase);
+
+    const log = createAuditLog(
+      caseId,
+      actor.id,
+      actor.role,
+      'cancel_claim',
+      caseObj.status,
+      caseObj.status,
+      `Sinistre "${claimId}" annulé.`
+    );
+    this.addLog(log);
+  },
+
+  overrideClaims(caseId: string, reason: string, actor: { id: string; role: Role }) {
+    const caseObj = cases.find((c) => c.id === caseId);
+    if (!caseObj) throw new Error(`Case ${caseId} not found.`);
+    if (!hasPermission(actor.role, 'override_claims')) {
+      throw new Error(`Role ${actor.role} is not permitted to override claims.`);
+    }
+    if (!reason || reason.trim() === '') {
+      throw new Error('Un motif est obligatoire pour effectuer un override.');
+    }
+    const updatedCase: SavCase = {
+      ...caseObj,
+      claimsOverridden: true,
+      claimsOverrideReason: reason,
+      claimsOverrideAt: new Date().toISOString(),
+      claimsOverrideBy: actor.id,
+      updatedAt: new Date().toISOString(),
+    };
+    this.addCase(updatedCase);
+
+    const log = createAuditLog(
+      caseId,
+      actor.id,
+      actor.role,
+      'override_claims',
+      caseObj.status,
+      caseObj.status,
+      `Override exceptionnel des accords effectué. Motif : ${reason}.`
+    );
+    this.addLog(log);
   },
 };

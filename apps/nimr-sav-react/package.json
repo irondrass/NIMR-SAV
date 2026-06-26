@@ -1,6 +1,6 @@
 {
   "name": "nimr-sav-react",
-  "version": "24.0.0-alpha.14",
+  "version": "24.0.0-alpha.15",
   "private": true,
   "description": "NIMR Carrosserie SAV — React TypeScript v24 migration foundation",
   "type": "module",

@@ -8,6 +8,7 @@ import { PriorityBadge } from '@/components/PriorityBadge';
 import { EmptyState } from '@/components/EmptyState';
 import { VersionBanner } from '@/components/VersionBanner';
 import { getRoleFieldGuidance } from '@/domain/ui-field-guidelines';
+import { getBlockingClaimsReasons } from '@/domain/claims';
 
 interface ReadOnlyViewProps {
   user: User;
@@ -417,6 +418,142 @@ export const ReadOnlyView: React.FC<ReadOnlyViewProps> = ({ user }) => {
                   </p>
                 </div>
               )}
+
+              {/* Claims section */}
+              <div>
+                <h3 style={{ fontSize: '0.95rem', color: '#3b82f6', marginBottom: '0.5rem' }}>
+                  Sinistres / OR (Claims)
+                </h3>
+                {selectedCase.claims && selectedCase.claims.length > 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                    {selectedCase.claims.map((claim) => (
+                      <div
+                        key={claim.id}
+                        style={{
+                          padding: '0.75rem',
+                          background: 'rgba(255, 255, 255, 0.02)',
+                          border: '1px solid rgba(255, 255, 255, 0.05)',
+                          borderRadius: '6px',
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                          <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>{claim.label}</span>
+                          <span
+                            style={{
+                              fontSize: '0.75rem',
+                              padding: '0.2rem 0.5rem',
+                              borderRadius: '4px',
+                              background:
+                                claim.status === 'approved'
+                                  ? 'rgba(16, 185, 129, 0.1)'
+                                  : claim.status === 'rejected'
+                                  ? 'rgba(239, 68, 68, 0.1)'
+                                  : claim.status === 'cancelled'
+                                  ? 'rgba(113, 113, 122, 0.1)'
+                                  : 'rgba(234, 179, 8, 0.1)',
+                              color:
+                                claim.status === 'approved'
+                                  ? '#10b981'
+                                  : claim.status === 'rejected'
+                                  ? '#ef4444'
+                                  : claim.status === 'cancelled'
+                                  ? '#71717a'
+                                  : '#eab308',
+                              border: '1px solid currentColor',
+                            }}
+                          >
+                            {claim.status.toUpperCase()}
+                          </span>
+                        </div>
+                        <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.8rem', color: '#a1a1aa' }}>
+                          Type: {claim.claimType} | Payeur: {claim.payerType} | Montant estimé: {claim.estimatedAmount} €
+                        </p>
+                        {claim.description && (
+                          <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.8rem', color: '#d4d4d8' }}>
+                            {claim.description}
+                          </p>
+                        )}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.8rem', background: 'rgba(0,0,0,0.15)', padding: '0.5rem', borderRadius: '4px' }}>
+                          <div>
+                            <strong>Accord Expert: </strong>
+                            {claim.requiredApprovals.includes('expert') ? (
+                              claim.expertApproved ? (
+                                <span style={{ color: '#10b981' }}>Validé (Par: {claim.expertName || 'N/A'})</span>
+                              ) : (
+                                <span style={{ color: '#eab308' }}>En attente</span>
+                              )
+                            ) : (
+                              <span style={{ color: '#71717a' }}>Non requis</span>
+                            )}
+                          </div>
+                          <div>
+                            <strong>Accord Client: </strong>
+                            {claim.requiredApprovals.includes('client') ? (
+                              claim.clientApproved ? (
+                                <span style={{ color: '#10b981' }}>Validé (Réf: {claim.clientApprovalReference || 'N/A'})</span>
+                              ) : (
+                                <span style={{ color: '#eab308' }}>En attente</span>
+                              )
+                            ) : (
+                              <span style={{ color: '#71717a' }}>Non requis</span>
+                            )}
+                          </div>
+                          {claim.notes && (
+                            <div style={{ marginTop: '0.25rem', fontSize: '0.75rem', color: '#a1a1aa', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '0.25rem' }}>
+                              Note: {claim.notes}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p style={{ fontSize: '0.9rem', color: '#71717a', margin: 0 }}>Aucun sinistre enregistré.</p>
+                )}
+                {selectedCase.claimsOverridden && (
+                  <div
+                    style={{
+                      marginTop: '0.75rem',
+                      padding: '0.5rem 0.75rem',
+                      background: 'rgba(16, 185, 129, 0.1)',
+                      border: '1px solid rgba(16, 185, 129, 0.2)',
+                      color: '#10b981',
+                      borderRadius: '6px',
+                      fontSize: '0.8rem',
+                    }}
+                  >
+                    ⚠️ Accords bypassés par Admin le{' '}
+                    {selectedCase.claimsOverrideAt ? new Date(selectedCase.claimsOverrideAt).toLocaleString() : 'N/A'}{' '}
+                    pour la raison : "{selectedCase.claimsOverrideReason}"
+                  </div>
+                )}
+                {(() => {
+                  const reasons = getBlockingClaimsReasons(selectedCase.claims || [], selectedCase.claimsOverridden);
+                  if (reasons.length > 0) {
+                    return (
+                      <div
+                        style={{
+                          marginTop: '0.5rem',
+                          padding: '0.5rem 0.75rem',
+                          background: 'rgba(239, 68, 68, 0.1)',
+                          border: '1px solid rgba(239, 68, 68, 0.2)',
+                          color: '#ef4444',
+                          borderRadius: '6px',
+                          fontSize: '0.8rem',
+                        }}
+                      >
+                        <strong>Planification bloquée : accord expert/client manquant</strong>
+                        <ul style={{ margin: '0.25rem 0 0 1.25rem', padding: 0 }}>
+                          {reasons.map((r, idx) => (
+                            <li key={idx}>{r}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
+              </div>
 
               {/* Direction notes hidden check */}
               {canViewDirectionNotes(user.role) && selectedCase.directionNotes && (

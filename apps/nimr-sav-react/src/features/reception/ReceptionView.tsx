@@ -5,7 +5,8 @@ import { RECEPTION_PRESETS } from '@/constants/reception-presets';
 import { validateFictiveFields } from '@/domain/validation-rules';
 import { transitionCase } from '@/domain/workflow-engine';
 import { createAuditLog } from '@/domain/audit-log';
-import { SavCase } from '@/domain/sav-case';
+import { SavCase, Claim } from '@/domain/sav-case';
+import { getBlockingClaimsReasons } from '@/domain/claims';
 import { hasPermission, canViewDirectionNotes } from '@/domain/action-permissions';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/EmptyState';
@@ -18,7 +19,18 @@ interface ReceptionViewProps {
 }
 
 export const ReceptionView: React.FC<ReceptionViewProps> = ({ user }) => {
-  const { cases, logs, addCase, addLog } = useSavCases();
+  const {
+    cases,
+    logs,
+    addCase,
+    addLog,
+    addClaim,
+    updateClaim,
+    approveClaimExpert,
+    approveClaimClient,
+    rejectClaim,
+    cancelClaim,
+  } = useSavCases();
 
   // Form states
   const [immatriculation, setImmatriculation] = useState('');
@@ -37,6 +49,14 @@ export const ReceptionView: React.FC<ReceptionViewProps> = ({ user }) => {
   // Active view tab in list panel
   const [activeListTab, setActiveListTab] = useState<'drafts' | 'received_today' | 'logs'>('drafts');
 
+  // Claims state
+  const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
+  const [showAddClaimForm, setShowAddClaimForm] = useState(false);
+  const [claimLabel, setClaimLabel] = useState('');
+  const [claimType, setClaimType] = useState<'insurance' | 'customer' | 'warranty' | 'internal'>('insurance');
+  const [claimDescription, setClaimDescription] = useState('');
+  const [claimAmount, setClaimAmount] = useState<number | ''>('');
+
   // Authorization checks
   const canCreate = hasPermission(user.role, 'create_case');
   const canReceive = hasPermission(user.role, 'receive_case');
@@ -51,6 +71,11 @@ export const ReceptionView: React.FC<ReceptionViewProps> = ({ user }) => {
       (c) => c.status === 'received' && c.receptionDate.startsWith(todayStr)
     );
   }, [cases]);
+
+  const selectedCase = useMemo(() => {
+    if (!selectedCaseId) return null;
+    return cases.find((c) => c.id === selectedCaseId) || null;
+  }, [cases, selectedCaseId]);
 
   // Form helper: reset fields
   const handleResetForm = () => {
@@ -200,6 +225,44 @@ export const ReceptionView: React.FC<ReceptionViewProps> = ({ user }) => {
       setTimeout(() => setSuccessMsg(''), 5000);
     } else {
       alert(result.error || 'Erreur lors de la transition de réception.');
+    }
+  };
+
+  const handleAddClaimSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedCaseId) return;
+    if (!claimLabel.trim()) {
+      alert('Veuillez renseigner un libellé.');
+      return;
+    }
+    const defaultPayer: Record<string, 'assurance' | 'client' | 'garantie' | 'interne'> = {
+      insurance: 'assurance',
+      customer: 'client',
+      warranty: 'garantie',
+      internal: 'interne',
+    };
+    const payerType = defaultPayer[claimType];
+    const newClaim: Partial<Claim> = {
+      id: `claim-${Date.now()}`,
+      label: claimLabel.trim(),
+      claimType,
+      payerType,
+      status: claimType === 'insurance' ? 'expert_pending' : claimType === 'customer' ? 'client_pending' : 'approved',
+      description: claimDescription.trim(),
+      estimatedAmount: claimAmount === '' ? 0 : Number(claimAmount),
+      expertApproved: false,
+      clientApproved: false,
+      requiredApprovals: claimType === 'insurance' ? ['expert', 'client'] : claimType === 'customer' ? ['client'] : ['internal'],
+    };
+
+    try {
+      addClaim(selectedCaseId, newClaim, user);
+      setClaimLabel('');
+      setClaimDescription('');
+      setClaimAmount('');
+      setShowAddClaimForm(false);
+    } catch (err) {
+      alert((err as Error).message || 'Erreur lors de l\'ajout du sinistre.');
     }
   };
 
@@ -538,9 +601,14 @@ export const ReceptionView: React.FC<ReceptionViewProps> = ({ user }) => {
                           Créé le : {new Date(c.createdAt).toLocaleTimeString()}
                         </p>
                       </div>
-                      <Button size="sm" onClick={() => handleReceiveDraft(c)}>
-                        Réceptionner
-                      </Button>
+                      <div style={{ display: 'flex', gap: '0.5rem' }}>
+                        <Button size="sm" variant="ghost" onClick={() => setSelectedCaseId(c.id)}>
+                          Claims {c.claims && c.claims.length > 0 ? `(${c.claims.length})` : ''}
+                        </Button>
+                        <Button size="sm" onClick={() => handleReceiveDraft(c)}>
+                          Réceptionner
+                        </Button>
+                      </div>
                     </div>
                   ))
                 )}
@@ -585,6 +653,11 @@ export const ReceptionView: React.FC<ReceptionViewProps> = ({ user }) => {
                       <p style={{ margin: '0.25rem 0 0', fontSize: '0.8rem', color: '#888' }}>
                         Réceptionné à : {new Date(c.receptionDate).toLocaleTimeString()}
                       </p>
+                      <div style={{ marginTop: '0.5rem', display: 'flex', justifyContent: 'flex-end' }}>
+                        <Button size="sm" variant="ghost" onClick={() => setSelectedCaseId(c.id)}>
+                          Gérer les Claims {c.claims && c.claims.length > 0 ? `(${c.claims.length})` : ''}
+                        </Button>
+                      </div>
                     </div>
                   ))
                 )}
@@ -623,6 +696,185 @@ export const ReceptionView: React.FC<ReceptionViewProps> = ({ user }) => {
               </div>
             )}
           </div>
+
+          {/* Claims / Sinistres management panel */}
+          {selectedCase && (
+            <div
+              style={{
+                marginTop: '1.5rem',
+                padding: '1rem',
+                background: 'rgba(255,255,255,0.02)',
+                borderRadius: '6px',
+                border: '1px solid rgba(255,255,255,0.05)',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 600 }}>Sinistres / OR — {selectedCase.immatriculation}</h3>
+                <Button size="sm" onClick={() => setShowAddClaimForm(!showAddClaimForm)}>
+                  {showAddClaimForm ? 'Masquer' : 'Ajouter un Sinistre'}
+                </Button>
+              </div>
+
+              {/* Add Claim Form */}
+              {showAddClaimForm && (
+                <form onSubmit={handleAddClaimSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginBottom: '1rem', paddingBottom: '1rem', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.8rem', color: '#a1a1aa', marginBottom: '0.25rem' }}>Libellé *</label>
+                    <input
+                      type="text"
+                      value={claimLabel}
+                      onChange={(e) => setClaimLabel(e.target.value)}
+                      placeholder="e.g. Réparation pare-chocs"
+                      style={{ width: '100%', padding: '0.5rem', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.15)', background: '#18181b', color: '#fff', fontSize: '0.85rem' }}
+                    />
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.8rem', color: '#a1a1aa', marginBottom: '0.25rem' }}>Type de sinistre</label>
+                      <select
+                        value={claimType}
+                        onChange={(e) => setClaimType(e.target.value as 'insurance' | 'customer' | 'warranty' | 'internal')}
+                        style={{ width: '100%', padding: '0.5rem', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.15)', background: '#18181b', color: '#fff', fontSize: '0.85rem' }}
+                      >
+                        <option value="insurance">Assurance</option>
+                        <option value="customer">Client direct</option>
+                        <option value="warranty">Garantie</option>
+                        <option value="internal">Interne</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.8rem', color: '#a1a1aa', marginBottom: '0.25rem' }}>Montant Estimé (€)</label>
+                      <input
+                        type="number"
+                        value={claimAmount}
+                        onChange={(e) => setClaimAmount(e.target.value === '' ? '' : Number(e.target.value))}
+                        placeholder="0"
+                        style={{ width: '100%', padding: '0.5rem', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.15)', background: '#18181b', color: '#fff', fontSize: '0.85rem' }}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.8rem', color: '#a1a1aa', marginBottom: '0.25rem' }}>Description</label>
+                    <textarea
+                      value={claimDescription}
+                      onChange={(e) => setClaimDescription(e.target.value)}
+                      placeholder="Détails du sinistre..."
+                      rows={2}
+                      style={{ width: '100%', padding: '0.5rem', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.15)', background: '#18181b', color: '#fff', fontSize: '0.85rem', resize: 'vertical' }}
+                    />
+                  </div>
+                  <Button size="sm" type="submit">Enregistrer le Sinistre</Button>
+                </form>
+              )}
+
+              {/* Claims List */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                {(!selectedCase.claims || selectedCase.claims.length === 0) ? (
+                  <div style={{ fontSize: '0.85rem', color: '#888', fontStyle: 'italic' }}>Aucun sinistre enregistré sur ce dossier.</div>
+                ) : (
+                  selectedCase.claims.map((claim) => {
+                    const blockages = getBlockingClaimsReasons([claim]);
+                    const isBlocked = blockages.length > 0;
+                    return (
+                      <div key={claim.id} style={{ padding: '0.75rem', background: 'rgba(255,255,255,0.01)', border: '1px solid rgba(255,255,255,0.03)', borderRadius: '4px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
+                          <strong style={{ fontSize: '0.85rem' }}>{claim.label}</strong>
+                          <span style={{ fontSize: '0.75rem', padding: '2px 6px', borderRadius: '4px', background: claim.status === 'approved' ? 'rgba(16,185,129,0.1)' : claim.status === 'rejected' ? 'rgba(239,68,68,0.1)' : 'rgba(245,158,11,0.1)', color: claim.status === 'approved' ? '#10b981' : claim.status === 'rejected' ? '#ef4444' : '#f59e0b' }}>
+                            {claim.status.toUpperCase()}
+                          </span>
+                        </div>
+                        <p style={{ margin: 0, fontSize: '0.8rem', color: '#aaa' }}>Type: {claim.claimType} | Payeur: {claim.payerType} {claim.estimatedAmount ? `| Estimé: ${claim.estimatedAmount} €` : ''}</p>
+                        {claim.description && <p style={{ margin: '0.25rem 0 0', fontSize: '0.8rem', color: '#888' }}>{claim.description}</p>}
+
+                        {/* Approvals Details */}
+                        <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.5rem', fontSize: '0.75rem' }}>
+                          {claim.requiredApprovals.includes('expert') && (
+                            <span style={{ color: claim.expertApproved ? '#10b981' : '#ef4444' }}>
+                              Accord Expert: {claim.expertApproved ? `✅ (Par: ${claim.expertName})` : '❌ Manquant'}
+                            </span>
+                          )}
+                          {claim.requiredApprovals.includes('client') && (
+                            <span style={{ color: claim.clientApproved ? '#10b981' : '#ef4444' }}>
+                              Accord Client: {claim.clientApproved ? `✅ (Réf: ${claim.clientApprovalReference})` : '❌ Manquant'}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Blockages Summary */}
+                        {isBlocked && (
+                          <div style={{ marginTop: '0.5rem', padding: '0.4rem', background: 'rgba(239,68,68,0.05)', border: '1px solid rgba(239,68,68,0.1)', borderRadius: '4px', color: '#f87171', fontSize: '0.75rem' }}>
+                            ⚠️ Planification bloquée : {blockages.join(' ')}
+                          </div>
+                        )}
+
+                        {/* Action buttons */}
+                        {claim.status !== 'cancelled' && claim.status !== 'approved' && (
+                          <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                            {claim.requiredApprovals.includes('expert') && !claim.expertApproved && (
+                              <Button
+                                size="sm"
+                                onClick={() => {
+                                  const name = prompt("Saisir le nom de l'expert :");
+                                  if (name && name.trim()) {
+                                    approveClaimExpert(selectedCase.id, claim.id, name.trim(), user);
+                                  }
+                                }}
+                              >
+                                Valider Accord Expert
+                              </Button>
+                            )}
+                            {claim.requiredApprovals.includes('client') && !claim.clientApproved && (
+                              <Button
+                                size="sm"
+                                onClick={() => {
+                                  const ref = prompt("Saisir la référence de l'accord :");
+                                  if (ref && ref.trim()) {
+                                    approveClaimClient(selectedCase.id, claim.id, ref.trim(), user);
+                                  }
+                                }}
+                              >
+                                Valider Accord Client
+                              </Button>
+                            )}
+                            {claim.claimType === 'warranty' && (
+                              <Button
+                                size="sm"
+                                onClick={() => {
+                                  updateClaim(selectedCase.id, claim.id, { status: 'approved' }, user);
+                                }}
+                              >
+                                Valider Garantie
+                              </Button>
+                            )}
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              style={{ color: '#ef4444' }}
+                              onClick={() => {
+                                const reason = prompt("Saisir le motif du rejet :");
+                                if (reason && reason.trim()) {
+                                  rejectClaim(selectedCase.id, claim.id, reason.trim(), user);
+                                }
+                              }}
+                            >
+                              Rejeter
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => cancelClaim(selectedCase.id, claim.id, user)}
+                            >
+                              Annuler
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
       <VersionBanner />

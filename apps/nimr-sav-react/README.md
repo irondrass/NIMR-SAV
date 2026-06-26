@@ -1,4 +1,4 @@
-# NIMR SAV React — v24.0.0-alpha.14
+# NIMR SAV React — v24.0.0-alpha.15
 
 Version de rattrapage fonctionnel / retour en phase alpha.
 
@@ -40,35 +40,41 @@ npm audit --registry=https://registry.npmjs.org/
 
 ## Version
 
-`v24.0.0-alpha.14` — Version de rattrapage fonctionnel / retour en développement alpha (rc.1 historique non modifiée).
+`v24.0.0-alpha.15` — Version de rattrapage fonctionnel / retour en développement alpha (rc.1 historique non modifiée).
 
-- alpha.14 interne uniquement.
-- Non destinée à la production.
-- Non finale.
-- Aucun tag automatique.
-- Aucun push automatique.
+- alpha.15 interne uniquement (non destiné à la production et non finale).
+- Aucun tag automatique, ni de push automatique.
 - Le pilote stable reste exclusivement `v23.2.6`.
 - Le fichier `data/vehicles.json` reste strictement `[]`.
-- React v24 reste sans service worker actif.
-- Aucun backend ajouté.
-- Aucun Supabase ajouté.
+- React v24 reste sans service worker actif (offline/PWA reporté au Lot alpha.18).
+- Aucun backend ni Supabase ajouté (lot Cloud/Supabase séparé post-alpha).
 - La recette métier alpha.12 est conservée.
 - Le gel fonctionnel alpha.13 est conservé.
 - `v24.0.0` final reste hors périmètre.
 
-## Readiness alpha.14
+## Roadmap des Lots de Rattrapage Fonctionnel
 
-alpha.14 confirme :
+- **alpha.14** : Planning Atelier Avancé, suggestions de créneaux, collisions, capacité ressources, Gantt.
+- **alpha.15** (Version courante) : Multi-sinistres / Claims / Accords Expert & Client.
+- **alpha.16** : Import Devis & Calcul Charge Atelier.
+- **alpha.17** : Impressions & Exports ZIP/PDF.
+- **alpha.18** : Mode Offline & PWA.
+- **Cloud/Supabase** : Synchronisation & Sécurité Cloud (séparé en lot post-alpha).
 
-- version alignée sur `v24.0.0-alpha.14` ;
-- statut de développement alpha de rattrapage ;
-- absence d’exposition production ;
-- absence de version finale ;
-- absence de tag automatique ;
+## Readiness alpha.15
+
+alpha.15 confirme :
+
+- version alignée sur `v24.0.0-alpha.15` ;
+- couverture fonctionnelle : multi-sinistres, claims et accords expert/client ;
+- statut de développement alpha de rattrapage (non RC, non production) ;
+- absence d’exposition production et absence de version finale ;
+- absence de tag ou de push automatique ;
 - rôles et statuts officiels uniquement ;
-- flux métier alpha.12 conservé ;
-- gel fonctionnel alpha.13 conservé ;
+- flux métier alpha.12 et gel fonctionnel alpha.13 conservés ;
 - consultation Direction/Admin/Lecture seule sans mutation ;
+- blocage de la planification en cas d'accord expert/client requis manquant ;
+- dérogation exceptionnelle par Admin avec motif obligatoire ;
 - livraison impossible sans qualité approuvée ;
 - dossier livré sans retour arrière.
 

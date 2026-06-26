@@ -50,22 +50,22 @@ import { validateReleaseReadiness } from '../src/domain/release-readiness';
 import { SavCase } from '../src/domain/sav-case';
 import { AuditLogEntry } from '../src/domain/audit-log';
 
-describe('SAV Release Readiness & Invariants Integration (v24.0.0-alpha.14)', () => {
+describe('SAV Release Readiness & Invariants Integration (v24.0.0-alpha.15)', () => {
   // 1. Version matches
-  it('APP_VERSION is exactly v24.0.0-alpha.14', () => {
-    expect(APP_VERSION).toBe('v24.0.0-alpha.14');
+  it('APP_VERSION is exactly v24.0.0-alpha.15', () => {
+    expect(APP_VERSION).toBe('v24.0.0-alpha.15');
   });
 
-  it('package.json version matches 24.0.0-alpha.14', () => {
+  it('package.json version matches 24.0.0-alpha.15', () => {
     const pkgPath = resolve(__dirname, '../package.json');
     const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
-    expect(pkg.version).toBe('24.0.0-alpha.14');
+    expect(pkg.version).toBe('24.0.0-alpha.15');
   });
 
-  it('package-lock.json version matches 24.0.0-alpha.14', () => {
+  it('package-lock.json version matches 24.0.0-alpha.15', () => {
     const lockPath = resolve(__dirname, '../package-lock.json');
     const lock = JSON.parse(readFileSync(lockPath, 'utf-8'));
-    expect(lock.version).toBe('24.0.0-alpha.14');
+    expect(lock.version).toBe('24.0.0-alpha.15');
   });
 
   // 2. data/vehicles.json is strictly []
@@ -135,7 +135,7 @@ describe('SAV Release Readiness & Invariants Integration (v24.0.0-alpha.14)', ()
       details: 'Dossier créé',
     };
 
-    const report = validateReleaseReadiness([mockCase], [mockLog], { appVersion: 'v24.0.0-alpha.14' });
+    const report = validateReleaseReadiness([mockCase], [mockLog], { appVersion: 'v24.0.0-alpha.15' });
     expect(report.isReadyForRcEvaluation).toBe(true);
     expect(report.blockers).toHaveLength(0);
     expect(report.recommendation).toContain('rc.1 interne préparée');
@@ -185,7 +185,7 @@ describe('SAV Release Readiness & Invariants Integration (v24.0.0-alpha.14)', ()
       details: 'Dossier créé',
     };
 
-    const report = validateReleaseReadiness([mockCaseBadStatus, mockCaseNoQc], [mockLogBadRole], { appVersion: 'v24.0.0-alpha.14' });
+    const report = validateReleaseReadiness([mockCaseBadStatus, mockCaseNoQc], [mockLogBadRole], { appVersion: 'v24.0.0-alpha.15' });
     expect(report.isReadyForRcEvaluation).toBe(false);
     expect(report.blockers.length).toBeGreaterThanOrEqual(3);
 

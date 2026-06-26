@@ -42,7 +42,11 @@ export type Action =
   | 'view_permission_matrix'
   | 'view_system_invariants'
   | 'view_audit_summary'
-  | 'view_readonly_console';
+  | 'view_readonly_console'
+  | 'manage_claims'
+  | 'approve_claim_expert'
+  | 'approve_claim_client'
+  | 'override_claims';
 
 /**
  * Checks if a specific role is allowed to perform a given action.
@@ -137,6 +141,16 @@ export function hasPermission(role: Role, action: Action): boolean {
 
     case 'edit_direction_notes':
       return role === 'directeur-sav';
+
+    case 'manage_claims':
+      return role === 'reception' || role === 'chef-atelier';
+
+    case 'approve_claim_expert':
+    case 'approve_claim_client':
+      return role === 'reception';
+
+    case 'override_claims':
+      return false;
 
     case 'admin_action':
       return false; // Only Admin (handled above)

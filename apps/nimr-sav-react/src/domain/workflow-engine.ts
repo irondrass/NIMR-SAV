@@ -4,6 +4,7 @@ import { AuditLogEntry, createAuditLog } from './audit-log';
 import { canDeliverCase, isQCValidated } from './delivery-rules';
 import { isQCComplete } from './qc-rules';
 import { Role } from '../types';
+import { getBlockingClaimsReasons } from './claims';
 
 export interface TransitionResult {
   success: boolean;
@@ -92,6 +93,18 @@ export function transitionCase(
       isExceptionalAdminAction = true;
     } else {
       return { success: false, error: `Cancellation from ${caseObj.status} status is forbidden except for Admin.` };
+    }
+  }
+
+  // Claims validation checks
+  const isEngagingAtelier = ['diagnosis', 'waiting_parts', 'repair'].includes(targetStatus);
+  if (isEngagingAtelier && !isExceptionalAdminAction) {
+    const blockingReasons = getBlockingClaimsReasons(caseObj.claims || [], caseObj.claimsOverridden);
+    if (blockingReasons.length > 0) {
+      return {
+        success: false,
+        error: 'Planification bloquée : accord expert/client manquant',
+      };
     }
   }
 

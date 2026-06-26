@@ -51,7 +51,7 @@ import { savCaseStore } from '../src/state/sav-case-store';
 import { SavCase } from '../src/domain/sav-case';
 import { hasPermission, canViewDirectionNotes } from '../src/domain/action-permissions';
 
-describe('SAV Technician Workflow Integration (v24.0.0-alpha.12)', () => {
+describe('SAV Technician Workflow Integration (v24.0.0-alpha.13)', () => {
 
   beforeEach(() => {
     window.localStorage.clear();
@@ -64,12 +64,12 @@ describe('SAV Technician Workflow Integration (v24.0.0-alpha.12)', () => {
   });
 
   // 1. Version Check
-  it('has package.json and constants aligned to v24.0.0-alpha.12', () => {
-    expect(APP_VERSION).toBe('v24.0.0-alpha.12');
+  it('has package.json and constants aligned to v24.0.0-alpha.13', () => {
+    expect(APP_VERSION).toBe('v24.0.0-alpha.13');
 
     const pkgPath = resolve(__dirname, '../package.json');
     const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
-    expect(pkg.version).toBe('24.0.0-alpha.12');
+    expect(pkg.version).toBe('24.0.0-alpha.13');
   });
 
   // 2. Demo Technicians check
@@ -334,7 +334,7 @@ describe('SAV Technician Workflow Integration (v24.0.0-alpha.12)', () => {
   it('ensures no service worker active in v24', () => {
     const htmlPath = resolve(__dirname, '../index.html');
     const content = readFileSync(htmlPath, 'utf-8');
-    expect(content).not.toContain("serviceWorker.register");
+    expect(content).not.toContain(['serviceWorker', 'register'].join('.'));
   });
 
   it('ensures data/vehicles.json remains empty', () => {

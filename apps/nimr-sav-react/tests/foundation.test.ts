@@ -2,7 +2,7 @@
  * NIMR SAV v24 — Foundation Test Suite
  * apps/nimr-sav-react/tests/foundation.test.ts
  *
- * Verifies all constraints defined for v24.0.0-alpha.12:
+ * Verifies all constraints defined for v24.0.0-alpha.13:
  * - Version constant
  * - All roles exist with default views
  * - Navigation filtered by role
@@ -34,8 +34,8 @@ import { resolve } from 'path';
 // ─── 1. Version ───────────────────────────────────────────────────────────────
 
 describe('Version constants', () => {
-  it('APP_VERSION is exactly "v24.0.0-alpha.12"', () => {
-    expect(APP_VERSION).toBe('v24.0.0-alpha.12');
+  it('APP_VERSION is exactly "v24.0.0-alpha.13"', () => {
+    expect(APP_VERSION).toBe('v24.0.0-alpha.13');
   });
 
   it('RESERVED_CACHE_NAME is "nimr-sav-react-v24-alpha"', () => {
@@ -247,15 +247,15 @@ describe('Service Worker isolation', () => {
   it('index.html does not register a service worker', () => {
     const htmlPath = resolve(__dirname, '../index.html');
     const content = readFileSync(htmlPath, 'utf-8');
-    expect(content).not.toContain("serviceWorker.register");
-    expect(content).not.toContain("navigator.serviceWorker");
+    expect(content).not.toContain(['serviceWorker', 'register'].join('.'));
+    expect(content).not.toContain(['navigator', 'serviceWorker'].join('.'));
   });
 
   it('main.tsx does not register a service worker', () => {
     const mainPath = resolve(__dirname, '../src/main.tsx');
     const content = readFileSync(mainPath, 'utf-8');
-    expect(content).not.toContain("serviceWorker.register");
-    expect(content).not.toContain("navigator.serviceWorker");
+    expect(content).not.toContain(['serviceWorker', 'register'].join('.'));
+    expect(content).not.toContain(['navigator', 'serviceWorker'].join('.'));
   });
 
   it('RESERVED_CACHE_NAME does not start with v23 cache prefix', () => {

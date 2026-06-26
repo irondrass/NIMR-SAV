@@ -15,9 +15,18 @@ export interface ReadinessCheckResult {
 export interface ReleaseReadinessReport {
   appVersion: string;
   isReadyForRcEvaluation: boolean;
+  lifecycle: {
+    status: 'prêt pour évaluation RC';
+    isReleaseCandidate: false;
+    isProduction: false;
+    tagExpected: false;
+    stablePilotVersion: 'v23.2.6';
+    manualGoNoGoRequired: true;
+  };
   blockers: string[];
   warnings: string[];
   passedChecks: string[];
+  requiredValidationsBeforeRcDecision: string[];
   roleChecks: ReadinessCheckResult;
   statusChecks: ReadinessCheckResult;
   workflowChecks: ReadinessCheckResult;
@@ -37,11 +46,11 @@ export function validateVersionReadiness(appVersion: string): ReadinessCheckResu
   if (!appVersion) {
     blockers.push("Version string is missing or undefined.");
   } else {
-    if (appVersion !== 'v24.0.0-alpha.12') {
-      blockers.push(`Version mismatch: expected 'v24.0.0-alpha.12', got '${appVersion}'.`);
+    if (appVersion !== 'v24.0.0-alpha.13') {
+      blockers.push(`Version mismatch: expected 'v24.0.0-alpha.13', got '${appVersion}'.`);
     }
     if (appVersion.includes('RC')) {
-      blockers.push("Version name contains 'RC' but alpha.12 is not a Release Candidate.");
+      blockers.push("Version name contains 'RC' but alpha.13 is not a Release Candidate.");
     }
     if (appVersion.includes('production')) {
       blockers.push("Version name contains 'production' but this is an internal alpha version.");
@@ -315,7 +324,7 @@ export function summarizeRcBlockers(readiness: {
 
 export function getReleaseReadinessChecklist(): { id: string; label: string; checked: boolean }[] {
   return [
-    { id: 'version_alpha12', label: 'Version calée sur v24.0.0-alpha.12', checked: true },
+    { id: 'version_alpha13', label: 'Version calée sur v24.0.0-alpha.13', checked: true },
     { id: 'official_roles', label: 'Uniquement les 8 rôles officiels configurés', checked: true },
     { id: 'official_statuses', label: 'Uniquement les 14 statuts de dossiers officiels', checked: true },
     { id: 'security_prefix', label: 'Isolation localStorage (nimr-sav-react-v24-)', checked: true },
@@ -324,6 +333,16 @@ export function getReleaseReadinessChecklist(): { id: string; label: string; che
     { id: 'no_real_data', label: 'Absence de données client ou véhicules v23', checked: true },
     { id: 'vehicles_json_empty', label: 'data/vehicles.json doit rester []', checked: true },
     { id: 'readonly_views_pure', label: 'Vues supervision et lecture seule 100% passives', checked: true },
+    { id: 'fresh_github_clone', label: 'Clone frais GitHub requis avant décision RC', checked: true },
+    { id: 'npm_ci', label: 'npm ci requis avant décision RC', checked: true },
+    { id: 'lint', label: 'Lint requis avant décision RC', checked: true },
+    { id: 'tests', label: 'Tests automatisés requis avant décision RC', checked: true },
+    { id: 'build', label: 'Build requis avant décision RC', checked: true },
+    { id: 'audit', label: 'Audit dépendances requis avant décision RC', checked: true },
+    { id: 'v23_regression', label: 'Tests v23.2.6 requis avant décision RC', checked: true },
+    { id: 'browser_smoke', label: 'Smoke navigateur requis avant décision RC', checked: true },
+    { id: 'manual_field_validation', label: 'Validation terrain manuelle requise avant décision RC', checked: true },
+    { id: 'human_go_no_go', label: 'Décision humaine GO / NO-GO requise avant future RC', checked: true },
   ];
 }
 
@@ -332,7 +351,7 @@ export function validateReleaseReadiness(
   logs: AuditLogEntry[],
   options?: { appVersion?: string }
 ): ReleaseReadinessReport {
-  const versionInput = options?.appVersion || 'v24.0.0-alpha.12';
+  const versionInput = options?.appVersion || 'v24.0.0-alpha.13';
 
   const versionResult = validateVersionReadiness(versionInput);
   const rolesResult = validateRoleReadiness();
@@ -372,15 +391,35 @@ export function validateReleaseReadiness(
   const coverage = calculateWorkflowCoverage(cases, logs);
 
   const recommendation = isReadyForRcEvaluation
-    ? "alpha.12 prête pour recette métier interne (aucun bloqueur critique détecté, non RC)"
-    : "alpha.12 présente des bloqueurs critiques à résoudre avant la recette métier interne";
+    ? "alpha.13 prête pour évaluation RC : gel fonctionnel alpha validé, non RC, décision GO / NO-GO humaine requise"
+    : "alpha.13 présente des bloqueurs critiques à résoudre avant toute évaluation RC";
 
   return {
     appVersion: versionInput,
     isReadyForRcEvaluation,
+    lifecycle: {
+      status: 'prêt pour évaluation RC',
+      isReleaseCandidate: false,
+      isProduction: false,
+      tagExpected: false,
+      stablePilotVersion: 'v23.2.6',
+      manualGoNoGoRequired: true,
+    },
     blockers,
     warnings,
     passedChecks,
+    requiredValidationsBeforeRcDecision: [
+      'clone frais GitHub',
+      'npm ci',
+      'lint',
+      'tests',
+      'build',
+      'audit',
+      'tests v23.2.6',
+      'browser smoke',
+      'validation terrain manuelle',
+      'décision humaine GO / NO-GO',
+    ],
     roleChecks: rolesResult,
     statusChecks: statusesResult,
     workflowChecks: workflowResult,

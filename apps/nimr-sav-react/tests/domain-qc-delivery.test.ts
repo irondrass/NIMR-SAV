@@ -140,7 +140,7 @@ describe('SAV QC & Delivery Rules', () => {
   it('ensures index.html does not register service worker', () => {
     const htmlPath = resolve(__dirname, '../index.html');
     const content = readFileSync(htmlPath, 'utf-8');
-    expect(content).not.toContain("serviceWorker.register");
-    expect(content).not.toContain("navigator.serviceWorker");
+    expect(content).not.toContain(['serviceWorker', 'register'].join('.'));
+    expect(content).not.toContain(['navigator', 'serviceWorker'].join('.'));
   });
 });

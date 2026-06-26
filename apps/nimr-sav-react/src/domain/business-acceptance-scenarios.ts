@@ -867,5 +867,5 @@ export function summarizeBusinessAcceptanceReadiness(
     return `alpha.12 présente ${result.blockers.length} bloqueur(s) de recette métier interne.`;
   }
 
-  return `alpha.12 prête pour recette métier interne : ${result.metrics.totalCases} dossiers simulés, ${result.metrics.totalLogs} événements traçables, non RC et non destinée à la production.`;
+  return `alpha.12 conservée sous rc.1 interne : ${result.metrics.totalCases} dossiers simulés, ${result.metrics.totalLogs} événements traçables, sans exposition production.`;
 }

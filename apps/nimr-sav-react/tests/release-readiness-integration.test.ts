@@ -50,22 +50,22 @@ import { validateReleaseReadiness } from '../src/domain/release-readiness';
 import { SavCase } from '../src/domain/sav-case';
 import { AuditLogEntry } from '../src/domain/audit-log';
 
-describe('SAV Release Readiness & Invariants Integration (v24.0.0-alpha.13)', () => {
+describe('SAV Release Readiness & Invariants Integration (v24.0.0-rc.1)', () => {
   // 1. Version matches
-  it('APP_VERSION is exactly v24.0.0-alpha.13', () => {
-    expect(APP_VERSION).toBe('v24.0.0-alpha.13');
+  it('APP_VERSION is exactly v24.0.0-rc.1', () => {
+    expect(APP_VERSION).toBe('v24.0.0-rc.1');
   });
 
-  it('package.json version matches 24.0.0-alpha.13', () => {
+  it('package.json version matches 24.0.0-rc.1', () => {
     const pkgPath = resolve(__dirname, '../package.json');
     const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
-    expect(pkg.version).toBe('24.0.0-alpha.13');
+    expect(pkg.version).toBe('24.0.0-rc.1');
   });
 
-  it('package-lock.json version matches 24.0.0-alpha.13', () => {
+  it('package-lock.json version matches 24.0.0-rc.1', () => {
     const lockPath = resolve(__dirname, '../package-lock.json');
     const lock = JSON.parse(readFileSync(lockPath, 'utf-8'));
-    expect(lock.version).toBe('24.0.0-alpha.13');
+    expect(lock.version).toBe('24.0.0-rc.1');
   });
 
   // 2. data/vehicles.json is strictly []
@@ -135,10 +135,15 @@ describe('SAV Release Readiness & Invariants Integration (v24.0.0-alpha.13)', ()
       details: 'Dossier créé',
     };
 
-    const report = validateReleaseReadiness([mockCase], [mockLog], { appVersion: 'v24.0.0-alpha.13' });
+    const report = validateReleaseReadiness([mockCase], [mockLog], { appVersion: 'v24.0.0-rc.1' });
     expect(report.isReadyForRcEvaluation).toBe(true);
     expect(report.blockers).toHaveLength(0);
-    expect(report.recommendation).toContain('alpha.13 prête pour évaluation RC');
+    expect(report.recommendation).toContain('rc.1 interne préparée');
+    expect(report.lifecycle.status).toBe('Release Candidate interne préparée');
+    expect(report.lifecycle.isReleaseCandidate).toBe(true);
+    expect(report.lifecycle.isFinal).toBe(false);
+    expect(report.lifecycle.isProduction).toBe(false);
+    expect(report.lifecycle.tagExpected).toBe(false);
   });
 
   it('detects blockers for unofficial roles, statuses, or corrupted workflow state', () => {
@@ -180,7 +185,7 @@ describe('SAV Release Readiness & Invariants Integration (v24.0.0-alpha.13)', ()
       details: 'Dossier créé',
     };
 
-    const report = validateReleaseReadiness([mockCaseBadStatus, mockCaseNoQc], [mockLogBadRole], { appVersion: 'v24.0.0-alpha.13' });
+    const report = validateReleaseReadiness([mockCaseBadStatus, mockCaseNoQc], [mockLogBadRole], { appVersion: 'v24.0.0-rc.1' });
     expect(report.isReadyForRcEvaluation).toBe(false);
     expect(report.blockers.length).toBeGreaterThanOrEqual(3);
 

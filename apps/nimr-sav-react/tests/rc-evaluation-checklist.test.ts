@@ -15,7 +15,7 @@ function flattenChecklistText(): string {
   });
 }
 
-describe('RC evaluation checklist (v24.0.0-alpha.13)', () => {
+describe('RC evaluation checklist (v24.0.0-rc.1)', () => {
   it('contains the technical checklist', () => {
     const sections = getRcEvaluationChecklist();
 
@@ -65,7 +65,7 @@ describe('RC evaluation checklist (v24.0.0-alpha.13)', () => {
     expect(flattenChecklistText()).toContain('Checklist validation manuelle');
   });
 
-  it('contains GO / NO-GO criteria for future RC evaluation', () => {
+  it('contains GO / NO-GO criteria for rc.1 decision', () => {
     const criteria = getGoNoGoCriteriaForRcEvaluation();
 
     expect(criteria.go.length).toBeGreaterThanOrEqual(5);
@@ -73,13 +73,14 @@ describe('RC evaluation checklist (v24.0.0-alpha.13)', () => {
     expect(flattenChecklistText()).toContain('GO / NO-GO');
   });
 
-  it('does not describe alpha.13 as a published RC or production version', () => {
+  it('does not describe rc.1 as published, production, or final', () => {
     const text = flattenChecklistText();
     const forbiddenPhrases = [
       ['production', ' ready'].join(''),
       ['production', '-ready'].join(''),
       ['RC', ' publiée'].join(''),
       ['release candidate', ' publiée'].join(''),
+      ['version finale', ' validée'].join(''),
     ];
 
     for (const phrase of forbiddenPhrases) {
@@ -95,11 +96,11 @@ describe('RC evaluation checklist (v24.0.0-alpha.13)', () => {
     expect(text).toContain('Aucun push ni tag automatique');
   });
 
-  it('documents known limitations before any future RC decision', () => {
+  it('documents known limitations before any rc.1 tag decision', () => {
     const limitations = getKnownLimitationsBeforeRc();
 
     expect(limitations.length).toBeGreaterThanOrEqual(5);
-    expect(limitations.join(' | ')).toContain('candidate à une évaluation RC');
+    expect(limitations.join(' | ')).toContain('Release Candidate interne');
     expect(limitations.join(' | ')).toContain('Validation manuelle terrain requise');
   });
 });

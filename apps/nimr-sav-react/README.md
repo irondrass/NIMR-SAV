@@ -1,41 +1,29 @@
-# NIMR SAV React — v24.0.0-alpha.13
+# NIMR SAV React — v24.0.0-rc.1
 
-Préparation RC / gel fonctionnel / documentation finale.
+Release Candidate interne / validation terrain finale.
 
 Application React + TypeScript pour NIMR Carrosserie SAV.
 
-> Alpha interne — cette version n’est pas une RC et n’est pas destinée à la production. Elle prépare une future évaluation, sans publication automatique.
+> RC interne — cette étape organise la validation terrain finale. Elle n’est pas destinée à la production, n’est pas la version finale et ne crée aucun tag automatiquement.
 
 ## Séparation stricte de v23.x
 
-| Élément | v23.x (racine) | v24 (apps/nimr-sav-react/) |
+| Élément | v23.x (racine) | v24 React |
 |---|---|---|
-| Statut | Pilote stable `v23.2.6` | Migration alpha interne |
+| Statut | Pilote stable `v23.2.6` | RC interne de validation |
 | Port | Serveur statique | 5173 (Vite) |
 | localStorage | `nimr-sav-*` | `nimr-sav-react-v24-*` |
 | Service Worker | `sw.js` actif côté v23 | Aucun service worker React actif |
 | Cache | `nimr-sav-v23.2.x-*` | `nimr-sav-react-v24-alpha` réservé |
 | Données | `data/vehicles.json` | Doit rester strictement `[]` |
 
-## Commandes
+## Commandes de validation locale
 
 ```bash
-# Installer les dépendances
 npm ci
-
-# Démarrer en développement (port 5173)
-npm run dev
-
-# Vérification TypeScript + build
-npm run build
-
-# Linter
 npm run lint
-
-# Tests
 npm test
-
-# Audit dépendances
+npm run build
 npm audit --registry=https://registry.npmjs.org/
 ```
 
@@ -52,55 +40,54 @@ npm audit --registry=https://registry.npmjs.org/
 
 ## Version
 
-`v24.0.0-alpha.13` — Préparation RC / gel fonctionnel / documentation finale.
+`v24.0.0-rc.1` — Release Candidate interne / validation terrain finale.
 
-- Alpha interne uniquement.
-- Non RC.
+- rc.1 interne uniquement.
 - Non destinée à la production.
-- Aucun push ni tag automatique pour cette étape.
+- Non finale.
+- Aucun tag automatique.
+- Aucun push automatique.
 - Le pilote stable reste exclusivement `v23.2.6`.
 - Le fichier `data/vehicles.json` reste strictement `[]`.
 - React v24 reste sans service worker actif.
 - Aucun backend ajouté.
 - Aucun Supabase ajouté.
 - La recette métier alpha.12 est conservée.
+- Le gel fonctionnel alpha.13 est conservé.
+- `v24.0.0` final reste hors périmètre.
 
-## Gel fonctionnel alpha.13
+## Readiness RC interne
 
-alpha.13 ajoute :
+rc.1 confirme :
 
-- un module de readiness de gel fonctionnel ;
-- une checklist de préparation à une future évaluation RC ;
-- des critères GO / NO-GO explicites ;
-- des preuves automatiques de non-régression métier ;
-- une documentation finale avant arbitrage humain.
-
-Les validations conceptuelles couvrent :
-
-- version alignée sur `v24.0.0-alpha.13` ;
-- application encore alpha, non RC et non destinée à la production ;
-- absence de tag attendu ;
-- `v23.2.6` conservée comme version stable / pilote ;
-- données publiques véhicules vides ;
-- absence de backend, Supabase et service worker React actif ;
+- version alignée sur `v24.0.0-rc.1` ;
+- statut Release Candidate interne ;
+- absence d’exposition production ;
+- absence de version finale ;
+- absence de tag automatique ;
 - rôles et statuts officiels uniquement ;
 - flux métier alpha.12 conservé ;
+- gel fonctionnel alpha.13 conservé ;
 - consultation Direction/Admin/Lecture seule sans mutation ;
 - livraison impossible sans qualité approuvée ;
 - dossier livré sans retour arrière.
 
-## Recette métier conservée
+## Handoff validation terrain finale
 
-La simulation alpha.12 reste le socle métier de validation avec cinq dossiers fictifs en parallèle :
+La validation terrain doit rejouer une journée SAV fictive :
 
-- un flux complet réception → atelier → technicien → contrôle qualité → livraison ;
-- un dossier bloqué en `waiting_parts` ;
-- un rejet qualité suivi d’une reprise atelier ;
-- une tentative de livraison bloquée avant approbation qualité ;
-- un dossier annulé selon le workflow existant.
+- réception de plusieurs dossiers ;
+- affectation atelier ;
+- intervention technicien ;
+- attente pièces ;
+- rejet qualité ;
+- reprise atelier ;
+- approbation qualité ;
+- livraison client ;
+- consultation direction/admin/lecture seule.
 
-Les consultations Direction SAV, Admin/Gouvernance et Lecture seule restent passives : elles ne modifient pas les dossiers et ne créent pas de logs de workflow.
+Critères bloquants : perte de dossier, mutation par lecture seule, livraison sans qualité approuvée, statut incohérent, rôle non autorisé, donnée client réelle, erreur console critique, échec test/build/audit.
 
 ## Prochaine étape possible
 
-Décision humaine GO / NO-GO pour une éventuelle `v24.0.0-rc.1`, après clone frais, validations automatisées, smoke navigateur, tests v23.2.6 et validation manuelle terrain.
+Décision humaine GO / NO-GO pour tag rc.1 éventuel, après validations locales, clone frais GitHub, smoke navigateur, tests v23.2.6 et validation terrain manuelle.

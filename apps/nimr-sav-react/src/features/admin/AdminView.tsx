@@ -121,7 +121,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ user }) => {
       >
         <span>⚠️</span>
         <span>
-          <strong>Avertissement :</strong> Aucune action destructive ou modification utilisateur n’est disponible. Gel fonctionnel alpha.13 (non RC).
+          <strong>Avertissement :</strong> Aucune action destructive ou modification utilisateur n’est disponible. Release Candidate interne rc.1 (non production, non finale).
         </span>
       </div>
 

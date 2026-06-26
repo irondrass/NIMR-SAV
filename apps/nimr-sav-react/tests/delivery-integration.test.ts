@@ -51,7 +51,7 @@ import { SavCase } from '../src/domain/sav-case';
 import { hasPermission, canViewDirectionNotes } from '../src/domain/action-permissions';
 import { transitionCase } from '../src/domain/workflow-engine';
 
-describe('SAV Delivery Integration (v24.0.0-alpha.13)', () => {
+describe('SAV Delivery Integration (v24.0.0-rc.1)', () => {
   beforeEach(() => {
     window.localStorage.clear();
     savCaseStore.clearAll();
@@ -63,16 +63,16 @@ describe('SAV Delivery Integration (v24.0.0-alpha.13)', () => {
   });
 
   // 1. Version Check
-  it('has package.json and constants aligned to v24.0.0-alpha.13', () => {
-    expect(APP_VERSION).toBe('v24.0.0-alpha.13');
+  it('has package.json and constants aligned to v24.0.0-rc.1', () => {
+    expect(APP_VERSION).toBe('v24.0.0-rc.1');
 
     const pkgPath = resolve(__dirname, '../package.json');
     const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
-    expect(pkg.version).toBe('24.0.0-alpha.13');
+    expect(pkg.version).toBe('24.0.0-rc.1');
 
     const lockPath = resolve(__dirname, '../package-lock.json');
     const lock = JSON.parse(readFileSync(lockPath, 'utf-8'));
-    expect(lock.version).toBe('24.0.0-alpha.13');
+    expect(lock.version).toBe('24.0.0-rc.1');
   });
 
   // 2. Case Filtering

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { savCaseStore } from './sav-case-store';
-import { SavCase, WorkshopTask, QcChecklistItem, Claim } from '../domain/sav-case';
+import { SavCase, WorkshopTask, QcChecklistItem, Claim, EstimateLine } from '../domain/sav-case';
 import { AuditLogEntry } from '../domain/audit-log';
 import { Role } from '../types';
 import { CaseStatus } from '../domain/case-status';
@@ -89,5 +89,13 @@ export function useSavCases() {
       savCaseStore.cancelClaim(caseId, claimId, actor),
     overrideClaims: (caseId: string, reason: string, actor: { id: string; role: Role }) =>
       savCaseStore.overrideClaims(caseId, reason, actor),
+    importEstimateForClaim: (caseId: string, claimId: string, estimateInput: { fileName: string; content: string }, actor: { id: string; role: Role }) =>
+      savCaseStore.importEstimateForClaim(caseId, claimId, estimateInput, actor),
+    updateClaimEstimateLine: (caseId: string, claimId: string, lineId: string, updates: Partial<EstimateLine>, actor: { id: string; role: Role }) =>
+      savCaseStore.updateClaimEstimateLine(caseId, claimId, lineId, updates, actor),
+    removeEstimateFromClaim: (caseId: string, claimId: string, actor: { id: string; role: Role }) =>
+      savCaseStore.removeEstimateFromClaim(caseId, claimId, actor),
+    regenerateWorkshopTasksFromClaimEstimate: (caseId: string, claimId: string, actor: { id: string; role: Role }) =>
+      savCaseStore.regenerateWorkshopTasksFromClaimEstimate(caseId, claimId, actor),
   };
 }

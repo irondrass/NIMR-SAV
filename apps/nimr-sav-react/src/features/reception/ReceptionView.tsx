@@ -30,6 +30,9 @@ export const ReceptionView: React.FC<ReceptionViewProps> = ({ user }) => {
     approveClaimClient,
     rejectClaim,
     cancelClaim,
+    importEstimateForClaim,
+    removeEstimateFromClaim,
+    regenerateWorkshopTasksFromClaimEstimate,
   } = useSavCases();
 
   // Form states
@@ -54,6 +57,8 @@ export const ReceptionView: React.FC<ReceptionViewProps> = ({ user }) => {
   const [showAddClaimForm, setShowAddClaimForm] = useState(false);
   const [claimLabel, setClaimLabel] = useState('');
   const [claimType, setClaimType] = useState<'insurance' | 'customer' | 'warranty' | 'internal'>('insurance');
+  const [pasteTextMap, setPasteTextMap] = useState<Record<string, string>>({});
+  const [showPasteMap, setShowPasteMap] = useState<Record<string, boolean>>({});
   const [claimDescription, setClaimDescription] = useState('');
   const [claimAmount, setClaimAmount] = useState<number | ''>('');
 
@@ -785,6 +790,131 @@ export const ReceptionView: React.FC<ReceptionViewProps> = ({ user }) => {
                         </div>
                         <p style={{ margin: 0, fontSize: '0.8rem', color: '#aaa' }}>Type: {claim.claimType} | Payeur: {claim.payerType} {claim.estimatedAmount ? `| Estimé: ${claim.estimatedAmount} €` : ''}</p>
                         {claim.description && <p style={{ margin: '0.25rem 0 0', fontSize: '0.8rem', color: '#888' }}>{claim.description}</p>}
+
+                        {/* Estimate section */}
+                        {claim.estimate ? (
+                          <div style={{ marginTop: '0.5rem', padding: '0.5rem', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '4px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
+                              <span style={{ fontSize: '0.8rem', color: '#34d399', fontWeight: 'bold' }}>
+                                📄 Devis Importé : {claim.estimate.sourceFileName}
+                              </span>
+                              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                <Button
+                                  size="sm"
+                                  onClick={() => {
+                                    if (confirm("Voulez-vous régénérer les tâches de l'atelier depuis ce devis ? Cela écrasera les tâches actuelles du dossier.")) {
+                                      regenerateWorkshopTasksFromClaimEstimate(selectedCase.id, claim.id, user);
+                                    }
+                                  }}
+                                >
+                                  🔄 Tâches Atelier
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  style={{ color: '#ef4444' }}
+                                  onClick={() => {
+                                    if (confirm("Voulez-vous retirer le devis de ce sinistre ?")) {
+                                      removeEstimateFromClaim(selectedCase.id, claim.id, user);
+                                    }
+                                  }}
+                                >
+                                  Retirer
+                                </Button>
+                              </div>
+                            </div>
+                            <div style={{ fontSize: '0.75rem', color: '#bbb', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginTop: '0.25rem' }}>
+                              <div>
+                                <strong>Totaux :</strong> HT: {claim.estimate.totals.amountHT.toFixed(2)} | TVA: {claim.estimate.totals.amountTVA.toFixed(2)} | TTC: {claim.estimate.totals.amountTTC.toFixed(2)} {claim.estimate.totals.currency}
+                              </div>
+                              <div>
+                                <strong>Pièces :</strong> {claim.estimate.partsSummary.totalPartsCount} articles ({claim.estimate.partsSummary.totalPartsAmountHT.toFixed(2)} HT)
+                              </div>
+                            </div>
+                            <div style={{ fontSize: '0.75rem', color: '#bbb', marginTop: '0.25rem' }}>
+                              <strong>Répartition MO :</strong> {
+                                Object.entries(claim.estimate.laborSummary)
+                                  .filter(([_, h]) => h > 0)
+                                  .map(([p, h]) => `${p}: ${h}h`)
+                                  .join(', ') || 'Aucune heure MO'
+                              }
+                            </div>
+                            {claim.estimate.warnings.length > 0 && (
+                              <div style={{ marginTop: '0.25rem', color: '#fca5a5', fontSize: '0.7rem' }}>
+                                ⚠️ {claim.estimate.warnings.join(' | ')}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div style={{ marginTop: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                              <input
+                                type="file"
+                                id={`est-file-${claim.id}`}
+                                accept=".txt,.html"
+                                style={{ display: 'none' }}
+                                onChange={async (e) => {
+                                  const file = e.target.files?.[0];
+                                  if (!file) return;
+                                  const reader = new FileReader();
+                                  reader.onload = async (evt) => {
+                                    const content = evt.target?.result as string;
+                                    if (content) {
+                                      try {
+                                        importEstimateForClaim(selectedCase.id, claim.id, { fileName: file.name, content }, user);
+                                      } catch (err: unknown) {
+                                        alert(err instanceof Error ? err.message : "Erreur lors de l'import");
+                                      }
+                                    }
+                                  };
+                                  reader.readAsText(file);
+                                }}
+                              />
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={() => document.getElementById(`est-file-${claim.id}`)?.click()}
+                              >
+                                📥 Importer Devis (TXT/HTML)
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => setShowPasteMap(prev => ({ ...prev, [claim.id]: !prev[claim.id] }))}
+                              >
+                                {showPasteMap[claim.id] ? 'Masquer' : 'Coller texte'}
+                              </Button>
+                            </div>
+                            {showPasteMap[claim.id] && (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                                <textarea
+                                  rows={3}
+                                  placeholder="Coller le contenu du devis ici..."
+                                  style={{ width: '100%', padding: '0.4rem', fontSize: '0.75rem', background: '#18181b', color: '#fff', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px' }}
+                                  value={pasteTextMap[claim.id] || ''}
+                                  onChange={(e) => setPasteTextMap(prev => ({ ...prev, [claim.id]: e.target.value }))}
+                                />
+                                <Button
+                                  size="sm"
+                                  onClick={() => {
+                                    const content = pasteTextMap[claim.id];
+                                    if (content && content.trim()) {
+                                      try {
+                                        importEstimateForClaim(selectedCase.id, claim.id, { fileName: 'texte_colle.txt', content }, user);
+                                        setPasteTextMap(prev => ({ ...prev, [claim.id]: '' }));
+                                        setShowPasteMap(prev => ({ ...prev, [claim.id]: false }));
+                                      } catch (err: unknown) {
+                                        alert(err instanceof Error ? err.message : "Erreur lors de l'import");
+                                      }
+                                    }
+                                  }}
+                                >
+                                  Valider le texte collé
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+                        )}
 
                         {/* Approvals Details */}
                         <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.5rem', fontSize: '0.75rem' }}>

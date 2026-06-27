@@ -1,7 +1,7 @@
-# Matrice de Parité Fonctionnelle — v23.x vs v24.0.0-alpha.15
+# Matrice de Parité Fonctionnelle — v23.x vs v24.0.0-alpha.16
 
 > [!IMPORTANT]
-> **Notes sur la v24.0.0-alpha.15 :**
+> **Notes sur la v24.0.0-alpha.16 :**
 > - Le lot **alpha.15** couvre uniquement multi-sinistres / claims / accords expert & client.
 > - La version alpha.15 **n'est pas une RC** (Release Candidate) et **n'est pas destinée à la production** (le pilote stable reste la v23.2.6).
 > - Le lot **alpha.14** reste le lot dédié au planning avancé et Gantt.
@@ -10,7 +10,7 @@
 > - Le lot **alpha.18** reste offline/PWA (React sans Service Worker actif actuellement).
 > - Le lot **Cloud/Supabase** reste entièrement séparé.
 
-Ce document détaille la matrice comparative exhaustive de toutes les fonctionnalités de l'ancienne version v23.x et leur état de parité dans la version v24.0.0-alpha.15, avec la solution proposée pour combler chaque écart.
+Ce document détaille la matrice comparative exhaustive de toutes les fonctionnalités de l'ancienne version v23.x et leur état de parité dans la version v24.0.0-alpha.16, avec la solution proposée pour combler chaque écart.
 
 ---
 

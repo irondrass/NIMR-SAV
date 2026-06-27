@@ -24,6 +24,7 @@ export interface WorkshopTask {
   status: WorkshopTaskStatus;
   estimatedDurationMinutes?: number;
   createdAt: string; // ISO DateTime
+  pole?: WorkshopPole;
 }
 
 export interface SavCase {
@@ -68,6 +69,57 @@ export interface SavCase {
   updatedAt: string; // ISO DateTime
 }
 
+export type EstimateSourceType = 'html' | 'txt' | 'pasted_text' | 'unknown';
+export type EstimateLineType = 'labor' | 'part' | 'paint_material' | 'fee' | 'discount' | 'unknown';
+export type WorkshopPole = 'tolerie' | 'peinture' | 'preparation' | 'remontage' | 'finition' | 'mecanique' | 'controle_qualite' | 'autre';
+
+export interface EstimateTotals {
+  amountHT: number;
+  amountTVA: number;
+  amountTTC: number;
+  currency: string;
+}
+
+export interface EstimateLine {
+  id: string;
+  lineType: EstimateLineType;
+  code: string;
+  label: string;
+  quantity: number;
+  unitPrice: number;
+  totalPrice: number;
+  laborHours: number;
+  detectedPole: WorkshopPole;
+  selectedPole: WorkshopPole;
+  isPart: boolean;
+  isLabor: boolean;
+  isPaintMaterial: boolean;
+  isNewPart: boolean;
+  confidence: number;
+  rawLine: string;
+}
+
+export interface EstimatePartsSummary {
+  totalPartsCount: number;
+  totalPartsAmountHT: number;
+  newPartsCount: number;
+}
+
+export interface Estimate {
+  id: string;
+  sourceFileName: string;
+  sourceType: EstimateSourceType;
+  importedAt: string;
+  importedBy: string;
+  rawTextPreview: string;
+  totals: EstimateTotals;
+  lines: EstimateLine[];
+  laborSummary: Record<WorkshopPole, number>;
+  partsSummary: EstimatePartsSummary;
+  warnings: string[];
+  confidenceScore: number;
+}
+
 export interface Claim {
   id: string;
   label: string;
@@ -84,6 +136,7 @@ export interface Claim {
   clientApprovalReference?: string;
   requiredApprovals: string[];
   notes?: string;
+  estimate?: Estimate;
   createdAt: string; // ISO DateTime
   updatedAt: string; // ISO DateTime
 }

@@ -53,6 +53,57 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ user, activeTab = 
     return { dossiersBloques, attenteExpert, attenteClient };
   }, [cases]);
 
+  const estimatesMetrics = useMemo(() => {
+    let nbDevisImportes = 0;
+    let heuresMOEstimeesTotale = 0;
+    const chargeParPole: Record<string, number> = {
+      tolerie: 0,
+      peinture: 0,
+      preparation: 0,
+      remontage: 0,
+      finition: 0,
+      mecanique: 0,
+      controle_qualite: 0,
+      autre: 0,
+    };
+    let dossiersAvecDevisMaisAccordManquant = 0;
+    let dossiersSansDevis = 0;
+
+    cases.forEach((c) => {
+      let hasEstimate = false;
+      const claims = c.claims || [];
+      claims.forEach((claim) => {
+        if (claim.estimate) {
+          hasEstimate = true;
+          nbDevisImportes++;
+          const summary = claim.estimate.laborSummary || {};
+          Object.entries(summary).forEach(([pole, hours]) => {
+            const h = Number(hours) || 0;
+            chargeParPole[pole] = (chargeParPole[pole] || 0) + h;
+            heuresMOEstimeesTotale += h;
+          });
+        }
+      });
+
+      if (hasEstimate) {
+        const blockingReasons = getBlockingClaimsReasons(claims, c.claimsOverridden);
+        if (blockingReasons.length > 0) {
+          dossiersAvecDevisMaisAccordManquant++;
+        }
+      } else {
+        dossiersSansDevis++;
+      }
+    });
+
+    return {
+      nbDevisImportes,
+      heuresMOEstimeesTotale: Number(heuresMOEstimeesTotale.toFixed(2)),
+      chargeParPole,
+      dossiersAvecDevisMaisAccordManquant,
+      dossiersSansDevis,
+    };
+  }, [cases]);
+
   // Handle case details selection
   const selectedCase = useMemo(() => {
     if (!selectedCaseId) return null;
@@ -338,6 +389,67 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ user, activeTab = 
           </div>
           <div style={{ fontSize: '2rem', fontWeight: 700, color: '#3b82f6', marginTop: '0.25rem' }}>
             {claimsMetrics.attenteClient}
+          </div>
+        </div>
+      </section>
+
+      {/* Estimate & Labor Load KPI Section */}
+      <section
+        style={{
+          marginTop: '1.5rem',
+          background: '#1e1e24',
+          border: '1px solid rgba(255,255,255,0.05)',
+          padding: '1.5rem',
+          borderRadius: '8px',
+        }}
+      >
+        <h3 style={{ margin: '0 0 1rem 0', fontSize: '1rem', fontWeight: 600, color: '#3b82f6', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <span>📋</span> Analyse des Devis & Charge Atelier
+        </h3>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+            gap: '1rem',
+            marginBottom: '1rem',
+          }}
+        >
+          <div style={{ background: 'rgba(255,255,255,0.02)', padding: '1rem', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.03)' }}>
+            <div style={{ fontSize: '0.75rem', color: '#a1a1aa', fontWeight: 500 }}>Devis Importés</div>
+            <div style={{ fontSize: '1.5rem', fontWeight: 700, marginTop: '0.25rem', color: '#fff' }}>
+              {estimatesMetrics.nbDevisImportes}
+            </div>
+          </div>
+          <div style={{ background: 'rgba(255,255,255,0.02)', padding: '1rem', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.03)' }}>
+            <div style={{ fontSize: '0.75rem', color: '#a1a1aa', fontWeight: 500 }}>Total Heures MO</div>
+            <div style={{ fontSize: '1.5rem', fontWeight: 700, marginTop: '0.25rem', color: '#34d399' }}>
+              {estimatesMetrics.heuresMOEstimeesTotale}h
+            </div>
+          </div>
+          <div style={{ background: 'rgba(255,255,255,0.02)', padding: '1rem', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.03)' }}>
+            <div style={{ fontSize: '0.75rem', color: '#a1a1aa', fontWeight: 500 }}>Devis bloqués par accord</div>
+            <div style={{ fontSize: '1.5rem', fontWeight: 700, marginTop: '0.25rem', color: '#ef4444' }}>
+              {estimatesMetrics.dossiersAvecDevisMaisAccordManquant}
+            </div>
+          </div>
+          <div style={{ background: 'rgba(255,255,255,0.02)', padding: '1rem', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.03)' }}>
+            <div style={{ fontSize: '0.75rem', color: '#a1a1aa', fontWeight: 500 }}>Dossiers sans Devis</div>
+            <div style={{ fontSize: '1.5rem', fontWeight: 700, marginTop: '0.25rem', color: '#a1a1aa' }}>
+              {estimatesMetrics.dossiersSansDevis}
+            </div>
+          </div>
+        </div>
+
+        {/* Charge by pole */}
+        <div style={{ marginTop: '1rem', padding: '0.75rem', background: 'rgba(255,255,255,0.01)', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.03)' }}>
+          <div style={{ fontSize: '0.8rem', fontWeight: 600, color: '#aaa', marginBottom: '0.5rem' }}>Charge estimée par pôle atelier :</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '0.5rem' }}>
+            {Object.entries(estimatesMetrics.chargeParPole).map(([pole, hours]) => (
+              <div key={pole} style={{ fontSize: '0.75rem', color: '#ccc', padding: '0.25rem 0.5rem', background: 'rgba(255,255,255,0.02)', borderRadius: '4px', display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ textTransform: 'capitalize' }}>{pole.replace('_', ' ')}</span>
+                <strong style={{ color: hours > 0 ? '#3b82f6' : '#888' }}>{hours}h</strong>
+              </div>
+            ))}
           </div>
         </div>
       </section>

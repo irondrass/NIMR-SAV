@@ -1,4 +1,4 @@
-import { SavCase, WorkshopTask, QcChecklistItem, Claim } from '../domain/sav-case';
+import { SavCase, WorkshopTask, QcChecklistItem, Claim, EstimateLine } from '../domain/sav-case';
 import { AuditLogEntry, createAuditLog } from '../domain/audit-log';
 import { DEMO_CASES } from '../domain/case-fixtures';
 import { LS_PREFIX, APP_VERSION, RESERVED_CACHE_NAME } from '../constants/version';
@@ -10,6 +10,8 @@ import { hasPermission } from '../domain/action-permissions';
 import { transitionCase } from '../domain/workflow-engine';
 import { DEMO_TECHNICIANS } from '../constants/demo-technicians';
 import { getBlockingClaimsReasons, normalizeClaim, approveClaimExpert, approveClaimClient, rejectClaim, cancelClaim } from '../domain/claims';
+import { parseEstimateText, parseEstimateHtml } from '../domain/estimate-parser';
+import { generateWorkshopTasksFromEstimate, calculateLaborSummaryByPole } from '../domain/labor-allocator';
 import {
   calculateDirectorDashboard,
   calculateBlockingAlerts,
@@ -1146,6 +1148,192 @@ export const savCaseStore = {
       caseObj.status,
       caseObj.status,
       `Override exceptionnel des accords effectué. Motif : ${reason}.`
+    );
+    this.addLog(log);
+  },
+
+  importEstimateForClaim(
+    caseId: string,
+    claimId: string,
+    estimateInput: { fileName: string; content: string },
+    actor: { id: string; role: Role }
+  ) {
+    const caseObj = cases.find((c) => c.id === caseId);
+    if (!caseObj) throw new Error(`Case ${caseId} not found.`);
+    if (!hasPermission(actor.role, 'manage_claims')) {
+      throw new Error(`Role ${actor.role} is not permitted to import estimates.`);
+    }
+
+    const { fileName, content } = estimateInput;
+    const isHtml = fileName.toLowerCase().endsWith('.html') || fileName.toLowerCase().endsWith('.htm') || content.includes('<!DOCTYPE html') || content.includes('<html');
+    const parsedEstimate = isHtml
+      ? parseEstimateHtml(content, fileName, actor.id)
+      : parseEstimateText(content, fileName, actor.id);
+
+    const existingClaims = caseObj.claims || [];
+    const updatedClaims = existingClaims.map((claim) => {
+      if (claim.id === claimId) {
+        const updatedClaim = {
+          ...claim,
+          estimate: parsedEstimate,
+          estimatedAmount: parsedEstimate.totals.amountTTC,
+          updatedAt: new Date().toISOString(),
+        };
+        if (updatedClaim.status === 'draft') {
+          updatedClaim.status = updatedClaim.claimType === 'insurance' ? 'expert_pending' : 'client_pending';
+        }
+        return updatedClaim;
+      }
+      return claim;
+    });
+
+    const updatedCase: SavCase = {
+      ...caseObj,
+      claims: updatedClaims,
+      updatedAt: new Date().toISOString(),
+    };
+    this.addCase(updatedCase);
+
+    const log = createAuditLog(
+      caseId,
+      actor.id,
+      actor.role,
+      'manage_claims',
+      caseObj.status,
+      caseObj.status,
+      `Devis "${fileName}" importé pour le sinistre "${claimId}". TTC : ${parsedEstimate.totals.amountTTC.toFixed(2)}.`
+    );
+    this.addLog(log);
+  },
+
+  updateClaimEstimateLine(
+    caseId: string,
+    claimId: string,
+    lineId: string,
+    updates: Partial<EstimateLine>,
+    actor: { id: string; role: Role }
+  ) {
+    const caseObj = cases.find((c) => c.id === caseId);
+    if (!caseObj) throw new Error(`Case ${caseId} not found.`);
+    if (!hasPermission(actor.role, 'manage_claims')) {
+      throw new Error(`Role ${actor.role} is not permitted to update estimate lines.`);
+    }
+
+    const existingClaims = caseObj.claims || [];
+    const updatedClaims = existingClaims.map((claim) => {
+      if (claim.id === claimId && claim.estimate) {
+        const updatedLines = claim.estimate.lines.map((line) => {
+          if (line.id === lineId) {
+            return {
+              ...line,
+              ...updates,
+            };
+          }
+          return line;
+        });
+
+        const laborSummary = calculateLaborSummaryByPole(updatedLines);
+
+        return {
+          ...claim,
+          estimate: {
+            ...claim.estimate,
+            lines: updatedLines,
+            laborSummary,
+          },
+          updatedAt: new Date().toISOString(),
+        };
+      }
+      return claim;
+    });
+
+    const updatedCase: SavCase = {
+      ...caseObj,
+      claims: updatedClaims,
+      updatedAt: new Date().toISOString(),
+    };
+    this.addCase(updatedCase);
+
+    const log = createAuditLog(
+      caseId,
+      actor.id,
+      actor.role,
+      'manage_claims',
+      caseObj.status,
+      caseObj.status,
+      `Ligne de devis "${lineId}" mise à jour pour le sinistre "${claimId}".`
+    );
+    this.addLog(log);
+  },
+
+  removeEstimateFromClaim(caseId: string, claimId: string, actor: { id: string; role: Role }) {
+    const caseObj = cases.find((c) => c.id === caseId);
+    if (!caseObj) throw new Error(`Case ${caseId} not found.`);
+    if (!hasPermission(actor.role, 'manage_claims')) {
+      throw new Error(`Role ${actor.role} is not permitted to remove estimates.`);
+    }
+
+    const existingClaims = caseObj.claims || [];
+    const updatedClaims = existingClaims.map((claim) => {
+      if (claim.id === claimId) {
+        return {
+          ...claim,
+          estimate: undefined,
+          updatedAt: new Date().toISOString(),
+        };
+      }
+      return claim;
+    });
+
+    const updatedCase: SavCase = {
+      ...caseObj,
+      claims: updatedClaims,
+      updatedAt: new Date().toISOString(),
+    };
+    this.addCase(updatedCase);
+
+    const log = createAuditLog(
+      caseId,
+      actor.id,
+      actor.role,
+      'manage_claims',
+      caseObj.status,
+      caseObj.status,
+      `Devis retiré du sinistre "${claimId}".`
+    );
+    this.addLog(log);
+  },
+
+  regenerateWorkshopTasksFromClaimEstimate(caseId: string, claimId: string, actor: { id: string; role: Role }) {
+    const caseObj = cases.find((c) => c.id === caseId);
+    if (!caseObj) throw new Error(`Case ${caseId} not found.`);
+    if (!hasPermission(actor.role, 'assign_technician') && !hasPermission(actor.role, 'manage_claims')) {
+      throw new Error(`Role ${actor.role} is not permitted to regenerate workshop tasks from estimate.`);
+    }
+
+    const claim = (caseObj.claims || []).find((c) => c.id === claimId);
+    if (!claim || !claim.estimate) {
+      throw new Error(`No estimate found for claim ${claimId}.`);
+    }
+
+    const generatedTasks = generateWorkshopTasksFromEstimate(claim.estimate);
+
+    const updatedCase: SavCase = {
+      ...caseObj,
+      workshopTasks: generatedTasks,
+      estimatedDurationMinutes: generatedTasks.reduce((sum, t) => sum + (t.estimatedDurationMinutes || 0), 0),
+      updatedAt: new Date().toISOString(),
+    };
+    this.addCase(updatedCase);
+
+    const log = createAuditLog(
+      caseId,
+      actor.id,
+      actor.role,
+      'manage_claims',
+      caseObj.status,
+      caseObj.status,
+      `Tâches d'atelier régénérées depuis le devis du sinistre "${claimId}".`
     );
     this.addLog(log);
   },

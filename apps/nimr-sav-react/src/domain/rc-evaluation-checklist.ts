@@ -41,7 +41,7 @@ export function getRcEvaluationChecklist(): readonly RcEvaluationChecklistSectio
           id: 'deterministic_install',
           label: 'Installation reproductible rc.1 avec npm ci',
           required: true,
-          evidence: 'package-lock aligné sur 24.0.0-alpha.15',
+          evidence: 'package-lock aligné sur 24.0.0-alpha.16',
         },
         {
           id: 'build_artifact',

@@ -37,6 +37,7 @@ export const PlanningView: React.FC<PlanningViewProps> = ({ user }) => {
     setWorkshopPriority,
     planWorkshopTask,
     transitionWorkshopCase,
+    regenerateWorkshopTasksFromClaimEstimate,
   } = useSavCases();
 
   // Selected case for planning/modifications
@@ -111,7 +112,14 @@ export const PlanningView: React.FC<PlanningViewProps> = ({ user }) => {
   const handleSelectCase = (c: SavCase) => {
     setSelectedCaseId(c.id);
     setBay(c.workshopBay || '');
-    setDuration(c.estimatedDurationMinutes !== undefined ? c.estimatedDurationMinutes : '');
+    let estimateDurationMin = 0;
+    (c.claims || []).forEach(claim => {
+      if (claim.estimate) {
+        const hours = Object.values(claim.estimate.laborSummary).reduce((sum, h) => sum + h, 0);
+        estimateDurationMin += Math.round(hours * 60);
+      }
+    });
+    setDuration(c.estimatedDurationMinutes !== undefined && c.estimatedDurationMinutes > 0 ? c.estimatedDurationMinutes : (estimateDurationMin > 0 ? estimateDurationMin : ''));
     setStartAt(c.plannedStartAt ? c.plannedStartAt.substring(0, 16) : '');
     setEndAt(c.plannedEndAt ? c.plannedEndAt.substring(0, 16) : '');
     setTaskLabel('');
@@ -132,7 +140,8 @@ export const PlanningView: React.FC<PlanningViewProps> = ({ user }) => {
 
     const blockingReasons = getBlockingClaimsReasons(selectedCase.claims || [], selectedCase.claimsOverridden);
     if (blockingReasons.length > 0) {
-      setErrorMsg('Planification bloquée : accord expert/client manquant');
+      const hasEstimate = (selectedCase.claims || []).some(c => !!c.estimate);
+      setErrorMsg(hasEstimate ? 'Devis importé, planification bloquée : accord expert/client manquant' : 'Planification bloquée : accord expert/client manquant');
       setInfoMsg('');
       return;
     }
@@ -184,7 +193,8 @@ export const PlanningView: React.FC<PlanningViewProps> = ({ user }) => {
 
     const blockingReasons = getBlockingClaimsReasons(extCase.claims || [], extCase.claimsOverridden);
     if (blockingReasons.length > 0) {
-      setErrorMsg('Planification bloquée : accord expert/client manquant');
+      const hasEstimate = (extCase.claims || []).some(c => !!c.estimate);
+      setErrorMsg(hasEstimate ? 'Devis importé, planification bloquée : accord expert/client manquant' : 'Planification bloquée : accord expert/client manquant');
       return;
     }
 
@@ -263,11 +273,20 @@ export const PlanningView: React.FC<PlanningViewProps> = ({ user }) => {
 
     const blockingReasons = getBlockingClaimsReasons(extCase.claims || [], extCase.claimsOverridden);
     if (blockingReasons.length > 0) {
-      setErrorMsg('Planification bloquée : accord expert/client manquant');
+      const hasEstimate = (extCase.claims || []).some(c => !!c.estimate);
+      setErrorMsg(hasEstimate ? 'Devis importé, planification bloquée : accord expert/client manquant' : 'Planification bloquée : accord expert/client manquant');
       return;
     }
 
-    const durationMin = duration === '' ? 120 : Number(duration);
+    let estimateDurationMin = 0;
+    (extCase.claims || []).forEach(c => {
+      if (c.estimate) {
+        const hours = Object.values(c.estimate.laborSummary).reduce((sum, h) => sum + h, 0);
+        estimateDurationMin += Math.round(hours * 60);
+      }
+    });
+
+    const durationMin = duration === '' ? (estimateDurationMin > 0 ? estimateDurationMin : 120) : Number(duration);
     const options = generateAppointmentOptions(
       extCase.typeIntervention || 'mecanique',
       durationMin,
@@ -285,7 +304,8 @@ export const PlanningView: React.FC<PlanningViewProps> = ({ user }) => {
     if (!selectedCase) return;
     const blockingReasons = getBlockingClaimsReasons(selectedCase.claims || [], selectedCase.claimsOverridden);
     if (blockingReasons.length > 0) {
-      setErrorMsg('Planification bloquée : accord expert/client manquant');
+      const hasEstimate = (selectedCase.claims || []).some(c => !!c.estimate);
+      setErrorMsg(hasEstimate ? 'Devis importé, planification bloquée : accord expert/client manquant' : 'Planification bloquée : accord expert/client manquant');
       return;
     }
 
@@ -608,8 +628,34 @@ export const PlanningView: React.FC<PlanningViewProps> = ({ user }) => {
                             {claim.status.toUpperCase()}
                           </span>
                         </div>
+                        {claim.estimate && (
+                          <div style={{ marginTop: '0.25rem', padding: '0.4rem', background: 'rgba(255,255,255,0.02)', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.05)', fontSize: '0.75rem' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <span>📄 Devis : <strong>{claim.estimate.sourceFileName}</strong></span>
+                              <Button
+                                size="sm"
+                                style={{ padding: '0.1rem 0.4rem', fontSize: '0.7rem' }}
+                                onClick={() => {
+                                  if (confirm("Voulez-vous écraser les tâches d'atelier actuelles de ce dossier avec celles générées par ce devis ?")) {
+                                    regenerateWorkshopTasksFromClaimEstimate(selectedCase.id, claim.id, user);
+                                  }
+                                }}
+                              >
+                                ⚡ Générer Tâches
+                              </Button>
+                            </div>
+                            <div style={{ marginTop: '0.15rem', color: '#ccc' }}>
+                              Charge : {
+                                Object.entries(claim.estimate.laborSummary)
+                                  .filter(([_, h]) => h > 0)
+                                  .map(([p, h]) => `${p}: ${h}h`)
+                                  .join(', ') || 'Aucune heure'
+                              }
+                            </div>
+                          </div>
+                        )}
                         {claimBlockages.length > 0 && (
-                          <div style={{ color: '#f87171', fontSize: '0.75rem' }}>
+                          <div style={{ color: '#f87171', fontSize: '0.75rem', marginTop: '0.25rem' }}>
                             Planification bloquée : {claimBlockages.join(' ')}
                           </div>
                         )}

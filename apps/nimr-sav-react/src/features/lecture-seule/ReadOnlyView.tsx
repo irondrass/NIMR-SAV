@@ -473,6 +473,34 @@ export const ReadOnlyView: React.FC<ReadOnlyViewProps> = ({ user }) => {
                             {claim.description}
                           </p>
                         )}
+                        {claim.estimate ? (
+                          <div style={{ margin: '0 0 0.5rem 0', padding: '0.5rem', background: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255, 255, 255, 0.05)', borderRadius: '4px', fontSize: '0.75rem' }}>
+                            <div style={{ color: '#34d399', fontWeight: 'bold', marginBottom: '0.25rem' }}>
+                              📄 Devis : {claim.estimate.sourceFileName} ({claim.estimate.sourceType.toUpperCase()})
+                            </div>
+                            <div style={{ color: '#ccc', marginBottom: '0.25rem' }}>
+                              HT: {claim.estimate.totals.amountHT.toFixed(2)} | TVA: {claim.estimate.totals.amountTVA.toFixed(2)} | TTC: {claim.estimate.totals.amountTTC.toFixed(2)} {claim.estimate.totals.currency}
+                            </div>
+                            <div style={{ color: '#ccc', marginBottom: '0.25rem' }}>
+                              Charge : {
+                                Object.entries(claim.estimate.laborSummary)
+                                  .filter(([_, h]) => h > 0)
+                                  .map(([p, h]) => `${p}: ${h}h`)
+                                  .join(', ') || 'Aucune heure MO'
+                              }
+                            </div>
+                            {claim.estimate.warnings.length > 0 && (
+                              <div style={{ color: '#fca5a5', fontSize: '0.7rem' }}>
+                                ⚠️ {claim.estimate.warnings.join(' | ')}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.75rem', color: '#71717a', fontStyle: 'italic' }}>
+                            Aucun devis importé pour ce sinistre.
+                          </p>
+                        )}
+
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.8rem', background: 'rgba(0,0,0,0.15)', padding: '0.5rem', borderRadius: '4px' }}>
                           <div>
                             <strong>Accord Expert: </strong>

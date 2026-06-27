@@ -487,7 +487,13 @@ export const AdminView: React.FC<AdminViewProps> = ({ user }) => {
                               </button>
                             </div>
                             <div style={{ color: '#a1a1aa', fontSize: '0.75rem', marginTop: '0.25rem' }}>
-                              Client: {c.clientName}
+                              Client: {c.clientName} | Devis: {
+                                (c.claims || []).map(claim => {
+                                  return claim.estimate
+                                    ? `${claim.estimate.sourceFileName} (${claim.estimate.totals.amountTTC.toFixed(2)} TTC)`
+                                    : `Sans Devis (${claim.label})`;
+                                }).join(' / ') || 'Aucun sinistre'
+                              }
                             </div>
                             <ul style={{ margin: '0.25rem 0 0 1rem', padding: 0, color: '#f87171', fontSize: '0.75rem' }}>
                               {reasons.map((r, idx) => (

@@ -66,7 +66,7 @@ const caseWithClaimPhotos: SavCase = {
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
-describe('Photo Export Domain Tests (v24.0.0-alpha.17)', () => {
+describe('Photo Export Domain Tests (v24.0.0-alpha.18)', () => {
   describe('normalizePhotoAttachment', () => {
     it('creates a CasePhoto object with generated ID and metadata', () => {
       const result = normalizePhotoAttachment(

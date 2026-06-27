@@ -12,6 +12,8 @@ import { PriorityBadge } from '@/components/PriorityBadge';
 import { VersionBanner } from '@/components/VersionBanner';
 import { getRoleFieldGuidance, getStatusDisplay } from '@/domain/ui-field-guidelines';
 import { buildWorkshopSheet } from '@/domain/print-documents';
+import { useConnectivity } from '@/state/useConnectivity';
+import { createOfflineAction, OfflineActionType } from '@/domain/offline-queue';
 
 // Advanced planning imports
 import { GanttChart } from '@/components/GanttChart';
@@ -40,7 +42,11 @@ export const PlanningView: React.FC<PlanningViewProps> = ({ user }) => {
     transitionWorkshopCase,
     regenerateWorkshopTasksFromClaimEstimate,
     recordPrintAction,
+    enqueueOfflineAction,
+    saveLocalSnapshot,
   } = useSavCases();
+
+  const { isOffline } = useConnectivity();
 
   // Selected case for planning/modifications
   const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
@@ -184,7 +190,13 @@ export const PlanningView: React.FC<PlanningViewProps> = ({ user }) => {
 
     try {
       assignTechnician(selectedCaseId, techId, user);
-      setInfoMsg('Technicien affecté avec succès.');
+      if (isOffline) {
+        enqueueOfflineAction(createOfflineAction('update_case', { caseId: selectedCaseId, technicianId: techId }, { id: user.id, role: user.role }));
+        saveLocalSnapshot();
+        setInfoMsg('Technicien affecté avec succès. (Action de planification mise en attente / mode hors ligne)');
+      } else {
+        setInfoMsg('Technicien affecté avec succès.');
+      }
       setErrorMsg('');
     } catch (e) {
       setErrorMsg((e as Error).message || 'Erreur lors de l\'affectation.');
@@ -195,7 +207,13 @@ export const PlanningView: React.FC<PlanningViewProps> = ({ user }) => {
     if (!selectedCaseId) return;
     try {
       setWorkshopPriority(selectedCaseId, priority, user);
-      setInfoMsg('Priorité définie avec succès.');
+      if (isOffline) {
+        enqueueOfflineAction(createOfflineAction('update_case', { caseId: selectedCaseId, priority }, { id: user.id, role: user.role }));
+        saveLocalSnapshot();
+        setInfoMsg('Priorité définie avec succès. (Action de planification mise en attente / mode hors ligne)');
+      } else {
+        setInfoMsg('Priorité définie avec succès.');
+      }
       setErrorMsg('');
     } catch (e) {
       setErrorMsg((e as Error).message || 'Erreur lors de la mise à jour de la priorité.');
@@ -268,13 +286,25 @@ export const PlanningView: React.FC<PlanningViewProps> = ({ user }) => {
 
       planWorkshopTask(selectedCaseId, payload, user);
 
-      // Auto suggest parts prep if applicable
-      const partsNeeded = detectNewPartsPreparationNeed(extCase.typeIntervention || 'mecanique', extCase.observations || '');
-      if (partsNeeded && startAt) {
-        const prepPlan = suggestParallelNewPartsPreparation(selectedCaseId, extCase.typeIntervention || 'mecanique', extCase.observations || '', new Date(startAt));
-        setInfoMsg(`Planification enregistrée. Suggestion de pièces : ${summarizePartsPreparationPlan(prepPlan)}`);
+      if (isOffline) {
+        enqueueOfflineAction(createOfflineAction('update_case', { caseId: selectedCaseId, ...payload }, { id: user.id, role: user.role }));
+        saveLocalSnapshot();
+        const partsNeeded = detectNewPartsPreparationNeed(extCase.typeIntervention || 'mecanique', extCase.observations || '');
+        if (partsNeeded && startAt) {
+          const prepPlan = suggestParallelNewPartsPreparation(selectedCaseId, extCase.typeIntervention || 'mecanique', extCase.observations || '', new Date(startAt));
+          setInfoMsg(`Planification enregistrée. Suggestion de pièces : ${summarizePartsPreparationPlan(prepPlan)} (Action de planification mise en attente / mode hors ligne)`);
+        } else {
+          setInfoMsg('Planification enregistrée avec succès. (Action de planification mise en attente / mode hors ligne)');
+        }
       } else {
-        setInfoMsg('Planification enregistrée avec succès.');
+        // Auto suggest parts prep if applicable
+        const partsNeeded = detectNewPartsPreparationNeed(extCase.typeIntervention || 'mecanique', extCase.observations || '');
+        if (partsNeeded && startAt) {
+          const prepPlan = suggestParallelNewPartsPreparation(selectedCaseId, extCase.typeIntervention || 'mecanique', extCase.observations || '', new Date(startAt));
+          setInfoMsg(`Planification enregistrée. Suggestion de pièces : ${summarizePartsPreparationPlan(prepPlan)}`);
+        } else {
+          setInfoMsg('Planification enregistrée avec succès.');
+        }
       }
 
       setErrorMsg('');
@@ -397,7 +427,14 @@ export const PlanningView: React.FC<PlanningViewProps> = ({ user }) => {
     if (!selectedCaseId) return;
     try {
       transitionWorkshopCase(selectedCaseId, nextStatus, user);
-      setInfoMsg(`Dossier basculé vers le statut : ${nextStatus}.`);
+      if (isOffline) {
+        const actionType = nextStatus === 'received' ? 'receive_case' : 'update_case';
+        enqueueOfflineAction(createOfflineAction(actionType as OfflineActionType, { caseId: selectedCaseId, status: nextStatus }, { id: user.id, role: user.role }));
+        saveLocalSnapshot();
+        setInfoMsg(`Dossier basculé vers le statut : ${nextStatus}. (Action mise en attente / mode hors ligne)`);
+      } else {
+        setInfoMsg(`Dossier basculé vers le statut : ${nextStatus}.`);
+      }
       setErrorMsg('');
       // If the case moved out of current view tab, clear selection or update
       if (selectedCase && selectedCase.status !== nextStatus) {
@@ -439,6 +476,11 @@ export const PlanningView: React.FC<PlanningViewProps> = ({ user }) => {
         <div style={{ marginTop: '0.75rem', fontSize: '0.85rem', color: '#3b82f6', fontStyle: 'italic' }}>
           {getRoleFieldGuidance(user.role)}
         </div>
+        {isOffline && (
+          <div style={{ marginTop: '0.75rem', padding: '0.5rem', background: 'rgba(239,68,68,0.15)', border: '1px solid #ef4444', borderRadius: '4px', color: '#fca5a5', fontSize: '0.8rem' }}>
+            ⚠️ Mode hors ligne : consultation du planning via les données locales. Les actions de planification seront mises en attente de synchronisation.
+          </div>
+        )}
       </header>
 
       {/* Capacity Summary & Date Picker */}

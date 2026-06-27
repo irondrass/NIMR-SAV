@@ -18,13 +18,43 @@ import {
   calculateTechnicianLoad,
 } from '../domain/director-kpis';
 
+import { OfflineAction, enqueueOfflineAction as queueEnqueue, cancelOfflineAction as queueCancel, replayOfflineQueue } from '../domain/offline-queue';
+import { LocalSnapshot, buildLocalSnapshot, validateLocalSnapshot, restoreLocalSnapshot } from '../domain/local-cache';
+import { saveSnapshotToLocalStorage, clearLocalSnapshot } from './local-cache-adapter';
+
 const CASES_KEY = `${LS_PREFIX}cases`;
 const LOGS_KEY = `${LS_PREFIX}audit_logs`;
+const PENDING_ACTIONS_KEY = `${LS_PREFIX}pending_offline_actions`;
 
 let cases: SavCase[] = loadInitialCases();
 let logs: AuditLogEntry[] = loadInitialLogs();
+let pendingActions: OfflineAction[] = loadInitialPendingActions();
 
 const listeners = new Set<() => void>();
+
+function loadInitialPendingActions(): OfflineAction[] {
+  if (typeof window === 'undefined') {
+    return [];
+  }
+  try {
+    const item = window.localStorage.getItem(PENDING_ACTIONS_KEY);
+    return item ? (JSON.parse(item) as OfflineAction[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function savePendingActions(actions: OfflineAction[]) {
+  pendingActions = actions;
+  if (typeof window !== 'undefined') {
+    try {
+      window.localStorage.setItem(PENDING_ACTIONS_KEY, JSON.stringify(pendingActions));
+    } catch (e) {
+      console.error('[NIMR v24] Failed to save pending actions to localStorage:', e);
+    }
+  }
+  notify();
+}
 
 function loadInitialCases(): SavCase[] {
   if (typeof window === 'undefined') {
@@ -142,10 +172,12 @@ export const savCaseStore = {
   clearAll() {
     cases = [];
     logs = [];
+    pendingActions = [];
     if (typeof window !== 'undefined') {
       try {
         window.localStorage.removeItem(CASES_KEY);
         window.localStorage.removeItem(LOGS_KEY);
+        window.localStorage.removeItem(PENDING_ACTIONS_KEY);
       } catch (e) {
         console.error('[NIMR v24] Failed to clear localStorage:', e);
       }
@@ -1442,5 +1474,60 @@ export const savCaseStore = {
       `Export complet du dossier au format ZIP.`
     );
     this.addLog(log);
+  },
+
+  getPendingActions(): OfflineAction[] {
+    return pendingActions;
+  },
+
+  enqueueOfflineAction(action: OfflineAction) {
+    const updated = queueEnqueue(pendingActions, action);
+    savePendingActions(updated);
+  },
+
+  clearPendingAction(actionId: string) {
+    const updated = pendingActions.filter((a) => a.id !== actionId);
+    savePendingActions(updated);
+  },
+
+  cancelPendingAction(actionId: string) {
+    const updated = queueCancel(pendingActions, actionId);
+    savePendingActions(updated);
+  },
+
+  replayPendingActions() {
+    const { updatedActions, result } = replayOfflineQueue(pendingActions, this);
+    savePendingActions(updatedActions);
+    return result;
+  },
+
+  saveLocalSnapshot(): { success: boolean; error?: string } {
+    const snapshot = buildLocalSnapshot(cases, logs, pendingActions, APP_VERSION);
+    return saveSnapshotToLocalStorage(snapshot);
+  },
+
+  restoreLocalSnapshot(snapshot: LocalSnapshot): { success: boolean; error?: string } {
+    const validation = validateLocalSnapshot(snapshot, APP_VERSION);
+    if (!validation.valid) {
+      return { success: false, error: validation.reason };
+    }
+    const { cases: restoredCases, logs: restoredLogs, pendingActions: restoredPending } = restoreLocalSnapshot(snapshot);
+    this.setCases(restoredCases);
+
+    // Direct store variable updates
+    logs = restoredLogs;
+    if (typeof window !== 'undefined') {
+      try {
+        window.localStorage.setItem(LOGS_KEY, JSON.stringify(logs));
+      } catch (e) {
+        console.error('[NIMR v24] Failed to save logs to localStorage:', e);
+      }
+    }
+    savePendingActions(restoredPending);
+    return { success: true };
+  },
+
+  clearLocalCache() {
+    clearLocalSnapshot();
   },
 };

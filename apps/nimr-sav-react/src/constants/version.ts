@@ -2,13 +2,13 @@
  * NIMR SAV v24 — Version & Cache constants
  *
  * IMPORTANT:
- * - APP_VERSION must remain "v24.0.0-alpha.17" during this internal acceptance cycle
+ * - APP_VERSION must remain "v24.0.0-alpha.18" during this internal acceptance cycle
  * - RESERVED_CACHE_NAME is reserved but NOT actively registered (no SW yet)
  * - LS_PREFIX is the ONLY authorized localStorage prefix for this app
  * - Never reuse: nimr-sav, nimr-carrosserie, nimr-sav-v23, nimr-sav-pro
  */
 
-export const APP_VERSION = 'v24.0.0-alpha.17' as const;
+export const APP_VERSION = 'v24.0.0-alpha.18' as const;
 
 export const RESERVED_CACHE_NAME = 'nimr-sav-react-v24-alpha' as const;
 

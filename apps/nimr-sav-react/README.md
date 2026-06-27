@@ -1,4 +1,4 @@
-# NIMR SAV React — v24.0.0-alpha.17
+# NIMR SAV React — v24.0.0-alpha.18
 
 Version de rattrapage fonctionnel / retour en phase alpha.
 
@@ -19,7 +19,7 @@ Application React + TypeScript pour NIMR Carrosserie SAV.
 
 ## Version
 
-`v24.0.0-alpha.17` — Version de rattrapage fonctionnel / retour en développement alpha (rc.1 historique non modifiée).
+`v24.0.0-alpha.18` — Version de rattrapage fonctionnel / retour en développement alpha (rc.1 historique non modifiée).
 
 - alpha.16 interne uniquement (non destiné à la production et non finale).
 - Aucun tag automatique, ni de push automatique.
@@ -40,19 +40,19 @@ Application React + TypeScript pour NIMR Carrosserie SAV.
 - **alpha.18** : Mode Offline & PWA.
 - **Cloud/Supabase** : Synchronisation & Sécurité Cloud (séparé en lot post-alpha).
 
-## Readiness alpha.16
+## Readiness alpha.18
 
-alpha.16 confirme :
+alpha.18 confirme :
 
-- version alignée sur `v24.0.0-alpha.17` ;
-- couverture fonctionnelle : import de devis (HTML/TXT/texte collé), extraction automatique des montants HT/TVA/TTC, heures MO et répartition par pôle atelier ;
+- version alignée sur `v24.0.0-alpha.18` ;
+- couverture fonctionnelle : détection d’état de connexion, bannière offline visible sur tablette, file d'attente locale d'actions offline (replay simulé sans serveur), sauvegarde et validation locale des snapshots, diagnostic PWA isolé (sans SW actif par défaut) ;
 - statut de développement alpha de rattrapage (non RC, non production) ;
 - absence d’exposition production et absence de version finale ;
 - absence de tag ou de push automatique ;
 - rôles et statuts officiels uniquement ;
-- flux métier alpha.12, gel fonctionnel alpha.13 et claims alpha.15 conservés ;
+- flux métier alpha.12/13, Gantt alpha.14, claims alpha.15, devis alpha.16, impressions/exports/photos alpha.17 conservés ;
 - consultation Direction/Admin/Lecture seule sans mutation ;
-- blocage de la planification en cas d'accord expert/client requis manquant, avec message enrichi si devis importé.
+- fonctionnement dégradé offline avec avertissements clairs et sauvegarde locale.
 
 ## Commandes de validation locale
 

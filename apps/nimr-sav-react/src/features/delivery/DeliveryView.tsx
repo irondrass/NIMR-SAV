@@ -8,6 +8,8 @@ import { hasPermission } from '@/domain/action-permissions';
 import { EmptyState } from '@/components/EmptyState';
 import { BlockedNotice } from '@/components/BlockedNotice';
 import { getRoleFieldGuidance } from '@/domain/ui-field-guidelines';
+import { useConnectivity } from '@/state/useConnectivity';
+import { createOfflineAction } from '@/domain/offline-queue';
 
 interface DeliveryViewProps {
   user: User;
@@ -20,7 +22,11 @@ export const DeliveryView: React.FC<DeliveryViewProps> = ({ user }) => {
     prepareDelivery,
     deliverCase,
     recordPrintAction,
+    enqueueOfflineAction,
+    saveLocalSnapshot,
   } = useSavCases();
+
+  const { isOffline } = useConnectivity();
 
   // Resolve actor for delivery operations (supporting demo session if user is not livraison/admin)
   const actor = useMemo(() => {
@@ -88,7 +94,13 @@ export const DeliveryView: React.FC<DeliveryViewProps> = ({ user }) => {
       setErrorMsg('');
       setSuccessMsg('');
       prepareDelivery(caseId, actor);
-      setSuccessMsg("Dossier préparé pour la livraison avec succès !");
+      if (isOffline) {
+        enqueueOfflineAction(createOfflineAction('delivery_update', { caseId, status: 'ready_delivery' }, { id: actor.id, role: actor.role }));
+        saveLocalSnapshot();
+        setSuccessMsg("Dossier préparé pour la livraison avec succès ! (Action locale sauvegardée)");
+      } else {
+        setSuccessMsg("Dossier préparé pour la livraison avec succès !");
+      }
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : String(err));
     }
@@ -106,7 +118,13 @@ export const DeliveryView: React.FC<DeliveryViewProps> = ({ user }) => {
         notes: notes.trim() ? notes : undefined,
       };
       deliverCase(selectedCase.id, payload, actor);
-      setSuccessMsg("Véhicule livré avec succès ! Preuve enregistrée.");
+      if (isOffline) {
+        enqueueOfflineAction(createOfflineAction('delivery_update', { caseId: selectedCase.id, status: 'delivered', ...payload }, { id: actor.id, role: actor.role }));
+        saveLocalSnapshot();
+        setSuccessMsg("Véhicule livré avec succès ! Preuve enregistrée. (Action locale sauvegardée)");
+      } else {
+        setSuccessMsg("Véhicule livré avec succès ! Preuve enregistrée.");
+      }
       setRecipientName('');
       setProofReference('');
       setNotes('');
@@ -127,6 +145,11 @@ export const DeliveryView: React.FC<DeliveryViewProps> = ({ user }) => {
           <p className="view-subtitle" style={{ margin: '0.25rem 0 0 0', color: '#a1a1aa', fontSize: '0.875rem' }}>
             Session de : <strong style={{ color: '#fff' }}>{actor.name} ({actor.role})</strong>
           </p>
+          {isOffline && (
+            <div style={{ marginTop: '0.75rem', padding: '0.5rem', background: 'rgba(239,68,68,0.15)', border: '1px solid #ef4444', borderRadius: '4px', color: '#fca5a5', fontSize: '0.8rem' }}>
+              ⚠️ Mode hors ligne : consultation livraison via les données locales. Les actions de livraison seront sauvegardées localement.
+            </div>
+          )}
         </div>
       </header>
 

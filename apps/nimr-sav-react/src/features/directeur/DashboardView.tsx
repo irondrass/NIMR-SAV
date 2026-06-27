@@ -11,6 +11,8 @@ import { getRoleFieldGuidance } from '@/domain/ui-field-guidelines';
 import { Button } from '@/components/ui/Button';
 import { hasPermission } from '@/domain/action-permissions';
 import { buildCompleteCaseBundle, downloadExportBundle } from '@/domain/export-bundle';
+import { useConnectivity } from '@/state/useConnectivity';
+import { getLocalSnapshotMetadata } from '@/state/local-cache-adapter';
 
 interface DashboardViewProps {
   user: User;
@@ -18,7 +20,9 @@ interface DashboardViewProps {
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({ user, activeTab = 'pilotage' }) => {
-  const { cases, logs, getDirectorDashboard } = useSavCases();
+  const { cases, logs, getDirectorDashboard, pendingActions } = useSavCases();
+  const { isOnline } = useConnectivity();
+  const cacheMeta = getLocalSnapshotMetadata();
 
   // Selected case for the read-only details view under "dossiers" tab
   const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
@@ -405,6 +409,54 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ user, activeTab = 
           </div>
           <div style={{ fontSize: '2rem', fontWeight: 700, color: '#3b82f6', marginTop: '0.25rem' }}>
             {claimsMetrics.attenteClient}
+          </div>
+        </div>
+
+        <div
+          style={{
+            background: '#1e1e24',
+            border: '1px solid rgba(255,255,255,0.05)',
+            padding: '1.25rem',
+            borderRadius: '8px',
+          }}
+        >
+          <div style={{ fontSize: '0.85rem', color: '#a1a1aa', fontWeight: 500 }}>
+            État Connexion
+          </div>
+          <div style={{ fontSize: '2rem', fontWeight: 700, color: isOnline ? '#10b981' : '#ef4444', marginTop: '0.25rem' }}>
+            {isOnline ? 'En ligne' : 'Hors ligne'}
+          </div>
+        </div>
+
+        <div
+          style={{
+            background: '#1e1e24',
+            border: '1px solid rgba(255,255,255,0.05)',
+            padding: '1.25rem',
+            borderRadius: '8px',
+          }}
+        >
+          <div style={{ fontSize: '0.85rem', color: '#a1a1aa', fontWeight: 500 }}>
+            Actions en attente
+          </div>
+          <div style={{ fontSize: '2rem', fontWeight: 700, color: pendingActions.length > 0 ? '#f59e0b' : '#a1a1aa', marginTop: '0.25rem' }}>
+            {pendingActions.length}
+          </div>
+        </div>
+
+        <div
+          style={{
+            background: '#1e1e24',
+            border: '1px solid rgba(255,255,255,0.05)',
+            padding: '1.25rem',
+            borderRadius: '8px',
+          }}
+        >
+          <div style={{ fontSize: '0.85rem', color: '#a1a1aa', fontWeight: 500 }}>
+            Cache Local (Snapshot)
+          </div>
+          <div style={{ fontSize: '1.1rem', fontWeight: 600, color: cacheMeta ? '#a7f3d0' : '#71717a', marginTop: '0.65rem' }}>
+            {cacheMeta ? `Disponible (${cacheMeta.casesCount} dossiers)` : 'Non disponible'}
           </div>
         </div>
       </section>

@@ -7,6 +7,9 @@ import { validateReleaseReadiness, getReleaseReadinessChecklist } from '@/domain
 import { VersionBanner } from '@/components/VersionBanner';
 import { getRoleFieldGuidance } from '@/domain/ui-field-guidelines';
 import { getBlockingClaimsReasons } from '@/domain/claims';
+import { OfflineQueuePanel } from '@/components/OfflineQueuePanel';
+import { LocalCachePanel } from '@/components/LocalCachePanel';
+import { summarizePwaDiagnostics } from '@/domain/pwa-diagnostics';
 
 interface AdminViewProps {
   user: User;
@@ -44,6 +47,10 @@ export const AdminView: React.FC<AdminViewProps> = ({ user }) => {
 
   const staticChecklist = useMemo(() => {
     return getReleaseReadinessChecklist();
+  }, []);
+
+  const pwaReport = useMemo(() => {
+    return summarizePwaDiagnostics();
   }, []);
 
   return (
@@ -717,6 +724,70 @@ export const AdminView: React.FC<AdminViewProps> = ({ user }) => {
           </div>
         </div>
       </div>
+
+      {/* Offline & PWA Diagnostic Section */}
+      <section
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+          gap: '1.5rem',
+          marginTop: '1.5rem',
+        }}
+      >
+        <OfflineQueuePanel />
+        <LocalCachePanel />
+
+        <div
+          id="pwa-diagnostic-panel"
+          style={{
+            background: '#1e1e24',
+            borderRadius: '8px',
+            padding: '1rem',
+            border: '1px solid rgba(255,255,255,0.05)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '0.75rem',
+          }}
+        >
+          <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 600 }}>
+            ⚡ Diagnostic Offline &amp; PWA
+          </h3>
+          <div style={{ fontSize: '0.8rem', color: '#a1a1aa' }}>
+            {pwaReport.notice}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', fontSize: '0.8rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span>Manifeste HTML :</span>
+              <span style={{ color: pwaReport.manifest.status === 'ok' ? '#10b981' : '#f59e0b' }}>
+                {pwaReport.manifest.status.toUpperCase()}
+              </span>
+            </div>
+            <div style={{ color: '#71717a', fontSize: '0.75rem', paddingLeft: '0.5rem' }}>
+              {pwaReport.manifest.details}
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span>Icônes PWA :</span>
+              <span style={{ color: pwaReport.icons.status === 'ok' ? '#10b981' : '#f59e0b' }}>
+                {pwaReport.icons.status.toUpperCase()}
+              </span>
+            </div>
+            <div style={{ color: '#71717a', fontSize: '0.75rem', paddingLeft: '0.5rem' }}>
+              {pwaReport.icons.details}
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span>Service Worker :</span>
+              <span style={{ color: pwaReport.offline.status === 'ok' ? '#10b981' : '#f59e0b' }}>
+                {pwaReport.offline.status.toUpperCase()}
+              </span>
+            </div>
+            <div style={{ color: '#71717a', fontSize: '0.75rem', paddingLeft: '0.5rem' }}>
+              {pwaReport.offline.details}
+            </div>
+          </div>
+        </div>
+      </section>
 
       {/* Footer */}
       <footer style={{ marginTop: 'auto', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '1rem', textAlign: 'center' }}>

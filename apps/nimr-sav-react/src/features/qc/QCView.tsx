@@ -9,6 +9,8 @@ import { StatusBadge } from '@/components/StatusBadge';
 import { PriorityBadge } from '@/components/PriorityBadge';
 import { EmptyState } from '@/components/EmptyState';
 import { getRoleFieldGuidance } from '@/domain/ui-field-guidelines';
+import { useConnectivity } from '@/state/useConnectivity';
+import { createOfflineAction } from '@/domain/offline-queue';
 
 interface QCViewProps {
   user: User;
@@ -24,7 +26,11 @@ export const QCView: React.FC<QCViewProps> = ({ user }) => {
     rejectQualityCheck,
     sendQualityCaseToRework,
     recordPrintAction,
+    enqueueOfflineAction,
+    saveLocalSnapshot,
   } = useSavCases();
+
+  const { isOffline } = useConnectivity();
 
   // Pick a simulated QC user if the logged in user doesn't have QC permissions
   const actor = useMemo(() => {
@@ -95,7 +101,13 @@ export const QCView: React.FC<QCViewProps> = ({ user }) => {
       setErrorMsg('');
       setSuccessMsg('');
       startQualityCheck(caseId, actor);
-      setSuccessMsg("Contrôle qualité démarré avec succès !");
+      if (isOffline) {
+        enqueueOfflineAction(createOfflineAction('qc_update', { caseId, status: 'in_progress' }, { id: actor.id, role: actor.role }));
+        saveLocalSnapshot();
+        setSuccessMsg("Contrôle qualité démarré avec succès ! (Action locale sauvegardée)");
+      } else {
+        setSuccessMsg("Contrôle qualité démarré avec succès !");
+      }
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : String(err));
     }
@@ -110,6 +122,10 @@ export const QCView: React.FC<QCViewProps> = ({ user }) => {
         item.id === itemId ? { ...item, checked: !item.checked } : item
       );
       updateQualityChecklist(selectedCase.id, updatedItems, actor);
+      if (isOffline) {
+        enqueueOfflineAction(createOfflineAction('qc_update', { caseId: selectedCase.id, checklist: updatedItems }, { id: actor.id, role: actor.role }));
+        saveLocalSnapshot();
+      }
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : String(err));
     }
@@ -120,7 +136,13 @@ export const QCView: React.FC<QCViewProps> = ({ user }) => {
       setErrorMsg('');
       setSuccessMsg('');
       approveQualityCheck(caseId, actor);
-      setSuccessMsg("Contrôle qualité validé et approuvé !");
+      if (isOffline) {
+        enqueueOfflineAction(createOfflineAction('qc_update', { caseId, status: 'approved' }, { id: actor.id, role: actor.role }));
+        saveLocalSnapshot();
+        setSuccessMsg("Contrôle qualité validé et approuvé ! (Action locale sauvegardée)");
+      } else {
+        setSuccessMsg("Contrôle qualité validé et approuvé !");
+      }
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : String(err));
     }
@@ -133,7 +155,13 @@ export const QCView: React.FC<QCViewProps> = ({ user }) => {
       setErrorMsg('');
       setSuccessMsg('');
       rejectQualityCheck(selectedCase.id, rejectionReason, actor);
-      setSuccessMsg("Contrôle qualité rejeté avec succès.");
+      if (isOffline) {
+        enqueueOfflineAction(createOfflineAction('qc_update', { caseId: selectedCase.id, status: 'rejected', reason: rejectionReason }, { id: actor.id, role: actor.role }));
+        saveLocalSnapshot();
+        setSuccessMsg("Contrôle qualité rejeté avec succès. (Action locale sauvegardée)");
+      } else {
+        setSuccessMsg("Contrôle qualité rejeté avec succès.");
+      }
       setRejectionReason('');
       setShowRejectionForm(false);
     } catch (err) {
@@ -148,7 +176,13 @@ export const QCView: React.FC<QCViewProps> = ({ user }) => {
       setErrorMsg('');
       setSuccessMsg('');
       sendQualityCaseToRework(selectedCase.id, reworkReason, actor);
-      setSuccessMsg("Dossier renvoyé en reprise atelier avec succès.");
+      if (isOffline) {
+        enqueueOfflineAction(createOfflineAction('qc_update', { caseId: selectedCase.id, status: 'rework', reason: reworkReason }, { id: actor.id, role: actor.role }));
+        saveLocalSnapshot();
+        setSuccessMsg("Dossier renvoyé en reprise atelier avec succès. (Action locale sauvegardée)");
+      } else {
+        setSuccessMsg("Dossier renvoyé en reprise atelier avec succès.");
+      }
       setReworkReason('');
       setShowReworkForm(false);
     } catch (err) {
@@ -175,6 +209,11 @@ export const QCView: React.FC<QCViewProps> = ({ user }) => {
           <p className="view-subtitle" style={{ margin: '0.25rem 0 0 0', color: '#a1a1aa', fontSize: '0.875rem' }}>
             Session de : <strong style={{ color: '#fff' }}>{actor.name} ({actor.role})</strong>
           </p>
+          {isOffline && (
+            <div style={{ marginTop: '0.75rem', padding: '0.5rem', background: 'rgba(239,68,68,0.15)', border: '1px solid #ef4444', borderRadius: '4px', color: '#fca5a5', fontSize: '0.8rem' }}>
+              ⚠️ Mode hors ligne : consultation qualité via les données locales. Les actions de contrôle seront sauvegardées localement.
+            </div>
+          )}
         </div>
       </header>
 

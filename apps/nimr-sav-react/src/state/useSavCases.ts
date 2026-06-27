@@ -4,15 +4,19 @@ import { SavCase, WorkshopTask, QcChecklistItem, Claim, EstimateLine, CasePhoto 
 import { AuditLogEntry } from '../domain/audit-log';
 import { Role } from '../types';
 import { CaseStatus } from '../domain/case-status';
+import { OfflineAction } from '../domain/offline-queue';
+import { LocalSnapshot } from '../domain/local-cache';
 
 export function useSavCases() {
   const [cases, setCases] = useState<SavCase[]>(savCaseStore.getCases());
   const [logs, setLogs] = useState<AuditLogEntry[]>(savCaseStore.getLogs());
+  const [pendingActions, setPendingActions] = useState<OfflineAction[]>(savCaseStore.getPendingActions());
 
   useEffect(() => {
     const unsubscribe = savCaseStore.subscribe(() => {
       setCases(savCaseStore.getCases());
       setLogs(savCaseStore.getLogs());
+      setPendingActions(savCaseStore.getPendingActions());
     });
     return unsubscribe;
   }, []);
@@ -105,5 +109,13 @@ export function useSavCases() {
       savCaseStore.recordPrintAction(caseId, documentType, actor),
     recordExportAction: (caseId: string, actor: { id: string; role: Role }) =>
       savCaseStore.recordExportAction(caseId, actor),
+    pendingActions,
+    enqueueOfflineAction: (action: OfflineAction) => savCaseStore.enqueueOfflineAction(action),
+    clearPendingAction: (actionId: string) => savCaseStore.clearPendingAction(actionId),
+    cancelPendingAction: (actionId: string) => savCaseStore.cancelPendingAction(actionId),
+    replayPendingActions: () => savCaseStore.replayPendingActions(),
+    saveLocalSnapshot: () => savCaseStore.saveLocalSnapshot(),
+    restoreLocalSnapshot: (snapshot: LocalSnapshot) => savCaseStore.restoreLocalSnapshot(snapshot),
+    clearLocalCache: () => savCaseStore.clearLocalCache(),
   };
 }

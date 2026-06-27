@@ -51,7 +51,7 @@ import { savCaseStore } from '../src/state/sav-case-store';
 import { OFFICIAL_ROLES } from '../src/domain/role-governance';
 import { ROLE_DEFAULT_VIEW, ROLE_ALLOWED_TABS } from '../src/types';
 
-describe('SAV Admin Governance Integration (v24.0.0-alpha.17)', () => {
+describe('SAV Admin Governance Integration (v24.0.0-alpha.18)', () => {
   beforeEach(() => {
     window.localStorage.clear();
     savCaseStore.clearAll();
@@ -63,20 +63,20 @@ describe('SAV Admin Governance Integration (v24.0.0-alpha.17)', () => {
   });
 
   // 1. Version Check
-  it('APP_VERSION is exactly v24.0.0-alpha.17', () => {
-    expect(APP_VERSION).toBe('v24.0.0-alpha.17');
+  it('APP_VERSION is exactly v24.0.0-alpha.18', () => {
+    expect(APP_VERSION).toBe('v24.0.0-alpha.18');
   });
 
-  it('package.json version matches 24.0.0-alpha.17', () => {
+  it('package.json version matches 24.0.0-alpha.18', () => {
     const pkgPath = resolve(__dirname, '../package.json');
     const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
-    expect(pkg.version).toBe('24.0.0-alpha.17');
+    expect(pkg.version).toBe('24.0.0-alpha.18');
   });
 
-  it('package-lock.json version matches 24.0.0-alpha.17', () => {
+  it('package-lock.json version matches 24.0.0-alpha.18', () => {
     const lockPath = resolve(__dirname, '../package-lock.json');
     const lock = JSON.parse(readFileSync(lockPath, 'utf-8'));
-    expect(lock.version).toBe('24.0.0-alpha.17');
+    expect(lock.version).toBe('24.0.0-alpha.18');
   });
 
   // 2. Roles list
@@ -138,7 +138,7 @@ describe('SAV Admin Governance Integration (v24.0.0-alpha.17)', () => {
   it('verifies getSystemInvariants fields and local prefix', () => {
     const invariants = savCaseStore.getSystemInvariants();
     expect(invariants.localStoragePrefix).toBe('nimr-sav-react-v24-');
-    expect(invariants.appVersion).toBe('v24.0.0-alpha.17');
+    expect(invariants.appVersion).toBe('v24.0.0-alpha.18');
     expect(invariants.v23Status).toContain('v23.2.6');
   });
 

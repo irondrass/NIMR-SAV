@@ -79,10 +79,10 @@ const baseCase: SavCase = {
 
 // ─── Integration Tests ────────────────────────────────────────────────────────
 
-describe('Print & Export Integration Tests (v24.0.0-alpha.17)', () => {
+describe('Print & Export Integration Tests (v24.0.0-alpha.18)', () => {
   describe('Version', () => {
-    it('APP_VERSION matches v24.0.0-alpha.17', () => {
-      expect(APP_VERSION).toBe('v24.0.0-alpha.17');
+    it('APP_VERSION matches v24.0.0-alpha.18', () => {
+      expect(APP_VERSION).toBe('v24.0.0-alpha.18');
     });
   });
 

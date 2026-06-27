@@ -12,9 +12,9 @@ import {
   validateNoConsultationMutation,
 } from './business-acceptance-scenarios';
 
-// Historique : v24.0.0-alpha.17 a existé et a été validée techniquement mais a reçu un NO-GO terrain.
+// Historique : v24.0.0-alpha.18 a existé et a été validée techniquement mais a reçu un NO-GO terrain.
 // alpha.14 est un retour en phase alpha de développement.
-export const FUNCTIONAL_FREEZE_VERSION = 'v24.0.0-alpha.17' as const;
+export const FUNCTIONAL_FREEZE_VERSION = 'v24.0.0-alpha.18' as const;
 export const STABLE_PILOT_VERSION = 'v23.2.6' as const;
 export const FUNCTIONAL_FREEZE_LABEL = 'gel fonctionnel alpha.13 conservé' as const;
 

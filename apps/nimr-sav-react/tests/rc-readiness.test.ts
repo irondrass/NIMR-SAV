@@ -15,10 +15,10 @@ import {
   validateRcTechnicalEvidence,
 } from '../src/domain/rc-readiness';
 
-describe('RC readiness (v24.0.0-alpha.17)', () => {
-  it('aligns APP_VERSION on v24.0.0-alpha.17', () => {
-    expect(APP_VERSION).toBe('v24.0.0-alpha.17');
-    expect(RC_READINESS_VERSION).toBe('v24.0.0-alpha.17');
+describe('RC readiness (v24.0.0-alpha.18)', () => {
+  it('aligns APP_VERSION on v24.0.0-alpha.18', () => {
+    expect(APP_VERSION).toBe('v24.0.0-alpha.18');
+    expect(RC_READINESS_VERSION).toBe('v24.0.0-alpha.18');
   });
 
   it('marks rc.1 as internal only', () => {

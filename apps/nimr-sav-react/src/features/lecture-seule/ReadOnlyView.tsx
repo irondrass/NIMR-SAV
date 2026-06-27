@@ -10,6 +10,7 @@ import { VersionBanner } from '@/components/VersionBanner';
 import { getRoleFieldGuidance } from '@/domain/ui-field-guidelines';
 import { getBlockingClaimsReasons } from '@/domain/claims';
 import { buildCompleteCaseSummary } from '@/domain/print-documents';
+import { useConnectivity } from '@/state/useConnectivity';
 
 interface ReadOnlyViewProps {
   user: User;
@@ -23,6 +24,8 @@ export const ReadOnlyView: React.FC<ReadOnlyViewProps> = ({ user }) => {
 
   const cases = getReadOnlyCases();
   const logs = getReadOnlyLogs();
+
+  const { isOffline } = useConnectivity();
 
   const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -129,6 +132,11 @@ export const ReadOnlyView: React.FC<ReadOnlyViewProps> = ({ user }) => {
           >
             Session de : <strong style={{ color: '#fff' }}>{user.name} ({user.role})</strong>
           </p>
+          {isOffline && (
+            <div style={{ marginTop: '0.75rem', padding: '0.5rem', background: 'rgba(239,68,68,0.15)', border: '1px solid #ef4444', borderRadius: '4px', color: '#fca5a5', fontSize: '0.8rem' }}>
+              ⚠️ Mode hors ligne : consultation en lecture seule depuis les données locales.
+            </div>
+          )}
         </div>
         <span
           style={{

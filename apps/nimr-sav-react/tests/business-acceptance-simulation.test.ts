@@ -18,7 +18,7 @@ import type { SavCase } from '../src/domain/sav-case';
 import { transitionCase } from '../src/domain/workflow-engine';
 import type { Role } from '../src/types';
 
-describe('Business acceptance simulation (v24.0.0-alpha.17)', () => {
+describe('Business acceptance simulation (v24.0.0-alpha.18)', () => {
   it('aligns application and package versions on rc.1', () => {
     const packageJson = JSON.parse(
       readFileSync(resolve(__dirname, '../package.json'), 'utf-8'),
@@ -27,10 +27,10 @@ describe('Business acceptance simulation (v24.0.0-alpha.17)', () => {
       readFileSync(resolve(__dirname, '../package-lock.json'), 'utf-8'),
     );
 
-    expect(APP_VERSION).toBe('v24.0.0-alpha.17');
-    expect(packageJson.version).toBe('24.0.0-alpha.17');
-    expect(packageLock.version).toBe('24.0.0-alpha.17');
-    expect(packageLock.packages[''].version).toBe('24.0.0-alpha.17');
+    expect(APP_VERSION).toBe('v24.0.0-alpha.18');
+    expect(packageJson.version).toBe('24.0.0-alpha.18');
+    expect(packageLock.version).toBe('24.0.0-alpha.18');
+    expect(packageLock.packages[''].version).toBe('24.0.0-alpha.18');
   });
 
   it('creates five fictitious parallel cases and all official acceptance actors', () => {

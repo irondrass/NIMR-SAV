@@ -47,8 +47,8 @@ export function validateVersionReadiness(appVersion: string): ReadinessCheckResu
   if (!appVersion) {
     blockers.push("Version string is missing or undefined.");
   } else {
-    if (appVersion !== 'v24.0.0-alpha.17') {
-      blockers.push(`Version mismatch: expected 'v24.0.0-alpha.17', got '${appVersion}'.`);
+    if (appVersion !== 'v24.0.0-alpha.18') {
+      blockers.push(`Version mismatch: expected 'v24.0.0-alpha.18', got '${appVersion}'.`);
     }
     if (appVersion === 'v24.0.0') {
       blockers.push('Version name points to the final release, but rc.1 must remain internal.');
@@ -325,7 +325,7 @@ export function summarizeRcBlockers(readiness: {
 
 export function getReleaseReadinessChecklist(): { id: string; label: string; checked: boolean }[] {
   return [
-    { id: 'version_rc1', label: 'Version calée sur v24.0.0-alpha.17', checked: true },
+    { id: 'version_rc1', label: 'Version calée sur v24.0.0-alpha.18', checked: true },
     { id: 'official_roles', label: 'Uniquement les 8 rôles officiels configurés', checked: true },
     { id: 'official_statuses', label: 'Uniquement les 14 statuts de dossiers officiels', checked: true },
     { id: 'security_prefix', label: 'Isolation localStorage (nimr-sav-react-v24-)', checked: true },
@@ -354,7 +354,7 @@ export function validateReleaseReadiness(
   logs: AuditLogEntry[],
   options?: { appVersion?: string }
 ): ReleaseReadinessReport {
-  const versionInput = options?.appVersion || 'v24.0.0-alpha.17';
+  const versionInput = options?.appVersion || 'v24.0.0-alpha.18';
 
   const versionResult = validateVersionReadiness(versionInput);
   const rolesResult = validateRoleReadiness();

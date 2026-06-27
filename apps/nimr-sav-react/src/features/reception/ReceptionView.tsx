@@ -22,9 +22,9 @@ import {
   downloadExportBundle,
   getExportWarnings
 } from '@/domain/export-bundle';
-import {
-  collectCasePhotos
-} from '@/domain/photo-export';
+import { collectCasePhotos } from '@/domain/photo-export';
+import { useConnectivity } from '@/state/useConnectivity';
+import { createOfflineAction } from '@/domain/offline-queue';
 
 interface ReceptionViewProps {
   user: User;
@@ -49,7 +49,11 @@ export const ReceptionView: React.FC<ReceptionViewProps> = ({ user }) => {
     removePhotoFromCase,
     recordPrintAction,
     recordExportAction,
+    enqueueOfflineAction,
+    saveLocalSnapshot,
   } = useSavCases();
+
+  const { isOffline } = useConnectivity();
 
   // Form states
   const [immatriculation, setImmatriculation] = useState('');
@@ -136,17 +140,22 @@ export const ReceptionView: React.FC<ReceptionViewProps> = ({ user }) => {
       const reader = new FileReader();
       reader.onload = () => {
         const dataUrl = reader.result as string;
+        const photoInput = {
+          name: file.name,
+          type: file.type,
+          size: file.size,
+          category,
+          dataUrl,
+        };
         addPhotoToCase(
           selectedCase.id,
-          {
-            name: file.name,
-            type: file.type,
-            size: file.size,
-            category,
-            dataUrl,
-          },
+          photoInput,
           user
         );
+        if (isOffline) {
+          enqueueOfflineAction(createOfflineAction('add_photo', { caseId: selectedCase.id, photoInput }, { id: user.id, role: user.role }));
+          saveLocalSnapshot();
+        }
       };
       reader.readAsDataURL(file);
     }
@@ -156,17 +165,22 @@ export const ReceptionView: React.FC<ReceptionViewProps> = ({ user }) => {
     if (!selectedCase) return;
     const mockBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
     const dataUrl = `data:image/png;base64,${mockBase64}`;
+    const photoInput = {
+      name: `mock_photo_${category}_${Date.now()}.png`,
+      type: 'image/png',
+      size: 68,
+      category,
+      dataUrl,
+    };
     addPhotoToCase(
       selectedCase.id,
-      {
-        name: `mock_photo_${category}_${Date.now()}.png`,
-        type: 'image/png',
-        size: 68,
-        category,
-        dataUrl,
-      },
+      photoInput,
       user
     );
+    if (isOffline) {
+      enqueueOfflineAction(createOfflineAction('add_photo', { caseId: selectedCase.id, photoInput }, { id: user.id, role: user.role }));
+      saveLocalSnapshot();
+    }
   };
 
   // Form helper: reset fields
@@ -257,7 +271,14 @@ export const ReceptionView: React.FC<ReceptionViewProps> = ({ user }) => {
     );
     addLog(creationLog);
 
-    setSuccessMsg(`Dossier brouillon ${newCaseId} créé avec succès !`);
+    if (isOffline) {
+      enqueueOfflineAction(createOfflineAction('create_case', newCase, { id: user.id, role: user.role }));
+      saveLocalSnapshot();
+      setSuccessMsg(`Dossier brouillon ${newCaseId} créé avec succès ! (Dossier créé localement / à vérifier après reconnexion)`);
+    } else {
+      setSuccessMsg(`Dossier brouillon ${newCaseId} créé avec succès !`);
+    }
+
     handleResetForm();
     setTimeout(() => setSuccessMsg(''), 5000);
   };
@@ -299,7 +320,16 @@ export const ReceptionView: React.FC<ReceptionViewProps> = ({ user }) => {
     if (result.success && result.updatedCase && result.auditLog) {
       addCase(result.updatedCase);
       addLog(result.auditLog);
-      setSuccessMsg(`Dossier ${newCaseId} créé et réceptionné avec succès !`);
+
+      if (isOffline) {
+        enqueueOfflineAction(createOfflineAction('create_case', draftCase, { id: user.id, role: user.role }));
+        enqueueOfflineAction(createOfflineAction('receive_case', { caseId: newCaseId }, { id: user.id, role: user.role }));
+        saveLocalSnapshot();
+        setSuccessMsg(`Dossier ${newCaseId} créé et réceptionné avec succès ! (Dossier créé localement / à vérifier après reconnexion)`);
+      } else {
+        setSuccessMsg(`Dossier ${newCaseId} créé et réceptionné avec succès !`);
+      }
+
       handleResetForm();
       setTimeout(() => setSuccessMsg(''), 5000);
     } else {
@@ -313,7 +343,15 @@ export const ReceptionView: React.FC<ReceptionViewProps> = ({ user }) => {
     if (result.success && result.updatedCase && result.auditLog) {
       addCase(result.updatedCase);
       addLog(result.auditLog);
-      setSuccessMsg(`Dossier ${draftCase.id} réceptionné avec succès !`);
+
+      if (isOffline) {
+        enqueueOfflineAction(createOfflineAction('receive_case', { caseId: draftCase.id }, { id: user.id, role: user.role }));
+        saveLocalSnapshot();
+        setSuccessMsg(`Dossier ${draftCase.id} réceptionné avec succès ! (Dossier créé localement / à vérifier après reconnexion)`);
+      } else {
+        setSuccessMsg(`Dossier ${draftCase.id} réceptionné avec succès !`);
+      }
+
       setTimeout(() => setSuccessMsg(''), 5000);
     } else {
       alert(result.error || 'Erreur lors de la transition de réception.');
@@ -398,6 +436,11 @@ export const ReceptionView: React.FC<ReceptionViewProps> = ({ user }) => {
         <div style={{ marginTop: '0.75rem', fontSize: '0.85rem', color: '#3b82f6', fontStyle: 'italic' }}>
           {getRoleFieldGuidance(user.role)}
         </div>
+        {isOffline && (
+          <div style={{ marginTop: '0.75rem', padding: '0.5rem', background: 'rgba(239,68,68,0.15)', border: '1px solid #ef4444', borderRadius: '4px', color: '#fca5a5', fontSize: '0.8rem' }}>
+            ⚠️ Mode hors ligne : les données créées seront stockées localement.
+          </div>
+        )}
       </header>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
@@ -1209,6 +1252,10 @@ export const ReceptionView: React.FC<ReceptionViewProps> = ({ user }) => {
                               onClick={() => {
                                 if (confirm(`Voulez-vous supprimer la photo "${photo.name}" ?`)) {
                                   removePhotoFromCase(selectedCase.id, photo.id, user);
+                                  if (isOffline) {
+                                    enqueueOfflineAction(createOfflineAction('remove_photo', { caseId: selectedCase.id, photoId: photo.id }, { id: user.id, role: user.role }));
+                                    saveLocalSnapshot();
+                                  }
                                 }
                               }}
                               style={{ position: 'absolute', top: '4px', right: '4px', background: 'rgba(239,68,68,0.8)', border: 'none', color: '#fff', borderRadius: '50%', width: '18px', height: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: '10px', fontWeight: 'bold' }}

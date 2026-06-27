@@ -286,8 +286,8 @@ describe('Print Documents Domain Tests', () => {
   // ─── Version check ─────────────────────────────────────────────────────────
 
   describe('Version', () => {
-    it('APP_VERSION is v24.0.0-alpha.17', () => {
-      expect(APP_VERSION).toBe('v24.0.0-alpha.17');
+    it('APP_VERSION is v24.0.0-alpha.18', () => {
+      expect(APP_VERSION).toBe('v24.0.0-alpha.18');
     });
   });
 });

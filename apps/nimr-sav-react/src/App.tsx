@@ -63,6 +63,8 @@ const TAB_LABELS: Record<string, string> = {
   livraison: 'Livraison',
 };
 
+import { ConnectivityBanner } from '@/components/ConnectivityBanner';
+
 export const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [activeTab, setActiveTab] = useState<string>('');
@@ -103,6 +105,8 @@ export const App: React.FC = () => {
           </Button>
         </div>
       </header>
+
+      <ConnectivityBanner />
 
       {/* Tab navigation — only if role has multiple tabs */}
       {allowedTabs.length > 1 && (

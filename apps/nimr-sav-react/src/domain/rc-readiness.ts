@@ -18,9 +18,9 @@ import {
   validateStableRoleAndStatusMatrix,
 } from './functional-freeze-readiness';
 
-// Historique : v24.0.0-alpha.18 a existé et a été validée techniquement mais a reçu un NO-GO terrain.
-// alpha.14 est un retour en phase alpha de développement.
-export const RC_READINESS_VERSION = 'v24.0.0-alpha.18' as const;
+// alpha.19 prépare une décision humaine avant une nouvelle RC éventuelle.
+// Ce module conserve les contrôles de readiness sans promouvoir alpha.19 en RC.
+export const RC_READINESS_VERSION = 'v24.0.0-alpha.19' as const;
 
 const OFFICIAL_RC_ROLES: readonly Role[] = [
   'reception',
@@ -125,7 +125,7 @@ export function validateRcScopeFreeze(options: RcReadinessOptions = {}): RcValid
   const appVersion = options.appVersion ?? APP_VERSION;
   const tagsPointingAtHead = [...(options.tagsPointingAtHead ?? [])];
   const versionIsRc1 = appVersion === RC_READINESS_VERSION;
-  const internalReleaseCandidate = /-rc\.|-alpha\./i.test(appVersion);
+  const internalReleaseCandidate = /-alpha\./i.test(appVersion);
   const finalRelease = options.finalReleaseDeclared === true || appVersion === 'v24.0.0';
   const productionExposure =
     options.productionExposureDeclared === true || /prod/i.test(appVersion);
@@ -133,10 +133,10 @@ export function validateRcScopeFreeze(options: RcReadinessOptions = {}): RcValid
 
   const blockers: string[] = [];
   if (!versionIsRc1) blockers.push(`Version attendue ${RC_READINESS_VERSION}, reçue ${appVersion}.`);
-  if (!internalReleaseCandidate) blockers.push('rc.1 ou alpha.14 doit rester une Release Candidate ou version interne.');
-  if (finalRelease) blockers.push('rc.1 ne doit pas être assimilée à la version finale.');
-  if (productionExposure) blockers.push('rc.1 ne doit pas être exposée comme déploiement production.');
-  if (automaticTagExpected) blockers.push('Aucun tag automatique ne doit être attendu pour rc.1.');
+  if (!internalReleaseCandidate) blockers.push('alpha.19 doit rester une version interne.');
+  if (finalRelease) blockers.push('alpha.19 ne doit pas être assimilée à la version finale.');
+  if (productionExposure) blockers.push('alpha.19 ne doit pas être exposée comme déploiement production.');
+  if (automaticTagExpected) blockers.push('Aucun tag automatique ne doit être attendu pour alpha.19.');
 
   return buildResult(
     {
@@ -178,7 +178,7 @@ export function validateRcTechnicalEvidence(
   };
 
   return buildResult(checks, [...runtime.blockers, ...data.blockers], [
-    'Les preuves npm ci, lint, tests, build, audit et clone frais restent obligatoires avant tag éventuel.',
+    'Les preuves npm ci, lint, tests, build, audit et clone frais restent obligatoires avant nouvelle RC éventuelle.',
     ...runtime.warnings,
     ...data.warnings,
   ]);
@@ -231,8 +231,8 @@ export function validateRcBusinessEvidence(): RcValidationResult {
     ...consultation.errors,
   ];
 
-  if (!rolesOfficial) blockers.push('La matrice des rôles officiels rc.1 a changé.');
-  if (!statusesOfficial) blockers.push('La matrice des statuts officiels rc.1 a changé.');
+  if (!rolesOfficial) blockers.push('La matrice des rôles officiels alpha.19 a changé.');
+  if (!statusesOfficial) blockers.push('La matrice des statuts officiels alpha.19 a changé.');
   if (!checks.deliveryBlockedWithoutApprovedQuality) {
     blockers.push('La livraison doit rester bloquée sans qualité approuvée.');
   }
@@ -252,7 +252,7 @@ export function validateRcRiskRegister(): RcRiskRegisterResult {
   const risks: readonly RcRiskRegisterItem[] = [
     {
       id: 'real_customer_data',
-      label: 'Donnée client réelle détectée dans la préparation RC',
+      label: 'Donnée client réelle détectée dans la préparation alpha.19',
       severity: 'blocking',
       mitigated: true,
       evidence: 'Scénarios fictifs et données véhicules publiques vides',
@@ -290,7 +290,7 @@ export function validateRcRiskRegister(): RcRiskRegisterResult {
       label: 'Validation terrain non réalisée',
       severity: 'blocking',
       mitigated: false,
-      evidence: 'Validation manuelle obligatoire avant tag éventuel',
+      evidence: 'Validation manuelle obligatoire avant nouvelle RC éventuelle',
     },
   ];
   const openBlockingRisks = risks.filter(
@@ -323,7 +323,7 @@ export function validateRcGoNoGoInputs(): RcValidationResult {
       finalReleaseOutOfScope: true,
     },
     [],
-    ['Aucun tag rc.1 ne doit être créé sans décision humaine explicite.'],
+    ['Aucun tag ne doit être créé depuis alpha.19 sans décision humaine explicite.'],
   );
 }
 
@@ -369,7 +369,7 @@ export function validateRcReadiness(options: RcReadinessOptions = {}): RcReadine
     warnings,
     checks,
     appVersion: options.appVersion ?? APP_VERSION,
-    internalReleaseCandidate: true,
+    internalReleaseCandidate: false,
     finalRelease: false,
     productionExposure: false,
     automaticTagExpected: false,
@@ -399,16 +399,15 @@ export function summarizeRcReadiness(
   >,
 ): string {
   if (!report.success) {
-    return `${report.appVersion} : ${report.blockers.length} bloqueur(s) à lever avant validation RC finale.`;
+    return `${report.appVersion} : ${report.blockers.length} bloqueur(s) à lever avant décision de nouvelle RC éventuelle.`;
   }
 
   const scope =
-    report.internalReleaseCandidate &&
     !report.finalRelease &&
     !report.productionExposure &&
     !report.automaticTagExpected
-      ? 'RC interne, non finale, non production, sans tag automatique'
-      : 'périmètre RC à revalider';
+      ? 'alpha.19 interne, non RC, non finale, non production, sans tag automatique'
+      : 'périmètre alpha.19 à revalider';
   const decision =
     report.manualFieldValidationRequired && report.humanGoNoGoDecisionRequired
       ? 'validation terrain manuelle et décision GO / NO-GO humaine obligatoires'

@@ -18,7 +18,7 @@ import {
 
 describe('Claims Domain and Helpers', () => {
   it('checks version', () => {
-    expect(APP_VERSION).toBe('v24.0.0-alpha.18');
+    expect(APP_VERSION).toBe('v24.0.0-alpha.19');
   });
 
   it('creates default claim', () => {

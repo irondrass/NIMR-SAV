@@ -1,7 +1,11 @@
 import { SavCase } from './sav-case';
 import { AuditLogEntry } from './audit-log';
-import { OfflineAction } from './offline-queue';
+import { OfflineAction, validateOfflineAction } from './offline-queue';
 import { LS_PREFIX } from '../constants/version';
+import { isOfficialRole } from './role-governance';
+import { validateAllowedCaseStatus } from './status-hardening';
+
+export const MAX_LOCAL_SNAPSHOT_BYTES = 1_000_000;
 
 export interface LocalSnapshot {
   appVersion: string;
@@ -63,6 +67,45 @@ export function validateLocalSnapshot(snapshot: unknown, currentAppVersion: stri
   if (!Array.isArray(snap.logs)) {
     return { valid: false, reason: "Format invalide : la liste des logs ('logs') est manquante ou invalide." };
   }
+  if (snap.pendingActions !== undefined && !Array.isArray(snap.pendingActions)) {
+    return { valid: false, reason: "Format invalide : la liste des actions offline est invalide." };
+  }
+
+  const size = estimateSnapshotSize(snapshot as LocalSnapshot);
+  if (size > MAX_LOCAL_SNAPSHOT_BYTES) {
+    return { valid: false, reason: 'Snapshot trop volumineux pour restauration locale sécurisée.' };
+  }
+
+  const caseStatusError = snap.cases
+    .map((entry) => entry as Record<string, unknown>)
+    .find((entry) => !validateAllowedCaseStatus(entry.status).valid);
+  if (caseStatusError) {
+    return {
+      valid: false,
+      reason: `Snapshot refusé : statut dossier inconnu (${String(caseStatusError.status)}).`,
+    };
+  }
+
+  const logRoleError = snap.logs
+    .map((entry) => entry as Record<string, unknown>)
+    .find((entry) => entry.userRole !== undefined && !isOfficialRole(entry.userRole));
+  if (logRoleError) {
+    return {
+      valid: false,
+      reason: `Snapshot refusé : rôle audit inconnu (${String(logRoleError.userRole)}).`,
+    };
+  }
+
+  const pendingActions = (snap.pendingActions ?? []) as OfflineAction[];
+  const invalidAction = pendingActions.find((action) => !validateOfflineAction(action).valid);
+  if (invalidAction) {
+    const validation = validateOfflineAction(invalidAction);
+    return {
+      valid: false,
+      reason: `Snapshot refusé : action offline invalide (${validation.reason || invalidAction.id}).`,
+    };
+  }
+
   return { valid: true };
 }
 

@@ -1,4 +1,10 @@
-import { LocalSnapshot, getLocalCacheKey } from '../domain/local-cache';
+import {
+  LocalSnapshot,
+  MAX_LOCAL_SNAPSHOT_BYTES,
+  estimateSnapshotSize,
+  getLocalCacheKey,
+  sanitizeSnapshotForStorage,
+} from '../domain/local-cache';
 
 export function saveSnapshotToLocalStorage(snapshot: LocalSnapshot): { success: boolean; error?: string } {
   if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
@@ -6,7 +12,12 @@ export function saveSnapshotToLocalStorage(snapshot: LocalSnapshot): { success: 
   }
   try {
     const key = getLocalCacheKey();
-    const serialized = JSON.stringify(snapshot);
+    const safeSnapshot = sanitizeSnapshotForStorage(snapshot);
+    const estimatedSize = estimateSnapshotSize(safeSnapshot);
+    if (estimatedSize > MAX_LOCAL_SNAPSHOT_BYTES) {
+      return { success: false, error: 'Snapshot trop volumineux pour le cache local sécurisé.' };
+    }
+    const serialized = JSON.stringify(safeSnapshot);
     localStorage.setItem(key, serialized);
     return { success: true };
   } catch (e) {

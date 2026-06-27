@@ -1,3 +1,5 @@
+import { RESERVED_CACHE_NAME } from '../constants/version';
+
 export interface DiagnosticResult {
   status: 'ok' | 'warning' | 'error';
   details: string;
@@ -6,7 +8,9 @@ export interface DiagnosticResult {
 export interface PwaDiagnosticsSummary {
   manifest: DiagnosticResult;
   icons: DiagnosticResult;
+  cache: DiagnosticResult;
   offline: DiagnosticResult;
+  serviceWorkerIsolation: DiagnosticResult;
   serviceWorkerActiveByDefault: boolean;
   overallStatus: 'ok' | 'warning' | 'error';
   notice: string;
@@ -42,7 +46,6 @@ export function checkIconReadiness(): DiagnosticResult {
 }
 
 export function checkOfflineReadiness(): DiagnosticResult {
-  // Connectivity and SW check
   if (typeof window === 'undefined') {
     return { status: 'warning', details: "Support hors ligne non vérifiable en environnement non-navigateur." };
   }
@@ -54,28 +57,54 @@ export function checkOfflineReadiness(): DiagnosticResult {
 
   return {
     status: 'warning',
-    details: "Le navigateur supporte les Service Workers, mais aucun Service Worker React n'est activé par défaut dans cette version préparatoire."
+    details: "Le navigateur supporte les Service Workers, mais aucun SW React n'est activé par défaut dans cette version préparatoire."
+  };
+}
+
+export function checkCacheReadiness(): DiagnosticResult {
+  if (typeof window === 'undefined') {
+    return { status: 'warning', details: "Cache API non vérifiable en environnement non-navigateur." };
+  }
+
+  if (!('caches' in window)) {
+    return { status: 'warning', details: "Cache API indisponible : le mode offline reste limité au localStorage." };
+  }
+
+  return {
+    status: 'ok',
+    details: `Cache API disponible ; nom réservé non activé automatiquement : ${RESERVED_CACHE_NAME}.`,
+  };
+}
+
+export function checkServiceWorkerIsolation(): DiagnosticResult {
+  return {
+    status: 'ok',
+    details: "Aucun enregistrement SW React n'est effectué par le diagnostic alpha.19 ; v23.2.6 reste isolé.",
   };
 }
 
 export function summarizePwaDiagnostics(): PwaDiagnosticsSummary {
   const manifest = checkManifestReadiness();
   const icons = checkIconReadiness();
+  const cache = checkCacheReadiness();
   const offline = checkOfflineReadiness();
+  const serviceWorkerIsolation = checkServiceWorkerIsolation();
 
   let overallStatus: 'ok' | 'warning' | 'error' = 'ok';
-  if (manifest.status === 'error' || icons.status === 'error' || offline.status === 'error') {
+  if ([manifest, icons, cache, offline, serviceWorkerIsolation].some((item) => item.status === 'error')) {
     overallStatus = 'error';
-  } else if (manifest.status === 'warning' || icons.status === 'warning' || offline.status === 'warning') {
+  } else if ([manifest, icons, cache, offline, serviceWorkerIsolation].some((item) => item.status === 'warning')) {
     overallStatus = 'warning';
   }
 
   return {
     manifest,
     icons,
+    cache,
     offline,
-    serviceWorkerActiveByDefault: false, // Explicitly false as requested
+    serviceWorkerIsolation,
+    serviceWorkerActiveByDefault: false,
     overallStatus,
-    notice: "alpha.18 offline préparatoire : service worker React désactivé par défaut pour éviter les interférences avec le pilote stable v23.2.6."
+    notice: "alpha.19 sécurité/readiness : diagnostic PWA isolé, aucun SW React actif par défaut, aucune interférence avec le pilote stable v23.2.6."
   };
 }

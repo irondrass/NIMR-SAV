@@ -1,5 +1,6 @@
 import { SavCase, Claim } from './sav-case';
 import { APP_VERSION } from '../constants/version';
+import { escapeHtml } from './field-security';
 
 export type PrintableDocumentType =
   | 'reception_sheet'
@@ -12,13 +13,7 @@ export type PrintableDocumentType =
 
 export function sanitizePrintableText(text: string | undefined | null): string {
   if (!text) return '';
-  return String(text)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#x27;')
-    .replace(/\//g, '&#x2F;');
+  return escapeHtml(text);
 }
 
 export function formatPrintDate(isoDate: string | undefined | null): string {

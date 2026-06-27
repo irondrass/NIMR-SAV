@@ -13,6 +13,8 @@ import { hasPermission } from '@/domain/action-permissions';
 import { buildCompleteCaseBundle, downloadExportBundle } from '@/domain/export-bundle';
 import { useConnectivity } from '@/state/useConnectivity';
 import { getLocalSnapshotMetadata } from '@/state/local-cache-adapter';
+import { summarizeSecurityHardening } from '@/domain/security-hardening';
+import { summarizeAcceptanceReadiness } from '@/domain/field-acceptance';
 
 interface DashboardViewProps {
   user: User;
@@ -23,6 +25,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ user, activeTab = 
   const { cases, logs, getDirectorDashboard, pendingActions } = useSavCases();
   const { isOnline } = useConnectivity();
   const cacheMeta = getLocalSnapshotMetadata();
+  const alpha19Readiness = useMemo(() => {
+    const security = summarizeSecurityHardening();
+    const acceptance = summarizeAcceptanceReadiness();
+    const reserveCount = security.warnings.length + acceptance.reserves.length;
+    return {
+      status: security.blockers.length > 0 || acceptance.failed > 0 ? 'NO-GO' : reserveCount > 0 ? 'GO avec réserves' : 'GO interne',
+      reserveCount,
+    };
+  }, []);
 
   // Selected case for the read-only details view under "dossiers" tab
   const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
@@ -261,7 +272,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ user, activeTab = 
               variant="ghost"
               style={{ background: '#2563eb', color: '#fff', fontSize: '0.82rem' }}
               onClick={() => {
-                const bundle = buildCompleteCaseBundle(cases[0], user.name);
+                const bundle = buildCompleteCaseBundle(cases[0], user.name, user.role);
                 downloadExportBundle(bundle);
               }}
             >
@@ -457,6 +468,25 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ user, activeTab = 
           </div>
           <div style={{ fontSize: '1.1rem', fontWeight: 600, color: cacheMeta ? '#a7f3d0' : '#71717a', marginTop: '0.65rem' }}>
             {cacheMeta ? `Disponible (${cacheMeta.casesCount} dossiers)` : 'Non disponible'}
+          </div>
+        </div>
+
+        <div
+          style={{
+            background: '#1e1e24',
+            border: '1px solid rgba(59,130,246,0.16)',
+            padding: '1.25rem',
+            borderRadius: '8px',
+          }}
+        >
+          <div style={{ fontSize: '0.85rem', color: '#a1a1aa', fontWeight: 500 }}>
+            Readiness alpha.19
+          </div>
+          <div style={{ fontSize: '1.15rem', fontWeight: 700, color: alpha19Readiness.status === 'NO-GO' ? '#ef4444' : '#34d399', marginTop: '0.5rem' }}>
+            {alpha19Readiness.status}
+          </div>
+          <div style={{ fontSize: '0.75rem', color: '#a1a1aa', marginTop: '0.25rem' }}>
+            {alpha19Readiness.reserveCount} réserve(s) sécurité/terrain · non production
           </div>
         </div>
       </section>

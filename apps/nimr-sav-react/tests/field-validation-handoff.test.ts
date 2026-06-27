@@ -19,7 +19,7 @@ function handoffText(): string {
   });
 }
 
-describe('Field validation handoff (v24.0.0-alpha.18)', () => {
+describe('Field validation handoff (v24.0.0-alpha.19)', () => {
   it('provides the field validation plan', () => {
     const plan = getFieldValidationPlan();
 
@@ -119,7 +119,7 @@ describe('Field validation handoff (v24.0.0-alpha.18)', () => {
     const forbiddenTagPhrase = ['tag', ' v24'].join('');
 
     expect(text).not.toContain(forbiddenTagPhrase);
-    expect(text).toContain('tag rc.1 éventuel reste une décision humaine séparée');
+    expect(text).toContain('nouvelle RC éventuelle reste une décision humaine séparée');
   });
 
   it('uses only official roles', () => {

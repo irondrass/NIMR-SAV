@@ -37,7 +37,7 @@ describe('Local Cache Domain Snapshotting & Restore', () => {
   const mockPending: OfflineAction[] = [];
 
   it('builds a correct LocalSnapshot structure', () => {
-    const appVersion = '24.0.0-alpha.18';
+    const appVersion = '24.0.0-alpha.19';
     const snap = buildLocalSnapshot(mockCases, mockLogs, mockPending, appVersion);
 
     expect(snap.appVersion).toBe(appVersion);
@@ -49,7 +49,7 @@ describe('Local Cache Domain Snapshotting & Restore', () => {
   });
 
   it('validates a correct LocalSnapshot', () => {
-    const appVersion = '24.0.0-alpha.18';
+    const appVersion = '24.0.0-alpha.19';
     const snap = buildLocalSnapshot(mockCases, mockLogs, mockPending, appVersion);
     const val = validateLocalSnapshot(snap, appVersion);
 
@@ -59,30 +59,30 @@ describe('Local Cache Domain Snapshotting & Restore', () => {
 
   it('invalidates a snapshot with incompatible schema version', () => {
     const snap = {
-      appVersion: '24.0.0-alpha.18',
+      appVersion: '24.0.0-alpha.19',
       schemaVersion: 23,
       cases: mockCases,
       logs: mockLogs,
     };
-    const val = validateLocalSnapshot(snap, '24.0.0-alpha.18');
+    const val = validateLocalSnapshot(snap, '24.0.0-alpha.19');
     expect(val.valid).toBe(false);
     expect(val.reason).toContain('schéma');
   });
 
   it('invalidates a snapshot with different appVersion', () => {
     const snap = {
-      appVersion: '24.0.0-alpha.18',
+      appVersion: '24.0.0-alpha.19',
       schemaVersion: 24,
       cases: mockCases,
       logs: mockLogs,
     };
-    const val = validateLocalSnapshot(snap, '24.0.0-alpha.18-different');
+    const val = validateLocalSnapshot(snap, '24.0.0-alpha.19-different');
     expect(val.valid).toBe(false);
     expect(val.reason).toContain("Version d'application incompatible");
   });
 
   it('restores snapshot data correctly', () => {
-    const appVersion = '24.0.0-alpha.18';
+    const appVersion = '24.0.0-alpha.19';
     const snap = buildLocalSnapshot(mockCases, mockLogs, mockPending, appVersion);
     const restored = restoreLocalSnapshot(snap);
 

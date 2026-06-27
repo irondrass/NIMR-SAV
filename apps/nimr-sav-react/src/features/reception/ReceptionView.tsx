@@ -125,7 +125,7 @@ export const ReceptionView: React.FC<ReceptionViewProps> = ({ user }) => {
 
   const handleExport = () => {
     if (!selectedCase) return;
-    const bundle = buildCompleteCaseBundle(selectedCase, user.id);
+    const bundle = buildCompleteCaseBundle(selectedCase, user.id, user.role);
     recordExportAction(selectedCase.id, user);
     downloadExportBundle(bundle);
   };

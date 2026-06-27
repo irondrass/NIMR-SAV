@@ -8,6 +8,18 @@ import {
 } from '../src/domain/offline-queue';
 
 describe('Offline Queue Actions & Validation', () => {
+  const offlineCase = {
+    id: 'case-offline-valid',
+    immatriculation: 'AA-123-AA',
+    vin: 'VF1ABCDEF12345678',
+    clientName: 'Offline Client',
+    telephone: '+21622333444',
+    status: 'draft' as const,
+    receptionDate: '2026-06-27T08:00:00.000Z',
+    createdAt: '2026-06-27T08:00:00.000Z',
+    updatedAt: '2026-06-27T08:00:00.000Z',
+  };
+
   it('creates a queued action with unique ID and timestamp', () => {
     const action = createOfflineAction(
       'receive_case',
@@ -26,11 +38,11 @@ describe('Offline Queue Actions & Validation', () => {
 
   it('validates role permissions for queued actions correctly', () => {
     // Reception can perform modifications
-    const act1 = createOfflineAction('create_case', {}, { id: 'usr-reception', role: 'reception' });
+    const act1 = createOfflineAction('create_case', offlineCase, { id: 'usr-reception', role: 'reception' });
     expect(validateOfflineAction(act1).valid).toBe(true);
 
     // Lecture-seule cannot perform modifications
-    const act2 = createOfflineAction('create_case', {}, { id: 'usr-ro', role: 'lecture-seule' });
+    const act2 = createOfflineAction('create_case', offlineCase, { id: 'usr-ro', role: 'lecture-seule' });
     expect(validateOfflineAction(act2).valid).toBe(false);
 
     // Chef-atelier can assign technician

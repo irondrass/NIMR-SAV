@@ -77,6 +77,16 @@ export const ALL_ACTIONS: readonly Action[] = [
   'view_system_invariants',
   'view_audit_summary',
   'view_readonly_console',
+  'manage_claims',
+  'approve_claim_expert',
+  'approve_claim_client',
+  'override_claims',
+  'print_reception_sheet',
+  'print_workshop_sheet',
+  'print_quality_sheet',
+  'print_delivery_receipt',
+  'export_complete_case',
+  'manage_case_photos',
 ] as const;
 
 export const WRITE_ACTIONS: readonly Action[] = [
@@ -94,6 +104,7 @@ export const WRITE_ACTIONS: readonly Action[] = [
   'deliver_case',
   'close_case',
   'edit_direction_notes',
+  'admin_action',
   'start_task',
   'complete_task',
   'update_task_status',
@@ -102,6 +113,11 @@ export const WRITE_ACTIONS: readonly Action[] = [
   'send_to_rework',
   'prepare_delivery',
   'add_delivery_proof',
+  'manage_claims',
+  'approve_claim_expert',
+  'approve_claim_client',
+  'override_claims',
+  'manage_case_photos',
 ] as const;
 
 export function getOfficialRoles(): readonly Role[] {

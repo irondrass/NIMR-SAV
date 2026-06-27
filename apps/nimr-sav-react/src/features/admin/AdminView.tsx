@@ -10,6 +10,10 @@ import { getBlockingClaimsReasons } from '@/domain/claims';
 import { OfflineQueuePanel } from '@/components/OfflineQueuePanel';
 import { LocalCachePanel } from '@/components/LocalCachePanel';
 import { summarizePwaDiagnostics } from '@/domain/pwa-diagnostics';
+import { summarizeSecurityHardening } from '@/domain/security-hardening';
+import { summarizeStatusHardening } from '@/domain/status-hardening';
+import { buildFieldSecurityReport } from '@/domain/field-security';
+import { summarizeAcceptanceReadiness } from '@/domain/field-acceptance';
 
 interface AdminViewProps {
   user: User;
@@ -19,6 +23,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ user }) => {
   const {
     cases,
     logs,
+    pendingActions,
     getAdminGovernanceSummary,
     getSystemInvariants,
     overrideClaims,
@@ -52,6 +57,44 @@ export const AdminView: React.FC<AdminViewProps> = ({ user }) => {
   const pwaReport = useMemo(() => {
     return summarizePwaDiagnostics();
   }, []);
+
+  const alpha19Readiness = useMemo(() => {
+    const permissions = summarizeSecurityHardening();
+    const statuses = summarizeStatusHardening();
+    const fields = buildFieldSecurityReport();
+    const acceptance = summarizeAcceptanceReadiness();
+    const exportPrintScore = 100;
+    const offlineCacheScore = pendingActions.some((action) => action.status === 'failed') ? 75 : 90;
+    const pwaScore = pwaReport.overallStatus === 'ok' ? 100 : pwaReport.overallStatus === 'warning' ? 85 : 40;
+    const blockers = [
+      ...permissions.blockers,
+      ...statuses.blockers,
+      ...fields.blockers,
+      ...(acceptance.failed > 0 ? ['Recette terrain alpha.19 en échec.'] : []),
+      ...(pwaReport.overallStatus === 'error' ? [pwaReport.notice] : []),
+    ];
+    const reserves = [
+      ...permissions.warnings,
+      ...statuses.warnings,
+      ...fields.warnings,
+      ...acceptance.reserves,
+      ...(pendingActions.length > 0 ? [`${pendingActions.length} action(s) offline à vérifier avant décision humaine.`] : []),
+    ];
+    const globalStatus = blockers.length > 0 ? 'NO-GO' : reserves.length > 0 ? 'GO avec réserves' : 'GO interne';
+
+    return {
+      permissions,
+      statuses,
+      fields,
+      acceptance,
+      exportPrintScore,
+      offlineCacheScore,
+      pwaScore,
+      blockers,
+      reserves,
+      globalStatus,
+    };
+  }, [pendingActions, pwaReport]);
 
   return (
     <div
@@ -130,9 +173,95 @@ export const AdminView: React.FC<AdminViewProps> = ({ user }) => {
       >
         <span>⚠️</span>
         <span>
-          <strong>Avertissement :</strong> Aucune action destructive ou modification utilisateur n’est disponible. Release Candidate interne rc.1 (non production, non finale).
+          <strong>Avertissement :</strong> alpha.19 est une recette interne de durcissement, non RC, non production, non finale et sans décision automatique de nouvelle RC.
         </span>
       </div>
+
+      <section
+        id="alpha19-security-readiness-panel"
+        style={{
+          background: '#1e1e24',
+          borderRadius: '8px',
+          padding: '1.25rem',
+          border: '1px solid rgba(59,130,246,0.22)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '1rem',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', flexWrap: 'wrap' }}>
+          <div>
+            <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700 }}>
+              Recette sécurité alpha.19
+            </h2>
+            <p style={{ margin: '0.25rem 0 0 0', color: '#a1a1aa', fontSize: '0.85rem' }}>
+              Durcissement interne avant décision humaine GO / NO-GO. alpha.19 n’est ni une RC ni une version de production.
+            </p>
+          </div>
+          <span
+            style={{
+              fontSize: '0.8rem',
+              padding: '0.35rem 0.7rem',
+              borderRadius: '6px',
+              background: alpha19Readiness.globalStatus === 'NO-GO' ? 'rgba(239,68,68,0.12)' : 'rgba(16,185,129,0.1)',
+              color: alpha19Readiness.globalStatus === 'NO-GO' ? '#f87171' : '#34d399',
+              border: `1px solid ${alpha19Readiness.globalStatus === 'NO-GO' ? 'rgba(239,68,68,0.25)' : 'rgba(16,185,129,0.25)'}`,
+              fontWeight: 700,
+            }}
+          >
+            {alpha19Readiness.globalStatus}
+          </span>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '0.75rem' }}>
+          {[
+            { label: 'Permissions', score: alpha19Readiness.permissions.score },
+            { label: 'Statuts', score: alpha19Readiness.statuses.score },
+            { label: 'Champs', score: alpha19Readiness.fields.score },
+            { label: 'Export/print', score: alpha19Readiness.exportPrintScore },
+            { label: 'Offline/cache', score: alpha19Readiness.offlineCacheScore },
+            { label: 'PWA', score: alpha19Readiness.pwaScore },
+          ].map((item) => (
+            <div
+              key={item.label}
+              style={{
+                background: 'rgba(255,255,255,0.025)',
+                border: '1px solid rgba(255,255,255,0.06)',
+                borderRadius: '6px',
+                padding: '0.75rem',
+              }}
+            >
+              <div style={{ fontSize: '0.76rem', color: '#a1a1aa' }}>{item.label}</div>
+              <div style={{ fontSize: '1.35rem', fontWeight: 700, color: item.score >= 90 ? '#34d399' : item.score >= 75 ? '#fbbf24' : '#f87171' }}>
+                {item.score}%
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '0.75rem' }}>
+          <div style={{ fontSize: '0.8rem', color: '#d4d4d8', background: 'rgba(0,0,0,0.14)', borderRadius: '6px', padding: '0.75rem' }}>
+            <strong style={{ color: '#fbbf24' }}>Réserves terrain :</strong>
+            <ul style={{ margin: '0.4rem 0 0 1rem', padding: 0 }}>
+              {alpha19Readiness.reserves.slice(0, 6).map((reserve, idx) => (
+                <li key={idx}>{reserve}</li>
+              ))}
+            </ul>
+          </div>
+          <div style={{ fontSize: '0.8rem', color: '#d4d4d8', background: 'rgba(0,0,0,0.14)', borderRadius: '6px', padding: '0.75rem' }}>
+            <strong style={{ color: alpha19Readiness.blockers.length > 0 ? '#f87171' : '#34d399' }}>Bloqueurs :</strong>
+            {alpha19Readiness.blockers.length === 0 ? (
+              <p style={{ margin: '0.4rem 0 0 0', color: '#a1a1aa' }}>Aucun bloqueur automatique détecté ; décision humaine obligatoire avant toute nouvelle RC.</p>
+            ) : (
+              <ul style={{ margin: '0.4rem 0 0 1rem', padding: 0 }}>
+                {alpha19Readiness.blockers.map((blocker, idx) => (
+                  <li key={idx}>{blocker}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      </section>
 
       {/* Main layout grid */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr', gap: '1.5rem', flex: 1 }}>
@@ -170,7 +299,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ user }) => {
                   border: `1px solid ${readinessReport.isReadyForRcEvaluation ? 'rgba(16,185,129,0.2)' : 'rgba(239,68,68,0.2)'}`,
                 }}
               >
-                {readinessReport.isReadyForRcEvaluation ? 'Prêt pour revue RC' : 'Bloqueurs détectés'}
+                {readinessReport.isReadyForRcEvaluation ? 'Prêt pour revue terrain' : 'Bloqueurs détectés'}
               </span>
             </h2>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>

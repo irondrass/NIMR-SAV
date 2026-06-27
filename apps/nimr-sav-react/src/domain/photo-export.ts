@@ -1,4 +1,5 @@
 import { SavCase, Claim, Estimate, CasePhoto } from './sav-case';
+import { sanitizeFileName, validatePhotoAttachmentInput } from './field-security';
 
 export function normalizePhotoAttachment(
   name: string,
@@ -9,11 +10,17 @@ export function normalizePhotoAttachment(
   relatedClaimId?: string,
   relatedEstimateId?: string
 ): CasePhoto {
+  const validated = validatePhotoAttachmentInput({ name, type: type || 'image/jpeg', size });
+  if (!validated.valid) {
+    throw new Error(validated.errors.join(' '));
+  }
+  const safePhoto = validated.value;
+
   return {
     id: `pho-${Math.random().toString(36).substr(2, 9)}`,
-    name: name.trim(),
-    type: type || 'image/jpeg',
-    size: size || 0,
+    name: safePhoto?.name || sanitizeFileName(name || 'photo.jpg'),
+    type: safePhoto?.type || 'image/jpeg',
+    size: safePhoto?.size || 0,
     category,
     dataUrl,
     createdAt: new Date().toISOString(),
@@ -56,17 +63,7 @@ export function buildPhotoExportFileName(photo: CasePhoto, index: number): strin
   const prefix = cat.charAt(0).toUpperCase() + cat.slice(1);
   const paddedIndex = String(index).padStart(2, '0');
 
-  // Ensure name has no accents or illegal Windows path characters
-  const cleanName = photo.name
-    .replace(/[àáâãäå]/g, 'a')
-    .replace(/[ç]/g, 'c')
-    .replace(/[éèêë]/g, 'e')
-    .replace(/[íìîï]/g, 'i')
-    .replace(/[ñ]/g, 'n')
-    .replace(/[óòôõöø]/g, 'o')
-    .replace(/[úùûü]/g, 'u')
-    .replace(/[ÿ]/g, 'y')
-    .replace(/[^a-zA-Z0-9_.-]/g, '_');
+  const cleanName = sanitizeFileName(photo.name || 'photo.jpg');
 
   return `${prefix}_${paddedIndex}_${cleanName}`;
 }

@@ -1,4 +1,4 @@
-﻿import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { APP_VERSION } from '../src/constants/version';
 import {
   parseEstimateText,
@@ -9,7 +9,7 @@ import {
 
 describe('Estimate Parser Domain Tests', () => {
   it('verifies correct app version constant', () => {
-    expect(APP_VERSION).toBe('v24.0.0-alpha.18');
+    expect(APP_VERSION).toBe('v24.0.0-alpha.19');
   });
 
   it('normalizes money values with commas and dots', () => {

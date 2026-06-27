@@ -281,7 +281,7 @@ export function getFinalRcDecisionTemplate(): FinalRcDecisionTemplate {
     options: [
       {
         id: 'go_rc1_tag',
-        label: 'GO pour tag rc.1',
+        label: 'GO pour nouvelle RC éventuelle',
         meaning: 'Les preuves locales, clone frais et terrain sont acceptées.',
         requiredEvidence: 'Validation complète signée et aucun bloqueur ouvert.',
       },
@@ -315,7 +315,7 @@ export function getFinalRcDecisionTemplate(): FinalRcDecisionTemplate {
       'lecture-seule',
     ],
     notes: [
-      'Le tag rc.1 éventuel reste une décision humaine séparée.',
+      'Toute nouvelle RC éventuelle reste une décision humaine séparée.',
       'Aucun déploiement production ne fait partie de ce handoff.',
       'La version finale v24.0.0 reste hors périmètre.',
     ],

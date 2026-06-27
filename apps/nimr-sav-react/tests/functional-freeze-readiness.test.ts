@@ -16,19 +16,19 @@ import {
   validateStableRoleAndStatusMatrix,
 } from '../src/domain/functional-freeze-readiness';
 
-describe('Functional freeze readiness (v24.0.0-alpha.18)', () => {
-  it('aligns APP_VERSION on v24.0.0-alpha.18', () => {
-    expect(APP_VERSION).toBe('v24.0.0-alpha.18');
+describe('Functional freeze readiness (v24.0.0-alpha.19)', () => {
+  it('aligns APP_VERSION on v24.0.0-alpha.19', () => {
+    expect(APP_VERSION).toBe('v24.0.0-alpha.19');
     expect(FUNCTIONAL_FREEZE_VERSION).toBe(APP_VERSION);
   });
 
-  it('reports rc.1 internal readiness while preserving the alpha.13 freeze', () => {
+  it('reports alpha.19 internal readiness while preserving the alpha.13 freeze', () => {
     const readiness = validateFunctionalFreezeReadiness();
 
     expect(readiness.success).toBe(true);
     expect(readiness.readyForRcEvaluation).toBe(true);
-    expect(readiness.internalReleaseCandidatePrepared).toBe(true);
-    expect(readiness.releaseCandidateCreated).toBe(true);
+    expect(readiness.internalReleaseCandidatePrepared).toBe(false);
+    expect(readiness.releaseCandidateCreated).toBe(false);
     expect(readiness.finalReleaseCreated).toBe(false);
     expect(readiness.freezeLabel).toBe('gel fonctionnel alpha.13 conservé');
     expect(readiness.blockers).toHaveLength(0);
@@ -42,7 +42,7 @@ describe('Functional freeze readiness (v24.0.0-alpha.18)', () => {
     expect(readiness.checks.stablePilotRemainsV2326).toBe(true);
   });
 
-  it('requires no automatic tag and no production exposure for rc.1', () => {
+  it('requires no automatic tag and no production exposure for alpha.19', () => {
     const exposure = validateNoProductionExposure();
 
     expect(exposure.success).toBe(true);
@@ -62,7 +62,7 @@ describe('Functional freeze readiness (v24.0.0-alpha.18)', () => {
     expect(exposure.blockers.length).toBeGreaterThanOrEqual(2);
   });
 
-  it('has no external runtime dependencies for the React rc.1 preparation', () => {
+  it('has no external runtime dependencies for the React alpha.19 preparation', () => {
     const externalRuntime = validateNoExternalRuntimeDependencies();
 
     expect(externalRuntime.success).toBe(true);
@@ -137,7 +137,7 @@ describe('Functional freeze readiness (v24.0.0-alpha.18)', () => {
     expect(readiness.checks.consultationWithoutMutation).toBe(true);
   });
 
-  it('requires manual field validation and human GO / NO-GO before tag decision', () => {
+  it('requires manual field validation and human GO / NO-GO before future RC decision', () => {
     const inputs = validateReleaseCandidateEvaluationInputs();
     const readiness = validateFunctionalFreezeReadiness();
     const summary = summarizeFunctionalFreezeReadiness(readiness);
@@ -147,7 +147,7 @@ describe('Functional freeze readiness (v24.0.0-alpha.18)', () => {
     expect(inputs.checks.humanGoNoGoDecisionRequired).toBe(true);
     expect(readiness.manualFieldValidationRequired).toBe(true);
     expect(readiness.humanGoNoGoDecisionRequired).toBe(true);
-    expect(summary).toContain('gel fonctionnel alpha.13 conservé sous rc.1 interne');
+    expect(summary).toContain('gel fonctionnel alpha.13 conservé sous alpha.19 interne');
     expect(summary).toContain('décision GO / NO-GO requises');
   });
 

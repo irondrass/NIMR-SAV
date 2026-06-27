@@ -15,21 +15,21 @@ import {
   validateRcTechnicalEvidence,
 } from '../src/domain/rc-readiness';
 
-describe('RC readiness (v24.0.0-alpha.18)', () => {
-  it('aligns APP_VERSION on v24.0.0-alpha.18', () => {
-    expect(APP_VERSION).toBe('v24.0.0-alpha.18');
-    expect(RC_READINESS_VERSION).toBe('v24.0.0-alpha.18');
+describe('RC readiness (v24.0.0-alpha.19)', () => {
+  it('aligns APP_VERSION on v24.0.0-alpha.19', () => {
+    expect(APP_VERSION).toBe('v24.0.0-alpha.19');
+    expect(RC_READINESS_VERSION).toBe('v24.0.0-alpha.19');
   });
 
-  it('marks rc.1 as internal only', () => {
+  it('marks alpha.19 as internal but not a release candidate', () => {
     const readiness = validateRcReadiness();
 
     expect(readiness.success).toBe(true);
-    expect(readiness.internalReleaseCandidate).toBe(true);
+    expect(readiness.internalReleaseCandidate).toBe(false);
     expect(readiness.checks.internalReleaseCandidate).toBe(true);
   });
 
-  it('confirms rc.1 is not final and not production', () => {
+  it('confirms alpha.19 is not final and not production', () => {
     const readiness = validateRcReadiness();
 
     expect(readiness.finalRelease).toBe(false);
@@ -38,7 +38,7 @@ describe('RC readiness (v24.0.0-alpha.18)', () => {
     expect(readiness.checks.productionExposureAbsent).toBe(true);
   });
 
-  it('requires no automatic tag for rc.1', () => {
+  it('requires no automatic tag for alpha.19', () => {
     const scope = validateRcScopeFreeze();
     const readiness = validateRcReadiness();
 
@@ -134,7 +134,7 @@ describe('RC readiness (v24.0.0-alpha.18)', () => {
     expect(business.checks.deliveredCannotMoveBackward).toBe(true);
   });
 
-  it('keeps the RC risk register explicit', () => {
+  it('keeps the readiness risk register explicit', () => {
     const riskRegister = validateRcRiskRegister();
 
     expect(riskRegister.success).toBe(true);
@@ -153,7 +153,7 @@ describe('RC readiness (v24.0.0-alpha.18)', () => {
     expect(goNoGo.checks.humanGoNoGoDecisionRequired).toBe(true);
     expect(readiness.manualFieldValidationRequired).toBe(true);
     expect(readiness.humanGoNoGoDecisionRequired).toBe(true);
-    expect(summary).toContain('RC interne');
+    expect(summary).toContain('alpha.19 interne');
     expect(summary).toContain('décision GO / NO-GO humaine obligatoires');
   });
 

@@ -1,4 +1,8 @@
 import { SavCase, Claim, CasePhoto, QcChecklistItem } from './sav-case';
+import { Action, hasPermission } from './action-permissions';
+import { isOfficialRole } from './role-governance';
+import { validateAllowedCaseStatus } from './status-hardening';
+import { validatePhotoAttachmentInput } from './field-security';
 
 export type OfflineActionType =
   | 'create_case'
@@ -34,6 +38,158 @@ export interface OfflineReplayResult {
   failed: string[];
 }
 
+const OFFLINE_ACTION_STATUSES: readonly OfflineActionStatus[] = ['queued', 'replayed', 'failed', 'cancelled', 'skipped'];
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function hasString(value: Record<string, unknown>, key: string): boolean {
+  return typeof value[key] === 'string' && String(value[key]).trim().length > 0;
+}
+
+function validateCaseIdPayload(payload: unknown): { valid: boolean; reason?: string } {
+  if (!isRecord(payload) || !hasString(payload, 'caseId')) {
+    return { valid: false, reason: "Payload invalide : caseId requis." };
+  }
+  return { valid: true };
+}
+
+function validateOfflineActionPermission(type: OfflineActionType, payload: unknown, role: string): { valid: boolean; reason?: string } {
+  if (!isOfficialRole(role)) {
+    return { valid: false, reason: `Rôle offline non officiel refusé : ${role}.` };
+  }
+
+  if (role === 'lecture-seule') {
+    return { valid: false, reason: "Le rôle 'lecture-seule' n'est pas autorisé à effectuer des modifications." };
+  }
+
+  let requiredAction: Action | null = null;
+  switch (type) {
+    case 'create_case':
+      requiredAction = 'create_case';
+      break;
+    case 'receive_case':
+      requiredAction = 'receive_case';
+      break;
+    case 'add_claim':
+    case 'update_claim':
+      requiredAction = 'manage_claims';
+      break;
+    case 'add_photo':
+    case 'remove_photo':
+      requiredAction = 'manage_case_photos';
+      break;
+    case 'export_case':
+      requiredAction = 'export_complete_case';
+      break;
+    case 'print_document': {
+      const documentType = isRecord(payload) ? String(payload.documentType || '') : '';
+      const printActions: Record<string, Action> = {
+        reception_sheet: 'print_reception_sheet',
+        workshop_sheet: 'print_workshop_sheet',
+        quality_check_sheet: 'print_quality_sheet',
+        delivery_receipt: 'print_delivery_receipt',
+      };
+      requiredAction = printActions[documentType] || 'print_reception_sheet';
+      break;
+    }
+    case 'qc_update':
+      requiredAction = 'validate_qc';
+      break;
+    case 'delivery_update':
+      requiredAction = 'deliver_case';
+      break;
+    case 'update_case':
+      requiredAction = 'change_workshop_status';
+      break;
+    default:
+      return { valid: false, reason: `Type d'action offline inconnu : ${type}.` };
+  }
+
+  if (!hasPermission(role, requiredAction)) {
+    return { valid: false, reason: `Action offline ${type} interdite pour le rôle ${role}.` };
+  }
+
+  return { valid: true };
+}
+
+function validateOfflineActionPayload(type: OfflineActionType, payload: unknown): { valid: boolean; reason?: string } {
+  switch (type) {
+    case 'create_case': {
+      if (!isRecord(payload)) return { valid: false, reason: 'Payload création dossier invalide.' };
+      const statusValidation = validateAllowedCaseStatus(payload.status);
+      if (!statusValidation.valid) return statusValidation;
+      if (!hasString(payload, 'id') || !hasString(payload, 'immatriculation')) {
+        return { valid: false, reason: 'Payload création dossier incomplet.' };
+      }
+      return { valid: true };
+    }
+    case 'receive_case':
+    case 'remove_photo':
+    case 'print_document':
+    case 'export_case':
+      return validateCaseIdPayload(payload);
+    case 'update_case': {
+      const base = validateCaseIdPayload(payload);
+      if (!base.valid) return base;
+      if (isRecord(payload) && payload.status !== undefined) {
+        const statusValidation = validateAllowedCaseStatus(payload.status);
+        if (!statusValidation.valid) return statusValidation;
+      }
+      return { valid: true };
+    }
+    case 'add_claim': {
+      const base = validateCaseIdPayload(payload);
+      if (!base.valid) return base;
+      if (!isRecord(payload) || !isRecord(payload.claim)) {
+        return { valid: false, reason: 'Payload sinistre invalide.' };
+      }
+      return { valid: true };
+    }
+    case 'update_claim': {
+      const base = validateCaseIdPayload(payload);
+      if (!base.valid) return base;
+      if (!isRecord(payload) || !hasString(payload, 'claimId') || !isRecord(payload.updatedFields)) {
+        return { valid: false, reason: 'Payload mise à jour sinistre invalide.' };
+      }
+      return { valid: true };
+    }
+    case 'add_photo': {
+      const base = validateCaseIdPayload(payload);
+      if (!base.valid) return base;
+      const photoInput = isRecord(payload) && isRecord(payload.photoInput) ? payload.photoInput : null;
+      if (!photoInput) return { valid: false, reason: 'Payload photo invalide.' };
+      const photoValidation = validatePhotoAttachmentInput({
+        name: String(photoInput.name || 'photo.jpg'),
+        type: String(photoInput.type || 'image/jpeg'),
+        size: Number(photoInput.size || 0),
+      });
+      return photoValidation.valid ? { valid: true } : { valid: false, reason: photoValidation.errors.join(' ') };
+    }
+    case 'qc_update': {
+      const base = validateCaseIdPayload(payload);
+      if (!base.valid) return base;
+      const status = isRecord(payload) ? payload.status : undefined;
+      if (status !== undefined && !['in_progress', 'approved', 'rejected', 'rework'].includes(String(status))) {
+        return { valid: false, reason: `Statut qualité offline invalide : ${String(status)}.` };
+      }
+      return { valid: true };
+    }
+    case 'delivery_update': {
+      const base = validateCaseIdPayload(payload);
+      if (!base.valid) return base;
+      const status = isRecord(payload) ? payload.status : undefined;
+      if (status !== undefined && !['ready_delivery', 'delivered'].includes(String(status))) {
+        return { valid: false, reason: `Statut livraison offline invalide : ${String(status)}.` };
+      }
+      return { valid: true };
+    }
+    default:
+      return { valid: false, reason: `Type d'action offline inconnu : ${type}.` };
+  }
+}
+
 export function createOfflineAction(
   type: OfflineActionType,
   payload: unknown,
@@ -50,8 +206,8 @@ export function createOfflineAction(
 }
 
 export function enqueueOfflineAction(actions: OfflineAction[], action: OfflineAction): OfflineAction[] {
-  // Prevent duplicate actions
-  if (actions.some((a) => a.id === action.id)) {
+  const fingerprint = getOfflineActionFingerprint(action);
+  if (actions.some((a) => a.id === action.id || getOfflineActionFingerprint(a) === fingerprint)) {
     return actions;
   }
   return [...actions, action];
@@ -62,16 +218,27 @@ export function cancelOfflineAction(actions: OfflineAction[], actionId: string):
 }
 
 export function validateOfflineAction(action: OfflineAction): { valid: boolean; reason?: string } {
-  if (!action.id || !action.type || !action.payload || !action.actor) {
+  if (!action.id || !action.type || action.payload === undefined || !action.actor) {
     return { valid: false, reason: "Structure d'action incomplète." };
   }
-  if (action.actor.role === 'lecture-seule') {
-    return { valid: false, reason: "Le rôle 'lecture-seule' n'est pas autorisé à effectuer des modifications." };
+  if (!OFFLINE_ACTION_STATUSES.includes(action.status)) {
+    return { valid: false, reason: `Statut d'action offline invalide : ${String(action.status)}.` };
   }
-  if (action.type === 'export_case' && action.actor.role === 'technicien') {
-    return { valid: false, reason: "Le rôle 'technicien' n'est pas autorisé à exporter un dossier complet." };
+  const permissionValidation = validateOfflineActionPermission(action.type, action.payload, action.actor.role);
+  if (!permissionValidation.valid) {
+    return permissionValidation;
   }
-  return { valid: true };
+  return validateOfflineActionPayload(action.type, action.payload);
+}
+
+export function getOfflineActionFingerprint(action: OfflineAction): string {
+  let payload = '';
+  try {
+    payload = JSON.stringify(action.payload);
+  } catch {
+    payload = String(action.payload);
+  }
+  return `${action.type}:${action.actor.id}:${action.actor.role}:${payload}`;
 }
 
 export function getOfflineActionLabel(type: OfflineActionType): string {
@@ -253,7 +420,6 @@ export function replayOfflineQueue(
       return { ...action, status: 'replayed' as const };
     } catch (e) {
       const err = e as Error;
-      console.error(`[NIMR v24] Échec du replay pour l'action ${action.id} :`, err);
       failed.push(action.id);
       return { ...action, status: 'failed' as const, error: err.message || 'Erreur inconnue' };
     }

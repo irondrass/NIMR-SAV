@@ -1,6 +1,6 @@
-# NIMR SAV React — v24.0.0-alpha.18
+# NIMR SAV React — v24.0.0-alpha.19
 
-Version de rattrapage fonctionnel / retour en phase alpha.
+Version de durcissement sécurité, recette terrain interne et audit avant décision humaine.
 
 Application React + TypeScript pour NIMR Carrosserie SAV.
 
@@ -19,34 +19,36 @@ Application React + TypeScript pour NIMR Carrosserie SAV.
 
 ## Version
 
-`v24.0.0-alpha.18` — Version de rattrapage fonctionnel / retour en développement alpha (rc.1 historique non modifiée).
+`v24.0.0-alpha.19` — Durcissement sécurité / recette finale interne / audit terrain avant nouvelle RC éventuelle.
 
-- alpha.16 interne uniquement (non destiné à la production et non finale).
+- alpha.19 est une version alpha interne uniquement : ce n’est pas une RC et ce n’est pas une version de production.
+- Aucune RC automatique après alpha.19 ; toute nouvelle RC nécessite une décision humaine GO / NO-GO.
 - Aucun tag automatique, ni de push automatique.
 - Le pilote stable reste exclusivement `v23.2.6`.
 - Le fichier `data/vehicles.json` reste strictement `[]`.
-- React v24 reste sans service worker actif (offline/PWA reporté au Lot alpha.18).
+- React v24 reste sans service worker actif par défaut ; le diagnostic PWA est isolé.
 - Aucun backend ni Supabase ajouté (lot Cloud/Supabase séparé post-alpha).
-- La recette métier alpha.12 est conservée.
-- Le gel fonctionnel alpha.13 est conservé.
+- Le replay offline reste local/simulé uniquement, sans synchronisation serveur.
+- Les lots alpha.14 planning/Gantt, alpha.15 claims/accords, alpha.16 devis/charge atelier, alpha.17 impressions/export/photos et alpha.18 offline/cache/queue/PWA sont conservés.
 - `v24.0.0` final reste hors périmètre.
 
 ## Roadmap des Lots de Rattrapage Fonctionnel
 
 - **alpha.14** : Planning Atelier Avancé, suggestions de créneaux, collisions, capacité ressources, Gantt.
 - **alpha.15** : Multi-sinistres / Claims / Accords Expert & Client.
-- **alpha.16** (Version courante) : Import Devis HTML/TXT, Calcul Charge Atelier, Répartition par Pôle.
+- **alpha.16** : Import Devis HTML/TXT, Calcul Charge Atelier, Répartition par Pôle.
 - **alpha.17** : Impressions & Exports ZIP/PDF.
 - **alpha.18** : Mode Offline & PWA.
+- **alpha.19** (Version courante) : Durcissement sécurité, validation champs, audit exports/cache/PWA, recette terrain par rôle.
 - **Cloud/Supabase** : Synchronisation & Sécurité Cloud (séparé en lot post-alpha).
 
-## Readiness alpha.18
+## Readiness alpha.19
 
-alpha.18 confirme :
+alpha.19 confirme :
 
-- version alignée sur `v24.0.0-alpha.18` ;
-- couverture fonctionnelle : détection d’état de connexion, bannière offline visible sur tablette, file d'attente locale d'actions offline (replay simulé sans serveur), sauvegarde et validation locale des snapshots, diagnostic PWA isolé (sans SW actif par défaut) ;
-- statut de développement alpha de rattrapage (non RC, non production) ;
+- version alignée sur `v24.0.0-alpha.19` ;
+- audit permissions/rôles, audit statuts, validation stricte champs terrain, sécurité export/print, durcissement cache/queue et diagnostic PWA isolé ;
+- statut de développement alpha de durcissement (non RC, non production) ;
 - absence d’exposition production et absence de version finale ;
 - absence de tag ou de push automatique ;
 - rôles et statuts officiels uniquement ;
@@ -83,4 +85,4 @@ Critères bloquants : perte de dossier, mutation par lecture seule, livraison sa
 
 ## Prochaine étape possible
 
-Décision humaine GO / NO-GO pour tag rc.1 éventuel, après validations locales, clone frais GitHub, smoke navigateur, tests v23.2.6 et validation terrain manuelle.
+Décision humaine GO / NO-GO avant toute nouvelle RC éventuelle, après validations locales, clone frais GitHub, smoke navigateur, tests v23.2.6 et validation terrain manuelle.

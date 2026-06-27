@@ -62,7 +62,7 @@ const caseWithClaims: SavCase = {
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
-describe('Export Bundle Domain Tests (v24.0.0-alpha.18)', () => {
+describe('Export Bundle Domain Tests (v24.0.0-alpha.19)', () => {
   describe('sanitizeExportFileName', () => {
     it('replaces accents with ASCII equivalents', () => {
       const result = sanitizeExportFileName('éàçü');

@@ -7,7 +7,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
 
-describe('Role Screen UX Integration (v24.0.0-alpha.18)', () => {
+describe('Role Screen UX Integration (v24.0.0-alpha.19)', () => {
   const views = {
     reception: resolve(__dirname, '../src/features/reception/ReceptionView.tsx'),
     planning: resolve(__dirname, '../src/features/chef-atelier/PlanningView.tsx'),
@@ -54,7 +54,7 @@ describe('Role Screen UX Integration (v24.0.0-alpha.18)', () => {
   // 2. AdminView displays rc.1 internal warning
   it('AdminView displays rc.1 internal warning notice without publication wording', () => {
     const adminContent = getFileContent(views.admin);
-    expect(adminContent).toContain('Release Candidate interne rc.1');
+    expect(adminContent).toContain('alpha.19 est une recette interne de durcissement');
     expect(adminContent).toContain('non production');
     expect(adminContent).toContain('non finale');
     expect(adminContent).not.toContain(['RC', 'publiée'].join(' '));

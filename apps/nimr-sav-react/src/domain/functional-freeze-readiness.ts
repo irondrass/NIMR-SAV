@@ -12,9 +12,9 @@ import {
   validateNoConsultationMutation,
 } from './business-acceptance-scenarios';
 
-// Historique : v24.0.0-alpha.18 a existé et a été validée techniquement mais a reçu un NO-GO terrain.
-// alpha.14 est un retour en phase alpha de développement.
-export const FUNCTIONAL_FREEZE_VERSION = 'v24.0.0-alpha.18' as const;
+// alpha.19 est une recette interne de durcissement après les lots alpha.14 à alpha.18.
+// Ce module vérifie que le gel fonctionnel reste conservé sans promouvoir une RC.
+export const FUNCTIONAL_FREEZE_VERSION = 'v24.0.0-alpha.19' as const;
 export const STABLE_PILOT_VERSION = 'v23.2.6' as const;
 export const FUNCTIONAL_FREEZE_LABEL = 'gel fonctionnel alpha.13 conservé' as const;
 
@@ -118,25 +118,25 @@ export function validateNoProductionExposure(
 ): FreezeValidationResult {
   const appVersion = options.appVersion ?? APP_VERSION;
   const tagsPointingAtHead = [...(options.tagsPointingAtHead ?? [])];
-  const isExpectedRc = appVersion === FUNCTIONAL_FREEZE_VERSION;
+  const isExpectedAlpha = appVersion === FUNCTIONAL_FREEZE_VERSION;
   const isInternalReleaseCandidate =
-    options.releaseCandidateDeclared === true || /-rc\.|-alpha\./i.test(appVersion);
+    options.releaseCandidateDeclared === true || /-alpha\./i.test(appVersion);
   const isFinalRelease = appVersion === 'v24.0.0';
   const isProduction = options.productionExposureDeclared === true || /prod/i.test(appVersion);
   const hasUnexpectedTag = tagsPointingAtHead.length > 0;
 
   const blockers: string[] = [];
-  if (!isExpectedRc) {
+  if (!isExpectedAlpha) {
     blockers.push(`Version attendue ${FUNCTIONAL_FREEZE_VERSION}, version reçue ${appVersion}.`);
   }
   if (!isInternalReleaseCandidate) {
-    blockers.push('rc.1 ou alpha.14 doit rester identifiée comme version interne.');
+    blockers.push('alpha.19 doit rester identifiée comme version interne.');
   }
   if (isFinalRelease) {
-    blockers.push('rc.1 ne doit pas être assimilée à la version finale.');
+    blockers.push('alpha.19 ne doit pas être assimilée à la version finale.');
   }
   if (isProduction) {
-    blockers.push('rc.1 ne doit pas être exposée comme version de production.');
+    blockers.push('alpha.19 ne doit pas être exposée comme version de production.');
   }
   if (hasUnexpectedTag) {
     blockers.push('Aucun tag automatique ne doit pointer sur le gel conservé.');
@@ -144,7 +144,7 @@ export function validateNoProductionExposure(
 
   return buildResult(
     {
-      versionIsRc1: isExpectedRc,
+      versionIsRc1: isExpectedAlpha,
       internalReleaseCandidateOnly: isInternalReleaseCandidate,
       finalReleaseNotCreated: !isFinalRelease,
       remainsNonProduction: !isProduction,
@@ -164,9 +164,9 @@ export function validateNoExternalRuntimeDependencies(
   const hasReactServiceWorker = options.hasReactServiceWorker === true;
 
   const blockers: string[] = [];
-  if (hasBackendRuntime) blockers.push('Aucun backend runtime ne doit être ajouté à React v24 rc.1.');
-  if (hasSupabaseRuntime) blockers.push('Aucun connecteur Supabase runtime ne doit être ajouté à React v24 rc.1.');
-  if (hasReactServiceWorker) blockers.push('Aucun service worker React actif ne doit être ajouté à rc.1.');
+  if (hasBackendRuntime) blockers.push('Aucun backend runtime ne doit être ajouté à React v24 alpha.19.');
+  if (hasSupabaseRuntime) blockers.push('Aucun connecteur Supabase runtime ne doit être ajouté à React v24 alpha.19.');
+  if (hasReactServiceWorker) blockers.push('Aucun service worker React actif ne doit être ajouté à alpha.19.');
 
   return buildResult(
     {
@@ -259,7 +259,7 @@ export function validateReleaseCandidateEvaluationInputs(): FreezeValidationResu
   };
 
   return buildResult(checks, [], [
-    'Validation manuelle terrain requise avant décision RC.',
+    'Validation manuelle terrain requise avant décision de nouvelle RC éventuelle.',
     'Décision humaine GO / NO-GO requise avant toute future RC.',
   ]);
 }
@@ -349,8 +349,8 @@ export function validateFunctionalFreezeReadiness(): FunctionalFreezeReadinessRe
     stablePilotVersion: STABLE_PILOT_VERSION,
     freezeLabel: FUNCTIONAL_FREEZE_LABEL,
     readyForRcEvaluation: success,
-    internalReleaseCandidatePrepared: true,
-    releaseCandidateCreated: true,
+    internalReleaseCandidatePrepared: false,
+    releaseCandidateCreated: false,
     finalReleaseCreated: false,
     productionExposure: false,
     tagExpected: false,
@@ -380,5 +380,5 @@ export function summarizeFunctionalFreezeReadiness(
       ? 'validation manuelle terrain et décision GO / NO-GO requises'
       : 'contrôles complémentaires requis';
 
-  return `${report.appVersion} : ${report.freezeLabel} sous rc.1 interne, ${manualSuffix}.`;
+  return `${report.appVersion} : ${report.freezeLabel} sous alpha.19 interne, ${manualSuffix}.`;
 }

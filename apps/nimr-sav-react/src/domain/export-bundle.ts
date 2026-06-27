@@ -1,5 +1,8 @@
 import { SavCase } from './sav-case';
 import { collectCasePhotos, dataUrlToExportContent, buildPhotoExportFileName } from './photo-export';
+import { Role } from '../types';
+import { hasPermission } from './action-permissions';
+import { neutralizeSpreadsheetFormula, sanitizeFileName, sanitizeFreeText } from './field-security';
 import {
   buildReceptionSheet,
   buildWorkshopSheet,
@@ -9,6 +12,8 @@ import {
 } from './print-documents';
 
 export type ExportFileType = 'html' | 'json' | 'text' | 'photo' | 'manifest';
+
+export const MAX_EXPORT_BUNDLE_SIZE_BYTES = 25 * 1024 * 1024;
 
 export interface ExportBundleFile {
   id: string;
@@ -34,16 +39,7 @@ export interface ExportBundle {
 }
 
 export function sanitizeExportFileName(name: string): string {
-  return name
-    .replace(/[àáâãäå]/g, 'a')
-    .replace(/[ç]/g, 'c')
-    .replace(/[éèêë]/g, 'e')
-    .replace(/[íìîï]/g, 'i')
-    .replace(/[ñ]/g, 'n')
-    .replace(/[óòôõöø]/g, 'o')
-    .replace(/[úùûü]/g, 'u')
-    .replace(/[ÿ]/g, 'y')
-    .replace(/[^a-zA-Z0-9_.-]/g, '_');
+  return sanitizeFileName(name, 'export');
 }
 
 export function buildSafeExportFileName(c: SavCase): string {
@@ -79,20 +75,20 @@ export function buildCaseTextSummary(c: SavCase): string {
   const claimsText = (c.claims || [])
     .map(
       cl =>
-        `- ${cl.label} [${cl.claimType}] : Status=${cl.status}, ExpertApproved=${cl.expertApproved}, ClientApproved=${cl.clientApproved}`
+        `- ${sanitizeFreeText(cl.label)} [${sanitizeExportFileName(cl.claimType)}] : Status=${sanitizeExportFileName(cl.status)}, ExpertApproved=${cl.expertApproved}, ClientApproved=${cl.clientApproved}`
     )
     .join('\n');
 
   return `=========================================
-DOSSIER SAV NIMR : ${c.immatriculation}
+DOSSIER SAV NIMR : ${sanitizeFreeText(c.immatriculation)}
 =========================================
-Client : ${c.clientName}
-Téléphone : ${c.telephone}
-VIN : ${c.vin}
-Statut Global : ${c.status}
-Date Réception : ${c.receptionDate}
-Priorité Atelier : ${c.workshopPriority || 'normale'}
-Poste affecté : ${c.workshopBay || 'Non affecté'}
+Client : ${sanitizeFreeText(c.clientName)}
+Téléphone : ${sanitizeFreeText(c.telephone)}
+VIN : ${sanitizeFreeText(c.vin)}
+Statut Global : ${sanitizeExportFileName(c.status)}
+Date Réception : ${sanitizeFreeText(c.receptionDate)}
+Priorité Atelier : ${sanitizeFreeText(c.workshopPriority || 'normale')}
+Poste affecté : ${sanitizeFreeText(c.workshopBay || 'Non affecté')}
 
 -----------------------------------------
 SINISTRES & CLAIMS :
@@ -102,13 +98,13 @@ ${claimsText || 'Aucun sinistre'}
 -----------------------------------------
 NOTES DE LA DIRECTION :
 -----------------------------------------
-${c.directionNotes || 'Aucune note.'}
+${sanitizeFreeText(c.directionNotes || 'Aucune note.')}
 
 -----------------------------------------
 LOGS / AUDIT DU WORKFLOW :
 -----------------------------------------
-Date de création : ${c.createdAt}
-Dernière mise à jour : ${c.updatedAt}
+Date de création : ${sanitizeFreeText(c.createdAt)}
+Dernière mise à jour : ${sanitizeFreeText(c.updatedAt)}
 `;
 }
 
@@ -158,7 +154,24 @@ export function calculateExportBundleSize(files: ExportBundleFile[]): number {
   return files.reduce((sum, f) => sum + f.size, 0);
 }
 
-export function buildCompleteCaseBundle(c: SavCase, actor: string): ExportBundle {
+export function validateCompleteCaseExportPermission(role: Role): { allowed: boolean; reason?: string } {
+  if (!hasPermission(role, 'export_complete_case')) {
+    return {
+      allowed: false,
+      reason: `Export dossier complet refusé pour le rôle ${role}.`,
+    };
+  }
+  return { allowed: true };
+}
+
+export function buildCompleteCaseBundle(c: SavCase, actor: string, actorRole?: Role): ExportBundle {
+  if (actorRole) {
+    const permission = validateCompleteCaseExportPermission(actorRole);
+    if (!permission.allowed) {
+      throw new Error(permission.reason);
+    }
+  }
+
   const files: ExportBundleFile[] = [];
 
   // 1. JSON complete export
@@ -265,6 +278,10 @@ export function buildCompleteCaseBundle(c: SavCase, actor: string): ExportBundle
   files.unshift(manifestFile);
 
   const warnings = getExportWarnings(c);
+  const bundleSize = calculateExportBundleSize(files);
+  if (bundleSize > MAX_EXPORT_BUNDLE_SIZE_BYTES) {
+    warnings.push('Export volumineux : vérifier la taille avant partage terrain.');
+  }
 
   return {
     id: `bun-${Math.random().toString(36).substr(2, 9)}`,
@@ -339,7 +356,13 @@ function compileZipBlob(files: { path: string; data: Uint8Array }[]): Blob {
   let offset = 0;
 
   files.forEach((file) => {
-    const nameBytes = encoder.encode(file.path.replace(/^\/+/, ""));
+    const safePath = file.path
+      .replace(/^\/+/, '')
+      .split('/')
+      .map((segment) => sanitizeExportFileName(segment))
+      .filter(Boolean)
+      .join('/') || 'export.txt';
+    const nameBytes = encoder.encode(neutralizeSpreadsheetFormula(safePath));
     const data = file.data;
     const crc = crc32(data);
     const local = new Uint8Array(30 + nameBytes.length);

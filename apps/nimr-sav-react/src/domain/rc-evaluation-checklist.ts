@@ -33,7 +33,7 @@ export function getRcEvaluationChecklist(): readonly RcEvaluationChecklistSectio
       items: [
         {
           id: 'fresh_github_clone',
-          label: 'Clone frais GitHub vérifié avant toute décision de tag rc.1',
+          label: 'Clone frais GitHub vérifié avant toute décision de nouvelle RC éventuelle',
           required: true,
           evidence: 'git status propre, commit attendu présent, aucun tag local automatique',
         },
@@ -41,7 +41,7 @@ export function getRcEvaluationChecklist(): readonly RcEvaluationChecklistSectio
           id: 'deterministic_install',
           label: 'Installation reproductible rc.1 avec npm ci',
           required: true,
-          evidence: 'package-lock aligné sur 24.0.0-alpha.18',
+          evidence: 'package-lock aligné sur 24.0.0-alpha.19',
         },
         {
           id: 'build_artifact',
@@ -117,7 +117,7 @@ export function getRcEvaluationChecklist(): readonly RcEvaluationChecklistSectio
         },
         {
           id: 'manual_field_validation',
-          label: 'Validation manuelle terrain requise avant décision de tag rc.1',
+          label: 'Validation manuelle terrain requise avant décision de nouvelle RC éventuelle',
           required: true,
           evidence: 'Contrôle humain GO / NO-GO non automatisé',
         },
@@ -183,7 +183,7 @@ export function getRcEvaluationChecklist(): readonly RcEvaluationChecklistSectio
         },
         {
           id: 'go_no_go_meeting',
-          label: 'Décision GO / NO-GO humaine avant tag rc.1 éventuel',
+          label: 'Décision GO / NO-GO humaine avant nouvelle RC éventuelle',
           required: true,
           evidence: 'Arbitrage explicite hors automatisation',
         },
@@ -209,7 +209,7 @@ export function getManualAcceptanceChecklist(): readonly RcEvaluationChecklistIt
 export function getKnownLimitationsBeforeRc(): readonly string[] {
   return [
     'rc.1 est une Release Candidate interne et ne correspond pas à la version finale.',
-    'Validation manuelle terrain requise avant tout arbitrage de tag rc.1.',
+    'Validation manuelle terrain requise avant tout arbitrage de nouvelle RC éventuelle.',
     'Le pilote stable reste v23.2.6 jusqu’à décision humaine explicite.',
     'Aucun backend, aucun Supabase et aucun service worker React actif dans cette étape.',
     'Les scénarios utilisent uniquement des données fictives et ne remplacent pas une recette utilisateur complète.',
@@ -224,7 +224,7 @@ export function getGoNoGoCriteriaForRcEvaluation(): GoNoGoCriteria {
       'Les tests de non-régression v23.2.6 passent sans modification des fichiers critiques v23.x.',
       'Le smoke navigateur ne remonte aucune erreur console bloquante.',
       'La validation manuelle terrain confirme les parcours SAV principaux.',
-      'La décision GO / NO-GO est actée par un humain responsable avant tag rc.1 éventuel.',
+      'La décision GO / NO-GO est actée par un humain responsable avant nouvelle RC éventuelle.',
     ],
     noGo: [
       'Un rôle ou un statut non officiel apparaît dans la matrice.',

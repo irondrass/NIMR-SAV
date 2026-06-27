@@ -165,7 +165,7 @@ export const ReadOnlyView: React.FC<ReadOnlyViewProps> = ({ user }) => {
           fontWeight: 500,
         }}
       >
-        ℹ️ Aucune action disponible (lecture seule). alpha.19 reste une recette interne non RC, non production et non finale.
+        ℹ️ Aucune action disponible (lecture seule). alpha.20 reste une recette web isolée non RC, non production et non finale.
       </div>
 
       {/* Main Grid */}

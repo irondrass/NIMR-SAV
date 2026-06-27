@@ -13,7 +13,7 @@ import {
 import type { SavCase } from '../src/domain/sav-case';
 import { transitionCase } from '../src/domain/workflow-engine';
 
-describe('Multi-case workflow consistency (v24.0.0-alpha.19)', () => {
+describe('Multi-case workflow consistency (v24.0.0-alpha.20)', () => {
   it('keeps every case status, technician, task and timeline isolated', () => {
     const cases = createAcceptanceScenarioCases();
     const logs = createAcceptanceScenarioTimeline();

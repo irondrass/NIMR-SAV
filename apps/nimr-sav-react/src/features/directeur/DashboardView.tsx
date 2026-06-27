@@ -480,7 +480,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ user, activeTab = 
           }}
         >
           <div style={{ fontSize: '0.85rem', color: '#a1a1aa', fontWeight: 500 }}>
-            Readiness alpha.19
+            Readiness alpha.20
           </div>
           <div style={{ fontSize: '1.15rem', fontWeight: 700, color: alpha19Readiness.status === 'NO-GO' ? '#ef4444' : '#34d399', marginTop: '0.5rem' }}>
             {alpha19Readiness.status}

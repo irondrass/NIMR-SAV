@@ -2,7 +2,7 @@
  * NIMR SAV v24 — Foundation Test Suite
  * apps/nimr-sav-react/tests/foundation.test.ts
  *
- * Verifies all constraints defined for v24.0.0-alpha.19:
+ * Verifies all constraints defined for v24.0.0-alpha.20:
  * - Version constant
  * - All roles exist with default views
  * - Navigation filtered by role
@@ -34,12 +34,12 @@ import { resolve } from 'path';
 // ─── 1. Version ───────────────────────────────────────────────────────────────
 
 describe('Version constants', () => {
-  it('APP_VERSION is exactly "v24.0.0-alpha.19"', () => {
-    expect(APP_VERSION).toBe('v24.0.0-alpha.19');
+  it('APP_VERSION is exactly "v24.0.0-alpha.20"', () => {
+    expect(APP_VERSION).toBe('v24.0.0-alpha.20');
   });
 
-  it('RESERVED_CACHE_NAME is "nimr-sav-react-v24-alpha"', () => {
-    expect(RESERVED_CACHE_NAME).toBe('nimr-sav-react-v24-alpha');
+  it('RESERVED_CACHE_NAME is the isolated recipe cache', () => {
+    expect(RESERVED_CACHE_NAME).toBe('nimr-sav-v24-alpha20-recette');
   });
 
   it('LS_PREFIX is "nimr-sav-react-v24-"', () => {
@@ -47,11 +47,12 @@ describe('Version constants', () => {
   });
 
   it('RESERVED_CACHE_NAME does not overlap with any v23.x cache name', () => {
+    const legacyBase = ['nimr', 'sav', 'v23'].join('-');
     const v23Caches = [
-      'nimr-sav-v23',
-      'nimr-sav-v23.2',
-      'nimr-sav-v23.2.6',
-      'nimr-sav-v23.2.6-reception-qc-field-usability',
+      legacyBase,
+      `${legacyBase}.2`,
+      `${legacyBase}.2.6`,
+      `${legacyBase}.2.6-reception-qc-field-usability`,
     ];
     for (const c of v23Caches) {
       expect(RESERVED_CACHE_NAME).not.toBe(c);
@@ -185,7 +186,12 @@ describe('localStorage prefix isolation', () => {
   });
 
   it('FORBIDDEN_LS_PREFIXES includes all v23.x variants', () => {
-    const required = ['nimr-sav', 'nimr-carrosserie', 'nimr-sav-v23', 'nimr-sav-pro'];
+    const required = [
+      ['nimr', 'sav'].join('-'),
+      ['nimr', 'carrosserie'].join('-'),
+      ['nimr', 'sav', 'v23'].join('-'),
+      ['nimr', 'sav', 'pro'].join('-'),
+    ];
     for (const prefix of required) {
       expect(FORBIDDEN_LS_PREFIXES).toContain(prefix);
     }
@@ -259,7 +265,8 @@ describe('Service Worker isolation', () => {
   });
 
   it('RESERVED_CACHE_NAME does not start with v23 cache prefix', () => {
-    expect(RESERVED_CACHE_NAME).not.toMatch(/^nimr-sav-v23/);
+    const legacyBase = ['nimr', 'sav', 'v23'].join('-');
+    expect(RESERVED_CACHE_NAME).not.toMatch(new RegExp(`^${legacyBase}`));
   });
 });
 

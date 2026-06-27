@@ -173,7 +173,7 @@ export function summarizeAcceptanceReadiness(): AcceptanceEvaluation {
     reserves: [
       ...evaluation.reserves,
       ...plan.flatMap((scenario) => scenario.reserves),
-      'alpha.19 reste une préparation interne : aucune RC ni mise en production automatique.',
+      'alpha.20 reste une recette web isolée : aucune RC ni mise en production automatique.',
     ],
   };
 }

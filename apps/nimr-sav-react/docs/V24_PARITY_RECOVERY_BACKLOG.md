@@ -3,14 +3,16 @@
 Ce backlog détaille la feuille de route (roadmap) découpée en lots de développement pour ramener la nouvelle application React à parité fonctionnelle stricte avec l'ancienne version pilote stable (v23.2.6).
 
 > [!IMPORTANT]
-> **Notes sur la v24.0.0-alpha.19 :**
+> **Notes sur la v24.0.0-alpha.20 :**
 > - Le lot **alpha.15** couvre uniquement multi-sinistres / claims / accords expert & client.
-> - La version alpha.19 **n'est pas une RC** (Release Candidate) et **n'est pas destinée à la production** (le pilote stable reste la v23.2.6).
+> - La version alpha.20 **n'est pas une RC** (Release Candidate) et **n'est pas destinée à la production** (le pilote stable reste la v23.2.6).
 > - Le lot **alpha.14** reste le lot dédié au planning avancé et Gantt.
 > - Le lot **alpha.16** reste le lot import devis.
 > - Le lot **alpha.17** reste impressions/exports.
-> - Le lot **alpha.18** reste offline/PWA (React sans Service Worker actif actuellement).
+> - Le lot **alpha.18** reste offline/cache/queue local.
 > - Le lot **alpha.19** couvre le durcissement sécurité, la validation champs, la recette terrain par rôle et les audits internes avant décision GO / NO-GO.
+> - Le lot **alpha.20** couvre la recette web isolée : URL `https://irondrass.github.io/NIMR-SAV-V24-RECETTE/`, manifest PWA, CSP, icônes et Service Worker limité au scope `/NIMR-SAV-V24-RECETTE/`.
+> - La stable v23 reste `https://irondrass.github.io/NIMR-SAV/` et ne doit pas être remplacée.
 > - Le lot **Cloud/Supabase** reste entièrement séparé.
 
 ---

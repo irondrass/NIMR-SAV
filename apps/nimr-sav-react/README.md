@@ -1,6 +1,6 @@
-# NIMR SAV React — v24.0.0-alpha.19
+# NIMR SAV React — v24.0.0-alpha.20
 
-Version de durcissement sécurité, recette terrain interne et audit avant décision humaine.
+Version de recette web isolée, PWA/CSP et audit live avant décision humaine.
 
 Application React + TypeScript pour NIMR Carrosserie SAV.
 
@@ -19,14 +19,17 @@ Application React + TypeScript pour NIMR Carrosserie SAV.
 
 ## Version
 
-`v24.0.0-alpha.19` — Durcissement sécurité / recette finale interne / audit terrain avant nouvelle RC éventuelle.
+`v24.0.0-alpha.20` — Recette web isolée / PWA / CSP / service worker recette / audit live.
 
-- alpha.19 est une version alpha interne uniquement : ce n’est pas une RC et ce n’est pas une version de production.
-- Aucune RC automatique après alpha.19 ; toute nouvelle RC nécessite une décision humaine GO / NO-GO.
+- alpha.20 est une version alpha de recette web uniquement : ce n’est pas une RC et ce n’est pas une version de production.
+- URL recette cible : https://irondrass.github.io/NIMR-SAV-V24-RECETTE/
+- URL stable inchangée : https://irondrass.github.io/NIMR-SAV/
+- Aucune RC automatique après alpha.20 ; toute nouvelle RC nécessite une décision humaine GO / NO-GO après audit live complet.
 - Aucun tag automatique, ni de push automatique.
 - Le pilote stable reste exclusivement `v23.2.6`.
 - Le fichier `data/vehicles.json` reste strictement `[]`.
-- React v24 reste sans service worker actif par défaut ; le diagnostic PWA est isolé.
+- Le service worker V24 est autorisé uniquement sous `/NIMR-SAV-V24-RECETTE/`.
+- Le cache recette est isolé : `nimr-sav-v24-alpha20-recette`.
 - Aucun backend ni Supabase ajouté (lot Cloud/Supabase séparé post-alpha).
 - Le replay offline reste local/simulé uniquement, sans synchronisation serveur.
 - Les lots alpha.14 planning/Gantt, alpha.15 claims/accords, alpha.16 devis/charge atelier, alpha.17 impressions/export/photos et alpha.18 offline/cache/queue/PWA sont conservés.
@@ -39,16 +42,20 @@ Application React + TypeScript pour NIMR Carrosserie SAV.
 - **alpha.16** : Import Devis HTML/TXT, Calcul Charge Atelier, Répartition par Pôle.
 - **alpha.17** : Impressions & Exports ZIP/PDF.
 - **alpha.18** : Mode Offline & PWA.
-- **alpha.19** (Version courante) : Durcissement sécurité, validation champs, audit exports/cache/PWA, recette terrain par rôle.
+- **alpha.19** : Durcissement sécurité, validation champs, audit exports/cache/PWA, recette terrain par rôle.
+- **alpha.20** (Version courante) : Recette web isolée, manifest PWA, icônes 192/512, CSP, service worker limité au dépôt recette, audit live facilité.
 - **Cloud/Supabase** : Synchronisation & Sécurité Cloud (séparé en lot post-alpha).
 
-## Readiness alpha.19
+## Readiness alpha.20
 
-alpha.19 confirme :
+alpha.20 confirme :
 
-- version alignée sur `v24.0.0-alpha.19` ;
-- audit permissions/rôles, audit statuts, validation stricte champs terrain, sécurité export/print, durcissement cache/queue et diagnostic PWA isolé ;
-- statut de développement alpha de durcissement (non RC, non production) ;
+- version alignée sur `v24.0.0-alpha.20` ;
+- recette publique isolée sous `/NIMR-SAV-V24-RECETTE/` ;
+- manifest `manifest.webmanifest`, icônes PNG 192/512, CSP stricte, `noscript` et fallback root ;
+- service worker `sw-v24-recette.js` limité au scope recette et au cache `nimr-sav-v24-alpha20-recette` ;
+- conservation des audits alpha.19 : permissions/rôles, statuts, validation champs terrain, sécurité export/print, cache/queue ;
+- statut de développement alpha de recette (non RC, non production) ;
 - absence d’exposition production et absence de version finale ;
 - absence de tag ou de push automatique ;
 - rôles et statuts officiels uniquement ;
@@ -85,4 +92,4 @@ Critères bloquants : perte de dossier, mutation par lecture seule, livraison sa
 
 ## Prochaine étape possible
 
-Décision humaine GO / NO-GO avant toute nouvelle RC éventuelle, après validations locales, clone frais GitHub, smoke navigateur, tests v23.2.6 et validation terrain manuelle.
+Audit live complet sur https://irondrass.github.io/NIMR-SAV-V24-RECETTE/ puis décision humaine GO / NO-GO avant toute nouvelle RC éventuelle.

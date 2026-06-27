@@ -12,9 +12,9 @@ import {
   validateNoConsultationMutation,
 } from './business-acceptance-scenarios';
 
-// alpha.19 est une recette interne de durcissement après les lots alpha.14 à alpha.18.
+// alpha.20 ajoute la recette web isolée après les lots alpha.14 à alpha.19.
 // Ce module vérifie que le gel fonctionnel reste conservé sans promouvoir une RC.
-export const FUNCTIONAL_FREEZE_VERSION = 'v24.0.0-alpha.19' as const;
+export const FUNCTIONAL_FREEZE_VERSION = 'v24.0.0-alpha.20' as const;
 export const STABLE_PILOT_VERSION = 'v23.2.6' as const;
 export const FUNCTIONAL_FREEZE_LABEL = 'gel fonctionnel alpha.13 conservé' as const;
 
@@ -130,13 +130,13 @@ export function validateNoProductionExposure(
     blockers.push(`Version attendue ${FUNCTIONAL_FREEZE_VERSION}, version reçue ${appVersion}.`);
   }
   if (!isInternalReleaseCandidate) {
-    blockers.push('alpha.19 doit rester identifiée comme version interne.');
+    blockers.push('alpha.20 doit rester identifiée comme version de recette interne.');
   }
   if (isFinalRelease) {
-    blockers.push('alpha.19 ne doit pas être assimilée à la version finale.');
+    blockers.push('alpha.20 ne doit pas être assimilée à la version finale.');
   }
   if (isProduction) {
-    blockers.push('alpha.19 ne doit pas être exposée comme version de production.');
+    blockers.push('alpha.20 ne doit pas être exposée comme version de production.');
   }
   if (hasUnexpectedTag) {
     blockers.push('Aucun tag automatique ne doit pointer sur le gel conservé.');
@@ -164,9 +164,9 @@ export function validateNoExternalRuntimeDependencies(
   const hasReactServiceWorker = options.hasReactServiceWorker === true;
 
   const blockers: string[] = [];
-  if (hasBackendRuntime) blockers.push('Aucun backend runtime ne doit être ajouté à React v24 alpha.19.');
-  if (hasSupabaseRuntime) blockers.push('Aucun connecteur Supabase runtime ne doit être ajouté à React v24 alpha.19.');
-  if (hasReactServiceWorker) blockers.push('Aucun service worker React actif ne doit être ajouté à alpha.19.');
+  if (hasBackendRuntime) blockers.push('Aucun backend runtime ne doit être ajouté à React v24 alpha.20.');
+  if (hasSupabaseRuntime) blockers.push('Aucun connecteur Supabase runtime ne doit être ajouté à React v24 alpha.20.');
+  if (hasReactServiceWorker) blockers.push('Aucun service worker hors recette isolée ne doit être ajouté à alpha.20.');
 
   return buildResult(
     {
@@ -380,5 +380,5 @@ export function summarizeFunctionalFreezeReadiness(
       ? 'validation manuelle terrain et décision GO / NO-GO requises'
       : 'contrôles complémentaires requis';
 
-  return `${report.appVersion} : ${report.freezeLabel} sous alpha.19 interne, ${manualSuffix}.`;
+  return `${report.appVersion} : ${report.freezeLabel} sous alpha.20 recette, ${manualSuffix}.`;
 }

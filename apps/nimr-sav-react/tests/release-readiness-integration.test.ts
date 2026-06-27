@@ -50,22 +50,22 @@ import { validateReleaseReadiness } from '../src/domain/release-readiness';
 import { SavCase } from '../src/domain/sav-case';
 import { AuditLogEntry } from '../src/domain/audit-log';
 
-describe('SAV Release Readiness & Invariants Integration (v24.0.0-alpha.19)', () => {
+describe('SAV Release Readiness & Invariants Integration (v24.0.0-alpha.20)', () => {
   // 1. Version matches
-  it('APP_VERSION is exactly v24.0.0-alpha.19', () => {
-    expect(APP_VERSION).toBe('v24.0.0-alpha.19');
+  it('APP_VERSION is exactly v24.0.0-alpha.20', () => {
+    expect(APP_VERSION).toBe('v24.0.0-alpha.20');
   });
 
-  it('package.json version matches 24.0.0-alpha.19', () => {
+  it('package.json version matches 24.0.0-alpha.20', () => {
     const pkgPath = resolve(__dirname, '../package.json');
     const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
-    expect(pkg.version).toBe('24.0.0-alpha.19');
+    expect(pkg.version).toBe('24.0.0-alpha.20');
   });
 
-  it('package-lock.json version matches 24.0.0-alpha.19', () => {
+  it('package-lock.json version matches 24.0.0-alpha.20', () => {
     const lockPath = resolve(__dirname, '../package-lock.json');
     const lock = JSON.parse(readFileSync(lockPath, 'utf-8'));
-    expect(lock.version).toBe('24.0.0-alpha.19');
+    expect(lock.version).toBe('24.0.0-alpha.20');
   });
 
   // 2. data/vehicles.json is strictly []
@@ -109,7 +109,7 @@ describe('SAV Release Readiness & Invariants Integration (v24.0.0-alpha.19)', ()
   // 4. LS_PREFIX and RESERVED_CACHE_NAME check
   it('enforces localStorage prefix and cache name', () => {
     expect(LS_PREFIX).toBe('nimr-sav-react-v24-');
-    expect(RESERVED_CACHE_NAME).toBe('nimr-sav-react-v24-alpha');
+    expect(RESERVED_CACHE_NAME).toBe('nimr-sav-v24-alpha20-recette');
   });
 
   // 5. Readiness report tests
@@ -135,11 +135,11 @@ describe('SAV Release Readiness & Invariants Integration (v24.0.0-alpha.19)', ()
       details: 'Dossier créé',
     };
 
-    const report = validateReleaseReadiness([mockCase], [mockLog], { appVersion: 'v24.0.0-alpha.19' });
+    const report = validateReleaseReadiness([mockCase], [mockLog], { appVersion: 'v24.0.0-alpha.20' });
     expect(report.isReadyForRcEvaluation).toBe(true);
     expect(report.blockers).toHaveLength(0);
-    expect(report.recommendation).toContain('alpha.19 prêt pour recette interne');
-    expect(report.lifecycle.status).toBe('Readiness alpha.19 interne');
+    expect(report.recommendation).toContain('alpha.20 prêt pour recette web isolée');
+    expect(report.lifecycle.status).toBe('Readiness alpha.20 recette');
     expect(report.lifecycle.isReleaseCandidate).toBe(false);
     expect(report.lifecycle.isFinal).toBe(false);
     expect(report.lifecycle.isProduction).toBe(false);
@@ -185,7 +185,7 @@ describe('SAV Release Readiness & Invariants Integration (v24.0.0-alpha.19)', ()
       details: 'Dossier créé',
     };
 
-    const report = validateReleaseReadiness([mockCaseBadStatus, mockCaseNoQc], [mockLogBadRole], { appVersion: 'v24.0.0-alpha.19' });
+    const report = validateReleaseReadiness([mockCaseBadStatus, mockCaseNoQc], [mockLogBadRole], { appVersion: 'v24.0.0-alpha.20' });
     expect(report.isReadyForRcEvaluation).toBe(false);
     expect(report.blockers.length).toBeGreaterThanOrEqual(3);
 

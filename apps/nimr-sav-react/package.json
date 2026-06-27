@@ -1,12 +1,13 @@
 {
   "name": "nimr-sav-react",
-  "version": "24.0.0-alpha.19",
+  "version": "24.0.0-alpha.20",
   "private": true,
   "description": "NIMR Carrosserie SAV — React TypeScript v24 migration foundation",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:recipe": "tsc -b && vite build --base=/NIMR-SAV-V24-RECETTE/",
     "lint": "eslint src tests --max-warnings 0",
     "test": "vitest run",
     "test:watch": "vitest",

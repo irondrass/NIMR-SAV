@@ -15,13 +15,13 @@ import {
   validateRcTechnicalEvidence,
 } from '../src/domain/rc-readiness';
 
-describe('RC readiness (v24.0.0-alpha.19)', () => {
-  it('aligns APP_VERSION on v24.0.0-alpha.19', () => {
-    expect(APP_VERSION).toBe('v24.0.0-alpha.19');
-    expect(RC_READINESS_VERSION).toBe('v24.0.0-alpha.19');
+describe('RC readiness (v24.0.0-alpha.20)', () => {
+  it('aligns APP_VERSION on v24.0.0-alpha.20', () => {
+    expect(APP_VERSION).toBe('v24.0.0-alpha.20');
+    expect(RC_READINESS_VERSION).toBe('v24.0.0-alpha.20');
   });
 
-  it('marks alpha.19 as internal but not a release candidate', () => {
+  it('marks alpha.20 as internal recipe but not a release candidate', () => {
     const readiness = validateRcReadiness();
 
     expect(readiness.success).toBe(true);
@@ -29,7 +29,7 @@ describe('RC readiness (v24.0.0-alpha.19)', () => {
     expect(readiness.checks.internalReleaseCandidate).toBe(true);
   });
 
-  it('confirms alpha.19 is not final and not production', () => {
+  it('confirms alpha.20 is not final and not production', () => {
     const readiness = validateRcReadiness();
 
     expect(readiness.finalRelease).toBe(false);
@@ -38,7 +38,7 @@ describe('RC readiness (v24.0.0-alpha.19)', () => {
     expect(readiness.checks.productionExposureAbsent).toBe(true);
   });
 
-  it('requires no automatic tag for alpha.19', () => {
+  it('requires no automatic tag for alpha.20', () => {
     const scope = validateRcScopeFreeze();
     const readiness = validateRcReadiness();
 
@@ -153,7 +153,7 @@ describe('RC readiness (v24.0.0-alpha.19)', () => {
     expect(goNoGo.checks.humanGoNoGoDecisionRequired).toBe(true);
     expect(readiness.manualFieldValidationRequired).toBe(true);
     expect(readiness.humanGoNoGoDecisionRequired).toBe(true);
-    expect(summary).toContain('alpha.19 interne');
+    expect(summary).toContain('alpha.20 recette');
     expect(summary).toContain('décision GO / NO-GO humaine obligatoires');
   });
 

@@ -1,13 +1,13 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { App } from './App'
+import { registerRecipeServiceWorker } from './pwa/registerRecipeServiceWorker'
 import './styles/index.css'
 
 /**
- * NIMR SAV v24.0.0-alpha.19 — React entry point
+ * NIMR SAV v24.0.0-alpha.20 — React recipe entry point
  *
- * NO service worker registration here.
- * Reserved cache name: nimr-sav-react-v24-alpha (future use only)
+ * Service worker registration is restricted to the isolated recipe path.
  */
 
 const rootElement = document.getElementById('root')
@@ -21,3 +21,5 @@ ReactDOM.createRoot(rootElement).render(
     <App />
   </React.StrictMode>
 )
+
+void registerRecipeServiceWorker()

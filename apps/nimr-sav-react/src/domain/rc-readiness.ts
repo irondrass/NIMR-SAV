@@ -18,9 +18,9 @@ import {
   validateStableRoleAndStatusMatrix,
 } from './functional-freeze-readiness';
 
-// alpha.19 prépare une décision humaine avant une nouvelle RC éventuelle.
-// Ce module conserve les contrôles de readiness sans promouvoir alpha.19 en RC.
-export const RC_READINESS_VERSION = 'v24.0.0-alpha.19' as const;
+// alpha.20 prépare une recette web isolée avant une nouvelle RC éventuelle.
+// Ce module conserve les contrôles de readiness sans promouvoir alpha.20 en RC.
+export const RC_READINESS_VERSION = 'v24.0.0-alpha.20' as const;
 
 const OFFICIAL_RC_ROLES: readonly Role[] = [
   'reception',
@@ -133,10 +133,10 @@ export function validateRcScopeFreeze(options: RcReadinessOptions = {}): RcValid
 
   const blockers: string[] = [];
   if (!versionIsRc1) blockers.push(`Version attendue ${RC_READINESS_VERSION}, reçue ${appVersion}.`);
-  if (!internalReleaseCandidate) blockers.push('alpha.19 doit rester une version interne.');
-  if (finalRelease) blockers.push('alpha.19 ne doit pas être assimilée à la version finale.');
-  if (productionExposure) blockers.push('alpha.19 ne doit pas être exposée comme déploiement production.');
-  if (automaticTagExpected) blockers.push('Aucun tag automatique ne doit être attendu pour alpha.19.');
+  if (!internalReleaseCandidate) blockers.push('alpha.20 doit rester une version de recette interne.');
+  if (finalRelease) blockers.push('alpha.20 ne doit pas être assimilée à la version finale.');
+  if (productionExposure) blockers.push('alpha.20 ne doit pas être exposée comme déploiement production.');
+  if (automaticTagExpected) blockers.push('Aucun tag automatique ne doit être attendu pour alpha.20.');
 
   return buildResult(
     {
@@ -231,8 +231,8 @@ export function validateRcBusinessEvidence(): RcValidationResult {
     ...consultation.errors,
   ];
 
-  if (!rolesOfficial) blockers.push('La matrice des rôles officiels alpha.19 a changé.');
-  if (!statusesOfficial) blockers.push('La matrice des statuts officiels alpha.19 a changé.');
+  if (!rolesOfficial) blockers.push('La matrice des rôles officiels alpha.20 a changé.');
+  if (!statusesOfficial) blockers.push('La matrice des statuts officiels alpha.20 a changé.');
   if (!checks.deliveryBlockedWithoutApprovedQuality) {
     blockers.push('La livraison doit rester bloquée sans qualité approuvée.');
   }
@@ -252,7 +252,7 @@ export function validateRcRiskRegister(): RcRiskRegisterResult {
   const risks: readonly RcRiskRegisterItem[] = [
     {
       id: 'real_customer_data',
-      label: 'Donnée client réelle détectée dans la préparation alpha.19',
+      label: 'Donnée client réelle détectée dans la préparation alpha.20',
       severity: 'blocking',
       mitigated: true,
       evidence: 'Scénarios fictifs et données véhicules publiques vides',
@@ -323,7 +323,7 @@ export function validateRcGoNoGoInputs(): RcValidationResult {
       finalReleaseOutOfScope: true,
     },
     [],
-    ['Aucun tag ne doit être créé depuis alpha.19 sans décision humaine explicite.'],
+    ['Aucun tag ne doit être créé depuis alpha.20 sans décision humaine explicite.'],
   );
 }
 
@@ -406,8 +406,8 @@ export function summarizeRcReadiness(
     !report.finalRelease &&
     !report.productionExposure &&
     !report.automaticTagExpected
-      ? 'alpha.19 interne, non RC, non finale, non production, sans tag automatique'
-      : 'périmètre alpha.19 à revalider';
+      ? 'alpha.20 recette, non RC, non finale, non production, sans tag automatique'
+      : 'périmètre alpha.20 à revalider';
   const decision =
     report.manualFieldValidationRequired && report.humanGoNoGoDecisionRequired
       ? 'validation terrain manuelle et décision GO / NO-GO humaine obligatoires'

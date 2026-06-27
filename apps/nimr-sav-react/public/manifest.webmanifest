@@ -1,0 +1,24 @@
+{
+  "name": "NIMR SAV V24 Recette",
+  "short_name": "NIMR V24",
+  "description": "NIMR SAV v24 alpha recette",
+  "start_url": "/NIMR-SAV-V24-RECETTE/",
+  "scope": "/NIMR-SAV-V24-RECETTE/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "icons": [
+    {
+      "src": "/NIMR-SAV-V24-RECETTE/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/NIMR-SAV-V24-RECETTE/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

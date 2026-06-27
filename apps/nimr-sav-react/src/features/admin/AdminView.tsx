@@ -19,6 +19,12 @@ interface AdminViewProps {
   user: User;
 }
 
+function getDiagnosticColor(status: 'ok' | 'warning' | 'error'): string {
+  if (status === 'ok') return '#10b981';
+  if (status === 'warning') return '#f59e0b';
+  return '#ef4444';
+}
+
 export const AdminView: React.FC<AdminViewProps> = ({ user }) => {
   const {
     cases,
@@ -173,7 +179,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ user }) => {
       >
         <span>⚠️</span>
         <span>
-          <strong>Avertissement :</strong> alpha.19 est une recette interne de durcissement, non RC, non production, non finale et sans décision automatique de nouvelle RC.
+          <strong>Avertissement :</strong> alpha.20 est une recette web isolée, non RC, non production, non finale et sans remplacement de la v23 stable.
         </span>
       </div>
 
@@ -195,7 +201,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ user }) => {
               Recette sécurité alpha.19
             </h2>
             <p style={{ margin: '0.25rem 0 0 0', color: '#a1a1aa', fontSize: '0.85rem' }}>
-              Durcissement interne avant décision humaine GO / NO-GO. alpha.19 n’est ni une RC ni une version de production.
+              Durcissement alpha.19 préservé sous alpha.20. La recette web reste soumise à décision humaine GO / NO-GO.
             </p>
           </div>
           <span
@@ -879,40 +885,36 @@ export const AdminView: React.FC<AdminViewProps> = ({ user }) => {
           }}
         >
           <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 600 }}>
-            ⚡ Diagnostic Offline &amp; PWA
+            PWA recette V24
           </h3>
           <div style={{ fontSize: '0.8rem', color: '#a1a1aa' }}>
             {pwaReport.notice}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', fontSize: '0.8rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span>Manifeste HTML :</span>
-              <span style={{ color: pwaReport.manifest.status === 'ok' ? '#10b981' : '#f59e0b' }}>
-                {pwaReport.manifest.status.toUpperCase()}
-              </span>
-            </div>
-            <div style={{ color: '#71717a', fontSize: '0.75rem', paddingLeft: '0.5rem' }}>
-              {pwaReport.manifest.details}
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span>Icônes PWA :</span>
-              <span style={{ color: pwaReport.icons.status === 'ok' ? '#10b981' : '#f59e0b' }}>
-                {pwaReport.icons.status.toUpperCase()}
-              </span>
-            </div>
-            <div style={{ color: '#71717a', fontSize: '0.75rem', paddingLeft: '0.5rem' }}>
-              {pwaReport.icons.details}
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span>Service Worker :</span>
-              <span style={{ color: pwaReport.offline.status === 'ok' ? '#10b981' : '#f59e0b' }}>
-                {pwaReport.offline.status.toUpperCase()}
-              </span>
-            </div>
-            <div style={{ color: '#71717a', fontSize: '0.75rem', paddingLeft: '0.5rem' }}>
-              {pwaReport.offline.details}
+            {[
+              { label: 'Manifest', result: pwaReport.manifest },
+              { label: 'Icônes', result: pwaReport.icons },
+              { label: 'CSP', result: pwaReport.csp },
+              { label: 'Noindex', result: pwaReport.noindex },
+              { label: 'Service Worker', result: pwaReport.offline },
+              { label: 'Isolation SW', result: pwaReport.serviceWorkerIsolation },
+            ].map((item) => (
+              <div key={item.label}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>{item.label} :</span>
+                  <span style={{ color: getDiagnosticColor(item.result.status) }}>
+                    {item.result.status.toUpperCase()}
+                  </span>
+                </div>
+                <div style={{ color: '#71717a', fontSize: '0.75rem', paddingLeft: '0.5rem' }}>
+                  {item.result.details}
+                </div>
+              </div>
+            ))}
+            <div style={{ color: '#d4d4d8', fontSize: '0.78rem', padding: '0.5rem', background: 'rgba(255,255,255,0.03)', borderRadius: '6px' }}>
+              <div>Scope : <code>{pwaReport.recipe.basePath}</code></div>
+              <div>Cache : <code>{pwaReport.recipe.cacheName}</code></div>
+              <div>Recette uniquement — non production — v23 stable inchangée</div>
             </div>
           </div>
         </div>

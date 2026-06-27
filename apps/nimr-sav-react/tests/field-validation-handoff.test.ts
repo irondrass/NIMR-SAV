@@ -19,7 +19,7 @@ function handoffText(): string {
   });
 }
 
-describe('Field validation handoff (v24.0.0-alpha.19)', () => {
+describe('Field validation handoff (v24.0.0-alpha.20)', () => {
   it('provides the field validation plan', () => {
     const plan = getFieldValidationPlan();
 

@@ -8,7 +8,7 @@ import {
 } from '../src/domain/offline-queue';
 import { SavCase } from '../src/domain/sav-case';
 
-const appVersion = 'v24.0.0-alpha.19';
+const appVersion = 'v24.0.0-alpha.20';
 
 const baseCase: SavCase = {
   id: 'offline-security-case',

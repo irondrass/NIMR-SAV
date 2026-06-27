@@ -16,7 +16,7 @@ export interface ReleaseReadinessReport {
   appVersion: string;
   isReadyForRcEvaluation: boolean;
   lifecycle: {
-    status: 'Readiness alpha.19 interne';
+    status: 'Readiness alpha.20 recette';
     isReleaseCandidate: false;
     isFinal: false;
     isProduction: false;
@@ -47,14 +47,14 @@ export function validateVersionReadiness(appVersion: string): ReadinessCheckResu
   if (!appVersion) {
     blockers.push("Version string is missing or undefined.");
   } else {
-    if (appVersion !== 'v24.0.0-alpha.19') {
-      blockers.push(`Version mismatch: expected 'v24.0.0-alpha.19', got '${appVersion}'.`);
+    if (appVersion !== 'v24.0.0-alpha.20') {
+      blockers.push(`Version mismatch: expected 'v24.0.0-alpha.20', got '${appVersion}'.`);
     }
     if (appVersion === 'v24.0.0') {
-      blockers.push('Version name points to the final release, but alpha.19 must remain internal.');
+      blockers.push('Version name points to the final release, but alpha.20 must remain internal.');
     }
     if (appVersion.includes('production')) {
-      blockers.push('Version name contains production, but alpha.19 is not a production deployment.');
+      blockers.push('Version name contains production, but alpha.20 is not a production deployment.');
     }
   }
 
@@ -325,7 +325,7 @@ export function summarizeRcBlockers(readiness: {
 
 export function getReleaseReadinessChecklist(): { id: string; label: string; checked: boolean }[] {
   return [
-    { id: 'version_alpha19', label: 'Version calée sur v24.0.0-alpha.19', checked: true },
+    { id: 'version_alpha20', label: 'Version calée sur v24.0.0-alpha.20', checked: true },
     { id: 'official_roles', label: 'Uniquement les 8 rôles officiels configurés', checked: true },
     { id: 'official_statuses', label: 'Uniquement les 14 statuts de dossiers officiels', checked: true },
     { id: 'security_prefix', label: 'Isolation localStorage (nimr-sav-react-v24-)', checked: true },
@@ -344,8 +344,8 @@ export function getReleaseReadinessChecklist(): { id: string; label: string; che
     { id: 'browser_smoke', label: 'Smoke navigateur requis avant nouvelle RC éventuelle', checked: true },
     { id: 'manual_field_validation', label: 'Validation terrain manuelle obligatoire avant nouvelle RC éventuelle', checked: true },
     { id: 'human_go_no_go', label: 'Décision humaine GO / NO-GO obligatoire avant nouvelle RC éventuelle', checked: true },
-    { id: 'no_auto_tag', label: 'Aucun tag automatique depuis alpha.19', checked: true },
-    { id: 'no_production_deploy', label: 'Aucun déploiement production depuis alpha.19', checked: true },
+    { id: 'no_auto_tag', label: 'Aucun tag automatique depuis alpha.20', checked: true },
+    { id: 'no_production_deploy', label: 'Aucun déploiement production depuis alpha.20', checked: true },
   ];
 }
 
@@ -354,7 +354,7 @@ export function validateReleaseReadiness(
   logs: AuditLogEntry[],
   options?: { appVersion?: string }
 ): ReleaseReadinessReport {
-  const versionInput = options?.appVersion || 'v24.0.0-alpha.19';
+  const versionInput = options?.appVersion || 'v24.0.0-alpha.20';
 
   const versionResult = validateVersionReadiness(versionInput);
   const rolesResult = validateRoleReadiness();
@@ -394,14 +394,14 @@ export function validateReleaseReadiness(
   const coverage = calculateWorkflowCoverage(cases, logs);
 
   const recommendation = isReadyForRcEvaluation
-    ? 'alpha.19 prêt pour recette interne : validation locale, clone frais, terrain manuel et décision GO / NO-GO humaine requis avant nouvelle RC éventuelle'
-    : 'alpha.19 présente des bloqueurs critiques à résoudre avant validation terrain finale';
+    ? 'alpha.20 prêt pour recette web isolée : validation locale, audit live recette et décision GO / NO-GO humaine requis avant nouvelle RC éventuelle'
+    : 'alpha.20 présente des bloqueurs critiques à résoudre avant validation terrain finale';
 
   return {
     appVersion: versionInput,
     isReadyForRcEvaluation,
     lifecycle: {
-      status: 'Readiness alpha.19 interne',
+      status: 'Readiness alpha.20 recette',
       isReleaseCandidate: false,
       isFinal: false,
       isProduction: false,

@@ -18,8 +18,8 @@ import type { SavCase } from '../src/domain/sav-case';
 import { transitionCase } from '../src/domain/workflow-engine';
 import type { Role } from '../src/types';
 
-describe('Business acceptance simulation (v24.0.0-alpha.19)', () => {
-  it('aligns application and package versions on alpha.19', () => {
+describe('Business acceptance simulation (v24.0.0-alpha.20)', () => {
+  it('aligns application and package versions on alpha.20', () => {
     const packageJson = JSON.parse(
       readFileSync(resolve(__dirname, '../package.json'), 'utf-8'),
     );
@@ -27,10 +27,10 @@ describe('Business acceptance simulation (v24.0.0-alpha.19)', () => {
       readFileSync(resolve(__dirname, '../package-lock.json'), 'utf-8'),
     );
 
-    expect(APP_VERSION).toBe('v24.0.0-alpha.19');
-    expect(packageJson.version).toBe('24.0.0-alpha.19');
-    expect(packageLock.version).toBe('24.0.0-alpha.19');
-    expect(packageLock.packages[''].version).toBe('24.0.0-alpha.19');
+    expect(APP_VERSION).toBe('v24.0.0-alpha.20');
+    expect(packageJson.version).toBe('24.0.0-alpha.20');
+    expect(packageLock.version).toBe('24.0.0-alpha.20');
+    expect(packageLock.packages[''].version).toBe('24.0.0-alpha.20');
   });
 
   it('creates five fictitious parallel cases and all official acceptance actors', () => {
@@ -243,7 +243,7 @@ describe('Business acceptance simulation (v24.0.0-alpha.19)', () => {
     expect(result.metrics.waitingPartsCases).toBe(1);
     expect(result.metrics.reworkCases).toBe(1);
     expect(result.metrics.consultationMutationLogs).toBe(0);
-    expect(summary).toContain('alpha.12 conservée sous alpha.19 interne');
+    expect(summary).toContain('alpha.12 conservée sous alpha.20 recette');
     expect(summary).toContain('sans exposition production');
   });
 

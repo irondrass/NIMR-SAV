@@ -16,13 +16,13 @@ import {
   validateStableRoleAndStatusMatrix,
 } from '../src/domain/functional-freeze-readiness';
 
-describe('Functional freeze readiness (v24.0.0-alpha.19)', () => {
-  it('aligns APP_VERSION on v24.0.0-alpha.19', () => {
-    expect(APP_VERSION).toBe('v24.0.0-alpha.19');
+describe('Functional freeze readiness (v24.0.0-alpha.20)', () => {
+  it('aligns APP_VERSION on v24.0.0-alpha.20', () => {
+    expect(APP_VERSION).toBe('v24.0.0-alpha.20');
     expect(FUNCTIONAL_FREEZE_VERSION).toBe(APP_VERSION);
   });
 
-  it('reports alpha.19 internal readiness while preserving the alpha.13 freeze', () => {
+  it('reports alpha.20 recipe readiness while preserving the alpha.13 freeze', () => {
     const readiness = validateFunctionalFreezeReadiness();
 
     expect(readiness.success).toBe(true);
@@ -42,7 +42,7 @@ describe('Functional freeze readiness (v24.0.0-alpha.19)', () => {
     expect(readiness.checks.stablePilotRemainsV2326).toBe(true);
   });
 
-  it('requires no automatic tag and no production exposure for alpha.19', () => {
+  it('requires no automatic tag and no production exposure for alpha.20', () => {
     const exposure = validateNoProductionExposure();
 
     expect(exposure.success).toBe(true);
@@ -62,7 +62,7 @@ describe('Functional freeze readiness (v24.0.0-alpha.19)', () => {
     expect(exposure.blockers.length).toBeGreaterThanOrEqual(2);
   });
 
-  it('has no external runtime dependencies for the React alpha.19 preparation', () => {
+  it('has no external runtime dependencies for the React alpha.20 preparation', () => {
     const externalRuntime = validateNoExternalRuntimeDependencies();
 
     expect(externalRuntime.success).toBe(true);
@@ -147,7 +147,7 @@ describe('Functional freeze readiness (v24.0.0-alpha.19)', () => {
     expect(inputs.checks.humanGoNoGoDecisionRequired).toBe(true);
     expect(readiness.manualFieldValidationRequired).toBe(true);
     expect(readiness.humanGoNoGoDecisionRequired).toBe(true);
-    expect(summary).toContain('gel fonctionnel alpha.13 conservé sous alpha.19 interne');
+    expect(summary).toContain('gel fonctionnel alpha.13 conservé sous alpha.20 recette');
     expect(summary).toContain('décision GO / NO-GO requises');
   });
 

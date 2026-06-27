@@ -49,7 +49,7 @@ import { transitionCase } from '../src/domain/workflow-engine';
 import { hasPermission } from '../src/domain/action-permissions';
 import { AuditLogEntry } from '../src/domain/audit-log';
 
-describe('SAV End-to-End Workflow Readiness (v24.0.0-alpha.19)', () => {
+describe('SAV End-to-End Workflow Readiness (v24.0.0-alpha.20)', () => {
   beforeEach(() => {
     window.localStorage.clear();
     savCaseStore.clearAll();

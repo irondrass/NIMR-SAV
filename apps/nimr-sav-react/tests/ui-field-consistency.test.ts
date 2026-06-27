@@ -15,7 +15,7 @@ import {
 import { Role } from '../src/types';
 import { CaseStatus } from '../src/domain/case-status';
 
-describe('UI Field Consistency (v24.0.0-alpha.19)', () => {
+describe('UI Field Consistency (v24.0.0-alpha.20)', () => {
   const officialRoles: Role[] = [
     'reception',
     'chef-atelier',
@@ -55,8 +55,8 @@ describe('UI Field Consistency (v24.0.0-alpha.19)', () => {
   ];
 
   // 1. Version Check
-  it('APP_VERSION is exactly v24.0.0-alpha.19', () => {
-    expect(APP_VERSION).toBe('v24.0.0-alpha.19');
+  it('APP_VERSION is exactly v24.0.0-alpha.20', () => {
+    expect(APP_VERSION).toBe('v24.0.0-alpha.20');
   });
 
   // 2. getRoleFieldGuidance covers all 8 official roles

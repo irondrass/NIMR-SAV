@@ -7,6 +7,7 @@ const __dirname = fileURLToPath(new URL('.', import.meta.url))
 
 // https://vite.dev/config/
 export default defineConfig({
+  base: '/NIMR-SAV-V24-RECETTE/',
   plugins: [react()],
   resolve: {
     alias: {

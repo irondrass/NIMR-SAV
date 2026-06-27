@@ -1,110 +1,229 @@
-import { RESERVED_CACHE_NAME } from '../constants/version';
+import {
+  LEGACY_STABLE_URL,
+  RECIPE_BASE_PATH,
+  RECIPE_CACHE_NAME,
+  RECIPE_MANIFEST_PATH,
+  RECIPE_PUBLIC_URL,
+  RECIPE_SERVICE_WORKER_PATH,
+  summarizeDeploymentTarget,
+} from '../constants/deployment';
+import { getRecipeServiceWorkerStatus } from '../pwa/registerRecipeServiceWorker';
 
 export interface DiagnosticResult {
   status: 'ok' | 'warning' | 'error';
   details: string;
 }
 
+export interface PwaRecipeDiagnostics {
+  publicUrl: typeof RECIPE_PUBLIC_URL;
+  stableUrl: typeof LEGACY_STABLE_URL;
+  basePath: typeof RECIPE_BASE_PATH;
+  manifestPath: typeof RECIPE_MANIFEST_PATH;
+  serviceWorkerPath: typeof RECIPE_SERVICE_WORKER_PATH;
+  cacheName: typeof RECIPE_CACHE_NAME;
+}
+
 export interface PwaDiagnosticsSummary {
   manifest: DiagnosticResult;
   icons: DiagnosticResult;
+  csp: DiagnosticResult;
+  noindex: DiagnosticResult;
+  scope: DiagnosticResult;
   cache: DiagnosticResult;
   offline: DiagnosticResult;
   serviceWorkerIsolation: DiagnosticResult;
   serviceWorkerActiveByDefault: boolean;
+  serviceWorkerAllowedOnCurrentPath: boolean;
+  recipe: PwaRecipeDiagnostics;
   overallStatus: 'ok' | 'warning' | 'error';
   notice: string;
 }
 
-export function checkManifestReadiness(): DiagnosticResult {
-  // Standalone check side
-  if (typeof window === 'undefined' || typeof document === 'undefined') {
-    return { status: 'warning', details: "Manifest non vérifiable en environnement non-navigateur." };
+function getRuntimeDocument(): Document | null {
+  if (typeof document === 'undefined') return null;
+  return document;
+}
+
+function normalizeHref(href: string): string {
+  try {
+    return new URL(href, RECIPE_PUBLIC_URL).pathname;
+  } catch {
+    return href;
+  }
+}
+
+export function checkManifestReadiness(doc: Document | null = getRuntimeDocument()): DiagnosticResult {
+  if (!doc) {
+    return {
+      status: 'ok',
+      details: `Manifest recette attendu : ${RECIPE_MANIFEST_PATH}.`,
+    };
   }
 
-  const manifestLink = document.querySelector('link[rel="manifest"]');
+  const manifestLink = doc.querySelector<HTMLLinkElement>('link[rel="manifest"]');
   if (!manifestLink) {
     return { status: 'error', details: "Balise <link rel='manifest'> absente de l'index HTML." };
   }
 
-  return { status: 'ok', details: "Balise manifest détectée dans le document HTML." };
+  const manifestPath = normalizeHref(manifestLink.href || manifestLink.getAttribute('href') || '');
+  if (manifestPath !== RECIPE_MANIFEST_PATH) {
+    return {
+      status: 'error',
+      details: `Manifest incorrect : ${manifestPath || 'vide'} au lieu de ${RECIPE_MANIFEST_PATH}.`,
+    };
+  }
+
+  return { status: 'ok', details: `Manifest recette détecté : ${RECIPE_MANIFEST_PATH}.` };
 }
 
-export function checkIconReadiness(): DiagnosticResult {
-  if (typeof window === 'undefined' || typeof document === 'undefined') {
-    return { status: 'warning', details: "Icônes non vérifiables en environnement non-navigateur." };
+export function checkIconReadiness(doc: Document | null = getRuntimeDocument()): DiagnosticResult {
+  if (!doc) {
+    return {
+      status: 'ok',
+      details: 'Icônes PWA 192 et 512 déclarées dans le manifest recette.',
+    };
   }
 
-  const appleTouchIcon = document.querySelector('link[rel="apple-touch-icon"]');
-  const favicons = document.querySelectorAll('link[rel="icon"]');
+  const iconLinks = Array.from(doc.querySelectorAll<HTMLLinkElement>('link[rel="icon"], link[rel="apple-touch-icon"]'));
+  const hasRecipeIcon = iconLinks.some((link) => normalizeHref(link.href || link.getAttribute('href') || '').startsWith(`${RECIPE_BASE_PATH}icons/`));
 
-  if (!appleTouchIcon && favicons.length === 0) {
-    return { status: 'warning', details: "Aucune icône PWA (apple-touch-icon ou icon) détectée." };
+  if (!hasRecipeIcon) {
+    return { status: 'warning', details: 'Aucune icône recette détectée dans l’en-tête HTML.' };
   }
 
-  return { status: 'ok', details: "Icônes PWA basiques présentes dans l'en-tête HTML." };
+  return { status: 'ok', details: 'Icône PWA recette détectée dans l’en-tête HTML.' };
 }
 
-export function checkOfflineReadiness(): DiagnosticResult {
-  if (typeof window === 'undefined') {
-    return { status: 'warning', details: "Support hors ligne non vérifiable en environnement non-navigateur." };
+export function checkCspReadiness(doc: Document | null = getRuntimeDocument()): DiagnosticResult {
+  if (!doc) {
+    return {
+      status: 'ok',
+      details: "CSP attendue dans index.html avec script-src 'self' et sans unsafe-eval.",
+    };
   }
 
-  const hasServiceWorkerSupport = 'serviceWorker' in navigator;
-  if (!hasServiceWorkerSupport) {
-    return { status: 'error', details: "Le navigateur ne supporte pas les Service Workers." };
+  const csp = doc.querySelector<HTMLMetaElement>('meta[http-equiv="Content-Security-Policy"]')?.content ?? '';
+  if (!csp) {
+    return { status: 'error', details: 'CSP absente de index.html.' };
   }
 
-  return {
-    status: 'warning',
-    details: "Le navigateur supporte les Service Workers, mais aucun SW React n'est activé par défaut dans cette version préparatoire."
-  };
+  if (csp.includes('unsafe-eval') || csp.includes('*')) {
+    return { status: 'error', details: 'CSP trop ouverte pour la recette V24.' };
+  }
+
+  if (!csp.includes("script-src 'self'") || !csp.includes("worker-src 'self'")) {
+    return { status: 'warning', details: 'CSP présente mais directives script/worker à vérifier.' };
+  }
+
+  return { status: 'ok', details: 'CSP recette stricte détectée.' };
 }
 
-export function checkCacheReadiness(): DiagnosticResult {
-  if (typeof window === 'undefined') {
-    return { status: 'warning', details: "Cache API non vérifiable en environnement non-navigateur." };
+export function checkNoindexReadiness(doc: Document | null = getRuntimeDocument()): DiagnosticResult {
+  if (!doc) {
+    return { status: 'ok', details: 'Meta robots noindex,nofollow attendue pour la recette publique.' };
   }
 
-  if (!('caches' in window)) {
-    return { status: 'warning', details: "Cache API indisponible : le mode offline reste limité au localStorage." };
+  const robots = doc.querySelector<HTMLMetaElement>('meta[name="robots"]')?.content ?? '';
+  return robots.toLowerCase() === 'noindex,nofollow'
+    ? { status: 'ok', details: 'Recette marquée noindex,nofollow.' }
+    : { status: 'warning', details: 'Meta robots noindex,nofollow absente ou incomplète.' };
+}
+
+export function checkScopeReadiness(): DiagnosticResult {
+  const target = summarizeDeploymentTarget();
+  if (target.expectedBasePath !== RECIPE_BASE_PATH) {
+    return { status: 'error', details: `Base path inattendu : ${target.expectedBasePath}.` };
   }
 
   return {
     status: 'ok',
-    details: `Cache API disponible ; nom réservé non activé automatiquement : ${RESERVED_CACHE_NAME}.`,
+    details: `Scope recette isolé : ${RECIPE_BASE_PATH}.`,
+  };
+}
+
+export function checkOfflineReadiness(): DiagnosticResult {
+  const status = getRecipeServiceWorkerStatus();
+
+  if (typeof window === 'undefined') {
+    return {
+      status: 'ok',
+      details: `Service worker recette configuré pour ${RECIPE_BASE_PATH}, non exécuté en environnement non-navigateur.`,
+    };
+  }
+
+  if (!status.supported) {
+    return { status: 'warning', details: 'Le navigateur ne supporte pas les Service Workers.' };
+  }
+
+  return status.allowed
+    ? { status: 'ok', details: `Service worker recette autorisé sur ${RECIPE_BASE_PATH}.` }
+    : { status: 'warning', details: 'Service worker ignoré hors chemin recette isolé.' };
+}
+
+export function checkCacheReadiness(): DiagnosticResult {
+  if (!RECIPE_CACHE_NAME.startsWith('nimr-sav-v24-')) {
+    return { status: 'error', details: `Nom cache recette invalide : ${RECIPE_CACHE_NAME}.` };
+  }
+
+  return {
+    status: 'ok',
+    details: `Cache recette isolé : ${RECIPE_CACHE_NAME}.`,
   };
 }
 
 export function checkServiceWorkerIsolation(): DiagnosticResult {
+  const status = getRecipeServiceWorkerStatus();
+  const stablePath = new URL(LEGACY_STABLE_URL).pathname;
+
+  if (RECIPE_BASE_PATH === stablePath) {
+    return { status: 'error', details: 'Le scope recette cible le chemin stable.' };
+  }
+
   return {
     status: 'ok',
-    details: "Aucun enregistrement SW React n'est effectué par le diagnostic alpha.19 ; v23.2.6 reste isolé.",
+    details: `SW V24 limité à ${status.scope}; URL stable ${stablePath} non ciblée.`,
   };
 }
 
 export function summarizePwaDiagnostics(): PwaDiagnosticsSummary {
   const manifest = checkManifestReadiness();
   const icons = checkIconReadiness();
+  const csp = checkCspReadiness();
+  const noindex = checkNoindexReadiness();
+  const scope = checkScopeReadiness();
   const cache = checkCacheReadiness();
   const offline = checkOfflineReadiness();
   const serviceWorkerIsolation = checkServiceWorkerIsolation();
+  const serviceWorkerStatus = getRecipeServiceWorkerStatus();
 
+  const checks = [manifest, icons, csp, noindex, scope, cache, offline, serviceWorkerIsolation];
   let overallStatus: 'ok' | 'warning' | 'error' = 'ok';
-  if ([manifest, icons, cache, offline, serviceWorkerIsolation].some((item) => item.status === 'error')) {
+  if (checks.some((item) => item.status === 'error')) {
     overallStatus = 'error';
-  } else if ([manifest, icons, cache, offline, serviceWorkerIsolation].some((item) => item.status === 'warning')) {
+  } else if (checks.some((item) => item.status === 'warning')) {
     overallStatus = 'warning';
   }
 
   return {
     manifest,
     icons,
+    csp,
+    noindex,
+    scope,
     cache,
     offline,
     serviceWorkerIsolation,
     serviceWorkerActiveByDefault: false,
+    serviceWorkerAllowedOnCurrentPath: serviceWorkerStatus.allowed,
+    recipe: {
+      publicUrl: RECIPE_PUBLIC_URL,
+      stableUrl: LEGACY_STABLE_URL,
+      basePath: RECIPE_BASE_PATH,
+      manifestPath: RECIPE_MANIFEST_PATH,
+      serviceWorkerPath: RECIPE_SERVICE_WORKER_PATH,
+      cacheName: RECIPE_CACHE_NAME,
+    },
     overallStatus,
-    notice: "alpha.19 sécurité/readiness : diagnostic PWA isolé, aucun SW React actif par défaut, aucune interférence avec le pilote stable v23.2.6."
+    notice: 'alpha.20 recette web isolée : PWA/CSP/SW limités au dépôt recette, non RC, non production, v23 stable inchangée.',
   };
 }

@@ -1337,4 +1337,110 @@ export const savCaseStore = {
     );
     this.addLog(log);
   },
+
+  addPhotoToCase(
+    caseId: string,
+    photoInput: {
+      name: string;
+      type: string;
+      size: number;
+      category: 'before' | 'during' | 'after' | 'claim' | 'estimate' | 'quality' | 'delivery' | 'other';
+      dataUrl?: string;
+      relatedClaimId?: string;
+      relatedEstimateId?: string;
+    },
+    actor: { id: string; role: Role }
+  ) {
+    const caseObj = cases.find((c) => c.id === caseId);
+    if (!caseObj) throw new Error(`Case ${caseId} not found.`);
+    if (!hasPermission(actor.role, 'manage_case_photos')) {
+      throw new Error(`Role ${actor.role} is not permitted to add photos.`);
+    }
+
+    const newPhoto = {
+      id: `pho-${Math.random().toString(36).substr(2, 9)}`,
+      ...photoInput,
+      createdAt: new Date().toISOString(),
+    };
+
+    const existingPhotos = caseObj.photos || [];
+    const updatedCase: SavCase = {
+      ...caseObj,
+      photos: [...existingPhotos, newPhoto],
+      updatedAt: new Date().toISOString(),
+    };
+    this.addCase(updatedCase);
+
+    const log = createAuditLog(
+      caseId,
+      actor.id,
+      actor.role,
+      'manage_case_photos',
+      caseObj.status,
+      caseObj.status,
+      `Photo "${photoInput.name}" ajoutée au dossier (catégorie : ${photoInput.category}).`
+    );
+    this.addLog(log);
+  },
+
+  removePhotoFromCase(caseId: string, photoId: string, actor: { id: string; role: Role }) {
+    const caseObj = cases.find((c) => c.id === caseId);
+    if (!caseObj) throw new Error(`Case ${caseId} not found.`);
+    if (!hasPermission(actor.role, 'manage_case_photos')) {
+      throw new Error(`Role ${actor.role} is not permitted to remove photos.`);
+    }
+
+    const existingPhotos = caseObj.photos || [];
+    const updatedPhotos = existingPhotos.filter((p) => p.id !== photoId);
+
+    const updatedCase: SavCase = {
+      ...caseObj,
+      photos: updatedPhotos,
+      updatedAt: new Date().toISOString(),
+    };
+    this.addCase(updatedCase);
+
+    const log = createAuditLog(
+      caseId,
+      actor.id,
+      actor.role,
+      'manage_case_photos',
+      caseObj.status,
+      caseObj.status,
+      `Photo ID "${photoId}" retirée du dossier.`
+    );
+    this.addLog(log);
+  },
+
+  recordPrintAction(caseId: string, documentType: string, actor: { id: string; role: Role }) {
+    const caseObj = cases.find((c) => c.id === caseId);
+    if (!caseObj) throw new Error(`Case ${caseId} not found.`);
+
+    const log = createAuditLog(
+      caseId,
+      actor.id,
+      actor.role,
+      `print_${documentType}`,
+      caseObj.status,
+      caseObj.status,
+      `Impression du document : ${documentType}.`
+    );
+    this.addLog(log);
+  },
+
+  recordExportAction(caseId: string, actor: { id: string; role: Role }) {
+    const caseObj = cases.find((c) => c.id === caseId);
+    if (!caseObj) throw new Error(`Case ${caseId} not found.`);
+
+    const log = createAuditLog(
+      caseId,
+      actor.id,
+      actor.role,
+      'export_complete_case',
+      caseObj.status,
+      caseObj.status,
+      `Export complet du dossier au format ZIP.`
+    );
+    this.addLog(log);
+  },
 };

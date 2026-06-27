@@ -5,7 +5,7 @@ import { RECEPTION_PRESETS } from '@/constants/reception-presets';
 import { validateFictiveFields } from '@/domain/validation-rules';
 import { transitionCase } from '@/domain/workflow-engine';
 import { createAuditLog } from '@/domain/audit-log';
-import { SavCase, Claim } from '@/domain/sav-case';
+import { SavCase, Claim, CasePhoto } from '@/domain/sav-case';
 import { getBlockingClaimsReasons } from '@/domain/claims';
 import { hasPermission, canViewDirectionNotes } from '@/domain/action-permissions';
 import { Button } from '@/components/ui/Button';
@@ -13,6 +13,18 @@ import { EmptyState } from '@/components/EmptyState';
 import { StatusBadge } from '@/components/StatusBadge';
 import { VersionBanner } from '@/components/VersionBanner';
 import { getRoleFieldGuidance } from '@/domain/ui-field-guidelines';
+import {
+  buildReceptionSheet,
+  buildDeliveryReceipt
+} from '@/domain/print-documents';
+import {
+  buildCompleteCaseBundle,
+  downloadExportBundle,
+  getExportWarnings
+} from '@/domain/export-bundle';
+import {
+  collectCasePhotos
+} from '@/domain/photo-export';
 
 interface ReceptionViewProps {
   user: User;
@@ -33,6 +45,10 @@ export const ReceptionView: React.FC<ReceptionViewProps> = ({ user }) => {
     importEstimateForClaim,
     removeEstimateFromClaim,
     regenerateWorkshopTasksFromClaimEstimate,
+    addPhotoToCase,
+    removePhotoFromCase,
+    recordPrintAction,
+    recordExportAction,
   } = useSavCases();
 
   // Form states
@@ -81,6 +97,77 @@ export const ReceptionView: React.FC<ReceptionViewProps> = ({ user }) => {
     if (!selectedCaseId) return null;
     return cases.find((c) => c.id === selectedCaseId) || null;
   }, [cases, selectedCaseId]);
+
+  const handlePrint = (type: 'reception_sheet' | 'delivery_receipt') => {
+    if (!selectedCase) return;
+    let html = '';
+    if (type === 'reception_sheet') {
+      html = buildReceptionSheet(selectedCase);
+    } else {
+      html = buildDeliveryReceipt(selectedCase);
+    }
+
+    recordPrintAction(selectedCase.id, type, user);
+
+    if (typeof window !== 'undefined') {
+      const w = window.open('', '_blank');
+      if (w) {
+        w.document.write(html);
+        w.document.close();
+        w.print();
+      }
+    }
+  };
+
+  const handleExport = () => {
+    if (!selectedCase) return;
+    const bundle = buildCompleteCaseBundle(selectedCase, user.id);
+    recordExportAction(selectedCase.id, user);
+    downloadExportBundle(bundle);
+  };
+
+  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>, category: 'before' | 'during' | 'after' | 'claim' | 'estimate' | 'quality' | 'delivery' | 'other') => {
+    if (!selectedCase) return;
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = reader.result as string;
+        addPhotoToCase(
+          selectedCase.id,
+          {
+            name: file.name,
+            type: file.type,
+            size: file.size,
+            category,
+            dataUrl,
+          },
+          user
+        );
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleAddMockPhoto = (category: 'before' | 'during' | 'after' | 'claim' | 'estimate' | 'quality' | 'delivery' | 'other') => {
+    if (!selectedCase) return;
+    const mockBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    const dataUrl = `data:image/png;base64,${mockBase64}`;
+    addPhotoToCase(
+      selectedCase.id,
+      {
+        name: `mock_photo_${category}_${Date.now()}.png`,
+        type: 'image/png',
+        size: 68,
+        category,
+        dataUrl,
+      },
+      user
+    );
+  };
 
   // Form helper: reset fields
   const handleResetForm = () => {
@@ -1002,6 +1089,138 @@ export const ReceptionView: React.FC<ReceptionViewProps> = ({ user }) => {
                     );
                   })
                 )}
+              </div>
+
+              {/* Dossier Incomplete Warnings */}
+              {(() => {
+                const warnings = getExportWarnings(selectedCase);
+                if (warnings.length > 0) {
+                  return (
+                    <div style={{ marginTop: '1.25rem', padding: '0.75rem', background: 'rgba(245,158,11,0.05)', border: '1px solid rgba(245,158,11,0.2)', borderRadius: '4px', color: '#fbbf24' }}>
+                      <strong style={{ fontSize: '0.85rem', display: 'block', marginBottom: '0.25rem' }}>⚠️ Dossier Incomplet :</strong>
+                      <ul style={{ margin: 0, paddingLeft: '1.25rem', fontSize: '0.8rem' }}>
+                        {warnings.map((w, idx) => <li key={idx}>{w}</li>)}
+                      </ul>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
+
+              {/* Print and Export Buttons */}
+              <div style={{ marginTop: '1.5rem', paddingTop: '1rem', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                <h4 style={{ margin: '0 0 0.75rem 0', fontSize: '0.9rem', fontWeight: 600 }}>Impression &amp; Exportation</h4>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  {hasPermission(user.role, 'print_reception_sheet') && (
+                    <Button onClick={() => handlePrint('reception_sheet')}>
+                      🖨️ Fiche Réception
+                    </Button>
+                  )}
+                  {hasPermission(user.role, 'print_delivery_receipt') && (
+                    <Button onClick={() => handlePrint('delivery_receipt')}>
+                      🖨️ PV Restitution
+                    </Button>
+                  )}
+                  {hasPermission(user.role, 'export_complete_case') && (
+                    <Button variant="ghost" style={{ background: '#2563eb', color: '#fff' }} onClick={handleExport}>
+                      📦 Exporter Dossier (ZIP)
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              {/* Photos Management Panel */}
+              <div style={{ marginTop: '1.5rem', paddingTop: '1rem', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                <h4 style={{ margin: '0 0 0.75rem 0', fontSize: '0.9rem', fontWeight: 600 }}>Gestion des Photos</h4>
+
+                {/* Photo uploader or Mock photo button */}
+                {hasPermission(user.role, 'manage_case_photos') && (
+                  <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap', marginBottom: '1rem' }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.75rem', color: '#a1a1aa', marginBottom: '0.25rem' }}>Catégorie photo</label>
+                      <select
+                        id="photo-category-select"
+                        defaultValue="before"
+                        style={{ padding: '0.4rem', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.15)', background: '#18181b', color: '#fff', fontSize: '0.8rem' }}
+                      >
+                        <option value="before">Avant réparation</option>
+                        <option value="during">En cours</option>
+                        <option value="after">Après réparation</option>
+                        <option value="claim">Sinistre</option>
+                        <option value="estimate">Devis</option>
+                        <option value="quality">Qualité</option>
+                        <option value="delivery">Livraison</option>
+                        <option value="other">Autre</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.75rem', color: '#a1a1aa', marginBottom: '0.25rem' }}>Importer fichier</label>
+                      <input
+                        type="file"
+                        multiple
+                        accept="image/*"
+                        onChange={(e) => {
+                          const select = document.getElementById('photo-category-select') as HTMLSelectElement;
+                          const cat = (select?.value || 'before') as CasePhoto['category'];
+                          handlePhotoUpload(e, cat);
+                        }}
+                        style={{ fontSize: '0.8rem', color: '#ccc' }}
+                      />
+                    </div>
+                    <div style={{ alignSelf: 'flex-end' }}>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        style={{ border: '1px solid rgba(255,255,255,0.15)' }}
+                        onClick={() => {
+                          const select = document.getElementById('photo-category-select') as HTMLSelectElement;
+                          const cat = (select?.value || 'before') as CasePhoto['category'];
+                          handleAddMockPhoto(cat);
+                        }}
+                      >
+                        📷 Ajouter Photo Test
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Photos List */}
+                {(() => {
+                  const photosList = collectCasePhotos(selectedCase);
+                  if (photosList.length === 0) {
+                    return <div style={{ fontSize: '0.8rem', color: '#888', fontStyle: 'italic' }}>Aucune photo associée à ce dossier.</div>;
+                  }
+                  return (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '0.75rem', marginTop: '0.5rem' }}>
+                      {photosList.map((photo) => (
+                        <div key={photo.id} style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '4px', padding: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.25rem', position: 'relative' }}>
+                          {photo.dataUrl && (
+                            <img src={photo.dataUrl} alt={photo.name} style={{ width: '100%', height: '80px', objectFit: 'cover', borderRadius: '2px', background: '#000' }} />
+                          )}
+                          <div style={{ fontSize: '0.75rem', fontWeight: 'bold', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }} title={photo.name}>
+                            {photo.name}
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.7rem', color: '#aaa' }}>
+                            <span style={{ textTransform: 'capitalize' }}>{photo.category}</span>
+                            <span>{(photo.size / 1024).toFixed(1)} KB</span>
+                          </div>
+                          {hasPermission(user.role, 'manage_case_photos') && (
+                            <button
+                              onClick={() => {
+                                if (confirm(`Voulez-vous supprimer la photo "${photo.name}" ?`)) {
+                                  removePhotoFromCase(selectedCase.id, photo.id, user);
+                                }
+                              }}
+                              style={{ position: 'absolute', top: '4px', right: '4px', background: 'rgba(239,68,68,0.8)', border: 'none', color: '#fff', borderRadius: '50%', width: '18px', height: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: '10px', fontWeight: 'bold' }}
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           )}

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { savCaseStore } from './sav-case-store';
-import { SavCase, WorkshopTask, QcChecklistItem, Claim, EstimateLine } from '../domain/sav-case';
+import { SavCase, WorkshopTask, QcChecklistItem, Claim, EstimateLine, CasePhoto } from '../domain/sav-case';
 import { AuditLogEntry } from '../domain/audit-log';
 import { Role } from '../types';
 import { CaseStatus } from '../domain/case-status';
@@ -97,5 +97,13 @@ export function useSavCases() {
       savCaseStore.removeEstimateFromClaim(caseId, claimId, actor),
     regenerateWorkshopTasksFromClaimEstimate: (caseId: string, claimId: string, actor: { id: string; role: Role }) =>
       savCaseStore.regenerateWorkshopTasksFromClaimEstimate(caseId, claimId, actor),
+    addPhotoToCase: (caseId: string, photoInput: Omit<CasePhoto, 'id' | 'createdAt'>, actor: { id: string; role: Role }) =>
+      savCaseStore.addPhotoToCase(caseId, photoInput, actor),
+    removePhotoFromCase: (caseId: string, photoId: string, actor: { id: string; role: Role }) =>
+      savCaseStore.removePhotoFromCase(caseId, photoId, actor),
+    recordPrintAction: (caseId: string, documentType: string, actor: { id: string; role: Role }) =>
+      savCaseStore.recordPrintAction(caseId, documentType, actor),
+    recordExportAction: (caseId: string, actor: { id: string; role: Role }) =>
+      savCaseStore.recordExportAction(caseId, actor),
   };
 }

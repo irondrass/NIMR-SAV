@@ -8,6 +8,9 @@ import { PriorityBadge } from '@/components/PriorityBadge';
 import { EmptyState } from '@/components/EmptyState';
 import { VersionBanner } from '@/components/VersionBanner';
 import { getRoleFieldGuidance } from '@/domain/ui-field-guidelines';
+import { Button } from '@/components/ui/Button';
+import { hasPermission } from '@/domain/action-permissions';
+import { buildCompleteCaseBundle, downloadExportBundle } from '@/domain/export-bundle';
 
 interface DashboardViewProps {
   user: User;
@@ -248,6 +251,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ user, activeTab = 
           >
             {APP_VERSION}
           </span>
+
+          {hasPermission(user.role, 'export_complete_case') && (
+            <Button
+              variant="ghost"
+              style={{ background: '#2563eb', color: '#fff', fontSize: '0.82rem' }}
+              onClick={() => {
+                const bundle = buildCompleteCaseBundle(cases[0], user.name);
+                downloadExportBundle(bundle);
+              }}
+            >
+              📦 Exporter Dossier
+            </Button>
+          )}
         </div>
       </header>
 

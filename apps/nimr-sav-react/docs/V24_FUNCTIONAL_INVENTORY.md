@@ -1,9 +1,9 @@
-# Inventaire Fonctionnel Complet — NIMR SAV React v24.0.0-alpha.16
+# Inventaire Fonctionnel Complet — NIMR SAV React v24.0.0-alpha.17
 
 Ce document recense les fonctionnalités implémentées dans la nouvelle version React de l'application (`apps/nimr-sav-react`).
 
 > [!IMPORTANT]
-> **Notes sur la v24.0.0-alpha.16 :**
+> **Notes sur la v24.0.0-alpha.17 :**
 > - Le lot **alpha.15** couvre uniquement multi-sinistres / claims / accords expert & client.
 > - La version alpha.15 **n'est pas une RC** (Release Candidate) et **n'est pas destinée à la production** (le pilote stable reste la v23.2.6).
 > - Le lot **alpha.14** reste le lot dédié au planning avancé et Gantt.

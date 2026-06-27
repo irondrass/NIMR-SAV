@@ -16,9 +16,9 @@ import {
   validateStableRoleAndStatusMatrix,
 } from '../src/domain/functional-freeze-readiness';
 
-describe('Functional freeze readiness (v24.0.0-alpha.16)', () => {
-  it('aligns APP_VERSION on v24.0.0-alpha.16', () => {
-    expect(APP_VERSION).toBe('v24.0.0-alpha.16');
+describe('Functional freeze readiness (v24.0.0-alpha.17)', () => {
+  it('aligns APP_VERSION on v24.0.0-alpha.17', () => {
+    expect(APP_VERSION).toBe('v24.0.0-alpha.17');
     expect(FUNCTIONAL_FREEZE_VERSION).toBe(APP_VERSION);
   });
 

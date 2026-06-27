@@ -3,6 +3,8 @@ import type { User } from '@/types';
 import { useSavCases } from '@/state/useSavCases';
 import { Button } from '@/components/ui/Button';
 import { StatusBadge } from '@/components/StatusBadge';
+import { buildDeliveryReceipt } from '@/domain/print-documents';
+import { hasPermission } from '@/domain/action-permissions';
 import { EmptyState } from '@/components/EmptyState';
 import { BlockedNotice } from '@/components/BlockedNotice';
 import { getRoleFieldGuidance } from '@/domain/ui-field-guidelines';
@@ -17,6 +19,7 @@ export const DeliveryView: React.FC<DeliveryViewProps> = ({ user }) => {
     logs,
     prepareDelivery,
     deliverCase,
+    recordPrintAction,
   } = useSavCases();
 
   // Resolve actor for delivery operations (supporting demo session if user is not livraison/admin)
@@ -42,6 +45,20 @@ export const DeliveryView: React.FC<DeliveryViewProps> = ({ user }) => {
   const selectedCase = useMemo(() => {
     return deliveryCases.find((c) => c.id === selectedCaseId) || null;
   }, [deliveryCases, selectedCaseId]);
+
+  const handlePrintDeliveryReceipt = () => {
+    if (!selectedCase) return;
+    const html = buildDeliveryReceipt(selectedCase);
+    recordPrintAction(selectedCase.id, 'delivery_receipt', actor);
+    if (typeof window !== 'undefined') {
+      const w = window.open('', '_blank');
+      if (w) {
+        w.document.write(html);
+        w.document.close();
+        w.print();
+      }
+    }
+  };
 
   const [recipientName, setRecipientName] = useState('');
   const [proofReference, setProofReference] = useState('');
@@ -185,9 +202,16 @@ export const DeliveryView: React.FC<DeliveryViewProps> = ({ user }) => {
                       Client : <strong>{selectedCase.clientName}</strong> | Tél : <strong>{selectedCase.telephone}</strong>
                     </p>
                   </div>
-                  <div style={{ textAlign: 'right' }}>
-                    <StatusBadge status={selectedCase.status} />
-                    <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.8rem', color: '#71717a' }}>
+                   <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.5rem' }}>
+                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                      <StatusBadge status={selectedCase.status} />
+                      {hasPermission(user.role, 'print_delivery_receipt') && (
+                        <Button size="sm" onClick={handlePrintDeliveryReceipt}>
+                          🖨️ PV Restitution
+                        </Button>
+                      )}
+                    </div>
+                    <p style={{ margin: 0, fontSize: '0.8rem', color: '#71717a' }}>
                       Reçu le : {new Date(selectedCase.receptionDate).toLocaleString()}
                     </p>
                   </div>

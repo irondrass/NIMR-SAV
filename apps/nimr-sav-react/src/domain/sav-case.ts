@@ -1,5 +1,17 @@
 import { CaseStatus } from './case-status';
 
+export interface CasePhoto {
+  id: string;
+  name: string;
+  type: string;
+  size: number;
+  category: 'before' | 'during' | 'after' | 'claim' | 'estimate' | 'quality' | 'delivery' | 'other';
+  dataUrl?: string;
+  createdAt: string;
+  relatedClaimId?: string;
+  relatedEstimateId?: string;
+}
+
 export interface QcChecklistItem {
   id: string;
   label: string;
@@ -65,6 +77,7 @@ export interface SavCase {
   claimsOverrideReason?: string;
   claimsOverrideAt?: string; // ISO DateTime
   claimsOverrideBy?: string;
+  photos?: CasePhoto[];
   createdAt: string; // ISO DateTime
   updatedAt: string; // ISO DateTime
 }
@@ -118,6 +131,7 @@ export interface Estimate {
   partsSummary: EstimatePartsSummary;
   warnings: string[];
   confidenceScore: number;
+  photos?: CasePhoto[];
 }
 
 export interface Claim {
@@ -137,6 +151,7 @@ export interface Claim {
   requiredApprovals: string[];
   notes?: string;
   estimate?: Estimate;
+  photos?: CasePhoto[];
   createdAt: string; // ISO DateTime
   updatedAt: string; // ISO DateTime
 }

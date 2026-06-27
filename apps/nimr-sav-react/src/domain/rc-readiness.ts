@@ -18,9 +18,9 @@ import {
   validateStableRoleAndStatusMatrix,
 } from './functional-freeze-readiness';
 
-// Historique : v24.0.0-alpha.16 a existé et a été validée techniquement mais a reçu un NO-GO terrain.
+// Historique : v24.0.0-alpha.17 a existé et a été validée techniquement mais a reçu un NO-GO terrain.
 // alpha.14 est un retour en phase alpha de développement.
-export const RC_READINESS_VERSION = 'v24.0.0-alpha.16' as const;
+export const RC_READINESS_VERSION = 'v24.0.0-alpha.17' as const;
 
 const OFFICIAL_RC_ROLES: readonly Role[] = [
   'reception',

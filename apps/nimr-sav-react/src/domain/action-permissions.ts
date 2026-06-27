@@ -46,7 +46,13 @@ export type Action =
   | 'manage_claims'
   | 'approve_claim_expert'
   | 'approve_claim_client'
-  | 'override_claims';
+  | 'override_claims'
+  | 'print_reception_sheet'
+  | 'print_workshop_sheet'
+  | 'print_quality_sheet'
+  | 'print_delivery_receipt'
+  | 'export_complete_case'
+  | 'manage_case_photos';
 
 /**
  * Checks if a specific role is allowed to perform a given action.
@@ -56,13 +62,17 @@ export function hasPermission(role: Role, action: Action): boolean {
     return true;
   }
 
-  // Lecture seule cannot modify anything (only view actions)
+  // Lecture seule cannot modify anything (only view/print preview actions)
   if (role === 'lecture-seule') {
     return (
       action === 'view_cases' ||
       action === 'view_tasks' ||
       action === 'view_readonly_console' ||
-      action === 'view_audit_summary'
+      action === 'view_audit_summary' ||
+      action === 'print_reception_sheet' ||
+      action === 'print_workshop_sheet' ||
+      action === 'print_quality_sheet' ||
+      action === 'print_delivery_receipt'
     );
   }
 
@@ -152,8 +162,23 @@ export function hasPermission(role: Role, action: Action): boolean {
     case 'override_claims':
       return false;
 
-    case 'admin_action':
-      return false; // Only Admin (handled above)
+    case 'print_reception_sheet':
+      return role === 'reception' || role === 'directeur-sav';
+
+    case 'print_workshop_sheet':
+      return role === 'chef-atelier' || role === 'directeur-sav';
+
+    case 'print_quality_sheet':
+      return role === 'qualite' || role === 'directeur-sav';
+
+    case 'print_delivery_receipt':
+      return role === 'reception' || role === 'livraison' || role === 'directeur-sav';
+
+    case 'export_complete_case':
+      return role === 'reception' || role === 'directeur-sav';
+
+    case 'manage_case_photos':
+      return role === 'reception';
 
     default:
       return false;

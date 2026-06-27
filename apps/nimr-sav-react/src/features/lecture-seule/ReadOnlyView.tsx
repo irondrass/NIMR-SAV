@@ -9,6 +9,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { VersionBanner } from '@/components/VersionBanner';
 import { getRoleFieldGuidance } from '@/domain/ui-field-guidelines';
 import { getBlockingClaimsReasons } from '@/domain/claims';
+import { buildCompleteCaseSummary } from '@/domain/print-documents';
 
 interface ReadOnlyViewProps {
   user: User;
@@ -602,6 +603,27 @@ export const ReadOnlyView: React.FC<ReadOnlyViewProps> = ({ user }) => {
                   </div>
                 </div>
               )}
+
+              {/* Documents Preview Section */}
+              <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                <h3 style={{ fontSize: '0.95rem', color: '#3b82f6', marginBottom: '0.5rem' }}>
+                  📄 Documents Consultables
+                </h3>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <button
+                    onClick={() => {
+                      if (typeof window !== 'undefined') {
+                        const html = buildCompleteCaseSummary(selectedCase);
+                        const w = window.open('', '_blank');
+                        if (w) { w.document.write(html); w.document.close(); }
+                      }
+                    }}
+                    style={{ padding: '0.35rem 0.7rem', background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.3)', borderRadius: '4px', color: '#93c5fd', fontSize: '0.8rem', cursor: 'pointer' }}
+                  >
+                    🔍 Résumé complet dossier
+                  </button>
+                </div>
+              </div>
 
               {/* Logs section */}
               {caseLogs.length > 0 && (

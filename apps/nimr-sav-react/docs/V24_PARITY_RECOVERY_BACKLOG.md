@@ -3,7 +3,7 @@
 Ce backlog détaille la feuille de route (roadmap) découpée en lots de développement pour ramener la nouvelle application React à parité fonctionnelle stricte avec l'ancienne version pilote stable (v23.2.6).
 
 > [!IMPORTANT]
-> **Notes sur la v24.0.0-alpha.16 :**
+> **Notes sur la v24.0.0-alpha.17 :**
 > - Le lot **alpha.15** couvre uniquement multi-sinistres / claims / accords expert & client.
 > - La version alpha.15 **n'est pas une RC** (Release Candidate) et **n'est pas destinée à la production** (le pilote stable reste la v23.2.6).
 > - Le lot **alpha.14** reste le lot dédié au planning avancé et Gantt.

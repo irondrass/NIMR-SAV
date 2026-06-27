@@ -3,6 +3,8 @@ import type { User } from '@/types';
 import { useSavCases } from '@/state/useSavCases';
 import { Button } from '@/components/ui/Button';
 import { normalizeQcChecklist } from '@/domain/qc-rules';
+import { buildQualityCheckSheet } from '@/domain/print-documents';
+import { hasPermission } from '@/domain/action-permissions';
 import { StatusBadge } from '@/components/StatusBadge';
 import { PriorityBadge } from '@/components/PriorityBadge';
 import { EmptyState } from '@/components/EmptyState';
@@ -21,6 +23,7 @@ export const QCView: React.FC<QCViewProps> = ({ user }) => {
     approveQualityCheck,
     rejectQualityCheck,
     sendQualityCaseToRework,
+    recordPrintAction,
   } = useSavCases();
 
   // Pick a simulated QC user if the logged in user doesn't have QC permissions
@@ -49,6 +52,20 @@ export const QCView: React.FC<QCViewProps> = ({ user }) => {
   const selectedCase = useMemo(() => {
     return qcCases.find((c) => c.id === selectedCaseId) || null;
   }, [qcCases, selectedCaseId]);
+
+  const handlePrintQualityCheckSheet = () => {
+    if (!selectedCase) return;
+    const html = buildQualityCheckSheet(selectedCase);
+    recordPrintAction(selectedCase.id, 'quality_check_sheet', actor);
+    if (typeof window !== 'undefined') {
+      const w = window.open('', '_blank');
+      if (w) {
+        w.document.write(html);
+        w.document.close();
+        w.print();
+      }
+    }
+  };
 
   const [rejectionReason, setRejectionReason] = useState('');
   const [reworkReason, setReworkReason] = useState('');
@@ -233,9 +250,16 @@ export const QCView: React.FC<QCViewProps> = ({ user }) => {
                       Client : <strong>{selectedCase.clientName}</strong> | Tél : <strong>{selectedCase.telephone}</strong>
                     </p>
                   </div>
-                  <div style={{ textAlign: 'right' }}>
-                    <StatusBadge status={selectedCase.status} />
-                    <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.8rem', color: '#71717a' }}>
+                  <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.5rem' }}>
+                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                      <StatusBadge status={selectedCase.status} />
+                      {hasPermission(user.role, 'print_quality_sheet') && (
+                        <Button size="sm" onClick={handlePrintQualityCheckSheet}>
+                          🖨️ Fiche Qualité
+                        </Button>
+                      )}
+                    </div>
+                    <p style={{ margin: 0, fontSize: '0.8rem', color: '#71717a' }}>
                       Reçu le : {new Date(selectedCase.receptionDate).toLocaleString()}
                     </p>
                   </div>

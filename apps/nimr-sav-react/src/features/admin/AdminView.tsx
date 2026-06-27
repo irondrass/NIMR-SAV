@@ -402,6 +402,33 @@ export const AdminView: React.FC<AdminViewProps> = ({ user }) => {
                 ))
               )}
             </div>
+
+            {/* Print/Export Timeline */}
+            {(() => {
+              const printExportLogs = logs.filter((l) =>
+                ['print_reception_sheet', 'print_workshop_sheet', 'print_quality_sheet', 'print_delivery_receipt', 'export_complete_case', 'export_zip'].some(
+                  (a) => l.action === a || (l.details && l.details.includes(a))
+                )
+              );
+              if (printExportLogs.length === 0) return null;
+              return (
+                <div style={{ marginTop: '1rem' }}>
+                  <h3 style={{ fontSize: '0.85rem', fontWeight: 600, color: '#a1a1aa', margin: '0 0 0.5rem 0' }}>
+                    🖨️ Timeline Impressions &amp; Exports
+                  </h3>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', maxHeight: '150px', overflowY: 'auto' }}>
+                    {printExportLogs.slice(0, 20).map((log) => (
+                      <div key={log.id} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', fontSize: '0.75rem', padding: '0.3rem 0.5rem', background: 'rgba(59,130,246,0.05)', borderLeft: '2px solid #3b82f6', borderRadius: '2px' }}>
+                        <span style={{ color: '#71717a', minWidth: '80px' }}>{new Date(log.timestamp).toLocaleTimeString()}</span>
+                        <span style={{ color: '#e4e4e7' }}>{log.action}</span>
+                        <span style={{ color: '#a1a1aa', flexGrow: 1 }}>{log.details}</span>
+                        <span style={{ color: '#71717a' }}>{log.userId}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
 
           {/* Bypass Claims Section */}

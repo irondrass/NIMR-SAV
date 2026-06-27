@@ -11,6 +11,7 @@ import { StatusBadge } from '@/components/StatusBadge';
 import { PriorityBadge } from '@/components/PriorityBadge';
 import { VersionBanner } from '@/components/VersionBanner';
 import { getRoleFieldGuidance, getStatusDisplay } from '@/domain/ui-field-guidelines';
+import { buildWorkshopSheet } from '@/domain/print-documents';
 
 // Advanced planning imports
 import { GanttChart } from '@/components/GanttChart';
@@ -38,10 +39,25 @@ export const PlanningView: React.FC<PlanningViewProps> = ({ user }) => {
     planWorkshopTask,
     transitionWorkshopCase,
     regenerateWorkshopTasksFromClaimEstimate,
+    recordPrintAction,
   } = useSavCases();
 
   // Selected case for planning/modifications
   const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
+
+  const handlePrintWorkshopSheet = () => {
+    if (!selectedCase) return;
+    const html = buildWorkshopSheet(selectedCase);
+    recordPrintAction(selectedCase.id, 'workshop_sheet', user);
+    if (typeof window !== 'undefined') {
+      const w = window.open('', '_blank');
+      if (w) {
+        w.document.write(html);
+        w.document.close();
+        w.print();
+      }
+    }
+  };
 
   // Planning form fields (for the selected case)
   const [bay, setBay] = useState('');
@@ -592,7 +608,14 @@ export const PlanningView: React.FC<PlanningViewProps> = ({ user }) => {
           ) : (
             <>
               <div>
-                <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 600 }}>Détail : {selectedCase.immatriculation}</h2>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 600 }}>Détail : {selectedCase.immatriculation}</h2>
+                  {hasPermission(user.role, 'print_workshop_sheet') && (
+                    <Button size="sm" onClick={handlePrintWorkshopSheet}>
+                      🖨️ Fiche Atelier
+                    </Button>
+                  )}
+                </div>
                 <div style={{ margin: '0.25rem 0 0', color: '#888', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                   <span>ID: {selectedCase.id}</span>
                   <span>|</span>

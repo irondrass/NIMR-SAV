@@ -485,7 +485,7 @@ async function buildQuickEstimateCreationDraft(file, form) {
     claimType,
   });
   if (!parsedBase.laborLines.length) {
-    throw new Error("Aucune ligne de main-d'œuvre détectée dans le devis importé.");
+    notifyUser("Aucune ligne de main-d’œuvre détectée dans le devis PDF. Vous pourrez ajouter des tâches manuellement.", "warning");
   }
   const metadata = inferEstimateCreationMetadata(parsedBase, extracted);
   return {

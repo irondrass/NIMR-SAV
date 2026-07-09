@@ -2532,11 +2532,16 @@ function renderCaseDetail() {
   updateVehicleImportStatus(vehicleRecords.length ? `${vehicleRecords.length} véhicules chargés` : "Importez la base véhicules pour chercher par VIN");
   setupCaseDetailTabs(detail, item);
   updateCaseHeader(detail, item);
-  $("[data-field='status']", detail).textContent = statusLabels[getCaseStatus(item)];
-  $("[data-field='created']", detail).textContent = `Créé le ${formatDate(item.createdAt)}`;
-  $("[data-field='expert-state']", detail).innerHTML = item.expertName
-    ? `<span class="tag ok">Expert renseigné</span>`
-    : `<span class="tag warn">À compléter</span>`;
+  const statusEl = $("[data-field='status']", detail);
+  if (statusEl) statusEl.textContent = statusLabels[getCaseStatus(item)];
+  const createdEl = $("[data-field='created']", detail);
+  if (createdEl) createdEl.textContent = `Créé le ${formatDate(item.createdAt)}`;
+  const expertStateEl = $("[data-field='expert-state']", detail);
+  if (expertStateEl) {
+    expertStateEl.innerHTML = item.expertName
+      ? `<span class="tag ok">Expert renseigné</span>`
+      : `<span class="tag warn">À compléter</span>`;
+  }
   const canEditCase = canRenderAction("case.edit", { item }) && !isCaseReadonlyArchive(item);
 
   $$("[data-input]", detail).forEach((input) => {
@@ -2683,7 +2688,7 @@ function renderCaseDetail() {
     }
   }
 
-  $("#photo-input", detail).addEventListener("change", (event) => handlePhotos(event, item, $("#photo-category", detail)?.value));
+  $("#photo-input", detail)?.addEventListener("change", (event) => handlePhotos(event, item, $("#photo-category", detail)?.value));
   $("#claim-form", detail)?.addEventListener("submit", (event) => handleClaimSubmit(event, item));
   $("#supplement-form", detail)?.addEventListener("submit", (event) => handleSupplementSubmit(event, item));
   $("#print-supplement-orders", detail)?.addEventListener("click", () => printSupplementWorkOrders(item));
@@ -2693,17 +2698,19 @@ function renderCaseDetail() {
     });
   });
   const proposalButton = $("#generate-proposals", detail);
-  proposalButton.addEventListener("click", () => {
-    const permissionGuard = guardAppointmentSchedule(item);
-    if (!permissionGuard.ok) return;
-    const issues = getBusinessRuleIssues(item, "appointment");
-    if (issues.length) {
-      notifyUser(issues.join("\n"));
-      return;
-    }
-    generatedProposals[item.id] = generateAppointmentOptions(item);
-    renderCaseDetail();
-  });
+  if (proposalButton) {
+    proposalButton.addEventListener("click", () => {
+      const permissionGuard = guardAppointmentSchedule(item);
+      if (!permissionGuard.ok) return;
+      const issues = getBusinessRuleIssues(item, "appointment");
+      if (issues.length) {
+        notifyUser(issues.join("\n"));
+        return;
+      }
+      generatedProposals[item.id] = generateAppointmentOptions(item);
+      renderCaseDetail();
+    });
+  }
   $$("[data-action-flag]", detail).forEach((button) => {
     const flag = button.dataset.actionFlag;
     button.addEventListener("click", async () => {
@@ -2742,7 +2749,7 @@ function renderCaseDetail() {
       render();
     });
   });
-  $("#print-repair-order", detail).addEventListener("click", () => printRepairOrder(item));
+  $("#print-repair-order", detail)?.addEventListener("click", () => printRepairOrder(item));
   $("#print-technician-work-orders", detail)?.addEventListener("click", () => printTechnicianWorkOrders(item));
   $("#export-case-folder", detail)?.addEventListener("click", () => exportCaseFolder(item));
   $("#export-client-folder", detail)?.addEventListener("click", () => exportClientFolder(item));
@@ -3637,6 +3644,7 @@ function missingSchedulingRoles(item) {
 
 function renderPhotos(root, item) {
   const photos = $("[data-field='photos']", root);
+  if (!photos) return;
   photos.innerHTML = item.photos.length
     ? item.photos
         .map(
@@ -4252,6 +4260,7 @@ function renderDurations(root, item) {
   renderImportedLaborReview(root, item);
   renderValidatedAppointmentPlan(root, item);
   const durationGrid = $("[data-field='durations']", root);
+  if (!durationGrid) return;
   item.stepServiceTypes = normalizeStepServiceTypes(item.stepServiceTypes);
   item.stepPreferredResources = normalizeStepPreferredResources(item.stepPreferredResources);
   const canEditPlanning = canRenderAction("planning.edit", { item }) && !isCaseReadonlyArchive(item);
@@ -4642,6 +4651,7 @@ function renderEstimateImportPreview(root, item) {
 
 function renderProposals(root, item) {
   const target = $("[data-field='proposals']", root);
+  if (!target) return;
   const appointmentOptions = normalizeAppointmentOptions(generatedProposals[item.id]);
   if (!appointmentOptions) {
     target.innerHTML = `<div class="empty-inline">Cliquez sur Calculer RDV pour obtenir le premier créneau disponible.</div>`;
@@ -4892,6 +4902,7 @@ function renderAssignments(root, item) {
 
 function renderQualityChecklist(root, item) {
   const target = $("[data-field='quality-checklist']", root);
+  if (!target) return;
   target.innerHTML = `
     <div class="section-heading compact-heading">
       <h2>Checklist qualité</h2>

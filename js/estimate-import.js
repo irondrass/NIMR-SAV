@@ -95,7 +95,7 @@ async function handleClaimEstimateImportFile(event, item, claimId, root) {
       claimType: claim.type || "assurance",
     });
     if (!parsed.laborLines.length) {
-      throw new Error("Aucune ligne de main-d'œuvre détectée pour cet ordre.");
+      notifyUser("Aucune ligne de main-d’œuvre détectée dans le devis PDF. Vous pouvez ajouter des tâches manuellement.", "warning");
     }
     const preview = prepareEstimateImportPreview(parsed, item);
     preview.sourceFile = {
@@ -170,6 +170,7 @@ function parseEstimateText(text, options = {}) {
           phase: distribution.phase,
           operation: distribution.operation,
           laborHours: distribution.laborHours,
+          toConfirm: Boolean(result.toConfirm),
         });
       });
     } else {
@@ -272,6 +273,28 @@ function classifyLaborLine(line, options = {}) {
   }
   const hoursInfo = pricingInfo.hoursInfo || extractLaborHours(text);
   if (!hoursInfo || hoursInfo.hours <= 0) {
+    if (pricingInfo.matches.length > 0 && hasLaborKeyword(normalized)) {
+      const operation = sanitizeEstimateOperation(text.slice(0, hoursInfo?.index) || text);
+      let distributions = distributeLaborHours(operation, 0.5, options);
+      if (!distributions.length) {
+        const defaultPhase = options.claimType === "vidange" || /\b(VIDANGE|ENTRETIEN|FILTRE)\b/.test(normalized)
+          ? "oilService"
+          : options.claimType === "electrical_client"
+          ? "electrical"
+          : options.claimType === "mechanical_client"
+          ? "mechanical"
+          : "body";
+        distributions = [makeDistribution(defaultPhase, operation, 0.5)];
+      }
+      return {
+        type: "labor",
+        text,
+        operation,
+        hours: 0.5,
+        distributions,
+        toConfirm: true,
+      };
+    }
     return hasLaborKeyword(normalized) ? { type: "ignored", reason: "Quantité MO introuvable" } : null;
   }
   const operation = sanitizeEstimateOperation(text.slice(0, hoursInfo.index) || text);
@@ -596,6 +619,7 @@ function buildOriginalEstimateLines(preview) {
     operation: line.operation || line.text || "Opération devis",
     laborHours: roundPlanningHours(line.hours || 0),
     rawText: line.text || line.operation || "",
+    toConfirm: Boolean(line.toConfirm),
     allocations: (line.distributions || []).map((distribution) => ({
       phase: distribution.phase,
       operation: distribution.operation || line.operation || "",

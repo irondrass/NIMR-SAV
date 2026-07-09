@@ -15,7 +15,7 @@ const scriptFiles = [
 ];
 
 function elementStub() {
-  return {
+  const stub = {
     value: '',
     textContent: '',
     innerHTML: '',
@@ -37,11 +37,16 @@ function elementStub() {
     querySelectorAll: () => [],
     closest: () => elementStub(),
     children: [],
+    cloneNode() { return elementStub(); },
+    replaceChild() {},
   };
+  stub.parentNode = stub;
+  return stub;
 }
 
 const context = {
   console,
+  elementStub,
   TextEncoder,
   TextDecoder,
   Blob,
@@ -652,6 +657,75 @@ test('end-to-end workflow validation: estimate import to archive', () => {
   assert.equal(result.closedStatus, 'cloture_atelier');
   assert.equal(result.archiveResultOk, true);
   assert.equal(result.archivedStatus, 'archive');
+});
+
+test('case details rendering and action validation works without crashing after legacy UI cleanup', () => {
+  const result = runJson(`(() => {
+    // 1. Setup mock environment with a case
+    state = normalizeState({
+      resources: [],
+      cases: [],
+      bookings: []
+    });
+
+    const item = normalizeCase({
+      id: 'crash-test-case',
+      clientName: 'Test UI Safety',
+      plate: '123TU4567',
+      claims: []
+    });
+    state.cases.push(item);
+    activeCaseId = item.id;
+    getActiveCase = () => item;
+
+    // 2. Mock a DOM root that mimics index.html after legacy cleanup
+    // Where legacy fields (like expert-state, photo-input, etc.) are absent.
+    const mockDetail = {
+      innerHTML: '',
+      replaceChildren() {},
+      querySelector(selector) {
+        if (selector === "[data-field='status']") return { textContent: '' };
+        if (selector === "[data-field='created']") return { textContent: '' };
+        // These are legacy and absent in the DOM
+        if (selector === "[data-field='expert-state']") return null;
+        if (selector === "#photo-input") return null;
+        if (selector === "#print-repair-order") return null;
+        if (selector === "[data-field='photos']") return null;
+        if (selector === "[data-field='quality-checklist']") return null;
+        return elementStub();
+      },
+      querySelectorAll() {
+        return [];
+      }
+    };
+
+    // 3. Executing renderCaseDetail under mock layout - should not throw/crash
+    let renderCrashed = false;
+    let errorMessage = "";
+    try {
+      // Temporarily override document.querySelector to return our mocks
+      const originalQuerySelector = document.querySelector;
+      document.querySelector = (selector) => {
+        if (selector === '#case-detail') return mockDetail;
+        if (selector === '#case-detail-template') return { content: { cloneNode() { return mockDetail; } } };
+        return mockDetail.querySelector(selector);
+      };
+
+      renderCaseDetail();
+
+      document.querySelector = originalQuerySelector;
+    } catch (e) {
+      renderCrashed = true;
+      errorMessage = e.message;
+    }
+
+    return JSON.stringify({
+      renderCrashed,
+      errorMessage
+    });
+  })()`);
+
+  assert.equal(result.renderCrashed, false, `renderCaseDetail should not crash: ${result.errorMessage}`);
 });
 
 console.log(`Simplified NIMR SAV workflow regression OK (${passed} checks)`);

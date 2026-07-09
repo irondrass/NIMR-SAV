@@ -728,4 +728,92 @@ test('case details rendering and action validation works without crashing after 
   assert.equal(result.renderCrashed, false, `renderCaseDetail should not crash: ${result.errorMessage}`);
 });
 
+test('PDF estimate import fallback triggers when no labor lines are matched, enabling planning', () => {
+  const result = runJson(`(() => {
+    // 1. Setup mock environment
+    state = normalizeState({
+      resources: [
+        { id: 'mecanicien-1', name: 'Mecanisien', role: 'mecanicien', active: true },
+        { id: 'pont-mecanique-1', name: 'Pont', role: 'pont_mecanique', active: true }
+      ],
+      cases: [],
+      bookings: []
+    });
+
+    // 2. Parse a text description that contains zero labor operations but valid metadata
+    const parsed = parseEstimateText("DEVIS ESTIMATIF ATELIER\\nClient: Khaled\\nImmat: 123TU4567\\nREFERENCE: DV-999\\nPIECE DETACHEE 500 TND");
+
+    // Check parsed properties
+    const hasOriginalFallback = parsed.fallbackUsed;
+    const originalHours = parsed.detectedHours;
+    const originalLaborLinesLength = parsed.laborLines.length;
+
+    // 3. Create a case from this preview
+    const item = normalizeCase({
+      id: 'fallback-case-test',
+      clientName: parsed.info?.clientName || 'Khaled',
+      plate: parsed.info?.plate || '123TU4567',
+      durations: Object.fromEntries(DURATIONS.map(([key]) => [key, 0])),
+      claims: []
+    });
+    state.cases.push(item);
+
+    const firstClaim = normalizeRepairClaim({
+      id: 'claim-1',
+      number: 'OT-001',
+      title: 'Intervention',
+      type: 'mechanical_client',
+      status: 'approved',
+      includeInPlanning: true,
+      expertApproved: true,
+      clientApproved: true
+    });
+    item.claims = [firstClaim];
+
+    const preview = prepareEstimateImportPreview(parsed, item);
+    applyEstimateImportToClaim(item, firstClaim, preview, { silent: true });
+
+    // 4. Validate that fallback task is present
+    const hasClaimLabor = hasKnownLabor(item);
+    const totalHours = totalDurationHours(item);
+    const hasFallbackTask = firstClaim.estimate?.fallbackUsed;
+    const fallbackOriginalLine = firstClaim.estimate?.originalLines?.find(line => line.source === 'pdf_fallback');
+    const fallbackDuration = fallbackOriginalLine?.laborHours || 0;
+    const isToConfirm = Boolean(fallbackOriginalLine?.toConfirm);
+
+    // 5. Test Chef validation is possible
+    const validationIssues = getBusinessRuleIssues(item, 'validate_chef_atelier');
+    const chefValidationResult = applyWorkflowAction(item, 'validate_chef_atelier');
+
+    // 6. Test planning is unlocked and calculate RDV has no issues
+    const planningIssues = getBusinessRuleIssues(item, 'appointment');
+
+    return JSON.stringify({
+      hasOriginalFallback,
+      originalHours,
+      originalLaborLinesLength,
+      hasClaimLabor,
+      totalHours,
+      hasFallbackTask,
+      fallbackDuration,
+      isToConfirm,
+      validationIssuesLength: validationIssues.length,
+      chefValidated: Boolean(item.flags?.chefValidated),
+      planningIssuesLength: planningIssues.length
+    });
+  })()`);
+
+  assert.equal(result.hasOriginalFallback, true, 'parsed fallbackUsed should be true');
+  assert.equal(result.originalHours, 0.5, 'detected hours should fallback to 0.5');
+  assert.equal(result.originalLaborLinesLength, 1, 'should have 1 fallback labor line');
+  assert.equal(result.hasClaimLabor, true, 'case should report having known labor');
+  assert.equal(result.totalHours, 0.75, 'total durations should sum up to 0.75h (including 0.25h finalCheck)');
+  assert.equal(result.hasFallbackTask, true, 'claim estimate should set fallbackUsed');
+  assert.equal(result.fallbackDuration, 0.5, 'fallback task duration must be 0.5h');
+  assert.equal(result.isToConfirm, true, 'fallback task must have toConfirm flag');
+  assert.equal(result.validationIssuesLength, 0, 'should have no chef validation issues');
+  assert.equal(result.chefValidated, true, 'should successfully validate chef atelier');
+  assert.equal(result.planningIssuesLength, 0, 'should have no planning issues after chef validation');
+});
+
 console.log(`Simplified NIMR SAV workflow regression OK (${passed} checks)`);

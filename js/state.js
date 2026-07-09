@@ -2380,7 +2380,13 @@ function recomputeCaseDurationsFromClaims(item) {
 
 function getClaimPlanningLaborLines(claim) {
   const applied = claim?.estimate?.lines || [];
-  if (applied.length) return applied;
+  if (applied.length) {
+    return applied.map(line => ({
+      ...line,
+      toConfirm: Boolean(line.toConfirm || claim?.estimate?.originalLines?.find(ol => ol.operation === line.operation || ol.rawText === line.operation)?.toConfirm),
+      source: line.source || claim?.estimate?.originalLines?.find(ol => ol.operation === line.operation || ol.rawText === line.operation)?.source || ""
+    }));
+  }
   return (claim?.estimate?.originalLines || []).flatMap((line) => {
     if (Array.isArray(line.allocations) && line.allocations.length) {
       return line.allocations.map((allocation) => ({
@@ -2388,10 +2394,19 @@ function getClaimPlanningLaborLines(claim) {
         phase: allocation.phase,
         operation: allocation.operation || line.operation,
         laborHours: allocation.laborHours,
+        toConfirm: Boolean(line.toConfirm),
+        source: line.source || "",
       }));
     }
     const phase = line.phase || line.selectedPhases?.[0] || "body";
-    return [{ id: line.id, phase, operation: line.operation || line.rawText || "", laborHours: line.laborHours }];
+    return [{
+      id: line.id,
+      phase,
+      operation: line.operation || line.rawText || "",
+      laborHours: line.laborHours,
+      toConfirm: Boolean(line.toConfirm),
+      source: line.source || "",
+    }];
   });
 }
 
@@ -2463,32 +2478,34 @@ function normalizeExpertEstimate(estimate) {
     originalLines: Array.isArray(estimate.originalLines) ? estimate.originalLines.map(normalizeExpertEstimateOriginalLine).filter(Boolean) : [],
     parts: Array.isArray(estimate.parts) ? estimate.parts.map(normalizeExpertEstimatePart).filter(Boolean) : [],
     sourceFile: normalizeEstimateSourceFile(estimate.sourceFile),
+    fallbackUsed: Boolean(estimate.fallbackUsed),
   };
 }
 
 function normalizeExpertEstimatePart(part) {
   part = part && typeof part === "object" ? part : {};
-  const designation = String(part.designation || part.name || part.rawText || "").trim();
-  if (!designation) return null;
+  const quantity = parseLocalizedDecimal(part.quantity ?? 0);
+  const unitPrice = parseLocalizedDecimal(part.unitPrice ?? 0);
+  const amount = parseLocalizedDecimal(part.amount ?? 0);
   return {
     id: part.id || uid("estimate-part"),
-    designation,
-    quantity: Math.max(0, parseLocalizedDecimal(part.quantity ?? 1) || 0),
-    unitPrice: Math.max(0, parseLocalizedDecimal(part.unitPrice ?? 0) || 0),
-    amount: Math.max(0, parseLocalizedDecimal(part.amount ?? 0) || 0),
-    rawText: part.rawText || designation,
+    designation: part.designation || "",
+    quantity: roundHours(quantity),
+    unitPrice: roundHours(unitPrice),
+    amount: roundHours(amount),
+    rawText: part.rawText || "",
   };
 }
 
-function normalizeEstimateSourceFile(sourceFile) {
-  if (!sourceFile || typeof sourceFile !== "object") return null;
+function normalizeEstimateSourceFile(file) {
+  if (!file || typeof file !== "object") return null;
   return {
-    id: sourceFile.id || uid("estimate-doc"),
-    name: sourceFile.name || "devis-original.pdf",
-    type: sourceFile.type || "application/octet-stream",
-    size: Number(sourceFile.size || 0),
-    category: sourceFile.category || "estimate_original",
-    createdAt: sourceFile.createdAt || new Date().toISOString(),
+    id: file.id || "",
+    name: file.name || "",
+    type: file.type || "",
+    size: Number(file.size || 0),
+    category: file.category || "claim_estimate_original",
+    createdAt: file.createdAt || new Date().toISOString(),
   };
 }
 
@@ -2501,6 +2518,8 @@ function normalizeExpertEstimateLine(line) {
     phase,
     operation: line.operation || "",
     laborHours: roundHours(laborHours),
+    toConfirm: Boolean(line.toConfirm),
+    source: line.source || "",
   };
 }
 
@@ -2528,6 +2547,8 @@ function normalizeExpertEstimateOriginalLine(line) {
     pieceKind: normalizedPieceKind,
     paintFaces: normalizedPaintFaces,
     paintGroup: line.paintGroup || "",
+    toConfirm: Boolean(line.toConfirm),
+    source: line.source || "",
   };
 }
 

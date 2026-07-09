@@ -1979,6 +1979,20 @@ function renderClaimCard(claim, index) {
   const partRows = partsLines.length ? partsLines.slice(0, 20).map((part) => `
     <li><strong>${escapeHtml(part.designation || 'Article devis')}</strong><span>Qté ${formatLocalizedDecimal(part.quantity || 0)}${part.amount ? ` · ${formatLocalizedDecimal(part.amount)}` : ''}</span></li>
   `).join('') : `<li class="muted">Aucune pièce/article importé.</li>`;
+  const diagnosticHtml = claim.estimate ? `
+    <div class="import-diagnostic-box" style="margin: 15px 0; padding: 12px; border-radius: 6px; background-color: #f8fafc; border: 1px solid #e2e8f0; font-size: 0.9em; display: flex; flex-direction: column; gap: 6px;">
+      <strong style="color: #475569;">Diagnostic import devis :</strong>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px;">
+        <span>• PDF lu : <strong>${claim.estimate.sourceFile?.name?.toLowerCase().endsWith('.pdf') ? 'Oui' : 'Non'}</strong></span>
+        <span>• Texte extrait : <strong>Oui</strong></span>
+        <span>• Lignes MO reconnues : <strong>${originalLines.filter(line => line.source !== 'pdf_fallback').length}</strong></span>
+        <span>• Tâches atelier créées : <strong>${estimateLines.length}</strong></span>
+        <span>• Durée totale : <strong>${formatLocalizedDecimal(total)} h</strong></span>
+        <span>• Fallback utilisé : <strong>${claim.estimate.fallbackUsed ? 'Oui' : 'Non'}</strong></span>
+      </div>
+    </div>
+  ` : '';
+
   return `
     <article class="claim-card">
       <div class="claim-card-head">
@@ -1991,6 +2005,7 @@ function renderClaimCard(claim, index) {
           ${isClientOnlyRepairClaim(claim) ? "Importer devis client" : "Importer devis assurance"}
         </label>
       </div>
+      ${diagnosticHtml}
       <div class="form-grid compact-claim-grid">
         <label>Libellé<input data-claim-id="${escapeHtml(claim.id)}" data-claim-field="title" value="${escapeHtml(claim.title || '')}" /></label>
         <label>Zone<input data-claim-id="${escapeHtml(claim.id)}" data-claim-field="vehicleArea" value="${escapeHtml(claim.vehicleArea || '')}" /></label>
@@ -4739,12 +4754,21 @@ function renderAssignments(root, item) {
     });
 
     const totalHours = laborLines.reduce((sum, line) => sum + Number(line.laborHours || 0), 0);
+    const hasFallback = getWorkflowClaims(item).some((claim) => claim.estimate?.fallbackUsed);
 
     let html = `
       <div style="margin-bottom: 15px; font-weight: bold; font-size: 1.1em;">
         Tâches proposées depuis le devis (Total: ${formatLocalizedDecimal(totalHours)} h)
       </div>
     `;
+
+    if (hasFallback) {
+      html += `
+        <div class="devis-fallback-alert" style="margin-bottom: 20px; padding: 15px; border-radius: 8px; background-color: #fffbeb; border: 1px solid #fcd34d; color: #92400e; font-weight: 500;">
+          Le devis PDF a été importé, mais aucune main-d’œuvre n’a été reconnue automatiquement. Une tâche atelier provisoire a été créée. Merci de la corriger avant validation.
+        </div>
+      `;
+    }
 
     if (laborLines.length === 0) {
       html += `
@@ -4760,12 +4784,13 @@ function renderAssignments(root, item) {
             const service = getDurationLabel(line.phase);
             const role = ROLE_LABELS[template.role] || "Non précisé";
             const equipment = ROLE_LABELS[template.equipmentRole] || "Non requis";
+            const badgeHtml = line.toConfirm ? ` <span class="tag warn" style="background-color: #fef3c7; color: #92400e; border: 1px solid #fde68a; margin-left: 8px; padding: 2px 6px; border-radius: 4px; font-size: 0.8em; font-weight: bold;">Durée à confirmer</span>` : "";
             return `
               <article class="assignment-card proposed-task-card" style="border-left: 4px solid ${template.color || '#ccc'}; display: flex; justify-content: space-between; align-items: center;">
                 <div>
                   <strong>${escapeHtml(line.operation || 'Opération')}</strong>
                   <p class="muted" style="margin: 4px 0;">Service: ${escapeHtml(service)} · Rôle: ${escapeHtml(role)} · Recommandé: ${escapeHtml(equipment)}</p>
-                  <p class="muted" style="margin: 4px 0;">Statut: <span class="tag warn">À valider Chef Atelier</span> · Durée: <strong>${formatLocalizedDecimal(line.laborHours)} h</strong></p>
+                  <p class="muted" style="margin: 4px 0;">Statut: <span class="tag warn">À valider Chef Atelier</span> · Durée: <strong>${formatLocalizedDecimal(line.laborHours)} h</strong>${badgeHtml}</p>
                 </div>
                 <button class="icon-button" type="button" title="Supprimer la tâche" aria-label="Supprimer la tâche" data-remove-proposed-line="${escapeAttr(line.id)}" data-claim-id="${escapeAttr(line.claimId)}" style="font-size: 20px; font-weight: bold; background: none; border: none; color: #ef4444; cursor: pointer; padding: 5px 10px;">×</button>
               </article>

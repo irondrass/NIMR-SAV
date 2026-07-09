@@ -103,6 +103,7 @@
   }
 
   function shouldKeepOriginalLaborLine(line) {
+    if (line?.source === "pdf_fallback" || line?.toConfirm || String(line?.operation || line?.text || "").includes("Travaux atelier")) return true;
     if (line?.manual) return roundPlanningHours(Number(line?.laborHours ?? line?.hours ?? 0)) > 0;
     const operation = line?.operation || line?.rawText || line?.text || '';
     const normalized = normalizeEstimateOperationText(operation);
@@ -297,6 +298,8 @@
       pieceKind: line.pieceKind || inferPieceKind(line.operation || line.text || ''),
       paintFaces: line.paintFaces || inferPaintFaces(line.operation || line.text || '', line.pieceKind || inferPieceKind(line.operation || line.text || '')),
       paintGroup: line.paintGroup || inferPaintGroup(line.operation || line.text || ''),
+      toConfirm: Boolean(line.toConfirm),
+      source: line.source || '',
     })));
   }
 

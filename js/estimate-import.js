@@ -183,6 +183,36 @@ function parseEstimateText(text, options = {}) {
     }
   });
 
+  const fallbackUsed = laborLines.length === 0;
+  if (fallbackUsed) {
+    const fallbackLine = {
+      type: "labor",
+      text: "Travaux atelier à préciser",
+      operation: "Travaux atelier à préciser",
+      hours: 0.5,
+      toConfirm: true,
+      source: "pdf_fallback",
+      distributions: [
+        {
+          phase: "mechanical",
+          operation: "Travaux atelier à préciser",
+          laborHours: 0.5,
+        }
+      ]
+    };
+    laborLines.push(fallbackLine);
+    distributedLines.push({
+      id: uid("estimate-line"),
+      phase: "mechanical",
+      operation: "Travaux atelier à préciser",
+      laborHours: 0.5,
+      toConfirm: true,
+      source: "pdf_fallback"
+    });
+    allocations.mechanical = 0.5;
+    detectedHours = 0.5;
+  }
+
   return {
     fileName: options.fileName || "devis",
     sourceType: options.sourceType || "texte",
@@ -193,6 +223,7 @@ function parseEstimateText(text, options = {}) {
     ignoredLines,
     allocations,
     detectedHours: roundPlanningHours(detectedHours),
+    fallbackUsed,
   };
 }
 
@@ -568,6 +599,7 @@ async function applyEstimateImportToClaim(item, claim, preview, options = {}) {
           createdAt: preview.sourceFile.createdAt,
         }
       : claim.estimate?.sourceFile || null,
+    fallbackUsed: Boolean(preview.fallbackUsed),
   });
   claim.updatedAt = new Date().toISOString();
   if (preview.sourceFile?.blob && typeof saveDocumentRecord === "function") {

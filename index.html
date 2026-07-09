@@ -37,13 +37,13 @@
           <span class="save-status-indicator status-saved" id="save-status-indicator" aria-live="polite">Sauvegardé</span>
         </div>
         <nav class="sidebar-nav" aria-label="Navigation principale">
-          <button class="nav-button" type="button" data-tab="reception-workspace" style="display: none !important;">
+          <button class="nav-button" type="button" data-tab="reception-workspace" style="display: none !important;" hidden aria-hidden="true" tabindex="-1" data-legacy-ui>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>
-            Réception guidée
+            Ancien accueil
           </button>
           <button class="nav-button active" type="button" data-tab="dossiers" aria-current="page">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /></svg>
-            Dossier complet
+            Dossiers atelier
           </button>
           <button class="nav-button" type="button" data-tab="today">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 2v4M16 2v4M3 10h18" /><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M8 15h4M8 18h8" /></svg>
@@ -61,9 +61,9 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L4 17l3 3 5.3-5.3a4 4 0 0 0 5.4-5.4l-2.4 2.4-3-3 2.4-2.4Z"/><path d="m7 17 3 3"/></svg>
             Technicien
           </button>
-          <button class="nav-button" type="button" data-tab="qc-workspace" style="display: none !important;">
+          <button class="nav-button" type="button" data-tab="qc-workspace" style="display: none !important;" hidden aria-hidden="true" tabindex="-1" data-legacy-ui>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 12l2 2 4-4"/><path d="M21 12c0 4.97-4.03 9-9 9s-9-4.03-9-9 4.03-9 9-9c2.07 0 3.98.7 5.5 1.86"/><path d="M22 4L12 14l-3-3"/></svg>
-            Contr&#244;le Qualit&#233;
+            Ancien contr&#244;le
           </button>
           <button class="nav-button" type="button" data-tab="atelier">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -79,11 +79,11 @@
             <strong id="metric-active">0</strong>
           </article>
           <article class="metric">
-            <span>Accords en attente</span>
+            <span>Validations Chef</span>
             <strong id="metric-waiting">0</strong>
           </article>
           <article class="metric">
-            <span>Livraisons planifiées</span>
+            <span>Plannings atelier</span>
             <strong id="metric-deliveries">0</strong>
           </article>
           <article class="metric metric-split">
@@ -133,7 +133,7 @@
             <aside class="panel panel-list">
               <div class="panel-heading" style="display:flex; justify-content:space-between; align-items:center;">
                 <div>
-                  <h1>Réception guidée</h1>
+                  <h1>Ancien accueil</h1>
                   <p id="reception-cases-count">0 dossier</p>
                 </div>
                 <button class="primary-button" id="reception-new-dossier-btn" type="button" style="margin-left:auto; font-size:0.85rem; padding:6px 12px; display:flex; align-items:center; gap:6px;">
@@ -175,7 +175,7 @@
             <div class="panel-heading">
               <div>
                 <h1>Aujourd'hui atelier</h1>
-                <p>Réceptions, travaux, blocages, qualité et livraisons à traiter.</p>
+                <p>Tâches atelier, pauses, blocages et retards à traiter.</p>
               </div>
               <span class="status-pill" id="today-count-pill">0 dossier</span>
             </div>
@@ -188,8 +188,8 @@
             <aside class="panel panel-list">
               <div class="panel-heading">
                 <div>
-                  <h1>Dossier complet</h1>
-                  <p id="case-count">0 dossier en vue complète</p>
+                  <h1>Dossiers atelier</h1>
+                  <p id="case-count">0 dossier atelier</p>
                 </div>
                 <button class="icon-button" type="button" id="new-case-shortcut" title="Nouveau dossier" aria-label="Nouveau dossier">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
@@ -197,10 +197,10 @@
               </div>
               <div class="workflow-hint">
                 <div>
-                  <strong>Flux quotidien recommandé : Réception guidée</strong>
-                  <span>La Réception guidée accompagne les étapes terrain. Le Dossier complet sert aux corrections, imports avancés et contrôles détaillés.</span>
+                  <strong>Flux atelier : Devis PDF → Validation Chef → Tâches → Planning → Clôture</strong>
+                  <span>Importez le devis PDF, validez Chef Atelier, planifiez les tâches, suivez l’exécution technicien puis archivez.</span>
                 </div>
-                <button class="ghost-button" type="button" id="open-reception-workspace-from-dossiers">Ouvrir Réception guidée</button>
+                <button class="ghost-button" type="button" id="open-reception-workspace-from-dossiers" hidden aria-hidden="true" tabindex="-1" data-legacy-ui>Ancien raccourci</button>
               </div>
 
               <form class="quick-form" id="case-form">
@@ -252,7 +252,7 @@
                   Type de dossier
                   <select id="case-type-filter" aria-label="Filtrer par type de dossier">
                     <option value="all">Tous les types</option>
-                    <option value="assurance">Assurance / expert</option>
+                    <option value="assurance">Sinistre atelier</option>
                     <option value="client">Client direct / intervention SAV</option>
                     <option value="vidange">Vidange / entretien rapide</option>
                     <option value="mechanical_client">Réparation mécanique client</option>
@@ -304,7 +304,7 @@
                 Type de dossier
                 <select id="sav-dashboard-type-filter" aria-label="Filtrer le dashboard par type de dossier">
                   <option value="all">Tous les types</option>
-                  <option value="assurance">Assurance / expert</option>
+                  <option value="assurance">Sinistre atelier</option>
                   <option value="client">Client direct / intervention SAV</option>
                   <option value="vidange">Vidange / entretien rapide</option>
                   <option value="mechanical_client">Réparation mécanique client</option>
@@ -326,7 +326,7 @@
               <div class="section-heading compact-heading">
                 <div>
                   <h2>Alertes priorité Directeur SAV</h2>
-                  <span>Réceptions, livraisons, blocages et qualité à traiter.</span>
+                  <span>Validations Chef, planning, blocages et tâches atelier à traiter.</span>
                 </div>
               </div>
               <div class="pilotage-alerts" id="pilotage-alerts"></div>
@@ -427,7 +427,7 @@
                   <option value="cabine">Cabine peinture</option>
                   <option value="pont_vidange">Pont vidange</option>
                   <option value="pont_mecanique">Pont grands travaux mécaniques</option>
-                  <option value="controle">Contrôle qualité</option>
+                  <option value="controle">Contrôle final atelier</option>
                 </select>
                 <input name="location" placeholder="Emplacement" />
                 <label class="check-card">
@@ -466,9 +466,9 @@
                   <option value="admin">Admin technique</option>
                   <option value="chef_atelier">Chef atelier</option>
                   <option value="directeur_sav">Directeur SAV</option>
-                  <option value="reception">Réception</option>
+                  <option value="reception" hidden disabled data-legacy-ui>Ancien accueil</option>
                   <option value="technicien">Technicien</option>
-                  <option value="qualite">Qualité</option>
+                  <option value="qualite" hidden disabled data-legacy-ui>Ancien contrôle</option>
                   <option value="readonly">Lecture seule</option>
                 </select>
                 <input name="email" type="email" placeholder="Email (optionnel)" />
@@ -522,23 +522,23 @@
                 </article>
                 <article class="resource-card" style="padding: 12px; font-size: 0.85rem; display: block;">
                   <strong>Directeur SAV</strong>
-                  <p class="muted" style="margin: 4px 0 0;">Pilotage métier : dashboard performance SAV, dossiers, planning, KPI, exports, journal d'activité en consultation et override livraison si nécessaire. Pas d'accès aux actions techniques destructives.</p>
+                  <p class="muted" style="margin: 4px 0 0;">Pilotage métier : dashboard performance SAV, dossiers, planning, KPI, exports et journal d'activité en consultation. Pas d'accès aux actions techniques destructives.</p>
                 </article>
                 <article class="resource-card" style="padding: 12px; font-size: 0.85rem; display: block;">
                   <strong>Chef atelier</strong>
-                  <p class="muted" style="margin: 4px 0 0;">Supervision complète de la production, planification (Gantt), gestion des priorités et affectations, validation qualité et signature des overrides chef atelier.</p>
+                  <p class="muted" style="margin: 4px 0 0;">Supervision complète de la production, validation Chef Atelier, planification (Gantt), gestion des priorités, affectations et clôture atelier.</p>
                 </article>
                 <article class="resource-card" style="padding: 12px; font-size: 0.85rem; display: block;">
-                  <strong>Réception</strong>
-                  <p class="muted" style="margin: 4px 0 0;">Création et édition de dossiers, import de devis, planification de rendez-vous, réception de véhicules, livraison de véhicules et clôture opérationnelle.</p>
+                  <strong>Coordinateur atelier</strong>
+                  <p class="muted" style="margin: 4px 0 0;">Création et édition de dossiers, import de devis PDF, suivi planning et informations véhicule.</p>
                 </article>
                 <article class="resource-card" style="padding: 12px; font-size: 0.85rem; display: block;">
                   <strong>Technicien</strong>
                   <p class="muted" style="margin: 4px 0 0;">Démarrer, suspendre (pause), reprendre et terminer ses propres tâches rattachées à sa ressource technicien d'atelier.</p>
                 </article>
-                <article class="resource-card" style="padding: 12px; font-size: 0.85rem; display: block;">
-                  <strong>Qualité</strong>
-                  <p class="muted" style="margin: 4px 0 0;">Accéder aux listes de contrôle qualité, valider ou refuser les contrôles de fin de travaux.</p>
+                <article class="resource-card" style="padding: 12px; font-size: 0.85rem; display: none;" hidden data-legacy-ui>
+                  <strong>Ancien contrôle</strong>
+                  <p class="muted" style="margin: 4px 0 0;">Rôle hérité masqué dans le workflow atelier simplifié.</p>
                 </article>
                 <article class="resource-card" style="padding: 12px; font-size: 0.85rem; display: block;">
                   <strong>Lecture seule</strong>
@@ -842,18 +842,17 @@
       </div>
 
       <nav class="case-subnav" aria-label="Phases du dossier">
-        <button class="case-subtab active" type="button" data-case-tab="claims">👤 Infos & Devis</button>
-        <button class="case-subtab" type="button" data-case-tab="photos">📷 Photos</button>
-        <button class="case-subtab" type="button" data-case-tab="planning">📅 RDV & Planning</button>
-        <button class="case-subtab" type="button" data-case-tab="atelier">🛠️ Atelier & Compléments</button>
-        <button class="case-subtab" type="button" data-case-tab="livraison" style="display: none !important;">✅ Livraison & Clôture</button>
+        <button class="case-subtab active" type="button" data-case-tab="claims">📁 Dossier atelier</button>
+        <button class="case-subtab" type="button" data-case-tab="planning">📅 Planning atelier</button>
+        <button class="case-subtab" type="button" data-case-tab="atelier">🛠️ Atelier</button>
+        <button class="case-subtab" type="button" data-case-tab="livraison" style="display: none !important;" hidden aria-hidden="true" tabindex="-1" data-legacy-ui>Archive</button>
       </nav>
 
       <section class="case-panel active" data-case-panel="claims">
         <section class="detail-section summary-panel">
           <div class="section-heading">
             <div>
-              <h2>Résumé du dossier</h2>
+              <h2>Dossier atelier</h2>
               <span>Vue simplifiée : statut, prochaine action et informations essentielles.</span>
             </div>
             <span data-field="created"></span>
@@ -881,50 +880,28 @@
               <p data-field="summary-delivery"></p>
             </article>
             <article class="summary-card summary-order-card">
-              <span>Ordre</span>
+              <span>Devis PDF importé</span>
               <strong data-field="summary-order-type"></strong>
               <p data-field="summary-order-extra"></p>
             </article>
           </div>
           <div class="workflow compact-workflow" data-field="workflow"></div>
           <div class="validation-alert" data-field="validation-alert" hidden></div>
-          <div class="summary-checks">
-            <span class="tag" data-field="summary-photos"></span>
-            <span class="tag" data-field="summary-expert"></span>
-            <span class="tag" data-field="summary-quality"></span>
-          </div>
         </section>
 
         <section class="detail-section full-width">
           <div class="section-heading">
-            <h2>Réception du véhicule</h2>
+            <h2>Infos véhicule</h2>
             <span>Ce véhicule est déjà associé au dossier.</span>
           </div>
-          <div class="reception-intro">
-            <p>Vérifiez les informations puis confirmez la réception à l’atelier.</p>
-            <button class="primary-button" type="button" data-action-flag="received">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg>
-              Confirmer réception véhicule
-            </button>
-          </div>
           <div class="vehicle-identity-card" data-field="vehicle-identity"></div>
-          <div class="arrival-state">
-            <h3>État à l’arrivée</h3>
-            <p class="muted" data-field="arrival-notes"></p>
-            <label class="wide">Renseignements état à l’arrivée
-              <textarea data-input="arrivalNotes" rows="4" placeholder="Rayures, chocs visibles, accessoires manquants, niveau carburant, observations client..."></textarea>
-            </label>
-          </div>
-          <div class="reception-actions">
-            <button class="ghost-button" type="button" data-open-case-tab="photos">Ajouter photos avant réparation</button>
-          </div>
           <details class="manual-edit-box">
             <summary>Modifier infos véhicule</summary>
             <p class="muted">Modification véhicule : à utiliser uniquement en cas d’erreur sur le dossier.</p>
             <div class="form-grid">
               <label>Client / société propriétaire<input data-input="clientName" placeholder="Nom client ou société" /></label>
               <label>Téléphone client<input data-input="phone" inputmode="tel" placeholder="+216 ..." /></label>
-              <label>Propriétaire / société facturée<input data-input="ownerName" placeholder="Si différent du client" /></label>
+              <label>Propriétaire / société<input data-input="ownerName" placeholder="Si différent du client" /></label>
               <label>Personne déposante<input data-input="driverName" placeholder="Personne qui a amené le véhicule" /></label>
               <label>Téléphone déposant<input data-input="driverPhone" inputmode="tel" placeholder="+216 ..." /></label>
               <label>Immatriculation<input data-input="plate" placeholder="Ex. 6486TU169" /></label>
@@ -942,7 +919,7 @@
         <div class="detail-grid">
           <section class="detail-section">
             <div class="section-heading">
-              <h2>Validation dossier</h2>
+              <h2>Validation Chef Atelier</h2>
             </div>
             <div class="approval-row" id="chef-validation-row" style="margin-bottom: 20px;">
               <button class="primary-button" type="button" id="btn-chef-validate">
@@ -984,7 +961,7 @@
           <div class="section-heading">
             <div>
               <h2>Ordres de réparation & devis</h2>
-              <span>Assurance, service rapide, mécanique, électrique, diagnostic et carrosserie partagent le même planning atelier.</span>
+              <span>Sinistre, service rapide, mécanique, électrique, diagnostic et carrosserie partagent le même planning atelier.</span>
             </div>
           </div>
           <form class="claim-form" id="claim-form">
@@ -999,14 +976,14 @@
                   <option value="electrical_client">Client - réparation électrique</option>
                   <option value="diagnostic">Diagnostic</option>
                   <option value="garantie">Garantie</option>
-                  <option value="assurance">Assurance / expert</option>
+                  <option value="assurance">Sinistre atelier</option>
                 </select>
               </label>
               <label>Statut
                 <select name="status">
                   <option value="draft">Brouillon</option>
-                  <option value="expert_pending">En attente expert</option>
-                  <option value="client_pending">En attente client</option>
+                  <option value="expert_pending" hidden>À compléter</option>
+                  <option value="client_pending" hidden>À compléter</option>
                   <option value="approved">Accepté</option>
                 </select>
               </label>
@@ -1014,38 +991,18 @@
               <label>N° OR<input name="orNumber" placeholder="OR-SRV-..." /></label>
             </div>
             <div class="approval-row">
-              <label class="check-card"><input type="checkbox" name="expertApproved" /><span>Accord expert</span></label>
-              <label class="check-card"><input type="checkbox" name="clientApproved" /><span>Validation client/interne</span></label>
+              <label class="check-card" data-legacy-ui hidden><input type="checkbox" name="expertApproved" /><span>Ancienne validation externe</span></label>
+              <label class="check-card" data-legacy-ui hidden><input type="checkbox" name="clientApproved" /><span>Ancienne validation client</span></label>
               <label class="check-card"><input type="checkbox" name="includeInPlanning" checked /><span>Inclure dans planning global</span></label>
               <button class="primary-button" type="submit">Ajouter ordre de réparation</button>
             </div>
           </form>
-          <p class="muted">Importez un devis ou saisissez directement la main-d’œuvre dans chaque ordre. Assurance : accord expert + client. Service rapide, mécanique, électrique, diagnostic et garantie : validation client/interne sans expert.</p>
+          <p class="muted">Importez un devis PDF ou saisissez directement la main-d’œuvre dans chaque ordre. La validation publique du flux reste la Validation Chef Atelier.</p>
           <div class="claim-list" data-field="claims"></div>
         </section>
       </section>
 
-      <section class="case-panel" data-case-panel="photos" hidden>
-        <section class="detail-section full-width">
-          <div class="section-heading">
-            <h2>Photos dossier</h2>
-            <label class="photo-category-picker">Catégorie
-              <select id="photo-category">
-                <option value="before">Avant réparation</option>
-                <option value="supplement">Complément avant accord</option>
-                <option value="during">En cours</option>
-                <option value="after">Après réparation</option>
-              </select>
-            </label>
-            <label class="file-button">
-              <input type="file" id="photo-input" accept="image/*" multiple />
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h3l2-2h6l2 2h3v12H4z" /><circle cx="12" cy="13" r="3" /></svg>
-              Ajouter
-            </label>
-          </div>
-          <div class="photo-grid" data-field="photos"></div>
-        </section>
-      </section>
+
 
       <section class="case-panel" data-case-panel="planning" hidden>
         <section class="detail-section full-width">
@@ -1074,17 +1031,17 @@
       <section class="case-panel" data-case-panel="atelier" hidden>
         <section class="detail-section full-width">
           <div class="section-heading">
-            <h2>Réception véhicule &amp; travaux atelier</h2>
+            <h2>Exécution technicien</h2>
             <span data-field="delivery-estimate"></span>
           </div>
           <div class="approval-row">
-            <button class="primary-button" type="button" data-action-flag="received">
+            <button class="primary-button" type="button" data-action-flag="received" hidden aria-hidden="true" tabindex="-1" data-legacy-ui>
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg>
               Confirmer réception véhicule
             </button>
             <button class="primary-button" type="button" data-action-flag="workStarted">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg>
-              Ouvrir tâches technicien
+              Ouvrir tâches atelier
             </button>
             <button class="primary-button" type="button" data-action-flag="workCompleted" title="Action chef atelier avec contrôle des permissions et motif d’override si nécessaire.">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg>
@@ -1097,8 +1054,8 @@
         <section class="detail-section full-width">
           <div class="section-heading">
             <div>
-              <h2>Réparations complémentaires</h2>
-              <span>Ajouter un complément sans écraser le devis initial : photos, accord, MO et impact planning.</span>
+              <h2>Ajouter tâche atelier</h2>
+              <span>Ajouter une tâche atelier complémentaire avec son impact planning.</span>
             </div>
             <button class="ghost-button" type="button" id="print-supplement-orders">Imprimer compléments</button>
           </div>
@@ -1109,8 +1066,8 @@
               <label>Statut
                 <select name="status">
                   <option value="draft">Brouillon</option>
-                  <option value="expert_pending">En attente expert</option>
-                  <option value="client_pending">En attente client</option>
+                  <option value="expert_pending" hidden>À compléter</option>
+                  <option value="client_pending" hidden>À compléter</option>
                   <option value="approved">Accepté</option>
                 </select>
               </label>
@@ -1131,12 +1088,12 @@
               <label class="wide">Pièces complémentaires<textarea name="parts" rows="3" placeholder="Une pièce par ligne. Exemple : Renfort pare-chocs arrière x1"></textarea></label>
             </div>
             <div class="approval-row">
-              <label class="check-card"><input type="checkbox" name="expertApproved" /><span>Accord expert reçu</span></label>
-              <label class="check-card"><input type="checkbox" name="clientApproved" /><span>Validation client/interne</span></label>
+              <label class="check-card" data-legacy-ui hidden><input type="checkbox" name="expertApproved" /><span>Ancienne validation externe</span></label>
+              <label class="check-card" data-legacy-ui hidden><input type="checkbox" name="clientApproved" /><span>Ancienne validation client</span></label>
               <button class="primary-button" type="submit">Ajouter complément</button>
             </div>
           </form>
-          <p class="muted">Astuce : ajoutez les photos justificatives dans l’onglet Photos avec la catégorie “Complément avant accord”.</p>
+          <p class="muted">Astuce : ajoutez les photos justificatives dans l’onglet Photos avec la catégorie “Complément atelier”.</p>
           <div class="supplement-list" data-field="supplements"></div>
         </section>
 

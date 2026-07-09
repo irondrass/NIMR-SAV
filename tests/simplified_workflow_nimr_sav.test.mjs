@@ -36,6 +36,7 @@ function elementStub() {
     querySelector: () => elementStub(),
     querySelectorAll: () => [],
     closest: () => elementStub(),
+    children: [],
   };
 }
 
@@ -524,6 +525,133 @@ test('case status performance stays acceptable at 4000 cases', () => {
   })()`);
   assert.equal(result.count, 4000);
   assert.ok(result.ms < 2500, `status pass took ${result.ms} ms`);
+});
+
+test('end-to-end workflow validation: estimate import to archive', () => {
+  const result = runJson(`(() => {
+    // 1. Setup state with mock resources
+    state = normalizeState({
+      resources: [
+        { id: 'tech-1', name: 'Mecanicien', role: 'mecanicien', active: true, displayPlanning: true }
+      ],
+      cases: [],
+      bookings: []
+    });
+
+    // 2. Mock estimate import parsed lines
+    const parsedEstimate = {
+      laborLines: [{ phase: 'mechanical', operation: 'VIDANGE', laborHours: 1.5 }],
+      info: { clientName: 'STE TEST', plate: '999TU2026', vehicle: 'Dossier Test' }
+    };
+
+    // 3. Create Case
+    const item = normalizeCase({
+      id: 'e2e-case',
+      clientName: parsedEstimate.info.clientName,
+      plate: parsedEstimate.info.plate,
+      vehicle: parsedEstimate.info.vehicle,
+      claims: [{
+        id: 'claim-1',
+        type: 'client',
+        includeInPlanning: true,
+        estimate: { originalLines: parsedEstimate.laborLines, lines: parsedEstimate.laborLines }
+      }]
+    });
+    state.cases.push(item);
+    recomputeCaseDurationsFromClaims(item);
+
+    // 4. Verify initial state is "a_valider_chef_atelier"
+    const initialStatus = getCaseStatus(item);
+
+    // 5. Verify Chef validation blocking when no labor is present
+    const emptyCase = normalizeCase({
+      id: 'empty-case',
+      clientName: 'Empty',
+      plate: '111TU2026',
+      claims: [{ id: 'claim-empty', type: 'client', includeInPlanning: true, estimate: { lines: [], originalLines: [] } }]
+    });
+    DURATIONS.forEach(([key]) => { emptyCase.durations[key] = 0; });
+    const blockIssues = getBusinessRuleIssues(emptyCase, 'validate_chef_atelier');
+
+    // 6. Chef Atelier Validation
+    const validationResult = applyWorkflowAction(item, 'validate_chef_atelier');
+    const validatedStatus = getCaseStatus(item);
+
+    // 7. Verify tasks become planifiable (planning issue list should be empty for a validated case)
+    const planningIssues = getBusinessRuleIssues(item, 'appointment');
+
+    // 8. Calculate planning
+    const planningOptions = generateAppointmentOptions(item);
+    acceptProposal(item, planningOptions.proposal);
+    const plannedStatus = getCaseStatus(item);
+
+    // 9. Verify planning contains tasks
+    const hasBookings = state.bookings.some(b => b.caseId === item.id);
+
+    // 10. Technician flow: start, pause, resume, block, complete
+    const booking = state.bookings.find(b => b.caseId === item.id);
+
+    // Start task
+    booking.status = 'started';
+    const startedStatus = getCaseStatus(item);
+
+    // Pause task
+    booking.status = 'paused';
+    const pausedStatus = getCaseStatus(item);
+
+    // Resume (started)
+    booking.status = 'started';
+
+    // Block
+    booking.status = 'blocked';
+    const blockedStatus = getCaseStatus(item);
+
+    // Complete
+    booking.status = 'completed';
+    const completedStatus = getCaseStatus(item);
+
+    // 11. Clôturer atelier
+    const closeResult = applyWorkflowAction(item, 'atelierClosed');
+    const closedStatus = getCaseStatus(item);
+
+    // 12. Archive
+    const archiveResult = applyWorkflowAction(item, 'archived');
+    const archivedStatus = getCaseStatus(item);
+
+    return JSON.stringify({
+      initialStatus,
+      blockIssuesLength: blockIssues.length,
+      validationResultOk: validationResult.ok,
+      validatedStatus,
+      planningIssuesLength: planningIssues.length,
+      plannedStatus,
+      hasBookings,
+      startedStatus,
+      pausedStatus,
+      blockedStatus,
+      completedStatus,
+      closeResultOk: closeResult.ok,
+      closedStatus,
+      archiveResultOk: archiveResult.ok,
+      archivedStatus
+    });
+  })()`);
+
+  assert.equal(result.initialStatus, 'a_valider_chef_atelier');
+  assert.ok(result.blockIssuesLength > 0, 'Chef validation is blocked when no labor is present');
+  assert.equal(result.validationResultOk, true);
+  assert.equal(result.validatedStatus, 'valide_atelier');
+  assert.equal(result.planningIssuesLength, 0, 'planning has no issues after chef validation');
+  assert.equal(result.plannedStatus, 'planifie');
+  assert.equal(result.hasBookings, true);
+  assert.equal(result.startedStatus, 'en_cours');
+  assert.equal(result.pausedStatus, 'en_pause');
+  assert.equal(result.blockedStatus, 'bloque');
+  assert.equal(result.completedStatus, 'termine_atelier');
+  assert.equal(result.closeResultOk, true);
+  assert.equal(result.closedStatus, 'cloture_atelier');
+  assert.equal(result.archiveResultOk, true);
+  assert.equal(result.archivedStatus, 'archive');
 });
 
 console.log(`Simplified NIMR SAV workflow regression OK (${passed} checks)`);

@@ -3555,12 +3555,12 @@ function showInputPromptModal({
 // qualite : vue QC dédiée (qc-workspace) + dossiers
 // readonly : uniquement pilotage (lecture)
 const ROLE_TABS = {
-  admin:         ["reception-workspace", "dossiers", "today", "pilotage", "planning", "technician", "qc-workspace", "atelier"],
-  directeur_sav: ["dossiers", "today", "pilotage", "planning", "qc-workspace", "atelier"],
-  chef_atelier:  ["reception-workspace", "dossiers", "today", "pilotage", "planning", "technician", "atelier"],
-  reception:     ["reception-workspace", "dossiers", "today"],
+  admin:         ["dossiers", "today", "pilotage", "planning", "technician", "atelier"],
+  directeur_sav: ["dossiers", "today", "pilotage", "planning", "atelier"],
+  chef_atelier:  ["dossiers", "today", "pilotage", "planning", "technician", "atelier"],
+  reception:     ["dossiers", "today"],
   technicien:    ["technician"],
-  qualite:       ["qc-workspace", "dossiers"],
+  qualite:       ["dossiers"],
   readonly:      ["pilotage"],
 };
 
@@ -3569,9 +3569,9 @@ const ROLE_DEFAULT_TABS = {
   admin:         "dossiers",
   directeur_sav: "pilotage",
   chef_atelier:  "planning",
-  reception:     "reception-workspace",
+  reception:     "dossiers",
   technicien:    "technician",
-  qualite:       "qc-workspace",
+  qualite:       "dossiers",
   readonly:      "pilotage",
 };
 
@@ -3588,7 +3588,7 @@ function getAllowedTabsForCurrentUser() {
   if (!user) {
     const activeUsers = (state?.users || []).filter((u) => u.active !== false);
     if (activeUsers.length === 0) {
-      return ["reception-workspace", "dossiers", "today", "pilotage", "planning", "technician", "qc-workspace", "atelier"];
+      return ["dossiers", "today", "pilotage", "planning", "technician", "atelier"];
     }
     return [];
   }

@@ -127,7 +127,7 @@ function scheduleSequentialPipeline(item, startAfter, bookings) {
     steps.push(step);
     cursor = new Date(step.end);
   });
-  if (!steps.length) throw new Error("Renseignez au moins une durée atelier pour calculer un RDV.");
+  if (!steps.length) throw new Error("Aucune tâche atelier à planifier.");
   const marginMinutes = Math.ceil((totalMinutes * 0.2) / STEP_MINUTES) * STEP_MINUTES;
   const delivery = addWorkingMinutes(new Date(steps.at(-1).end), marginMinutes);
   return { start: steps[0].start, end: steps.at(-1).end, delivery: delivery.toISOString(), marginMinutes, steps, anticipatedNewParts: null };
@@ -212,7 +212,7 @@ function schedulePipelineWithAnticipatedNewParts(item, startAfter, bookings, spl
     vehicleCursor = new Date(step.end);
   });
 
-  if (!steps.length) throw new Error("Renseignez au moins une durée atelier pour calculer un RDV.");
+  if (!steps.length) throw new Error("Aucune tâche atelier à planifier.");
   steps.sort((a, b) => new Date(a.start) - new Date(b.start) || String(a.title).localeCompare(String(b.title)));
   const endDate = steps.reduce((latest, step) => maxDate(latest, new Date(step.end)), new Date(steps[0].end));
   const marginMinutes = Math.ceil((totalMinutes * 0.2) / STEP_MINUTES) * STEP_MINUTES;

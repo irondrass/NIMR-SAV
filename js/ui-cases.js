@@ -2495,6 +2495,23 @@ function renderKanban() {
     .join("");
 }
 
+async function handleChefValidation(item) {
+  const issues = getBusinessRuleIssues(item, CHEF_VALIDATION_WORKFLOW_ACTION);
+  if (issues.length) {
+    notifyUser(issues.join("\n"), "error");
+    return;
+  }
+  const permissionGuard = guardWorkflowAction(CHEF_VALIDATION_WORKFLOW_ACTION, item, true);
+  if (!permissionGuard.ok) return;
+
+  const result = applyWorkflowAction(item, CHEF_VALIDATION_WORKFLOW_ACTION);
+  if (result?.ok) {
+    saveState();
+    render();
+    notifyUser("Dossier validé par le Chef Atelier.", "success");
+  }
+}
+
 function renderCaseDetail() {
   const detail = $("#case-detail");
   const item = getActiveCase();
@@ -2649,6 +2666,23 @@ function renderCaseDetail() {
   renderCaseSummary(detail, item);
   renderRoleBasedCaseNotes(detail, item);
 
+  const btnChefValidate = $("#btn-chef-validate", detail);
+  const chefValidationStatus = $("#chef-validation-status", detail);
+  if (btnChefValidate && chefValidationStatus) {
+    if (item.flags?.chefValidated) {
+      btnChefValidate.style.display = "none";
+      btnChefValidate.hidden = true;
+      chefValidationStatus.style.display = "flex";
+      chefValidationStatus.hidden = false;
+    } else {
+      btnChefValidate.style.display = "";
+      btnChefValidate.hidden = false;
+      chefValidationStatus.style.display = "none";
+      chefValidationStatus.hidden = true;
+      btnChefValidate.addEventListener("click", () => handleChefValidation(item));
+    }
+  }
+
   $("#photo-input", detail).addEventListener("change", (event) => handlePhotos(event, item, $("#photo-category", detail)?.value));
   $("#claim-form", detail)?.addEventListener("submit", (event) => handleClaimSubmit(event, item));
   $("#supplement-form", detail)?.addEventListener("submit", (event) => handleSupplementSubmit(event, item));
@@ -2725,10 +2759,8 @@ function setupCaseDetailTabs(root, item) {
   const user = getCurrentUser();
   const role = user?.role || "readonly";
 
-  let allowedSubTabs = ["claims", "photos", "planning", "atelier", "livraison"];
-  if (role === "qualite") {
-    allowedSubTabs = ["claims", "photos", "livraison"];
-  } else if (role === "technicien") {
+  let allowedSubTabs = ["claims", "planning", "atelier"];
+  if (role === "technicien") {
     allowedSubTabs = [];
   }
 
@@ -2745,12 +2777,12 @@ function setupCaseDetailTabs(root, item) {
     .map((button) => button.dataset.caseTab);
 
   if (!allowedTabs.includes(activeCaseDetailTab)) {
-    activeCaseDetailTab = allowedTabs[0] || "claims";
+    activeCaseDetailTab = allowedTabs.includes("atelier") ? "atelier" : (allowedTabs[0] || "claims");
   }
 
   const activateTab = (tab) => {
     if (!allowedSubTabs.includes(tab)) {
-      tab = allowedSubTabs[0] || "claims";
+      tab = allowedTabs.includes("atelier") ? "atelier" : (allowedTabs[0] || "claims");
     }
     activeCaseDetailTab = tab;
     $$(`[data-case-tab]`, root).forEach((button) => {
@@ -2769,32 +2801,45 @@ function setupCaseDetailTabs(root, item) {
     button.addEventListener("click", () => activateTab(button.dataset.caseTab));
   });
 
-  $(`[data-next-action-tab]`, root)?.addEventListener("click", () => {
-    const action = getNextWorkflowAction(item);
-    const nextAction = getCaseNextAction(item);
-    let targetTab = nextAction?.code ? getCaseNextActionTab(nextAction.code) : (action ? getTabForAction(action) : "planning");
-    if (!allowedSubTabs.includes(targetTab)) {
-      targetTab = allowedSubTabs[0] || "claims";
-    }
-    activateTab(targetTab);
-    // Scroll vers l'élément d'action correspondant (même si l'onglet était déjà actif)
-    if (action) {
-      const targetEl =
-        root.querySelector(`[data-action-flag="${action}"]`) ||
-        root.querySelector(`[data-toggle="${action}"]`) ||
-        (action === "labor" ? root.querySelector("[data-manual-labor-entry]") : null) ||
-        (action === "claim" ? root.querySelector("#claim-form") : null) ||
-        (action === "appointment" ? root.querySelector("#generate-proposals") : null);
-      if (action === "labor" && targetEl?.tagName === "DETAILS") targetEl.open = true;
-      if (targetEl) {
-        setTimeout(() => {
-          targetEl.scrollIntoView({ behavior: "smooth", block: "center" });
-          targetEl.classList.add("highlight-pulse");
-          setTimeout(() => targetEl.classList.remove("highlight-pulse"), 1800);
-        }, 80);
+  const nextButton = $(`[data-next-action-tab]`, root);
+  if (nextButton) {
+    const newNextButton = nextButton.cloneNode(true);
+    nextButton.parentNode.replaceChild(newNextButton, nextButton);
+    newNextButton.addEventListener("click", async () => {
+      const status = getCaseStatus(item);
+      if (status === "devis_importe" || status === "a_valider_chef_atelier") {
+        await handleChefValidation(item);
+      } else if (status === "valide_atelier") {
+        activateTab("planning");
+      } else if (status === "planifie") {
+        activateTab("atelier");
+      } else if (status === "en_cours" || status === "en_pause" || status === "bloque") {
+        activateTab("atelier");
+      } else if (status === "termine_atelier") {
+        const permissionGuard = guardWorkflowAction("atelierClosed", item, true);
+        if (!permissionGuard.ok) return;
+        const issues = getBusinessRuleIssues(item, "atelierClosed");
+        if (issues.length) {
+          notifyUser(issues.join("\n"));
+          return;
+        }
+        applyWorkflowAction(item, "atelierClosed");
+        saveState();
+        render();
+      } else if (status === "cloture_atelier") {
+        const permissionGuard = guardWorkflowAction("archived", item, true);
+        if (!permissionGuard.ok) return;
+        const issues = getBusinessRuleIssues(item, "archived");
+        if (issues.length) {
+          notifyUser(issues.join("\n"));
+          return;
+        }
+        applyWorkflowAction(item, "archived");
+        saveState();
+        render();
       }
-    }
-  });
+    });
+  }
 
   activateTab(activeCaseDetailTab);
 }
@@ -2964,14 +3009,35 @@ function renderCaseSummary(root, item) {
 
   const nextButton = $(`[data-next-action-tab]`, root);
   if (nextButton) {
-    nextButton.textContent = nextAction.code === "done"
-      ? "Voir historique"
-      : action === "claim"
-      ? "Ajouter un ordre"
-      : action === "labor"
-        ? "Ajouter la main-d’œuvre"
-        : nextAction.label || "Continuer le dossier";
-    nextButton.dataset.nextActionCode = nextAction.code;
+    const status = getCaseStatus(item);
+    if (status === "devis_importe" || status === "a_valider_chef_atelier") {
+      nextButton.textContent = "Valider Chef Atelier";
+      nextButton.style.display = "";
+      nextButton.hidden = false;
+    } else if (status === "valide_atelier") {
+      nextButton.textContent = "Planifier les tâches";
+      nextButton.style.display = "";
+      nextButton.hidden = false;
+    } else if (status === "planifie") {
+      nextButton.textContent = "Ouvrir tâches atelier";
+      nextButton.style.display = "";
+      nextButton.hidden = false;
+    } else if (status === "en_cours" || status === "en_pause" || status === "bloque") {
+      nextButton.textContent = "Suivre exécution";
+      nextButton.style.display = "";
+      nextButton.hidden = false;
+    } else if (status === "termine_atelier") {
+      nextButton.textContent = "Clôturer atelier";
+      nextButton.style.display = "";
+      nextButton.hidden = false;
+    } else if (status === "cloture_atelier") {
+      nextButton.textContent = "Archiver";
+      nextButton.style.display = "";
+      nextButton.hidden = false;
+    } else {
+      nextButton.style.display = "none";
+      nextButton.hidden = true;
+    }
   }
 }
 
@@ -3478,6 +3544,12 @@ function getBusinessRuleIssues(item, action) {
     return issues;
   }
 
+  if (normalizedAction === CHEF_VALIDATION_WORKFLOW_ACTION) {
+    if (!hasKnownLabor(item)) {
+      issues.push("Impossible de valider : aucune tâche atelier détectée.");
+    }
+  }
+
   if (normalizedAction === "appointment") {
     if (!item.flags?.chefValidated) {
       issues.push("Le dossier doit être validé par le Chef Atelier avant planification.");
@@ -3492,8 +3564,8 @@ function getBusinessRuleIssues(item, action) {
     if (!hasVehicleIdentity(item)) {
       issues.push("Renseigner une immatriculation ou un VIN.");
     }
-    if (totalDurationHours(item) <= 0) {
-      issues.push("Renseigner au moins une durée atelier.");
+    if (!hasKnownLabor(item) || totalDurationHours(item) <= 0) {
+      issues.push("Aucune tâche atelier à planifier.");
     }
     const missingRoles = missingSchedulingRoles(item);
     if (missingRoles.length) {
@@ -4641,52 +4713,181 @@ function normalizeAppointmentOptions(value) {
 function renderAssignments(root, item) {
   const target = $("[data-field='assignments']", root);
   const delivery = $("[data-field='delivery-estimate']", root);
-  if (appointmentNeedsReschedule(item)) {
-    delivery.textContent = item.appointmentStatus === "no_show" ? "RDV manqué : report nécessaire" : "Report RDV en attente";
-  } else {
-    delivery.textContent = item.appointment ? `Livraison estimée: ${formatDateTime(item.appointment.delivery)}` : "Livraison non planifiée";
-  }
-  const assignmentRows = typeof getCaseBusinessTaskRows === "function"
-    ? getCaseBusinessTaskRows(item)
-    : state.bookings
-      .filter((booking) => booking.caseId === item.id)
-      .map((booking) => ({
-        displayBooking: booking,
-        actionBooking: booking,
-        statusLabel: getBookingStatusLabel(booking),
-        pauseRemainder: false,
-        plannedMinutes: getBookingDurationMinutes(booking),
-        start: booking.start,
-        end: booking.end,
-        resourceIds: booking.resourceIds || [],
-      }));
-  if (!assignmentRows.length) {
-    target.innerHTML = appointmentNeedsReschedule(item)
-      ? `<div class="empty-inline">RDV à reporter. Utilisez Calculer RDV puis choisissez une nouvelle date disponible.</div>`
-      : `<div class="empty-inline">Aucun travail affecté.</div>`;
-    return;
-  }
-  target.innerHTML = assignmentRows
-    .map((row) => {
-      const booking = row.displayBooking || row.actionBooking;
-      const resources = (row.resourceIds || booking.resourceIds || []).map((id) => getResource(id)?.name).filter(Boolean).join(", ");
-      const statusText = row.pauseRemainder ? `${row.statusLabel || "En pause"} · Reprise planifiée` : row.statusLabel || getBookingStatusLabel(booking);
-      const start = row.start || booking.start;
-      const end = row.end || booking.end;
-      return `
-        <article class="assignment-card">
-          <div>
-            <strong>${escapeHtml(booking.title)}</strong>
-            <p class="muted">${escapeHtml(resources)}</p>
-            <p class="muted">${escapeHtml(statusText)}${row.plannedMinutes ? ` · ${formatLocalizedDecimal(row.plannedMinutes / 60)} h utiles` : ""}</p>
-            ${row.pauseRemainder ? '<p class="muted">Reprise planifiée après pause.</p>' : ""}
-          </div>
-          <span>${formatDateTime(start)}</span>
-          <span>${formatDateTime(end)}</span>
-        </article>
+  if (!target) return;
+
+  const isChefValidated = Boolean(item.flags?.chefValidated);
+
+  if (!isChefValidated) {
+    if (delivery) delivery.textContent = "Dossier en attente de validation Chef Atelier";
+
+    // Get all labor lines from all claims
+    const laborLines = [];
+    getWorkflowClaims(item).forEach((claim) => {
+      getClaimPlanningLaborLines(claim).forEach((line) => {
+        laborLines.push({ ...line, claimId: claim.id });
+      });
+    });
+
+    const totalHours = laborLines.reduce((sum, line) => sum + Number(line.laborHours || 0), 0);
+
+    let html = `
+      <div style="margin-bottom: 15px; font-weight: bold; font-size: 1.1em;">
+        Tâches proposées depuis le devis (Total: ${formatLocalizedDecimal(totalHours)} h)
+      </div>
+    `;
+
+    if (laborLines.length === 0) {
+      html += `
+        <div class="devis-no-labor-alert" style="margin-bottom: 20px; padding: 15px; border-radius: 8px; background-color: #fef2f2; border: 1px solid #fca5a5; color: #991b1b; font-weight: 500;">
+          Aucune main-d’œuvre détectée dans le devis PDF. Veuillez vérifier le fichier ou ajouter une tâche manuellement.
+        </div>
       `;
-    })
-    .join("");
+    } else {
+      html += `
+        <div class="proposed-tasks-list" style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
+          ${laborLines.map((line) => {
+            const template = STEP_TEMPLATES.find((t) => t.key === line.phase) || {};
+            const service = getDurationLabel(line.phase);
+            const role = ROLE_LABELS[template.role] || "Non précisé";
+            const equipment = ROLE_LABELS[template.equipmentRole] || "Non requis";
+            return `
+              <article class="assignment-card proposed-task-card" style="border-left: 4px solid ${template.color || '#ccc'}; display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                  <strong>${escapeHtml(line.operation || 'Opération')}</strong>
+                  <p class="muted" style="margin: 4px 0;">Service: ${escapeHtml(service)} · Rôle: ${escapeHtml(role)} · Recommandé: ${escapeHtml(equipment)}</p>
+                  <p class="muted" style="margin: 4px 0;">Statut: <span class="tag warn">À valider Chef Atelier</span> · Durée: <strong>${formatLocalizedDecimal(line.laborHours)} h</strong></p>
+                </div>
+                <button class="icon-button" type="button" title="Supprimer la tâche" aria-label="Supprimer la tâche" data-remove-proposed-line="${escapeAttr(line.id)}" data-claim-id="${escapeAttr(line.claimId)}" style="font-size: 20px; font-weight: bold; background: none; border: none; color: #ef4444; cursor: pointer; padding: 5px 10px;">×</button>
+              </article>
+            `;
+          }).join("")}
+        </div>
+      `;
+    }
+
+    // Add manual labor form
+    html += `
+      <details class="claim-lines manual-labor-entry" open style="margin-top: 20px; border: 1px solid #e4e4e7; padding: 15px; border-radius: 8px; background-color: #fafafa;">
+        <summary style="font-weight: bold; cursor: pointer; margin-bottom: 10px;">Ajouter tâche atelier manuellement</summary>
+        <form class="claim-labor-form" id="manual-labor-form-atelier" style="margin-top: 10px;">
+          <div class="form-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+            <label>Service atelier
+              <select name="phase" style="width: 100%; margin-top: 4px; padding: 6px; border-radius: 4px; border: 1px solid #ccc;">
+                ${DURATIONS.filter(([key]) => key !== 'quality').map(([key, label]) => `<option value="${key}">${label}</option>`).join('')}
+              </select>
+            </label>
+            <label>Opération
+              <input name="operation" placeholder="Ex. Remplacement filtre à air" required style="width: 100%; margin-top: 4px; padding: 6px; border-radius: 4px; border: 1px solid #ccc;" />
+            </label>
+            <label>Heures MO
+              <input name="laborHours" type="text" inputmode="decimal" placeholder="Ex. 0.5" required style="width: 100%; margin-top: 4px; padding: 6px; border-radius: 4px; border: 1px solid #ccc;" />
+            </label>
+          </div>
+          <button class="primary-button" type="submit" style="margin-top: 15px;">Ajouter la tâche</button>
+        </form>
+      </details>
+    `;
+
+    target.innerHTML = html;
+
+    // Bind proposed line delete buttons
+    $$("[data-remove-proposed-line]", target).forEach((button) => {
+      button.addEventListener("click", () => {
+        removeClaimLaborLine(item, button.dataset.claimId, button.dataset.removeProposedLine);
+      });
+    });
+
+    // Bind manual labor form submit
+    const manualForm = $("#manual-labor-form-atelier", target);
+    if (manualForm) {
+      manualForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const mainClaim = getWorkflowClaims(item)[0] || item.claims?.[0];
+        if (!mainClaim) {
+          notifyUser("Aucune intervention active pour ce dossier.", "error");
+          return;
+        }
+
+        const permissionGuard = guardCaseEdit(item);
+        if (!permissionGuard.ok) return;
+
+        const data = new FormData(manualForm);
+        const phase = data.get("phase") || getDefaultClaimLaborPhase(mainClaim.type);
+        const operation = normalizeTextInputValue(data.get("operation"));
+        const laborHours = parseLocalizedDecimal(data.get("laborHours"));
+        if (!operation) {
+          notifyUser("Renseignez l'opération main-d'œuvre.", "error");
+          return;
+        }
+        if (!laborHours || laborHours <= 0) {
+          notifyUser("Renseignez une quantité d'heures valide.", "error");
+          return;
+        }
+
+        mainClaim.estimate = normalizeExpertEstimate(mainClaim.estimate);
+        mainClaim.estimate.originalLines.push(buildManualClaimLaborLine({ phase, operation, laborHours }));
+        mainClaim.estimate.confirmed = false;
+        mainClaim.estimate.confirmedAt = "";
+        mainClaim.updatedAt = new Date().toISOString();
+        refreshClaimEstimateFromManualLines(mainClaim);
+        recomputeCaseDurationsFromClaims(item);
+        clearPlanningIfNeeded(item, "Planning annulé après ajout manuel de main-d'œuvre. Recalculez un RDV.");
+        refreshCaseApprovalFlagsFromClaims(item);
+        addHistory(item, "claim.labor.added", "Main-d'œuvre ajoutée à l'ordre", `${getClaimLabel(mainClaim)} - ${operation}: ${formatLocalizedDecimal(laborHours)} h`);
+        saveState();
+        renderCaseDetail();
+      });
+    }
+
+  } else {
+    // Already validated: render scheduled bookings / assignments
+    if (appointmentNeedsReschedule(item)) {
+      if (delivery) delivery.textContent = item.appointmentStatus === "no_show" ? "RDV manqué : report nécessaire" : "Report RDV en attente";
+    } else {
+      if (delivery) delivery.textContent = item.appointment ? `Livraison estimée: ${formatDateTime(item.appointment.delivery)}` : "Livraison non planifiée";
+    }
+    const assignmentRows = typeof getCaseBusinessTaskRows === "function"
+      ? getCaseBusinessTaskRows(item)
+      : state.bookings
+        .filter((booking) => booking.caseId === item.id)
+        .map((booking) => ({
+          displayBooking: booking,
+          actionBooking: booking,
+          statusLabel: getBookingStatusLabel(booking),
+          pauseRemainder: false,
+          plannedMinutes: getBookingDurationMinutes(booking),
+          start: booking.start,
+          end: booking.end,
+          resourceIds: booking.resourceIds || [],
+        }));
+    if (!assignmentRows.length) {
+      target.innerHTML = appointmentNeedsReschedule(item)
+        ? `<div class="empty-inline">RDV à reporter. Utilisez Calculer RDV puis choisissez une nouvelle date disponible.</div>`
+        : `<div class="empty-inline">Aucun travail affecté.</div>`;
+      return;
+    }
+    target.innerHTML = assignmentRows
+      .map((row) => {
+        const booking = row.displayBooking || row.actionBooking;
+        const resources = (row.resourceIds || booking.resourceIds || []).map((id) => getResource(id)?.name).filter(Boolean).join(", ");
+        const statusText = row.pauseRemainder ? `${row.statusLabel || "En pause"} · Reprise planifiée` : row.statusLabel || getBookingStatusLabel(booking);
+        const start = row.start || booking.start;
+        const end = row.end || booking.end;
+        return `
+          <article class="assignment-card">
+            <div>
+              <strong>${escapeHtml(booking.title)}</strong>
+              <p class="muted">${escapeHtml(resources)}</p>
+              <p class="muted">${escapeHtml(statusText)}${row.plannedMinutes ? ` · ${formatLocalizedDecimal(row.plannedMinutes / 60)} h utiles` : ""}</p>
+              ${row.pauseRemainder ? '<p class="muted">Reprise planifiée après pause.</p>' : ""}
+            </div>
+            <span>${formatDateTime(start)}</span>
+            <span>${formatDateTime(end)}</span>
+          </article>
+        `;
+      })
+      .join("");
+  }
 }
 
 function renderQualityChecklist(root, item) {

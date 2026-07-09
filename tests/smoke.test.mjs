@@ -433,7 +433,7 @@ const zeroLaborCase = context.normalizeCase({
   claims: [{ type: 'assurance', includeInPlanning: true, estimate: { lines: [] } }],
 });
 assert.ok(
-  context.getBusinessRuleIssues(zeroLaborCase, 'appointment').some((issue) => issue.includes('durée atelier')),
+  context.getBusinessRuleIssues(zeroLaborCase, 'appointment').some((issue) => issue.includes('tâche atelier') || issue.includes('planifier')),
   'un RDV ne doit pas être planifié sans durée atelier'
 );
 

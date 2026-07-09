@@ -107,6 +107,13 @@ const UNAUTHORIZED_VIEW_SCRUB_SELECTORS = {
   "qc-workspace": [".qc-workspace-inner"],
 };
 
+const CHEF_VALIDATION_WORKFLOW_ACTION = "validate_chef_atelier";
+const CHEF_VALIDATION_FLAG = "chefValidated";
+
+function normalizeWorkflowAction(action) {
+  return action === CHEF_VALIDATION_FLAG ? CHEF_VALIDATION_WORKFLOW_ACTION : action;
+}
+
 function renderNavigationVisibility() {
   document.querySelectorAll("[data-tab]").forEach((button) => {
     const tabId = button.dataset.tab;
@@ -729,9 +736,7 @@ function hasKnownLabor(item) {
 }
 
 function caseHasCompletedValidations(item) {
-  const workflowClaims = getWorkflowClaims(item);
-  if (!workflowClaims.length) return false;
-  return workflowClaims.every((claim) => claim.clientApproved && (isClientOnlyRepairClaim(claim) || claim.expertApproved));
+  return Boolean(item?.flags?.chefValidated);
 }
 
 function getDeliveryDueState(item, now = new Date()) {
@@ -746,7 +751,7 @@ function getCaseNextAction(item) {
     return { code: "done", label: "Terminé", priority: "normal", reason: "Aucun dossier actif." };
   }
   if (isCaseReadonlyArchive(item)) {
-    return { code: "done", label: "Dossier clôturé — aucune action requise", priority: "normal", reason: getArchivedCaseMessage(item) };
+    return { code: "done", label: "Dossier clôturé", priority: "normal", reason: getArchivedCaseMessage(item) };
   }
   if (isCaseBlocked(item)) {
     return {
@@ -756,7 +761,6 @@ function getCaseNextAction(item) {
       reason: getCaseBlockerLabel(item) || "Le dossier est marqué comme bloqué.",
     };
   }
-  const workflowClaims = getWorkflowClaims(item);
   if (!hasVehicleIdentity(item)) {
     return {
       code: "complete_vehicle_identity",
@@ -765,75 +769,44 @@ function getCaseNextAction(item) {
       reason: "Ajoutez une immatriculation ou un VIN avant de poursuivre.",
     };
   }
+  const workflowClaims = getWorkflowClaims(item);
   if (!workflowClaims.length || workflowClaims.some((claim) => !claimHasLaborEstimate(claim)) || !hasKnownLabor(item)) {
     return {
       code: "add_labor",
       label: "Ajouter la main-d'œuvre",
       priority: "attention",
-      reason: "Le dossier doit contenir des heures de main-d'œuvre pour réserver l'atelier.",
+      reason: "Le dossier doit contenir des heures de main-d’œuvre avant validation Chef Atelier.",
     };
   }
-  if (appointmentNeedsReschedule(item)) {
+  if (!item.flags?.chefValidated) {
     return {
-      code: "schedule_appointment",
-      label: "Fixer le RDV client",
-      priority: "urgent",
-      reason: "Le RDV doit être reporté.",
+      code: "validate_chef_atelier",
+      label: "Validation Chef Atelier",
+      priority: "attention",
+      reason: "Le Chef Atelier doit valider le dossier pour générer les tâches.",
     };
   }
-  if (!item.appointment && !hasCaseBookings(item)) {
+  const bookings = Array.isArray(state?.bookings) ? state.bookings.filter(b => b.caseId === item.id) : [];
+  const hasSchedule = Boolean(item.appointment) || bookings.some(b => b.start && b.end);
+  if (!hasSchedule) {
     return {
       code: "schedule_work",
       label: "Planifier les travaux",
       priority: "attention",
-      reason: "La main-d'œuvre est connue mais aucun RDV ou créneau atelier n'est planifié.",
+      reason: "Le dossier est validé mais le planning n'est pas encore programmé.",
     };
   }
-  if (!caseHasCompletedValidations(item)) {
-    return {
-      code: "validate_customer_or_internal",
-      label: "Valider client / interne",
-      priority: "attention",
-      reason: "Les accords nécessaires ne sont pas encore complets.",
-    };
-  }
-  if (!item.flags.received) {
-    const start = item.appointment?.start ? new Date(item.appointment.start) : null;
-    const due = start && !Number.isNaN(start.getTime()) && start <= new Date();
-    return {
-      code: "receive_vehicle",
-      label: "Réceptionner le véhicule",
-      priority: due ? "urgent" : "normal",
-      reason: due ? "Le RDV de réception est arrivé ou dépassé." : "Le véhicule n'est pas encore physiquement reçu.",
-    };
-  }
-  if (!hasCaseBookings(item)) {
-    return {
-      code: "schedule_work",
-      label: "Planifier les travaux",
-      priority: "attention",
-      reason: "La main-d'œuvre est connue mais aucun créneau n'est planifié.",
-    };
-  }
-  const bookings = getCaseBookings(item);
-  const pausedOrRemainder = bookings.some((booking) => ["paused", "late_paused"].includes(getBookingOperationalStatus(booking)) || Number(booking.remainingMinutes || 0) > 0);
-  if (pausedOrRemainder) {
-    return {
-      code: "resume_or_replan_work",
-      label: "Reprendre ou reporter la tâche",
-      priority: "urgent",
-      reason: "Une tâche est en pause ou possède un reliquat à replanifier.",
-    };
-  }
-  if (!item.flags.workStarted) {
+  if (!item.flags?.workStarted) {
     return {
       code: "start_work",
       label: "Démarrer les travaux",
       priority: "normal",
-      reason: "Le véhicule est reçu et les créneaux atelier sont prêts.",
+      reason: "Le planning est prêt, les travaux peuvent commencer.",
     };
   }
-  if (!item.flags.workCompleted) {
+
+  const allCompleted = bookings.length > 0 && bookings.every(b => getBookingOperationalStatus(b) === "completed");
+  if (!allCompleted && !item.flags?.workCompleted) {
     return {
       code: "finish_work",
       label: "Terminer les travaux",
@@ -841,39 +814,28 @@ function getCaseNextAction(item) {
       reason: "Les travaux sont en cours.",
     };
   }
-  if (!item.flags.qualityApproved) {
+  if (!item.flags?.invoiced) {
     return {
-      code: "quality_check",
-      label: "Contrôle qualité",
+      code: "cloture_atelier",
+      label: "Clôturer le dossier",
       priority: "attention",
-      reason: "Les travaux sont terminés, le contrôle qualité reste à valider.",
+      reason: "Tous les travaux sont terminés, le dossier peut être clôturé.",
     };
   }
-  if (!item.flags.delivered) {
-    const deliveryState = getDeliveryDueState(item);
-    return deliveryState === "due" || deliveryState === "soon"
-      ? { code: "deliver_vehicle", label: "Livrer le véhicule", priority: deliveryState === "due" ? "urgent" : "attention", reason: "Le véhicule est prêt pour la livraison." }
-      : { code: "prepare_delivery", label: "Préparer livraison", priority: "normal", reason: "Le véhicule est contrôlé et attend la livraison." };
-  }
-  return { code: "done", label: "Terminé", priority: "normal", reason: "Le dossier est livré." };
+  return { code: "done", label: "Clôturé", priority: "normal", reason: "Le dossier est clôturé." };
 }
 
 function getCaseNextActionTab(actionCode) {
   const mapping = {
     complete_vehicle_identity: "claims",
     add_labor: "claims",
-    schedule_appointment: "planning",
-    receive_vehicle: "atelier",
-    validate_customer_or_internal: "claims",
+    validate_chef_atelier: "claims",
     schedule_work: "planning",
     start_work: "atelier",
-    resume_or_replan_work: "atelier",
     finish_work: "atelier",
-    quality_check: "livraison",
-    prepare_delivery: "livraison",
-    deliver_vehicle: "livraison",
+    cloture_atelier: "atelier",
     resolve_blocker: "claims",
-    done: "livraison",
+    done: "atelier",
   };
   return mapping[actionCode] || "claims";
 }
@@ -2039,8 +2001,6 @@ function renderClaimCard(claim, index) {
         </select></label>
       </div>
       <div class="approval-row">
-        ${isClientOnlyRepairClaim(claim) ? `<span class="tag ok">Expert non requis</span>` : `<label class="check-card"><input type="checkbox" data-claim-id="${escapeHtml(claim.id)}" data-claim-field="expertApproved" ${claim.expertApproved ? 'checked' : ''}/><span>Accord expert</span></label>`}
-        <label class="check-card"><input type="checkbox" data-claim-id="${escapeHtml(claim.id)}" data-claim-field="clientApproved" ${claim.clientApproved ? 'checked' : ''}/><span>${clientApprovalLabel}</span></label>
         <label class="check-card"><input type="checkbox" data-claim-id="${escapeHtml(claim.id)}" data-claim-field="includeInPlanning" ${claim.includeInPlanning !== false ? 'checked' : ''}/><span>Inclure planning</span></label>
         <span class="tag ${total > 0 ? 'ok' : 'warn'}">${formatLocalizedDecimal(total)} h MO</span>
         <button class="ghost-button danger-button" type="button" data-claim-delete="${escapeHtml(claim.id)}">Supprimer</button>
@@ -2254,6 +2214,14 @@ function isReusableEmptyClaim(claim, item = {}) {
 async function deleteClaim(item, claimId) {
   const permissionGuard = guardCaseEdit(item);
   if (!permissionGuard.ok) return;
+  const unmodifiable = state.bookings.some((booking) =>
+    booking.caseId === item.id &&
+    ["started", "paused", "blocked", "completed"].includes(getBookingOperationalStatus(booking))
+  );
+  if (unmodifiable) {
+    notifyUser("Impossible de supprimer cet ordre car des tâches sont en cours, en pause, bloquées ou terminées.", "error");
+    return;
+  }
   item.claims = normalizeRepairClaims(item.claims, item);
   const claim = item.claims.find((candidate) => candidate.id === claimId);
   if (!claim) return;
@@ -2458,6 +2426,14 @@ async function integrateSupplementDurations(item, supplementId) {
 async function deleteSupplement(item, supplementId) {
   const permissionGuard = guardCaseEdit(item);
   if (!permissionGuard.ok) return;
+  const unmodifiable = state.bookings.some((booking) =>
+    booking.caseId === item.id &&
+    ["started", "paused", "blocked", "completed"].includes(getBookingOperationalStatus(booking))
+  );
+  if (unmodifiable) {
+    notifyUser("Impossible de supprimer ce complément car des tâches sont en cours, en pause, bloquées ou terminées.", "error");
+    return;
+  }
   const supplement = (item.supplements || []).find((candidate) => candidate.id === supplementId);
   if (!supplement) return;
   const confirmed = await showConfirmModal(`Supprimer le complément ${supplement.number || supplement.title} ?`);
@@ -2476,12 +2452,11 @@ function renderKanban() {
     return;
   }
   const columns = [
-    { key: "reception", label: "Réception", statuses: ["receptionDraft", "awaitingVehicle", "vehicleReceived"] },
-    { key: "approvals", label: "Accords", statuses: ["approvals"] },
-    { key: "appointment", label: "RDV", statuses: ["appointment", "appointmentScheduled", "workScheduled", "noShow"] },
-    { key: "work", label: "En travaux", statuses: ["work"] },
-    { key: "quality", label: "Qualité", statuses: ["quality", "qualityRejected", "qualityRework"] },
-    { key: "delivered", label: "Livré", statuses: ["delivered"] },
+    { key: "to_validate", label: "À valider", statuses: ["devis_importe", "a_valider_chef_atelier"] },
+    { key: "validated_planned", label: "Validé & Planifié", statuses: ["valide_atelier", "planifie"] },
+    { key: "in_progress", label: "En cours", statuses: ["en_cours", "en_pause"] },
+    { key: "blocked", label: "Bloqué", statuses: ["bloque"] },
+    { key: "completed_closed", label: "Terminé & Clôturé", statuses: ["termine_atelier", "cloture_atelier"] },
   ];
   const dashboardCases = getSavDashboardCases(getSavDashboardRange()).periodCases;
   board.innerHTML = columns
@@ -2826,12 +2801,14 @@ function setupCaseDetailTabs(root, item) {
 
 
 function getTabForAction(action) {
-  if (action === "claim") return "claims";
-  if (action === "labor") return "claims";
-  if (action === "expertApproved" || action === "clientApproved") return "claims";
-  if (action === "appointment") return "planning";
-  if (action === "received" || action === "workStarted" || action === "workCompleted") return "atelier";
-  if (action === "qualityApproved" || action === "delivered" || action === "invoiced") return "livraison";
+  const normalizedAction = normalizeWorkflowAction(action);
+  if (normalizedAction === "claim") return "claims";
+  if (normalizedAction === "labor") return "claims";
+  if (normalizedAction === CHEF_VALIDATION_WORKFLOW_ACTION) return "claims";
+  if (normalizedAction === "expertApproved" || normalizedAction === "clientApproved") return "claims";
+  if (normalizedAction === "appointment") return "planning";
+  if (normalizedAction === "received" || normalizedAction === "workStarted" || normalizedAction === "workCompleted") return "atelier";
+  if (normalizedAction === "qualityApproved" || normalizedAction === "delivered" || normalizedAction === "invoiced") return "livraison";
   return "claims";
 }
 
@@ -2846,19 +2823,21 @@ function recordReleasedCapacityIfNeeded(item, freedMinutes) {
 }
 
 function applyWorkflowAction(item, action) {
-  const permissionGuard = guardWorkflowAction(action, item, true);
+  const normalizedAction = normalizeWorkflowAction(action);
+  const permissionGuard = guardWorkflowAction(normalizedAction, item, true);
   if (!permissionGuard.ok) return { ok: false, message: permissionGuard.message };
 
-  const issues = getBusinessRuleIssues(item, action);
+  const issues = getBusinessRuleIssues(item, normalizedAction);
   if (issues.length) {
     return { ok: false, message: issues.join("\n") };
   }
 
+  item.flags = item.flags || {};
   const workflowClaimIds = new Set(getWorkflowClaims(item).map((claim) => claim.id));
   const claims = Array.isArray(item.claims) ? item.claims : [];
   const now = new Date().toISOString();
 
-  if (action === "expertApproved") {
+  if (normalizedAction === "expertApproved") {
     claims.forEach((claim) => {
       if (workflowClaimIds.has(claim.id) && !isClientOnlyRepairClaim(claim)) {
         claim.expertApproved = true;
@@ -2871,7 +2850,7 @@ function applyWorkflowAction(item, action) {
     return { ok: true };
   }
 
-  if (action === "clientApproved") {
+  if (normalizedAction === "clientApproved") {
     claims.forEach((claim) => {
       if (!workflowClaimIds.has(claim.id)) return;
       claim.clientApproved = true;
@@ -2883,7 +2862,7 @@ function applyWorkflowAction(item, action) {
     return { ok: true };
   }
 
-  if (action === "workCompleted") {
+  if (normalizedAction === "workCompleted") {
     const technicianBookings = getCaseIncompleteTechnicianBookings(item);
     if (technicianBookings.length) {
       addHistory(
@@ -2899,14 +2878,40 @@ function applyWorkflowAction(item, action) {
     }
     const result = completeCaseWorkBookingsNow(item, new Date(now));
     item.flags.workCompleted = true;
-    if (!result.completed) recordFlagHistory(item, action, true);
+    if (!result.completed) recordFlagHistory(item, normalizedAction, true);
     recordReleasedCapacityIfNeeded(item, result.freedMinutes);
     return { ok: true, ...result };
   }
 
-  item.flags[action] = true;
-  if (action === "workStarted") item.flags.workCompleted = false;
-  recordFlagHistory(item, action, true);
+  if (normalizedAction === CHEF_VALIDATION_WORKFLOW_ACTION) {
+    item.flags.chefValidated = true;
+    item.chefValidatedAt = now;
+    item.chefValidatedBy = typeof getCurrentActor === "function" ? (getCurrentActor().userId || null) : (state?.currentUserId || null);
+    claims.forEach((claim) => {
+      if (workflowClaimIds.has(claim.id)) {
+        claim.status = "atelier_validated";
+        claim.updatedAt = now;
+      }
+    });
+    recordFlagHistory(item, normalizedAction, true);
+    return { ok: true };
+  }
+
+  if (normalizedAction === "atelierClosed") {
+    item.flags.atelierClosed = true;
+    recordFlagHistory(item, normalizedAction, true);
+    return { ok: true };
+  }
+
+  if (normalizedAction === "archived") {
+    item.flags.archived = true;
+    recordFlagHistory(item, normalizedAction, true);
+    return { ok: true };
+  }
+
+  item.flags[normalizedAction] = true;
+  if (normalizedAction === "workStarted") item.flags.workCompleted = false;
+  recordFlagHistory(item, normalizedAction, true);
   return { ok: true };
 }
 
@@ -3123,58 +3128,38 @@ function renderWorkflow(root, item) {
 
 const CASE_STAGE_FLOW = [
   ["opened", "Ouvert"],
-  ["appointment", "RDV"],
-  ["received", "Véhicule reçu"],
-  ["labor", "Main-d'œuvre"],
-  ["validation", "Validation"],
+  ["validation", "Validation Chef"],
   ["planned", "Planifié"],
   ["work", "En travaux"],
-  ["quality", "Qualité"],
-  ["readyDelivery", "Prêt livraison"],
-  ["delivered", "Livré"],
+  ["cloture", "Clôturé"],
 ];
 
 function getCaseStageFlow(item) {
-  const values = getWorkflowValues(item);
   const nextAction = getCaseNextAction(item);
-  const hasValidation = getWorkflowClaims(item).length > 0;
-  const hasLabor = hasKnownLabor(item);
-  const hasPlanning = hasCaseBookings(item);
   const done = {
     opened: true,
-    appointment: Boolean(item.appointment),
-    received: Boolean(item.flags.received),
-    labor: hasLabor,
-    validation: hasValidation ? caseHasCompletedValidations(item) : false,
-    planned: hasPlanning,
-    work: Boolean(item.flags.workCompleted),
-    quality: Boolean(item.flags.qualityApproved),
-    readyDelivery: Boolean(item.flags.qualityApproved),
-    delivered: Boolean(item.flags.delivered),
+    validation: Boolean(item.flags?.chefValidated),
+    planned: Boolean(item.appointment || (state.bookings && state.bookings.some(b => b.caseId === item.id && b.start && b.end))),
+    work: Boolean(item.flags?.workCompleted),
+    cloture: Boolean(item.flags?.invoiced),
   };
   const currentByAction = {
     complete_vehicle_identity: "opened",
-    add_labor: "labor",
-    schedule_appointment: "appointment",
-    receive_vehicle: "received",
-    validate_customer_or_internal: "validation",
+    validate_chef_atelier: "validation",
     schedule_work: "planned",
     start_work: "work",
-    resume_or_replan_work: "work",
     finish_work: "work",
-    quality_check: "quality",
-    prepare_delivery: "readyDelivery",
-    deliver_vehicle: "delivered",
-    resolve_blocker: hasPlanning || values.workStarted ? "work" : hasLabor ? "validation" : "labor",
-    done: "delivered",
+    cloture_atelier: "cloture",
+    resolve_blocker: "work",
+    done: "cloture",
   };
   const currentKey = currentByAction[nextAction.code] || "opened";
   return CASE_STAGE_FLOW.map(([key, label]) => {
     let stateName = done[key] ? "done" : key === currentKey ? "current" : "todo";
-    if (key === "validation" && !hasValidation) stateName = "na";
     if (nextAction.code === "resolve_blocker" && key === currentKey) stateName = "blocked";
-    if (key === "work" && item.flags.workStarted && !item.flags.workCompleted && stateName !== "blocked") stateName = "current";
-    if (key === "readyDelivery" && item.flags.qualityApproved && !item.flags.delivered) stateName = "current";
+    if (key === "work" && item.flags?.workStarted && !item.flags?.workCompleted && stateName !== "blocked") {
+      stateName = "current";
+    }
     return { key, label, state: stateName };
   });
 }
@@ -3465,15 +3450,11 @@ function getNextWorkflowAction(item) {
   const claimsToCheck = getWorkflowClaims(item);
   if (!claimsToCheck.length) return "claim";
   if (claimsToCheck.some((claim) => !claimHasLaborEstimate(claim))) return "labor";
-  if (claimsToCheck.some((claim) => !isClientOnlyRepairClaim(claim) && !claim.expertApproved)) return "expertApproved";
+  if (!item.flags?.chefValidated) return CHEF_VALIDATION_WORKFLOW_ACTION;
   if (!item.appointment || appointmentNeedsReschedule(item)) return "appointment";
-  if (claimsToCheck.some((claim) => !claim.clientApproved)) return "clientApproved";
-  if (!item.flags.received) return "received";
-  if (!item.flags.workStarted) return "workStarted";
-  if (!item.flags.workCompleted) return "workCompleted";
-  if (!item.flags.qualityApproved) return "qualityApproved";
-  if (!item.flags.delivered) return "delivered";
-  if (!item.flags.invoiced) return "invoiced";
+  if (!item.flags?.workStarted) return "workStarted";
+  if (!item.flags?.workCompleted) return "workCompleted";
+  if (!item.flags?.atelierClosed) return "atelierClosed";
   return null;
 }
 
@@ -3483,118 +3464,89 @@ function appointmentNeedsReschedule(item) {
 
 function getBusinessRuleIssues(item, action) {
   if (!item) return ["Aucun dossier sélectionné."];
+  const normalizedAction = normalizeWorkflowAction(action);
   const issues = [];
   const hasAssignments = state.bookings.some((booking) => booking.caseId === item.id);
-  const workflowClaims = getWorkflowClaims(item);
 
   if (isCaseReadonlyArchive(item)) {
     issues.push(getArchivedCaseMessage(item));
     return issues;
   }
 
-  if (isCaseBlocked(item) && !["claim", "labor", "expertApproved", "clientApproved"].includes(action)) {
+  if (isCaseBlocked(item) && !["claim", "labor"].includes(normalizedAction)) {
     issues.push(`Résoudre le blocage avant de continuer : ${getCaseBlockerLabel(item) || "dossier bloqué"}.`);
     return issues;
   }
 
-  if (action !== "claim" && !workflowClaims.length) {
-    issues.push("Créer au moins un ordre de réparation actif avant de continuer.");
-  }
-
-  if (action === "expertApproved") {
-    const expertClaims = workflowClaims.filter((claim) => !isClientOnlyRepairClaim(claim));
-    if (expertClaims.some((claim) => !claimHasLaborEstimate(claim))) issues.push("Importer ou saisir la main-d’œuvre sur chaque ordre assurance inclus.");
-    if (expertClaims.length && !hasBeforeRepairPhoto(item)) issues.push("Ajouter au moins une photo Avant réparation.");
-  }
-
-
-  if (action === "clientApproved") {
-    if (workflowClaims.some((claim) => !isClientOnlyRepairClaim(claim) && !claim.expertApproved)) issues.push("Valider d'abord l'accord expert sur les ordres assurance inclus.");
-    if (workflowClaims.some((claim) => !isClientOnlyRepairClaim(claim) && claim.type !== 'client' && !String(item.insurance || '').trim())) issues.push("Renseigner la compagnie d’assurance avant l’accord client.");
-    if (workflowClaims.some((claim) => !claimHasLaborEstimate(claim))) issues.push("Importer ou saisir la main-d’œuvre avant l’accord client/interne.");
-  }
-
-  if (action === "appointment") {
-    if (workflowClaims.some((claim) => !claimHasLaborEstimate(claim))) issues.push("Importer ou saisir la main-d’œuvre sur chaque ordre inclus.");
-    if (!hasVehicleIdentity(item)) issues.push("Renseigner une immatriculation ou un VIN.");
-    if (totalDurationHours(item) <= 0) issues.push("Renseigner au moins une durée atelier.");
+  if (normalizedAction === "appointment") {
+    if (!item.flags?.chefValidated) {
+      issues.push("Le dossier doit être validé par le Chef Atelier avant planification.");
+    }
+    const unmodifiable = state.bookings.some((booking) =>
+      booking.caseId === item.id &&
+      ["started", "paused", "blocked", "completed"].includes(getBookingOperationalStatus(booking))
+    );
+    if (unmodifiable) {
+      issues.push("Planning non modifiable car des tâches sont en cours, en pause, bloquées ou terminées.");
+    }
+    if (!hasVehicleIdentity(item)) {
+      issues.push("Renseigner une immatriculation ou un VIN.");
+    }
+    if (totalDurationHours(item) <= 0) {
+      issues.push("Renseigner au moins une durée atelier.");
+    }
     const missingRoles = missingSchedulingRoles(item);
-    if (missingRoles.length) issues.push(`Activer au moins une ressource pour : ${missingRoles.join(", ")}.`);
-  }
-
-  if (action === "received") {
-    if (appointmentNeedsReschedule(item)) issues.push("Reporter le RDV avant réception.");
-  }
-
-  if (action === "workStarted") {
-    if (!item.flags.received) issues.push("Confirmer la réception physique du véhicule avant de démarrer les travaux.");
-    if (workflowClaims.some((claim) => !claim.clientApproved)) issues.push("Enregistrer la validation client/interne avant de démarrer les travaux.");
-    if (!hasAssignments) issues.push("Aucune affectation atelier n'est planifiée pour ce dossier.");
-  }
-
-  if (action === "workCompleted") {
-    if (!item.flags.workStarted) issues.push("Démarrer les travaux avant de les terminer.");
-    if (!hasAssignments) issues.push("Aucune affectation atelier n'est planifiée pour ce dossier.");
-  }
-
-  if (action === "qualityApproved") {
-    if (!item.flags.received) issues.push("Confirmer la réception du véhicule avant le contrôle qualité.");
-    if (!item.flags.workStarted) issues.push("Démarrer les travaux avant le contrôle qualité.");
-    if (!item.flags.workCompleted) issues.push("Marquer les travaux terminés avant le contrôle qualité.");
-    if (!hasAssignments) issues.push("Aucune affectation atelier n'est planifiée pour ce dossier.");
-    if (!isCaseQualityChecklistComplete(item)) issues.push("Compléter toute la checklist qualité.");
-  }
-
-  if (action === "delivered") {
-    if (!item.appointment) issues.push("Choisir un RDV avant livraison.");
-    if (!item.flags.received) issues.push("Confirmer la réception physique du véhicule avant livraison.");
-    if (!item.flags.workStarted) issues.push("Démarrer les travaux avant livraison.");
-    if (!item.flags.workCompleted) issues.push("Marquer les travaux terminés avant livraison.");
-    if (!hasAssignments) issues.push("Aucune affectation atelier n'est planifiée pour ce dossier.");
-    if (!item.flags.qualityApproved) issues.push("Valider le contrôle qualité avant livraison.");
-    if (workflowClaims.some((claim) => !isClientOnlyRepairClaim(claim)) && !hasAfterRepairPhoto(item)) issues.push("Ajouter au moins une photo Après réparation avant livraison assurance.");
-  }
-
-  if (action === "invoiced") {
-    if (!item.flags.qualityApproved) issues.push("Le contrôle qualité doit être validé.");
-    if (!item.flags.delivered) issues.push("Livrer le véhicule avant de facturer le dossier.");
-    if (workflowClaims.some((claim) => !claim.clientApproved)) {
-      issues.push("La validation client/interne doit être enregistrée.");
+    if (missingRoles.length) {
+      issues.push(`Aucune ressource active pour : ${missingRoles.join(", ")}.`);
     }
-    if (workflowClaims.some((claim) => !isClientOnlyRepairClaim(claim) && !claim.expertApproved)) {
-      issues.push("L'accord expert sur les ordres assurance doit être validé.");
+  }
+
+  if (normalizedAction === "workStarted") {
+    if (!item.flags?.chefValidated) {
+      issues.push("Le dossier doit être validé par le Chef Atelier.");
     }
-    if (isCaseBlocked(item)) {
-      issues.push("Le dossier ne doit pas présenter de blocage actif.");
+    if (!hasAssignments) {
+      issues.push("Aucune affectation atelier n'est planifiée pour ce dossier.");
     }
-    const technicianBookings = getCaseIncompleteTechnicianBookings(item);
-    if (technicianBookings.length > 0) {
-      issues.push("Toutes les tâches atelier et reliquats doivent être terminés.");
+  }
+
+  if (normalizedAction === "workCompleted") {
+    if (!item.flags?.workStarted) {
+      issues.push("Démarrer les travaux avant de les terminer.");
     }
+    if (!hasAssignments) {
+      issues.push("Aucune affectation atelier n'est planifiée pour ce dossier.");
+    }
+  }
+
+  if (normalizedAction === "atelierClosed") {
+    if (!item.flags?.chefValidated) {
+      issues.push("Le dossier doit être validé par le Chef Atelier.");
+    }
+    const openBookings = state.bookings.filter(
+      (b) => b.caseId === item.id && getBookingOperationalStatus(b) !== "completed"
+    );
+    if (openBookings.length > 0) {
+      issues.push("Toutes les tâches atelier doivent être terminées avant clôture.");
+    }
+  }
+
+  if (normalizedAction === "archived") {
+    if (!item.flags?.atelierClosed) {
+      issues.push("Clôturer l'atelier avant d'archiver le dossier.");
+    }
+  }
+
+  const removedActions = ["expertApproved", "clientApproved", "received", "qualityApproved", "delivered", "invoiced"];
+  if (removedActions.includes(normalizedAction)) {
+    issues.push(`Action '${normalizedAction}' supprimée du workflow simplifié atelier.`);
   }
 
   return issues;
 }
 
 function getBusinessRuleWarnings(item, action) {
-  if (!item) return [];
-  const warnings = [];
-  const workflowClaims = getWorkflowClaims(item);
-
-  if (action === "appointment") {
-    if (workflowClaims.some((claim) => !isClientOnlyRepairClaim(claim) && !claim.expertApproved)) warnings.push("Accord expert manquant : ce RDV sera prévisionnel.");
-    if (workflowClaims.some((claim) => !claim.clientApproved)) warnings.push("Validation client/interne manquante : ce RDV sera prévisionnel.");
-  }
-
-  if (action === "received") {
-    if (!item.appointment) warnings.push("Ce véhicule est réceptionné sans rendez-vous planifié. Confirmez-vous cette réception exceptionnelle ?");
-  }
-
-  if (action === "supplement") {
-    if (item.flags.received && !item.flags.workStarted) warnings.push("Le véhicule est réceptionné mais les travaux ne sont pas démarrés. Confirmer l'ajout du complément ?");
-  }
-
-  return warnings;
+  return [];
 }
 
 function hasVehicleIdentity(item) {

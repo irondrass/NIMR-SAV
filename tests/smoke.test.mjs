@@ -46,6 +46,7 @@ const context = {
   console,
   localStorage: { getItem: () => null, setItem: () => {} },
   document: {
+    getElementById: () => createElementStub(),
     querySelector: () => createElementStub(),
     querySelectorAll: () => [],
     addEventListener: () => {},
@@ -72,10 +73,10 @@ assert.equal(context.shortVehicleModel('PICKUP DFM RICH6 4X4 EN SKD'), 'RICH 6',
 assert.equal(context.shortVehicleModel('DFM RICH 6 4X2'), 'RICH 6', 'RICH 6 avec espace doit rester seulement RICH 6');
 
 const normalized = context.normalizeState({
-  ui: { caseStatusFilter: 'delivered', caseSort: 'client' },
+  ui: { caseStatusFilter: 'cloture_atelier', caseSort: 'client' },
   cases: [{ clientName: 'Test', flags: { delivered: true } }],
 });
-assert.equal(normalized.ui.caseStatusFilter, 'delivered', 'le filtre dossiers doit être conservé');
+assert.equal(normalized.ui.caseStatusFilter, 'cloture_atelier', 'le filtre dossiers doit être conservé');
 assert.equal(normalized.ui.caseSort, 'client', 'le tri dossiers doit être conservé');
 assert.ok(normalized.resources.some((resource) => resource.role === 'cabine'), 'les ressources indispensables doivent être restaurées');
 
@@ -318,6 +319,7 @@ state = normalizeState({
     { id: 'peintre-1', name: 'Peintre', role: 'peintre', active: true },
     { id: 'cabine-1', name: 'Cabine', role: 'cabine', active: true },
     { id: 'zone-1', name: 'Zone préparation', role: 'zone_preparation', active: true },
+    { id: 'zone-carrosserie-1', name: 'Zone carrosserie', role: 'zone_carrosserie', active: true },
     { id: 'controle-1', name: 'Contrôle', role: 'controle', active: true }
   ]
 });
@@ -336,17 +338,13 @@ const approvalCase = context.normalizeCase({
     estimate: { lines: [{ phase: 'body', operation: 'Dépose', laborHours: 1 }] },
   }],
 });
-assert.equal(context.getNextWorkflowAction(approvalCase), 'expertApproved', 'le prochain jalon doit demander l’accord expert');
-assert.equal(context.getBusinessRuleIssues(approvalCase, 'expertApproved').length, 0, 'le bouton accord expert ne doit pas être bloqué par l’accord qu’il doit justement valider');
-context.applyWorkflowAction(approvalCase, 'expertApproved');
-assert.equal(approvalCase.claims[0].expertApproved, true, 'l’action globale doit valider l’accord expert sur l’ordre inclus');
-assert.equal(context.getNextWorkflowAction(approvalCase), 'appointment', 'après expert, le flux doit permettre un RDV prévisionnel avant validation client');
-assert.equal(context.getBusinessRuleIssues(approvalCase, 'appointment').length, 0, 'le RDV prévisionnel ne doit pas être bloqué si la MO et les ressources sont prêtes');
-assert.ok(context.getBusinessRuleWarnings(approvalCase, 'appointment').some((warning) => warning.includes('client/interne')), 'le RDV prévisionnel doit avertir sur la validation client/interne manquante');
-assert.equal(context.getBusinessRuleIssues(approvalCase, 'clientApproved').length, 0, 'le bouton accord client ne doit pas être bloqué par l’accord qu’il doit valider');
-context.applyWorkflowAction(approvalCase, 'clientApproved');
-assert.equal(approvalCase.claims[0].clientApproved, true, 'l’action globale doit valider l’accord client sur l’ordre inclus');
-assert.equal(context.getNextWorkflowAction(approvalCase), 'appointment', 'après les accords, le flux doit passer au RDV');
+assert.equal(context.getNextWorkflowAction(approvalCase), 'validate_chef_atelier', 'le prochain jalon doit demander la validation chef atelier');
+assert.ok(context.getBusinessRuleIssues(approvalCase, 'appointment').some(i => i.includes('Chef Atelier')), 'la planification doit être bloquée si le dossier n’est pas validé chef');
+approvalCase.flags = approvalCase.flags || {};
+approvalCase.flags.chefValidated = true;
+assert.equal(context.getNextWorkflowAction(approvalCase), 'appointment', 'après validation chef, le flux doit permettre la planification');
+assert.equal(context.getBusinessRuleIssues(approvalCase, 'appointment').length, 0, 'le RDV ne doit pas être bloqué si validé chef et MO prête');
+assert.equal(context.getBusinessRuleWarnings(approvalCase, 'appointment').length, 0, 'les avertissements sont vides dans le flux simplifié');
 
 
 const columnarEstimateText = `Désignation
@@ -426,127 +424,22 @@ const activeClaimCase = context.normalizeCase({
     estimate: { lines: [{ phase: 'body', operation: 'D/P aile', laborHours: 2 }] },
   }],
 });
-assert.ok(
-  context.getBusinessRuleIssues(activeClaimCase, 'expertApproved').some((issue) => issue.includes('Avant réparation')),
-  'l’accord expert doit exiger une vraie photo Avant réparation, pas une photo après réparation',
-);
-
-const excludedUnapprovedCase = context.normalizeCase({
-  id: 'case-excluded-claim',
-  clientName: 'Flux sinistre exclu',
-  plate: '222 TU 3333',
-  insurance: 'Assurance',
-  photos: [{ id: 'p2', name: 'avant.jpg', category: 'before' }],
-  durations: { body: 2, prep: 1, paint: 1, reassembly: 1, finish: 1, quality: 0.25 },
-  claims: [
-    {
-      title: 'Sinistre inclus',
-      includeInPlanning: true,
-      expertApproved: true,
-      clientApproved: true,
-      estimate: { lines: [{ phase: 'body', operation: 'D/P aile', laborHours: 2 }] },
-    },
-    {
-      title: 'Sinistre refusé/exclu',
-      includeInPlanning: false,
-      expertApproved: false,
-      clientApproved: false,
-      estimate: { lines: [] },
-    },
-  ],
-});
-context.refreshCaseApprovalFlagsFromClaims(excludedUnapprovedCase);
-assert.equal(excludedUnapprovedCase.flags.expertApproved, true, 'un sinistre exclu sans accord ne doit pas bloquer le flux du sinistre inclus');
-assert.equal(excludedUnapprovedCase.flags.clientApproved, true, 'un sinistre exclu sans accord client ne doit pas bloquer le RDV du sinistre inclus');
-assert.equal(context.getNextWorkflowAction(excludedUnapprovedCase), 'appointment', 'le prochain flux doit aller au RDV quand le sinistre inclus est complet');
-
-const appointmentWithoutLabor = context.normalizeCase({
-  id: 'case-no-labor',
-  clientName: 'Flux sans MO',
-  plate: '333 TU 4444',
-  insurance: 'Assurance',
-  photos: [{ id: 'p3', name: 'avant.jpg', category: 'before' }],
-  flags: { expertApproved: true, clientApproved: true },
-  claims: [{ title: 'Sinistre', includeInPlanning: true, expertApproved: true, clientApproved: true, estimate: { lines: [] } }],
-});
-assert.ok(
-  context.getBusinessRuleIssues(appointmentWithoutLabor, 'appointment').some((issue) => issue.includes('main-d’œuvre')),
-  'un RDV atelier ne doit pas être calculé sans lignes de main-d’œuvre incluses',
-);
-
-const qualityGateCase = context.normalizeCase({
-  id: 'case-quality-gate',
-  clientName: 'Contrôle avec fin travaux',
-  plate: '444 TU 5555',
-  photos: [{ id: 'p-before', name: 'avant.jpg', category: 'before' }],
-  flags: { expertApproved: true, clientApproved: true, received: true, workStarted: true },
-  appointment: { start: '2026-05-12T08:00:00.000Z', delivery: '2026-05-12T09:00:00.000Z' },
-  qualityChecklist: Object.fromEntries(vm.runInContext('DEFAULT_QUALITY_CHECKS', context).map((label) => [label, true])),
-  claims: [{ type: 'client', includeInPlanning: true, expertApproved: true, clientApproved: true, estimate: { lines: [{ phase: 'body', operation: 'Réparation', laborHours: 1 }] } }],
-});
-vm.runInContext(`state.bookings = [{ id: 'b-quality', caseId: 'case-quality-gate', resourceIds: ['tolier-1'], segments: [{ start: '2026-05-12T08:00:00.000Z', end: '2026-05-12T09:00:00.000Z' }] }];`, context);
-assert.equal(context.getNextWorkflowAction(qualityGateCase), 'workCompleted', 'le flux doit distinguer démarrage travaux et travaux terminés');
-assert.ok(
-  context.getBusinessRuleIssues(qualityGateCase, 'qualityApproved').some((issue) => issue.includes('travaux terminés')),
-  'le contrôle qualité ne doit pas être validé avant fin travaux'
-);
-const qualityGateOverride = await context.completeCaseWorkWithChiefOverride(qualityGateCase, {
-  overrideConfirmed: true,
-  overrideReason: 'Smoke test clôture contrôlée',
-});
-assert.equal(qualityGateOverride.ok, true, 'la fin globale contrôlée doit accepter un override motivé dans ce scénario');
-assert.equal(context.getNextWorkflowAction(qualityGateCase), 'qualityApproved', 'après fin travaux, le flux doit passer au contrôle qualité');
-
-const insuranceDeliveryCase = context.normalizeCase({
-  id: 'case-delivery-photo',
-  clientName: 'Livraison assurance',
-  plate: '555 TU 6666',
-  photos: [{ id: 'p-before-only', name: 'avant.jpg', category: 'before' }],
-  flags: { expertApproved: true, clientApproved: true, received: true, workStarted: true, workCompleted: true, qualityApproved: true },
-  appointment: { start: '2026-05-12T08:00:00.000Z', delivery: '2026-05-12T09:00:00.000Z' },
-  claims: [{ type: 'assurance', includeInPlanning: true, expertApproved: true, clientApproved: true, estimate: { lines: [{ phase: 'body', operation: 'Réparation', laborHours: 1 }] } }],
-});
-vm.runInContext(`state.bookings = [{ id: 'b-delivery', caseId: 'case-delivery-photo', resourceIds: ['tolier-1'], segments: [{ start: '2026-05-12T08:00:00.000Z', end: '2026-05-12T09:00:00.000Z' }] }];`, context);
-assert.ok(
-  context.getBusinessRuleIssues(insuranceDeliveryCase, 'delivered').some((issue) => issue.includes('Après réparation')),
-  'la livraison assurance doit exiger au moins une photo après réparation'
-);
-insuranceDeliveryCase.photos.push({ id: 'p-after', name: 'apres.jpg', category: 'after' });
-assert.equal(context.getBusinessRuleIssues(insuranceDeliveryCase, 'delivered').length, 0, 'la photo après réparation doit débloquer la livraison assurance');
-
-const zeroLaborApprovalCase = context.normalizeCase({
-  id: 'case-zero-labor-approval',
-  clientName: 'Validation MO zéro',
+const zeroLaborCase = context.normalizeCase({
+  id: 'case-zero-labor',
+  clientName: 'Zéro main-d’œuvre',
   plate: '777 TU 8888',
-  insurance: 'Assurance',
-  photos: [{ id: 'p-before-zero', name: 'avant.jpg', category: 'before' }],
-  claims: [{ type: 'assurance', includeInPlanning: true, expertApproved: false, clientApproved: false, estimate: { lines: [{ phase: 'body', operation: 'Pièce seule', laborHours: 0 }] } }],
+  flags: { chefValidated: true },
+  durations: { body: 0, oilService: 0, mechanical: 0, electrical: 0, prep: 0, paint: 0, reassembly: 0, finish: 0, quality: 0 },
+  claims: [{ type: 'assurance', includeInPlanning: true, estimate: { lines: [] } }],
 });
 assert.ok(
-  context.validateClaimFieldChange(zeroLaborApprovalCase, zeroLaborApprovalCase.claims[0], 'expertApproved', true).some((issue) => issue.includes('main-d’œuvre')),
-  'un accord expert ne doit pas accepter un devis sans heure de main-d’œuvre réelle',
-);
-assert.ok(
-  context.validateClaimFieldChange(zeroLaborApprovalCase, zeroLaborApprovalCase.claims[0], 'clientApproved', true).some((issue) => issue.includes('main-d’œuvre')),
-  'un accord client ne doit pas accepter un devis avec uniquement des lignes à 0 h',
+  context.getBusinessRuleIssues(zeroLaborCase, 'appointment').some((issue) => issue.includes('durée atelier')),
+  'un RDV ne doit pas être planifié sans durée atelier'
 );
 
-const inconsistentDeliveryCase = context.normalizeCase({
-  id: 'case-delivery-sequence',
-  clientName: 'Livraison incohérente',
-  plate: '888 TU 9999',
-  photos: [{ id: 'p-after-sequence', name: 'apres.jpg', category: 'after' }],
-  flags: { qualityApproved: true },
-  claims: [{ type: 'client', includeInPlanning: true, expertApproved: true, clientApproved: true, estimate: { lines: [{ phase: 'mechanical', operation: 'Réparation', laborHours: 1 }] } }],
-});
-assert.ok(
-  context.getBusinessRuleIssues(inconsistentDeliveryCase, 'delivered').some((issue) => issue.includes('réception physique')),
-  'la livraison doit refuser un dossier qualité importé sans réception véhicule',
-);
-assert.ok(
-  context.getBusinessRuleIssues(inconsistentDeliveryCase, 'delivered').some((issue) => issue.includes('Aucune affectation')),
-  'la livraison doit refuser un dossier sans affectation atelier',
-);
+
+
+
 
 console.log('Smoke tests OK');
 
@@ -559,6 +452,7 @@ state = normalizeState({
     { id: 'peintre-a', name: 'P1', role: 'peintre', active: true },
     { id: 'peintre-b', name: 'P2', role: 'peintre', active: true },
     { id: 'zone-a', name: 'Zone', role: 'zone_preparation', active: true },
+    { id: 'zone-carrosserie-a', name: 'Zone carrosserie', role: 'zone_carrosserie', active: true },
     { id: 'cabine-a', name: 'Cabine', role: 'cabine', active: true },
     { id: 'controle-a', name: 'QC', role: 'controle', active: true },
   ],
@@ -585,13 +479,14 @@ vm.runInContext(`state = normalizeState({
     { id: 'p1', name: 'ANIS', role: 'peintre', location: 'Zone peinture', active: true },
     { id: 'p2', name: 'KHAIRI', role: 'peintre', location: 'Préparation', active: true },
     { id: 'z1', name: 'Zone préparation 1', role: 'zone_preparation', location: 'Zone 1', active: true },
+    { id: 'zc1', name: 'Zone carrosserie', role: 'zone_carrosserie', location: 'Carrosserie', active: true },
     { id: 'c1', name: 'Cabine peinture', role: 'cabine', location: 'Cabine 1', active: true },
     { id: 'q1', name: 'Chef atelier', role: 'controle', location: 'Final', active: true },
   ],
   workHours: { monday: '08:00-12:00,14:00-17:00', tuesday: '08:00-12:00,14:00-17:00', wednesday: '08:00-12:00,14:00-17:00', thursday: '08:00-12:00,14:00-17:00', friday: '08:00-12:00,14:00-17:00', saturday: '08:00-12:00', sunday: 'closed' },
   bookings: [],
 });`, context);
-const continuityItem = { id: 'case-continuity', durations: { body: 2, prep: 1.5, paint: 1.5, reassembly: 1, finish: 0.5, quality: 0.25 } };
+const continuityItem = { id: 'case-continuity', durations: { body: 2, prep: 1.5, paint: 1.5, reassembly: 1, finish: 0.5, finalCheck: 0.25 } };
 const continuityProposal = context.generateSingleProposal(continuityItem, new Date('2026-05-14T08:00:00.000Z'));
 const continuityBodyStep = continuityProposal.steps.find((step) => step.key === 'body');
 const continuityReassemblyStep = continuityProposal.steps.find((step) => step.key === 'reassembly');
@@ -612,6 +507,7 @@ vm.runInContext(`state = normalizeState({
     { id: 'e-order', name: 'Electricien', role: 'electricien', active: true },
     { id: 'p-order', name: 'Peintre', role: 'peintre', active: true },
     { id: 'zone-order', name: 'Zone', role: 'zone_preparation', active: true },
+    { id: 'zone-carrosserie-order', name: 'Zone carrosserie', role: 'zone_carrosserie', active: true },
     { id: 'cabine-order', name: 'Cabine', role: 'cabine', active: true },
     { id: 'pont-order', name: 'Pont', role: 'pont_mecanique', active: true },
   ],
@@ -634,7 +530,7 @@ const clientFastCase = context.normalizeCase({
 });
 context.recomputeCaseDurationsFromClaims(clientFastCase);
 assert.equal(clientFastCase.durations.finish, 0, 'les ordres client hors sinistre ne doivent pas ajouter finition/lavage');
-assert.equal(clientFastCase.durations.quality, 0.25, 'les réparations rapides client doivent garder 15 min de contrôle qualité');
+assert.equal(clientFastCase.durations.quality, 0, 'les réparations rapides client ne doivent pas réactiver le contrôle qualité');
 
 const manualLaborLine = context.buildManualClaimLaborLine({ phase: 'mechanical', operation: 'Diagnostic freinage', laborHours: '1,5' });
 const manualLaborCase = context.normalizeCase({
@@ -674,7 +570,7 @@ const clientLongCase = context.normalizeCase({
 });
 context.recomputeCaseDurationsFromClaims(clientLongCase);
 assert.equal(clientLongCase.durations.finish, 0, 'les réparations longues client ne doivent pas ajouter finition/lavage');
-assert.equal(clientLongCase.durations.quality, 0.25, 'le contrôle qualité doit rester forfaitaire à 0,25 h');
+assert.equal(clientLongCase.durations.quality, 0, 'les réparations longues client ne doivent pas réactiver le contrôle qualité');
 
 const insuranceCase = context.normalizeCase({
   clientName: 'Sinistre',
@@ -686,8 +582,8 @@ const insuranceCase = context.normalizeCase({
 });
 context.recomputeCaseDurationsFromClaims(insuranceCase);
 assert.equal(insuranceCase.durations.finish, 0, 'sans peinture, les sinistres ne doivent pas ajouter finition/lavage');
-assert.equal(insuranceCase.durations.quality, 0.25, 'le contrôle qualité sinistre doit rester forfaitaire à 0,25 h');
-console.log('Client order quality regression OK');
+assert.equal(insuranceCase.durations.quality, 0, 'le sinistre ne doit pas réactiver le contrôle qualité');
+console.log('Client order simplified duration regression OK');
 
 assert.equal(context.getTabForAction('expertApproved'), 'claims', 'Continuer sur accord expert doit ouvrir Ordres & devis');
 assert.equal(context.getTabForAction('clientApproved'), 'claims', 'Continuer sur accord client doit ouvrir Ordres & devis');
@@ -705,7 +601,9 @@ const clientWorkflowCase = context.normalizeCase({
     estimate: { lines: [{ phase: 'reassembly', operation: 'REMPL SERRURE', laborHours: 1 }] },
   }],
 });
-assert.equal(context.getNextWorkflowAction(clientWorkflowCase), 'appointment', 'un ordre client doit pouvoir réserver un RDV prévisionnel sans repasser par expert');
+assert.equal(context.getNextWorkflowAction(clientWorkflowCase), 'validate_chef_atelier', 'un ordre client doit demander la validation Chef Atelier avant RDV');
+clientWorkflowCase.flags.chefValidated = true;
+assert.equal(context.getNextWorkflowAction(clientWorkflowCase), 'appointment', 'un ordre client validé Chef doit pouvoir réserver un RDV sans repasser par expert');
 assert.equal(context.getWorkflowStepsForCase(clientWorkflowCase).some(([key]) => key === 'expertApproved'), false, 'le process client doit masquer accord expert');
 assert.equal(context.getWorkflowStepsForCase(clientWorkflowCase).some(([key]) => key === 'expert'), false, 'le process client doit masquer expert assigné');
 assert.equal(context.inferOrderTypeFromEstimate({ laborLines: [{ operation: 'rempl serrure av gh', text: 'rempl serrure av gh 1 35,000 35,000' }] }), 'client', 'un remplacement carrosserie client doit proposer Carrosserie client');
@@ -728,15 +626,16 @@ const fastStartCase = context.normalizeCase({
   }],
 });
 vm.runInContext(`state.bookings = [{ id: 'fast-booking', caseId: 'case-fast-start', key: 'oilService', resourceIds: ['pont-1'], segments: [{ start: '2026-05-12T08:00:00.000Z', end: '2026-05-12T09:00:00.000Z' }] }];`, context);
-assert.ok(context.getBusinessRuleIssues(fastStartCase, 'workStarted').some((issue) => issue.includes('client/interne')), 'le démarrage réel doit rester bloqué sans validation client/interne');
-context.applyWorkflowAction(fastStartCase, 'clientApproved');
-assert.equal(context.getBusinessRuleIssues(fastStartCase, 'workStarted').length, 0, 'la validation client/interne doit débloquer le démarrage service rapide');
+assert.ok(context.getBusinessRuleIssues(fastStartCase, 'workStarted').some((issue) => issue.includes('Chef Atelier')), 'le démarrage réel doit rester bloqué sans validation Chef Atelier');
+context.applyWorkflowAction(fastStartCase, 'validate_chef_atelier');
+assert.equal(context.getBusinessRuleIssues(fastStartCase, 'workStarted').length, 0, 'la validation Chef Atelier doit débloquer le démarrage service rapide');
 console.log('Client workflow summary regression OK');
 
 const noShowAppointmentCase = context.normalizeCase({
   id: 'case-no-show',
   clientName: 'Absent RDV',
   plate: '909 TU 2026',
+  flags: { chefValidated: true },
   appointmentStatus: 'no_show',
   appointment: { start: '2026-05-20T08:00:00.000Z', end: '2026-05-20T10:00:00.000Z', delivery: '2026-05-20T10:30:00.000Z' },
   claims: [{
@@ -748,7 +647,7 @@ const noShowAppointmentCase = context.normalizeCase({
   }],
 });
 assert.equal(context.getNextWorkflowAction(noShowAppointmentCase), 'appointment', 'un client absent doit retourner vers le report RDV, pas vers la réception');
-assert.ok(context.getBusinessRuleIssues(noShowAppointmentCase, 'received').some((issue) => issue.includes('Reporter le RDV')), 'la réception doit rester bloquée tant que le RDV absent n’est pas reporté');
+assert.ok(context.getBusinessRuleIssues(noShowAppointmentCase, 'received').some((issue) => issue.includes('supprimée')), 'l’action réception legacy doit rester supprimée du workflow simplifié');
 
 const noIdentityCase = context.normalizeCase({
   id: 'case-no-identity',
@@ -772,7 +671,9 @@ const laborNoPlanningCase = context.normalizeCase({
   plate: '102 TU 2026',
   claims: [{ type: 'mechanical_client', includeInPlanning: true, expertApproved: true, clientApproved: true, estimate: { lines: [{ phase: 'mechanical', operation: 'Réparation', laborHours: 2 }] } }],
 });
-assert.equal(context.getCaseNextAction(laborNoPlanningCase).code, 'schedule_work', 'un dossier avec MO mais sans planning doit proposer de planifier les travaux');
+assert.equal(context.getCaseNextAction(laborNoPlanningCase).code, 'validate_chef_atelier', 'un dossier avec MO doit demander la validation Chef Atelier avant planning');
+laborNoPlanningCase.flags.chefValidated = true;
+assert.equal(context.getCaseNextAction(laborNoPlanningCase).code, 'schedule_work', 'un dossier validé Chef avec MO mais sans planning doit proposer de planifier les travaux');
 
 const blockedCockpitCase = context.normalizeCase({
   id: 'case-blocked-cockpit',
@@ -795,13 +696,13 @@ const cockpitFlowCase = context.normalizeCase({
   clientName: 'Flux cockpit',
   plate: '104 TU 2026',
   appointment: { start: '2026-05-25T08:00:00.000Z', end: '2026-05-25T10:00:00.000Z', delivery: '2026-05-25T17:00:00.000Z' },
-  flags: { received: true, workStarted: true, workCompleted: true },
+  flags: { chefValidated: true, received: true, workStarted: true, workCompleted: true },
   claims: [{ type: 'client', includeInPlanning: true, expertApproved: true, clientApproved: true, estimate: { lines: [{ phase: 'mechanical', operation: 'Réparation', laborHours: 2 }] } }],
 });
 vm.runInContext(`state.bookings = [{ id: 'flow-booking', caseId: 'case-flow-cockpit', key: 'mechanical', resourceIds: ['pont-1'], segments: [{ start: '2026-05-25T08:00:00.000Z', end: '2026-05-25T10:00:00.000Z' }] }];`, context);
 const cockpitFlow = context.getCaseStageFlow(cockpitFlowCase);
-assert.equal(cockpitFlow.length, 10, 'le fil cockpit doit contenir les 10 étapes métier demandées');
-assert.equal(cockpitFlow.find((step) => step.key === 'quality').state, 'current', 'après travaux terminés, Qualité doit être l’étape en cours');
+assert.equal(cockpitFlow.length, 5, 'le fil cockpit doit contenir les 5 étapes du workflow atelier simplifié');
+assert.equal(cockpitFlow.find((step) => step.key === 'cloture').state, 'current', 'après travaux terminés, la clôture atelier doit être l’étape en cours');
 
 const zeroTodayGroups = JSON.parse(vm.runInContext(`(() => {
   state = normalizeState({ cases: [], bookings: [], resources: [] });
@@ -962,7 +863,8 @@ const pausedTaskRegression = JSON.parse(vm.runInContext(`(() => {
   state = normalizeState({
     resources: [
       { id: 'tech-pause', name: 'Technicien pause', role: 'tolier', active: true },
-      { id: 'tech-pause-2', name: 'Technicien reprise', role: 'tolier', active: true }
+      { id: 'tech-pause-2', name: 'Technicien reprise', role: 'tolier', active: true },
+      { id: 'zone-carrosserie-pause', name: 'Zone carrosserie pause', role: 'zone_carrosserie', active: true }
     ],
     cases: [{
       id: 'case-pause',

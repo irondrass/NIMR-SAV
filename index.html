@@ -37,7 +37,7 @@
           <span class="save-status-indicator status-saved" id="save-status-indicator" aria-live="polite">Sauvegardé</span>
         </div>
         <nav class="sidebar-nav" aria-label="Navigation principale">
-          <button class="nav-button" type="button" data-tab="reception-workspace">
+          <button class="nav-button" type="button" data-tab="reception-workspace" style="display: none !important;">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>
             Réception guidée
           </button>
@@ -61,7 +61,7 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L4 17l3 3 5.3-5.3a4 4 0 0 0 5.4-5.4l-2.4 2.4-3-3 2.4-2.4Z"/><path d="m7 17 3 3"/></svg>
             Technicien
           </button>
-          <button class="nav-button" type="button" data-tab="qc-workspace">
+          <button class="nav-button" type="button" data-tab="qc-workspace" style="display: none !important;">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 12l2 2 4-4"/><path d="M21 12c0 4.97-4.03 9-9 9s-9-4.03-9-9 4.03-9 9-9c2.07 0 3.98.7 5.5 1.86"/><path d="M22 4L12 14l-3-3"/></svg>
             Contr&#244;le Qualit&#233;
           </button>
@@ -140,7 +140,7 @@
                   ➕ Nouveau dossier
                 </button>
               </div>
-              
+
               <div class="reception-filters-row">
                 <button class="filter-pill active" data-filter="all">Tous</button>
                 <button class="filter-pill" data-filter="new">Nouveaux</button>
@@ -204,86 +204,25 @@
               </div>
 
               <form class="quick-form" id="case-form">
-                <label class="check-card quick-mode-toggle">
-                  <input type="checkbox" id="quick-create-mode" checked />
-                  <span>Mode guichet rapide : champs essentiels atelier</span>
-                </label>
-                <p class="required-hint">* Champs obligatoires. Identité véhicule minimale : immatriculation ou VIN.</p>
                 <p class="form-error-summary" id="case-form-errors" data-form-errors role="alert" hidden></p>
-                <label>
-                  Client / société propriétaire <span class="required-marker">*</span>
-                  <input name="clientName" autocomplete="name" placeholder="Nom client ou société" required aria-describedby="case-form-errors" />
-                </label>
-                <label>
-                  Téléphone client
-                  <input name="phone" inputmode="tel" placeholder="+216 ..." />
-                </label>
-                <label data-quick-optional>
-                  Véhicule
-                  <input name="vehicle" placeholder="Marque, modèle si connu" />
-                </label>
-                <label>
-                  Immatriculation ou VIN <span class="required-marker">*</span>
-                  <input name="plate" placeholder="Ex. 123 TU 4567" aria-describedby="case-form-errors" />
-                </label>
-                <label>
-                  Réf. OR
-                  <input name="orNavNumber" placeholder="Ex. OR-2026-001" />
-                </label>
-                <label>
-                  Kilométrage
-                  <input name="mileage" inputmode="numeric" placeholder="Ex. 138000" />
-                </label>
-                <label>
-                  Personne déposante
-                  <input name="driverName" placeholder="Nom de la personne qui amène le véhicule" />
-                </label>
-                <label data-quick-optional>
-                  Téléphone déposant
-                  <input name="driverPhone" inputmode="tel" placeholder="+216 ..." />
-                </label>
-                <label data-quick-optional>
-                  Propriétaire / société facturée
-                  <input name="ownerName" placeholder="Si différent du client affiché" />
-                </label>
-                <label data-quick-optional>
-                  Couleur
-                  <input name="color" placeholder="Couleur" />
-                </label>
-                <label data-quick-optional>
-                  VIN complet, si différent
-                  <input name="vin" placeholder="Numéro de châssis complet si connu" />
-                </label>
-                <label>
-                  Type d'ordre
-                  <select name="orderType">
-                    <option value="vidange">Vidange / entretien rapide</option>
-                    <option value="client">Client direct / intervention SAV</option>
-                    <option value="mechanical_client">Réparation mécanique client</option>
-                    <option value="electrical_client">Réparation électrique client</option>
-                    <option value="diagnostic">Diagnostic</option>
-                    <option value="garantie">Garantie constructeur</option>
-                    <option value="assurance">Assurance / expert</option>
-                  </select>
-                </label>
-                <label data-quick-optional>
-                  Libellé OR
-                  <input name="orderTitle" placeholder="Ex. Vidange, réparation mécanique..." />
-                </label>
-                <label class="file-button quick-import-button">
-                  <input type="file" id="quick-estimate-file-input" name="estimateFile" accept=".pdf,.xlsx,.csv,text/csv,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M17 8 12 3 7 8" /><path d="M12 3v12" /></svg>
-                  Importer devis à la création
-                </label>
-                <span class="muted" id="quick-estimate-import-status">Optionnel : le devis remplit client, véhicule, OR et main-d'œuvre.</span>
-                <label class="file-button quick-import-button">
-                  <input type="file" id="quick-vehicle-file-input" accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M17 8 12 3 7 8" /><path d="M12 3v12" /></svg>
-                  Importer base véhicules
-                </label>
-                <span class="muted" id="quick-vehicle-import-status">Base véhicules publique vide. Import local CSV/XLSX disponible.</span>
-                <div class="vin-result-list" id="quick-vin-results"></div>
-                <button class="primary-button" type="submit">
+
+                <div class="drop-zone" id="devis-pdf-drop-zone">
+                  <input type="file" id="quick-estimate-file-input" name="estimateFile" accept=".pdf,application/pdf" required style="display:none;" />
+                  <svg viewBox="0 0 24 24" aria-hidden="true" width="48" height="48" style="margin-bottom:12px;fill:none;stroke:currentColor;stroke-width:2;color:var(--muted);"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                  <p>Déposez le devis PDF ici ou <span class="file-link-text">parcourez vos fichiers</span></p>
+                  <span class="muted" style="font-size:0.8em;" id="quick-estimate-import-status">Fichier PDF uniquement</span>
+                </div>
+
+                <div id="devis-pdf-preview-info" style="display:none; margin: 15px 0; padding: 15px; border: 1px solid var(--line); border-radius: var(--radius-md); background: rgba(0,0,0,0.02);">
+                  <h4 style="margin:0 0 10px 0; font-weight:600; color:var(--text);">Aperçu du devis analysé</h4>
+                  <div id="devis-pdf-extracted-summary" class="muted" style="font-size:0.9em; line-height:1.4;"></div>
+                </div>
+
+                <div id="missing-fields-container" style="display:none; margin-top: 15px;">
+                  <!-- Missing fields dynamically inserted here -->
+                </div>
+
+                <button class="primary-button" type="submit" id="btn-create-case-from-pdf" disabled style="margin-top: 15px; width: 100%;">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
                   Créer dossier
                 </button>
@@ -297,6 +236,16 @@
                   Statut
                   <select id="case-status-filter" aria-label="Filtrer par statut">
                     <option value="all">Tous les statuts</option>
+                    <option value="devis_importe">Devis importé</option>
+                    <option value="a_valider_chef_atelier">À valider chef atelier</option>
+                    <option value="valide_atelier">Validé atelier</option>
+                    <option value="planifie">Planifié</option>
+                    <option value="en_cours">En cours</option>
+                    <option value="en_pause">En pause</option>
+                    <option value="bloque">Bloqué</option>
+                    <option value="termine_atelier">Terminé atelier</option>
+                    <option value="cloture_atelier">Clôturé atelier</option>
+                    <option value="archive">Archivé</option>
                   </select>
                 </label>
                 <label>
@@ -543,7 +492,7 @@
               </form>
               <div id="users-duplicates-alert" hidden></div>
               <div class="resource-list" id="users-list"></div>
-              
+
               <div class="section-heading compact-heading">
                 <div>
                   <h2>Utilisateur actif actuel</h2>
@@ -560,7 +509,7 @@
                 </label>
                 <button class="ghost-button" id="change-user-settings-btn" type="button" style="align-self: flex-start;">Changer d'utilisateur</button>
               </div>
-              
+
               <div class="section-heading compact-heading">
                 <div>
                   <h2>Résumé des permissions par rôle</h2>
@@ -811,7 +760,7 @@
         <div class="local-lock-logo">👤</div>
         <h2 id="user-login-title">Connexion utilisateur</h2>
         <p>Sélectionnez votre compte et entrez votre PIN de sécurité pour continuer.</p>
-        
+
         <label>
           Utilisateur
           <select id="user-login-select" name="userId" required style="width: 100%; margin-bottom: 12px; height: 38px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--border-color); font-size: 1rem;"></select>
@@ -897,7 +846,7 @@
         <button class="case-subtab" type="button" data-case-tab="photos">📷 Photos</button>
         <button class="case-subtab" type="button" data-case-tab="planning">📅 RDV & Planning</button>
         <button class="case-subtab" type="button" data-case-tab="atelier">🛠️ Atelier & Compléments</button>
-        <button class="case-subtab" type="button" data-case-tab="livraison">✅ Livraison & Clôture</button>
+        <button class="case-subtab" type="button" data-case-tab="livraison" style="display: none !important;">✅ Livraison & Clôture</button>
       </nav>
 
       <section class="case-panel active" data-case-panel="claims">
@@ -945,7 +894,7 @@
             <span class="tag" data-field="summary-quality"></span>
           </div>
         </section>
-      
+
         <section class="detail-section full-width">
           <div class="section-heading">
             <h2>Réception du véhicule</h2>
@@ -989,27 +938,26 @@
             </div>
           </details>
         </section>
-      
+
         <div class="detail-grid">
           <section class="detail-section">
             <div class="section-heading">
-              <h2>Expert assurance</h2>
-              <span data-field="expert-state"></span>
+              <h2>Validation dossier</h2>
+            </div>
+            <div class="approval-row" id="chef-validation-row" style="margin-bottom: 20px;">
+              <button class="primary-button" type="button" id="btn-chef-validate">
+                <svg viewBox="0 0 24 24" aria-hidden="true" width="18" height="18" style="fill:none;stroke:currentColor;stroke-width:2;margin-right:8px;"><path d="m5 12 4 4L19 6" /></svg>
+                Valider dossier (Chef Atelier)
+              </button>
+              <span id="chef-validation-status" style="display: none; align-items: center; font-weight: bold; color: var(--success-color); gap: 6px;">
+                <svg viewBox="0 0 24 24" aria-hidden="true" width="20" height="20" style="fill:none;stroke:currentColor;stroke-width:3;"><path d="m5 12 4 4L19 6" /></svg>
+                Dossier validé par le Chef Atelier
+              </span>
             </div>
             <div class="form-grid">
-              <label class="wide">Compagnie d’assurance<input data-input="insurance" placeholder="Ex. STAR, COMAR, GAT, BIAT Assurances…" /></label>
-              <label>Nom expert<input data-input="expertName" placeholder="Nom de l'expert" /></label>
-              <label>Téléphone expert<input data-input="expertPhone" inputmode="tel" placeholder="+216 ..." /></label>
-              <label class="wide">Email expert<input data-input="expertEmail" type="email" placeholder="expert@email.com" /></label>
-            </div>
-            <div class="approval-row">
-              <button class="primary-button" type="button" data-action-flag="expertApproved">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg>
-                Valider accord expert
-              </button>
-              <label class="check-card">
-                <input type="checkbox" data-toggle="clientApproved" />
-                <span>Validation client/interne</span>
+              <label class="wide">
+                Note technique interne (facultative)
+                <textarea data-input="workshopNotes" rows="3" placeholder="Saisir les notes techniques internes ici..."></textarea>
               </label>
             </div>
           </section>
@@ -1031,7 +979,7 @@
             <div class="estimate-import-preview" data-field="estimate-import-preview"></div>
           </section>
         </div>
-      
+
         <section class="detail-section full-width">
           <div class="section-heading">
             <div>
@@ -1191,19 +1139,14 @@
           <p class="muted">Astuce : ajoutez les photos justificatives dans l’onglet Photos avec la catégorie “Complément avant accord”.</p>
           <div class="supplement-list" data-field="supplements"></div>
         </section>
-      </section>
 
-      <section class="case-panel" data-case-panel="livraison" hidden>
         <section class="detail-section full-width">
           <div class="section-heading">
-            <h2>Contrôle qualité, livraison &amp; clôture</h2>
+            <h2>Clôture atelier</h2>
           </div>
           <div class="approval-row">
-            <label class="check-card"><input type="checkbox" data-toggle="qualityApproved" /><span>Contrôle qualité validé</span></label>
-            <label class="check-card"><input type="checkbox" data-toggle="delivered" /><span>Livraison effectuée</span></label>
-            <label class="check-card"><input type="checkbox" data-toggle="invoiced" /><span>Dossier Facturé &amp; Clôturé</span></label>
+            <label class="check-card"><input type="checkbox" data-toggle="invoiced" /><span>Dossier clôturé atelier</span></label>
           </div>
-          <div class="quality-checklist" data-field="quality-checklist"></div>
         </section>
         <section class="detail-section full-width">
           <div class="section-heading">
@@ -1213,7 +1156,7 @@
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M7 10l5 5 5-5" /><path d="M12 15V3" /></svg>
                 Exporter dossier ZIP
               </button>
-              <button class="ghost-button" type="button" id="export-client-folder">Exporter dossier client</button>
+              <button class="ghost-button" type="button" id="export-client-folder" hidden>Exporter dossier client</button>
               <button class="ghost-button danger-button" type="button" id="delete-case">Supprimer dossier</button>
             </div>
           </div>

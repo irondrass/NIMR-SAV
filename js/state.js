@@ -25,7 +25,7 @@ const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const WORKSHOP_NAME = "NIMR SAV";
 const MAX_ESTIMATE_IMPORT_SIZE = 10 * 1024 * 1024;
-const ESTIMATE_IMPORT_EXTENSIONS = ["pdf", "xlsx", "csv"];
+const ESTIMATE_IMPORT_EXTENSIONS = ["pdf"];
 const MAX_PHOTO_SIZE = 8 * 1024 * 1024;
 const MAX_BACKUP_IMPORT_SIZE = 50 * 1024 * 1024;
 const MAX_PHOTO_EDGE = 1600;
@@ -77,7 +77,8 @@ const DEFAULT_DURATIONS = {
   paint: 3,
   reassembly: 4,
   finish: 2,
-  quality: 0.25,
+  quality: 0,
+  finalCheck: 0,
 };
 
 const DURATIONS = [
@@ -90,6 +91,7 @@ const DURATIONS = [
   ["reassembly", "Remontage"],
   ["finish", "Finition + lavage"],
   ["quality", "Contrôle qualité"],
+  ["finalCheck", "Contrôle final"],
 ];
 
 const DEFAULT_QUALITY_CHECKS = [
@@ -121,6 +123,7 @@ const CLAIM_STATUS_LABELS = {
 const ACTION_LABELS = {
   claim: "Créer le premier ordre de travail",
   labor: "Saisir la main-d’œuvre",
+  validate_chef_atelier: "Validation Chef Atelier",
   expertApproved: "Valider l'accord expert",
   clientApproved: "Valider client / interne",
   appointment: "Fixer le RDV de dépôt",
@@ -158,6 +161,7 @@ const BLOCKER_REASON_OPTIONS = [
 const BLOCKER_REASON_LABELS = Object.fromEntries(BLOCKER_REASON_OPTIONS);
 
 const FLAG_HISTORY_EVENTS = {
+  validate_chef_atelier: { on: ["chef.atelier.validated", "Validation Chef Atelier enregistrée"] },
   expertApproved: { on: ["expert.approved", "Accord expert validé"] },
   clientApproved: {
     on: ["client.approved", "Validation client/interne enregistrée"],
@@ -202,6 +206,7 @@ const STEP_TEMPLATES = [
     key: "body",
     title: "Tôlerie + démontage",
     role: "tolier",
+    equipmentRole: "zone_carrosserie",
     color: "#1d6b75",
   },
   {
@@ -252,7 +257,13 @@ const STEP_TEMPLATES = [
   },
   {
     key: "quality",
-    title: "Contrôle qualité",
+    title: "Vérification finale",
+    role: "chef_atelier",
+    color: "#1f7a54",
+  },
+  {
+    key: "finalCheck",
+    title: "Contrôle final",
     role: "controle",
     color: "#1f7a54",
   },
@@ -267,23 +278,22 @@ const ROLE_LABELS = {
   cabine: "Cabine peinture",
   pont_vidange: "Pont vidange",
   pont_mecanique: "Pont grands travaux mécaniques",
-  controle: "Contrôle qualité",
+  chef_atelier: "Chef atelier",
+  zone_carrosserie: "Zone carrosserie",
+  controle: "Contrôle final",
 };
 
 const USER_ROLES = {
   admin: "Admin technique",
   chef_atelier: "Chef atelier",
   directeur_sav: "Directeur SAV",
-  reception: "Réception",
   technicien: "Technicien",
-  qualite: "Qualité",
   readonly: "Lecture seule",
 };
 
 const ROLE_PERMISSIONS = {
   admin: ["*"],
   directeur_sav: [
-    // Directeur SAV : vision métier complète mais SANS administration technique
     "audit.view",
     "dashboard.view",
     "case.create",
@@ -293,13 +303,8 @@ const ROLE_PERMISSIONS = {
     "schedule_appointment",
     "vehicle.receive",
     "receive_vehicle",
-    "delivery.complete",
-    "export.backup",
     "print.*",
     "customer_claim.manage",
-    "quality.validate",
-    "quality.reject",
-    "quality.revalidate",
     "notes.direction",
   ],
   chef_atelier: [
@@ -315,29 +320,11 @@ const ROLE_PERMISSIONS = {
     "task.*",
     "task.override",
     "planning.edit",
-    "quality.validate",
-    "quality.reject",
-    "quality.revalidate",
-    "delivery.complete",
     "case.close",
-    "export.backup",
-    "print.*",
-    "customer_claim.manage",
-  ],
-  reception: [
-    "case.create",
-    "case.edit",
-    "estimate.import",
-    "appointment.schedule",
-    "schedule_appointment",
-    "vehicle.receive",
-    "receive_vehicle",
-    "delivery.complete",
     "print.*",
     "customer_claim.manage",
   ],
   technicien: ["task.start", "task.pause", "task.resume", "task.complete", "task.block", "print.task"],
-  qualite: ["quality.validate", "quality.reject", "quality.revalidate", "print.quality"],
   readonly: ["dashboard.view", "print.*"],
 };
 
@@ -389,43 +376,35 @@ const SERVICE_TYPE_CONFIG = {
   peinture: { label: "Peinture", role: "peintre", title: "Peinture / préparation" },
 };
 
-const ESTIMATE_PLANNING_KEYS = ["body", "oilService", "mechanical", "electrical", "prep", "paint", "reassembly", "finish"];
+const ESTIMATE_PLANNING_KEYS = ["body", "oilService", "mechanical", "electrical", "prep", "paint", "reassembly", "finish", "finalCheck"];
 const ESTIMATE_ALLOWED_KEYS = [...ESTIMATE_PLANNING_KEYS, "quality"];
 
 const CASE_STATUS_DEFINITIONS = Object.freeze([
-  ["receptionDraft", "Réception à compléter"],
-  ["approvals", "Accords à finaliser"],
-  ["appointment", "RDV à fixer"],
-  ["appointmentScheduled", "RDV fixé"],
-  ["noShow", "Client absent"],
-  ["awaitingVehicle", "En attente réception"],
-  ["vehicleReceived", "Véhicule reçu"],
-  ["workScheduled", "Travaux planifiés"],
-  ["work", "En travaux"],
-  ["quality", "Contrôle qualité"],
-  ["qualityRejected", "QC refusé"],
-  ["qualityRework", "Retour atelier / retravail"],
-  ["delivered", "Livré"],
-  ["invoiced", "Clôturé & facturé"],
+  ["devis_importe", "Devis importé"],
+  ["a_valider_chef_atelier", "À valider Chef Atelier"],
+  ["valide_atelier", "Validé Chef Atelier"],
+  ["planifie", "Planifié"],
+  ["en_cours", "En cours"],
+  ["en_pause", "En pause"],
+  ["bloque", "Bloqué"],
+  ["termine_atelier", "Terminé atelier"],
+  ["cloture_atelier", "Clôturé atelier"],
+  ["archive", "Archivé"],
 ]);
 const CASE_STATUS_LABELS = Object.freeze(Object.fromEntries(CASE_STATUS_DEFINITIONS));
 const CASE_STATUS_KEYS = Object.freeze(CASE_STATUS_DEFINITIONS.map(([key]) => key));
-const CASE_STATUS_ALIASES = Object.freeze({ estimate: "receptionDraft" });
+const CASE_STATUS_ALIASES = Object.freeze({ estimate: "devis_importe" });
 const CASE_STATUS_TRANSITIONS = Object.freeze({
-  receptionDraft: ["approvals", "appointment", "appointmentScheduled"],
-  approvals: ["appointment", "appointmentScheduled", "receptionDraft"],
-  appointment: ["appointmentScheduled", "approvals"],
-  appointmentScheduled: ["awaitingVehicle", "noShow", "vehicleReceived"],
-  noShow: ["appointment"],
-  awaitingVehicle: ["vehicleReceived", "appointment"],
-  vehicleReceived: ["workScheduled", "work"],
-  workScheduled: ["work", "vehicleReceived"],
-  work: ["quality", "qualityRejected"],
-  quality: ["qualityRejected", "delivered"],
-  qualityRejected: ["qualityRework"],
-  qualityRework: ["work", "quality"],
-  delivered: ["invoiced"],
-  invoiced: [],
+  devis_importe: ["a_valider_chef_atelier", "valide_atelier"],
+  a_valider_chef_atelier: ["valide_atelier"],
+  valide_atelier: ["planifie"],
+  planifie: ["en_cours", "bloque", "en_pause"],
+  en_cours: ["en_pause", "bloque", "termine_atelier"],
+  en_pause: ["en_cours", "bloque", "termine_atelier"],
+  bloque: ["en_cours", "en_pause", "termine_atelier"],
+  termine_atelier: ["cloture_atelier"],
+  cloture_atelier: ["archive"],
+  archive: [],
 });
 const statusLabels = CASE_STATUS_LABELS;
 
@@ -437,7 +416,7 @@ const QUALITY_STATUS_ALIASES = Object.freeze({
   return_to_workshop: "rework",
 });
 
-function normalizeCaseStatus(value, fallback = "receptionDraft") {
+function normalizeCaseStatus(value, fallback = "devis_importe") {
   const raw = String(value || "").trim();
   const normalized = CASE_STATUS_ALIASES[raw] || raw;
   return CASE_STATUS_LABELS[normalized] ? normalized : fallback;
@@ -450,7 +429,7 @@ function normalizeCaseStatusFilter(value) {
 }
 
 function getCaseStatusLabel(value) {
-  return CASE_STATUS_LABELS[normalizeCaseStatus(value)] || CASE_STATUS_LABELS.receptionDraft;
+  return CASE_STATUS_LABELS[normalizeCaseStatus(value)] || CASE_STATUS_LABELS.devis_importe;
 }
 
 function getCaseStatusOptions() {
@@ -474,32 +453,30 @@ function normalizeQualityStatus(value) {
 }
 
 function getCaseStatus(item) {
-  if (!item) return "receptionDraft";
-  const flags = item.flags || {};
-  const rw = item.receptionWorkflow || {};
-  const qualityStatus = normalizeQualityStatus(rw.qualityStatus);
-  if (flags.invoiced) return "invoiced";
-  if (flags.delivered) return "delivered";
-  if (qualityStatus === "rejected") return "qualityRejected";
-  if (qualityStatus === "rework") return "qualityRework";
-  if (flags.qualityApproved || qualityStatus === "validated") return "quality";
-  if (flags.workCompleted || (rw.sentToWorkshopAt && qualityStatus === "in_progress")) return "quality";
-  if (flags.workStarted) return "work";
+  if (!item) return "devis_importe";
+  if (item.archived || item.flags?.archived) return "archive";
+  if (item.flags?.atelierClosed) return "cloture_atelier";
 
-  const bookings = Array.isArray(state?.bookings) ? state.bookings : [];
-  const hasAssignments = bookings.some((booking) => booking.caseId === item.id && booking.type !== "leave");
-  if (flags.received) return hasAssignments ? "workScheduled" : "vehicleReceived";
-  if (item.appointmentStatus === "no_show") return "noShow";
+  const bookings = Array.isArray(state?.bookings) ? state.bookings.filter(b => b.caseId === item.id) : [];
+  const hasWorkBookings = bookings.length > 0;
+  const allCompleted = hasWorkBookings && bookings.every(b => getBookingOperationalStatus(b) === "completed");
+  if (allCompleted || item.flags?.workCompleted) return "termine_atelier";
 
-  if (item.appointment) {
-    const appointmentStart = new Date(item.appointment.start);
-    const appointmentIsDue = !Number.isNaN(appointmentStart.getTime()) && appointmentStart <= new Date();
-    return appointmentIsDue ? "awaitingVehicle" : "appointmentScheduled";
-  }
+  const isBlocked = Boolean(item.blockerReason) || bookings.some(b => b.blockerReason || b.blockReason || b.blockedAt || b.status === "blocked");
+  if (isBlocked || item.flags?.blocked) return "bloque";
 
-  if (flags.expertApproved && flags.clientApproved) return "appointment";
-  if (item.expertName || hasRepairClaims(item)) return "approvals";
-  return "receptionDraft";
+  const hasPaused = bookings.some(b => getBookingOperationalStatus(b) === "paused");
+  if (hasPaused) return "en_pause";
+
+  const hasStarted = bookings.some(b => getBookingOperationalStatus(b) === "started");
+  if (hasStarted || item.flags?.workStarted) return "en_cours";
+
+  const hasSchedule = Boolean(item.appointment) || bookings.some(b => b.start && b.end);
+  if (hasSchedule) return "planifie";
+
+  if (item.flags?.chefValidated) return "valide_atelier";
+
+  return "a_valider_chef_atelier";
 }
 
 const DAY_LABELS = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"];
@@ -513,9 +490,9 @@ const legacyPhotoPayloads = new Map();
 
 let state = loadState();
 initializeLastKnownCasesComparable();
-let activeTab = "reception-workspace";
+let activeTab = "dossiers";
 let activeCaseId = state.cases[0]?.id ?? null;
-let activeCaseDetailTab = "resume";
+let activeCaseDetailTab = "claims";
 let generatedProposals = {};
 let estimateImportPreviews = {};
 let localSecurityIdleTimer = null;
@@ -653,7 +630,8 @@ function recordLocalSecurityFailure() {
 }
 
 function isLocalPinEnabled() {
-  return false;
+  const config = readLocalSecurityConfig();
+  return Boolean(config.pinHash && config.pinSalt);
 }
 
 function isLocalSessionUnlocked() {
@@ -745,6 +723,9 @@ async function deriveLocalPinHash(pin, saltBase64) {
 }
 
 async function verifyUserPin(user, pin) {
+  if (user?.id === "user-bootstrap-admin" && !isLocalHost()) {
+    throw new Error("Accès refusé : compte temporaire désactivé.");
+  }
   if (!user || !user.pinHash || !user.pinSalt) return false;
   if (user.pinHash.startsWith("mockhash:")) {
     const expected = `mockhash:${pin}:${user.pinSalt}`;
@@ -904,18 +885,23 @@ async function disableLocalPin() {
 }
 
 function initLocalSecurityGate() {
-  try {
-    localStorage.removeItem(LOCAL_SECURITY_KEY);
-    localStorage.removeItem(LOCAL_SECURITY_FAILURE_KEY);
-    sessionStorage.removeItem(LOCAL_SECURITY_SESSION_KEY);
-  } catch (error) {}
-
   bindLocalSecurityIdleEvents();
   renderLocalSecurityStatus();
 
   const overlay = $("#local-lock-overlay");
-  if (overlay) overlay.hidden = true;
-  document.querySelector(".app-shell")?.removeAttribute("inert");
+  if (isLocalPinEnabled()) {
+    sessionStorage.removeItem(LOCAL_SECURITY_SESSION_KEY);
+    if (overlay) overlay.hidden = false;
+    document.querySelector(".app-shell")?.setAttribute("inert", "");
+    const pinInput = overlay.querySelector("input[type='password']");
+    if (pinInput) {
+      pinInput.value = "";
+      pinInput.focus();
+    }
+  } else {
+    if (overlay) overlay.hidden = true;
+    document.querySelector(".app-shell")?.removeAttribute("inert");
+  }
   resetLocalSecurityIdleTimer();
 }
 
@@ -1275,6 +1261,12 @@ function normalizeUser(user = {}, resources = []) {
   };
 }
 
+function isLocalHost() {
+  if (typeof window === "undefined" || !window.location) return true;
+  const hn = window.location.hostname;
+  return hn === "localhost" || hn === "127.0.0.1" || hn.endsWith(".local") || hn === "";
+}
+
 function normalizeUsers(users, resources = []) {
   const normalized = Array.isArray(users)
     ? users.map((user) => normalizeUser(user, resources)).filter((user) => user.id && user.name)
@@ -1284,7 +1276,7 @@ function normalizeUsers(users, resources = []) {
     if (!byId.has(user.id)) byId.set(user.id, user);
   });
   const unique = [...byId.values()];
-  if (!unique.some((user) => user.active)) {
+  if (!unique.some((user) => user.role === "admin") && isLocalHost()) {
     unique.push(createBootstrapAdminUser());
   }
   return unique;
@@ -1334,6 +1326,9 @@ function getCurrentActor() {
 }
 
 function setCurrentUser(userId) {
+  if (userId === "user-bootstrap-admin" && !isLocalHost()) {
+    throw new Error("Accès refusé au compte temporaire en production.");
+  }
   const user = getUserById(userId);
   if (!user || user.active === false) return false;
   state.currentUserId = user.id;
@@ -1366,6 +1361,16 @@ function createUserLocal(userData, actor = null) {
   if (!name) return { ok: false, message: "Le nom complet est obligatoire." };
   if (!role || !Object.prototype.hasOwnProperty.call(USER_ROLES, role)) {
     return { ok: false, message: "Le rôle sélectionné est invalide." };
+  }
+  if (role === "technicien") {
+    const resourceId = String(userData?.resourceId || "").trim();
+    if (!resourceId) {
+      return { ok: false, message: "L'association à une ressource active est obligatoire pour le rôle technicien." };
+    }
+    const matchingResource = (state.resources || []).find((r) => r.id === resourceId && r.active !== false);
+    if (!matchingResource) {
+      return { ok: false, message: "La ressource sélectionnée est introuvable ou inactive." };
+    }
   }
 
   const emailNorm = String(userData?.email || "").trim().toLowerCase();
@@ -1412,6 +1417,16 @@ function updateUserLocal(userId, userData, actor = null) {
   if (!name) return { ok: false, message: "Le nom complet est obligatoire." };
   if (!role || !Object.prototype.hasOwnProperty.call(USER_ROLES, role)) {
     return { ok: false, message: "Le rôle sélectionné est invalide." };
+  }
+  if (role === "technicien") {
+    const resourceId = String(userData?.resourceId || "").trim();
+    if (!resourceId) {
+      return { ok: false, message: "L'association à une ressource active est obligatoire pour le rôle technicien." };
+    }
+    const matchingResource = (state.resources || []).find((r) => r.id === resourceId && r.active !== false);
+    if (!matchingResource) {
+      return { ok: false, message: "La ressource sélectionnée est introuvable ou inactive." };
+    }
   }
 
   const emailNorm = String(userData?.email || "").trim().toLowerCase();
@@ -2068,7 +2083,7 @@ function normalizeCase(item, bookings) {
     }
   }
 
-  return {
+  const normalizedCaseObj = {
     id: caseId || uid("case"),
     clientName: item.clientName || "Client",
     phone: item.phone || "",
@@ -2101,6 +2116,7 @@ function normalizeCase(item, bookings) {
     stepServiceTypes: normalizeStepServiceTypes(item.stepServiceTypes),
     stepPreferredResources: normalizeStepPreferredResources(item.stepPreferredResources),
     flags: {
+      chefValidated: false,
       expertApproved: false,
       clientApproved: false,
       received: false,
@@ -2109,8 +2125,12 @@ function normalizeCase(item, bookings) {
       qualityApproved: false,
       delivered: false,
       invoiced: false,
+      atelierClosed: false,
+      archived: false,
       ...(item.flags || {}),
     },
+    chefValidatedAt: item.chefValidatedAt || "",
+    chefValidatedBy: item.chefValidatedBy || "",
     appointmentStatus,
     qualityChecklist: normalizeQualityChecklist(item.qualityChecklist),
     appointment: item.appointment || null,
@@ -2135,6 +2155,8 @@ function normalizeCase(item, bookings) {
       direction:  String(item.notes?.direction  ?? ""),
     },
   };
+  recomputeCaseDurationsFromClaims(normalizedCaseObj);
+  return normalizedCaseObj;
 }
 
 function normalizeRepairClaims(claims = [], item = {}) {
@@ -2344,10 +2366,10 @@ function recomputeCaseDurationsFromClaims(item) {
   const productiveTotal = ["body", "oilService", "mechanical", "electrical", "prep", "paint", "reassembly"].reduce((sum, key) => sum + Number(totals[key] || 0), 0);
   if (hasInsuranceClaim) {
     totals.finish = roundHours(Number(totals.paint || 0) * 0.5);
-    totals.quality = 0.25;
+    totals.quality = 0;
   } else {
     totals.finish = 0;
-    totals.quality = productiveTotal > 0 ? 0.25 : 0;
+    totals.quality = 0;
   }
   DURATIONS.forEach(([key]) => {
     item.durations[key] = roundHours(totals[key] || 0);

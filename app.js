@@ -162,32 +162,187 @@ function bindCaseList() {
   });
 }
 
+function updateMissingFieldsUI(draft) {
+  const container = document.getElementById("missing-fields-container");
+  const btnCreate = document.getElementById("btn-create-case-from-pdf");
+  const previewDiv = document.getElementById("devis-pdf-preview-info");
+  const extractedSummary = document.getElementById("devis-pdf-extracted-summary");
+
+  if (!container || !btnCreate) return;
+
+  if (!draft) {
+    container.innerHTML = "";
+    container.style.display = "none";
+    if (previewDiv) previewDiv.style.display = "none";
+    btnCreate.disabled = true;
+    return;
+  }
+
+  const info = draft.parsed.info || {};
+
+  // Show preview
+  if (previewDiv && extractedSummary) {
+    extractedSummary.innerHTML = `
+      <strong>Client :</strong> ${escapeHtml(info.clientName || "-")}<br>
+      <strong>Véhicule :</strong> ${escapeHtml(info.vehicle || "-")}<br>
+      <strong>N° Devis :</strong> ${escapeHtml(info.estimateNumber || info.orNumber || "-")}<br>
+      <strong>Heures MO détectées :</strong> ${formatLocalizedDecimal(draft.parsed.detectedHours)} h
+    `;
+    previewDiv.style.display = "block";
+  }
+
+  let html = "";
+
+  const needsPlateOrVin = !info.plate && !info.vin;
+  if (needsPlateOrVin) {
+    html += `
+      <label style="display: block; margin-top: 10px;">
+        Immatriculation ou VIN <span class="required-marker">*</span>
+        <input name="plate" placeholder="Ex. 123 TU 4567 ou VIN de 17 caract." required style="width: 100%; margin-top: 4px;" />
+      </label>
+    `;
+  }
+
+  const needsMileage = !info.mileage;
+  if (needsMileage) {
+    html += `
+      <label style="display: block; margin-top: 10px;">
+        Kilométrage <span class="required-marker">*</span>
+        <input name="mileage" type="text" inputmode="numeric" placeholder="Ex. 120000" required style="width: 100%; margin-top: 4px;" />
+      </label>
+    `;
+  }
+
+  const needsPhone = !info.phone;
+  if (needsPhone) {
+    html += `
+      <label style="display: block; margin-top: 10px;">
+        Téléphone client <span class="required-marker">*</span>
+        <input name="phone" type="tel" placeholder="Ex. +216 55 111 222" required style="width: 100%; margin-top: 4px;" />
+      </label>
+    `;
+  }
+
+  container.innerHTML = html;
+  container.style.display = html ? "block" : "none";
+  btnCreate.disabled = false;
+}
+
+// Le devis PDF est le point d'entrée obligatoire du dossier atelier.
 function bindCaseCreation() {
   const form = $("#case-form");
   if (!form) return;
+
+  const dropZone = document.getElementById("devis-pdf-drop-zone");
+  const fileInput = document.getElementById("quick-estimate-file-input");
+
+  const handleEstimateFile = async (file) => {
+    quickEstimateCreationDraft = null;
+    const previewDiv = document.getElementById("devis-pdf-preview-info");
+    const container = document.getElementById("missing-fields-container");
+    const btnCreate = document.getElementById("btn-create-case-from-pdf");
+    const status = document.getElementById("quick-estimate-import-status");
+
+    if (previewDiv) previewDiv.style.display = "none";
+    if (container) {
+      container.innerHTML = "";
+      container.style.display = "none";
+    }
+    if (btnCreate) btnCreate.disabled = true;
+
+    if (!file) {
+      if (status) status.textContent = "Fichier PDF uniquement";
+      return;
+    }
+
+    const validationError = validateEstimateImportFile(file);
+    if (validationError) {
+      if (status) status.textContent = validationError;
+      notifyUser(validationError, "error");
+      return;
+    }
+
+    try {
+      if (status) status.textContent = "Lecture du devis en cours...";
+      quickEstimateCreationDraft = await buildQuickEstimateCreationDraft(file, form);
+
+      const info = quickEstimateCreationDraft.parsed.info || {};
+      const reference = cleanParsedEstimateNumber(info.estimateNumber) || info.orNumber || file.name;
+      if (status) {
+        status.textContent = `Devis lu : ${reference} - ${formatLocalizedDecimal(quickEstimateCreationDraft.parsed.detectedHours)} h MO détectées.`;
+      }
+
+      updateMissingFieldsUI(quickEstimateCreationDraft);
+    } catch (error) {
+      console.error("Pré-import devis création impossible", error);
+      quickEstimateCreationDraft = null;
+      if (status) status.textContent = "Import devis impossible.";
+      notifyUser(error.message || "Impossible de lire ce devis.", "error");
+    }
+  };
+
+  if (dropZone && fileInput) {
+    dropZone.addEventListener("click", () => fileInput.click());
+
+    dropZone.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      dropZone.classList.add("dragover");
+    });
+
+    dropZone.addEventListener("dragleave", () => {
+      dropZone.classList.remove("dragover");
+    });
+
+    dropZone.addEventListener("drop", (e) => {
+      e.preventDefault();
+      dropZone.classList.remove("dragover");
+      const file = e.dataTransfer.files?.[0];
+      if (file) {
+        const dataTransfer = new DataTransfer();
+        dataTransfer.items.add(file);
+        fileInput.files = dataTransfer.files;
+        handleEstimateFile(file);
+      }
+    });
+
+    fileInput.addEventListener("change", () => {
+      const file = fileInput.files?.[0];
+      handleEstimateFile(file);
+    });
+  }
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const createGuard = guardCaseCreate();
     if (!createGuard.ok) return;
+
+    if (!quickEstimateCreationDraft) {
+      notifyUser("Veuillez importer un devis PDF avant de créer le dossier.", "error");
+      return;
+    }
+
     const data = new FormData(form);
-    const estimateFile = data.get("estimateFile");
-    const hasEstimateFile = estimateFile && estimateFile.name;
-    const orderType = data.get("orderType") || "vidange";
-    const orderTitle = normalizeTextInputValue(data.get("orderTitle")) || getClaimTypeLabel(orderType);
+    const info = quickEstimateCreationDraft.parsed.info || {};
+
+    let plateVal = data.has("plate") ? data.get("plate") : (info.plate || "");
+    let vinVal = data.has("vin") ? data.get("vin") : (info.vin || "");
+
+    const normPlateVal = normalizeIdentifierValue(plateVal);
+    if (normPlateVal.length === 17) {
+      vinVal = normPlateVal;
+      plateVal = "";
+    }
+
     let candidate = {
-      clientName: normalizeTextInputValue(data.get("clientName")),
-      phone: normalizeTextInputValue(data.get("phone")),
-      ownerName: normalizeTextInputValue(data.get("ownerName")),
-      driverName: normalizeTextInputValue(data.get("driverName")),
-      driverPhone: normalizeTextInputValue(data.get("driverPhone")),
-      vehicle: normalizeTextInputValue(data.get("vehicle")),
-      plate: normalizeIdentifierValue(data.get("plate")),
-      color: normalizeTextInputValue(data.get("color")),
-      mileage: normalizeIdentifierValue(data.get("mileage")),
-      vin: normalizeIdentifierValue(data.get("vin")),
-      orNavNumber: normalizeIdentifierValue(data.get("orNavNumber")),
+      clientName: info.clientName || "Client devis",
+      phone: data.has("phone") ? data.get("phone") : (info.phone || ""),
+      vehicle: info.vehicle || "Véhicule à compléter",
+      plate: plateVal,
+      vin: vinVal,
+      mileage: data.has("mileage") ? data.get("mileage") : (info.mileage || ""),
+      orNavNumber: info.estimateNumber || info.orNumber || "",
     };
+
     const validation = validateReceptionCaseCandidate(candidate);
     candidate = validation.normalized;
     if (!validation.ok) {
@@ -196,9 +351,7 @@ function bindCaseCreation() {
       return;
     }
     renderFormValidationErrors(form, validation, "case-form-errors");
-    if (!candidate.vehicle) {
-      candidate.vehicle = "Véhicule à compléter";
-    }
+
     const duplicate = findDuplicateCase(candidate);
     if (duplicate) {
       const isStrictDuplicate = duplicate.clientName === candidate.clientName && (duplicate.plate === candidate.plate || duplicate.vin === candidate.vin) && !duplicate.flags?.delivered;
@@ -218,22 +371,24 @@ function bindCaseCreation() {
 
     const item = normalizeCase({
       ...candidate,
-      clientName: candidate.clientName || "Client devis",
       id: uid("case"),
       createdAt: new Date().toISOString(),
       durations: Object.fromEntries(DURATIONS.map(([key]) => [key, 0])),
       history: [makeHistoryEntry("case.created", "Dossier créé", new Date().toISOString())],
     });
 
+    const inferredType = inferOrderTypeFromEstimate(quickEstimateCreationDraft.parsed);
+    const orderTitle = inferOrderTitleFromEstimate(quickEstimateCreationDraft.parsed) || getClaimTypeLabel(inferredType);
+
     const firstClaim = normalizeRepairClaim({
       id: uid("claim"),
       number: "OT-001",
       title: orderTitle,
-      type: orderType,
-      status: isClientOnlyRepairClaim({ type: orderType }) ? "client_pending" : "expert_pending",
+      type: inferredType,
+      status: "approved",
       includeInPlanning: true,
-      expertApproved: isClientOnlyRepairClaim({ type: orderType }),
-      clientApproved: false,
+      expertApproved: true,
+      clientApproved: true,
       orNumber: item.orNavNumber || "",
     }, 0);
     item.claims = [firstClaim];
@@ -241,76 +396,22 @@ function bindCaseCreation() {
 
     state.cases.unshift(item);
     activeCaseId = item.id;
-    activeCaseDetailTab = "infos";
+    activeCaseDetailTab = "claims";
 
-    if (hasEstimateFile) {
-      const quickStatus = $("#quick-estimate-import-status");
-      const validationError = validateEstimateImportFile(estimateFile);
-      if (validationError) {
-        notifyUser(validationError, "error");
-      } else {
-        try {
-          if (quickStatus) quickStatus.textContent = "Analyse du devis...";
-          const draft = quickEstimateCreationDraft?.signature === getQuickEstimateFileSignature(estimateFile)
-            ? quickEstimateCreationDraft
-            : await buildQuickEstimateCreationDraft(estimateFile, form);
-          const parsed = enrichParsedEstimateInfo(draft.parsed, draft.metadata);
-          const preview = prepareEstimateImportPreview(parsed, item);
-          preview.sourceFile = makeQuickEstimateSourceFile(estimateFile);
-          await applyEstimateImportToClaim(item, firstClaim, preview, { silent: true });
-          if (!candidate.clientName && parsed.info?.clientName) item.clientName = parsed.info.clientName;
-          addHistory(item, "claim.estimate.imported", "Devis importé à la création", `${formatLocalizedDecimal(preview.detectedHours)} h MO détectées.`);
-          if (quickStatus) quickStatus.textContent = "Devis importé dans le premier OR.";
-        } catch (error) {
-          console.error("Import devis à la création impossible", error);
-          if (quickStatus) quickStatus.textContent = "Import devis impossible.";
-          notifyUser(error.message || "Dossier créé, mais import devis impossible.", "error");
-        }
-      }
-    }
+    const parsed = enrichParsedEstimateInfo(quickEstimateCreationDraft.parsed, quickEstimateCreationDraft.metadata);
+    const preview = prepareEstimateImportPreview(parsed, item);
+    preview.sourceFile = makeQuickEstimateSourceFile(fileInput.files?.[0]);
+    await applyEstimateImportToClaim(item, firstClaim, preview, { silent: true });
+    if (parsed.info?.clientName) item.clientName = parsed.info.clientName;
+    addHistory(item, "claim.estimate.imported", "Devis importé à la création", `${formatLocalizedDecimal(preview.detectedHours)} h MO détectées.`);
 
     refreshCaseApprovalFlagsFromClaims(item);
     saveState();
     form.reset();
-    render();
-    notifyUser(hasEstimateFile ? "Dossier créé avec devis importé." : "Dossier créé avec premier ordre de réparation.", "success");
-  });
-
-
-  form.elements?.orderType?.addEventListener("change", () => {
-    form.elements.orderType.dataset.userSelected = "true";
-  });
-
-  const quickEstimateInput = $("#quick-estimate-file-input", form);
-  quickEstimateInput?.addEventListener("change", async () => {
-    const file = quickEstimateInput.files?.[0];
-    const status = $("#quick-estimate-import-status");
     quickEstimateCreationDraft = null;
-    if (!file) {
-      if (status) status.textContent = "Optionnel : le devis remplit client, véhicule, OR et main-d'œuvre.";
-      return;
-    }
-    const validationError = validateEstimateImportFile(file);
-    if (validationError) {
-      if (status) status.textContent = validationError;
-      notifyUser(validationError, "error");
-      return;
-    }
-    try {
-      if (status) status.textContent = "Lecture du devis en cours...";
-      quickEstimateCreationDraft = await buildQuickEstimateCreationDraft(file, form);
-      applyQuickEstimateCreationDraftToForm(form, quickEstimateCreationDraft);
-      if (status) {
-        const info = quickEstimateCreationDraft.parsed.info || {};
-        const reference = cleanParsedEstimateNumber(info.estimateNumber) || info.orNumber || file.name;
-        status.textContent = `Devis lu : ${reference} - ${formatLocalizedDecimal(quickEstimateCreationDraft.parsed.detectedHours)} h MO détectées. Cliquez sur Créer dossier pour valider.`;
-      }
-    } catch (error) {
-      console.error("Pré-import devis création impossible", error);
-      quickEstimateCreationDraft = null;
-      if (status) status.textContent = "Import devis impossible.";
-      notifyUser(error.message || "Impossible de lire ce devis.", "error");
-    }
+    updateMissingFieldsUI(null);
+    render();
+    notifyUser("Dossier créé avec devis importé.", "success");
   });
 
   $("#new-case-shortcut")?.addEventListener("click", () => {

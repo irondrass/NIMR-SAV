@@ -1130,6 +1130,7 @@ function startCaseBookingTask(item, bookingId, meta = {}) {
   if (isCaseReadonlyArchive(item)) return { ok: false, message: getArchivedCaseMessage(item) };
   const booking = findCaseBooking(item, bookingId);
   if (!booking) return { ok: false, message: "Tâche introuvable dans le planning." };
+  if (isBookingTaskBlocked(booking)) return { ok: false, message: "Cette tâche est bloquée." };
   const status = getBookingOperationalStatus(booking);
   if (status === "completed") return { ok: false, message: "Cette tâche est déjà terminée." };
   if (status === "paused") return { ok: false, message: "Cette tâche est en pause. Reprenez le reliquat planifié." };
@@ -1156,10 +1157,15 @@ function startCaseBookingTask(item, bookingId, meta = {}) {
   return { ok: true, message: meta.resumed || booking.remainingFromPaused ? "Tâche reprise." : "Tâche démarrée.", booking };
 }
 
+function blockCaseBookingTask(item, bookingId, reason, details = "") {
+  return blockTechnicianTask(item, bookingId, "", reason, details);
+}
+
 function completeCaseBookingTaskNow(item, bookingId, completedAt = new Date(), meta = {}) {
   if (isCaseReadonlyArchive(item)) return { ok: false, message: getArchivedCaseMessage(item) };
   const booking = findCaseBooking(item, bookingId);
   if (!booking) return { ok: false, message: "Tâche introuvable dans le planning." };
+  if (isBookingTaskBlocked(booking)) return { ok: false, message: "Cette tâche est bloquée." };
   const status = getBookingOperationalStatus(booking);
   if (status === "completed") return { ok: false, message: "Cette tâche est déjà terminée." };
   if (status === "paused") return { ok: false, message: "Cette tâche est en pause. Terminez plutôt le reliquat planifié." };
@@ -1440,6 +1446,7 @@ function blockTechnicianTask(item, bookingId, technicianId, reason, details = ""
   } else if (status === "paused") {
     target = findRemainderBookingForPausedTask(booking.id) || booking;
   }
+  target.status = "blocked";
   target.blockedAt = new Date().toISOString();
   target.blockedBy = technicianId || "";
   target.blockReason = cleanReason;
@@ -1466,6 +1473,7 @@ function clearTechnicianTaskBlock(item, bookingId, technicianId, options = {}) {
     }
   }
   const hadBlock = isBookingTaskBlocked(booking);
+  booking.status = "planned";
   booking.blockedAt = "";
   booking.blockedBy = "";
   booking.blockReason = "";
@@ -1942,4 +1950,76 @@ function applyDependentBookingReschedule(item, previews, actor) {
     saveState({ flushCloud: true, cloudReason: "reschedule-dependent-tasks" });
   }
   return { ok: true, rescheduled: count };
+}
+
+/**
+ * Detects planning collision for a given resource in a time range.
+ * Works for any resource type: technician, pont, baie, cabine, equipment.
+ * Handles partial overlap, total overlap, and nested bookings.
+ *
+ * @param {string} resourceId - The resource to check.
+ * @param {Date|string} startAt - Start of the candidate slot.
+ * @param {Date|string} endAt - End of the candidate slot.
+ * @param {Array} bookings - Array of existing bookings (app model with resourceIds + segments).
+ * @param {string|null} ignoreBookingId - Optional booking ID to exclude (e.g. when rescheduling).
+ * @returns {boolean} true if a conflict exists.
+ */
+function resourceHasConflict(resourceId, startAt, endAt, bookings, ignoreBookingId) {
+  if (!resourceId || !startAt || !endAt) return false;
+
+  const start = new Date(startAt).getTime();
+  const end = new Date(endAt).getTime();
+
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+    return false;
+  }
+
+  return (bookings || []).some((booking) => {
+    if (!booking) return false;
+    if (ignoreBookingId && booking.id === ignoreBookingId) return false;
+
+    // Skip completed or closed-case bookings (not blocking the planning)
+    if (!isPlanningBlockingBooking(booking)) return false;
+
+    // Check if the booking uses this resource (app model uses resourceIds array)
+    const bookingResourceIds = booking.resourceIds || [];
+    const bookingResourceId =
+      booking.resourceId ||
+      booking.resource_id ||
+      booking.technicianId ||
+      booking.technician_id ||
+      booking.equipmentId ||
+      booking.equipment_id;
+
+    const usesResource =
+      bookingResourceIds.includes(resourceId) ||
+      bookingResourceId === resourceId;
+
+    if (!usesResource) return false;
+
+    // Check segment-level overlap (app model stores time in segments array)
+    const segments = booking.segments || [];
+    if (segments.length > 0) {
+      return segments.some((seg) => {
+        const segStart = new Date(seg.start).getTime();
+        const segEnd = new Date(seg.end).getTime();
+        if (!Number.isFinite(segStart) || !Number.isFinite(segEnd)) return false;
+        return start < segEnd && end > segStart;
+      });
+    }
+
+    // Fallback: check booking-level start/end if no segments
+    const bookingStart = new Date(
+      booking.startAt || booking.start_at || booking.start || booking.from
+    ).getTime();
+    const bookingEnd = new Date(
+      booking.endAt || booking.end_at || booking.end || booking.to
+    ).getTime();
+
+    if (!Number.isFinite(bookingStart) || !Number.isFinite(bookingEnd)) {
+      return false;
+    }
+
+    return start < bookingEnd && end > bookingStart;
+  });
 }

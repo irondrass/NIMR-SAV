@@ -11,7 +11,7 @@ function validateEstimateImportFile(file) {
   if (file.size > MAX_ESTIMATE_IMPORT_SIZE) return "Fichier trop volumineux. Taille maximale : 10 Mo.";
   const extension = getFileExtension(file.name);
   if (!ESTIMATE_IMPORT_EXTENSIONS.includes(extension)) {
-    return "Format non supporté. Importez un PDF texte, Excel ou CSV.";
+    return "Format non supporté. Importez un PDF atelier uniquement.";
   }
   return "";
 }
@@ -351,6 +351,7 @@ function dedupeEstimatePartLines(parts) {
 function distributeLaborHours(operation, hours, options = {}) {
   const normalized = normalizeEstimateOperationText(operation);
   const cleanDetail = removeKnownOperationPrefix(operation);
+
   if (/\bD\s*\/\s*P\s+ET\s+PREPARAT(?:ION|IN)\b/.test(normalized)) {
     const [body, reassembly] = splitPlanningHours(hours, [0.5, 0.5]);
     return [
@@ -373,6 +374,34 @@ function distributeLaborHours(operation, hours, options = {}) {
       makeDistribution("paint", `PEINTURE ${cleanDetail}`, paint),
     ];
   }
+  if (/\bD\s*\/\s*P\b/.test(normalized)) {
+    const [body, reassembly] = splitPlanningHours(hours, [0.5, 0.5]);
+    return [
+      makeDistribution("body", `D/P ${cleanDetail}`, body),
+      makeDistribution("reassembly", `REMONTAGE ${cleanDetail}`, reassembly),
+    ];
+  }
+
+  if (/\b(VIDANGE|ENTRETIEN|FILTRE|FILTRES)\b/.test(normalized)) {
+    return [makeDistribution("oilService", operation, hours)];
+  }
+  if (/\b(MECANIQUE|MECAN|SUSPENSION|FREIN|FREINAGE|GEOMETRIE|TRAIN\s+AVANT)\b/.test(normalized)) {
+    return [makeDistribution("mechanical", operation, hours)];
+  }
+  if (/\b(DIAGNOSTIC|VALISE|VOYANT|FAISCEAU|BATTERIE|BCM|ELECTRIQUE|ELECTRICITE)\b/.test(normalized)) {
+    return [makeDistribution("electrical", operation, hours)];
+  }
+  if (/\b(TOLERIE|REDRESSAGE|PARE\s*CHOC|PARE\s*CHOCS|AILE|PORTE|CHOC)\b/.test(normalized)) {
+    return [makeDistribution("body", operation, hours)];
+  }
+  if (/\b(PEINTURE|VERNIS|PREPARATION|TEINTE|CABINE)\b/.test(normalized)) {
+    return [makeDistribution("paint", operation, hours)];
+  }
+  if (/\b(CONTROLE\s+FINAL|ESSAI|VERIFICATION\s+FINALE)\b/.test(normalized)) {
+    return [makeDistribution("finalCheck", operation, hours)];
+  }
+
+
   if (/\b(PASSAGE\s+SUR\s+MARBRE|MARBRE)\b/.test(normalized)) return [makeDistribution("body", operation, hours)];
   if (/\b(VIDANGE|ENTRETIEN\s+RAPIDE|SERVICE\s+RAPIDE|FILTRE|FILTRES)\b/.test(normalized)) return [makeDistribution("oilService", operation, hours)];
   const isClientOnly = typeof isClientOnlyRepairClaim === "function"
@@ -557,8 +586,6 @@ function buildEstimatePartLines(preview) {
     id: part.id || uid("estimate-part"),
     designation: part.designation || part.rawText || "Article devis",
     quantity: roundPlanningHours(part.quantity || 0),
-    unitPrice: roundPlanningHours(part.unitPrice || 0),
-    amount: roundPlanningHours(part.amount || 0),
     rawText: part.rawText || part.designation || "",
   }));
 }

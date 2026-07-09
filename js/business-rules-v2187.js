@@ -15,7 +15,7 @@
 
   const PAINTABLE_PHASES = ['prep', 'paint'];
   const PARAM_PHASES = ['body', 'oilService', 'mechanical', 'electrical', 'prep', 'paint', 'reassembly', 'finish'];
-  const FIXED_QUALITY_HOURS = 0.25;
+  const FIXED_QUALITY_HOURS = 0;
 
   function normalizeEstimateLineIdentity(operation) {
     return normalizeEstimateOperationText(operation || '')
@@ -59,7 +59,8 @@
     if (!totals) return totals;
     const paint = Number(totals.paint || 0);
     totals.finish = paint > 0 ? roundPlanningHours(paint * 0.5) : 0;
-    totals.quality = FIXED_QUALITY_HOURS;
+    totals.quality = 0;
+    totals.finalCheck = 0.25;
     return totals;
   }
 
@@ -143,7 +144,7 @@
       if (Number(optimized.totals.finish || 0) > 0) {
         lines.push({ id: uid('estimate-line'), phase: 'finish', operation: 'Finition + lavage - 50% du temps peinture', laborHours: roundPlanningHours(optimized.totals.finish) });
       }
-      lines.push({ id: uid('estimate-line'), phase: 'quality', operation: 'Contrôle qualité forfaitaire', laborHours: FIXED_QUALITY_HOURS });
+      lines.push({ id: uid('estimate-line'), phase: 'finalCheck', operation: 'Contrôle final forfaitaire', laborHours: 0.25 });
       claim.estimate.lines = lines;
       claim.estimate.paintOptimization = optimized.paintOptimization;
       claim.estimate.totalOriginalHours = getOriginalLaborTotal(claim.estimate.originalLines);
@@ -393,7 +394,7 @@
       if (Number(optimized.totals.finish || 0) > 0) {
         lines.push({ id: uid('estimate-line'), phase: 'finish', operation: 'Finition + lavage - 50% du temps peinture', laborHours: roundPlanningHours(optimized.totals.finish) });
       }
-      lines.push({ id: uid('estimate-line'), phase: 'quality', operation: 'Contrôle qualité forfaitaire', laborHours: FIXED_QUALITY_HOURS });
+      lines.push({ id: uid('estimate-line'), phase: 'finalCheck', operation: 'Contrôle final forfaitaire', laborHours: 0.25 });
       return lines;
     }
     const fallback = originalBuildAppliedEstimateLines ? originalBuildAppliedEstimateLines(preview) : (preview.distributedLines || []);
@@ -414,7 +415,8 @@
     const result = originalRecompute ? originalRecompute(item) : false;
     if (item?.durations) {
       item.durations.finish = Number(item.durations.paint || 0) > 0 ? roundPlanningHours(Number(item.durations.paint || 0) * 0.5) : 0;
-      item.durations.quality = FIXED_QUALITY_HOURS;
+      item.durations.quality = 0;
+      item.durations.finalCheck = 0.25;
     }
     return result;
   };

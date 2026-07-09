@@ -448,6 +448,58 @@ function makeQuickEstimateSourceFile(file) {
   };
 }
 
+function normalizeCaseStatusFilter(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw || raw === "all" || raw === "tous") return "all";
+
+  const normalized = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[_\s-]+/g, "_");
+
+  const aliases = {
+    imported: "devis_importe",
+    devis_importe: "devis_importe",
+    estimate_imported: "devis_importe",
+
+    chef_validation: "a_valider_chef_atelier",
+    a_valider_chef: "a_valider_chef_atelier",
+    pending_chef_validation: "a_valider_chef_atelier",
+    a_valider_chef_atelier: "a_valider_chef_atelier",
+
+    atelier_validated: "valide_atelier",
+    valide_atelier: "valide_atelier",
+
+    planned: "planifie",
+    planifie: "planifie",
+
+    in_progress: "en_cours",
+    en_cours: "en_cours",
+
+    paused: "en_pause",
+    en_pause: "en_pause",
+
+    blocked: "bloque",
+    bloque: "bloque",
+
+    atelier_completed: "termine_atelier",
+    termine_atelier: "termine_atelier",
+
+    atelier_closed: "cloture_atelier",
+    cloture_atelier: "cloture_atelier",
+
+    archived: "archive",
+    archive: "archive",
+  };
+
+  const knownStatuses = typeof statusLabels === "object" && statusLabels ? statusLabels : {};
+  return aliases[normalized] || (knownStatuses[normalized] ? normalized : "all");
+}
+
+if (typeof window !== "undefined") {
+  window.normalizeCaseStatusFilter = normalizeCaseStatusFilter;
+}
+
 function populateCaseStatusFilters() {
   const options = typeof getCaseStatusOptions === "function"
     ? getCaseStatusOptions()
@@ -614,14 +666,17 @@ function inferEstimateCreationMetadata(parsed, extracted = {}) {
 
 function bindCaseFilters() {
   populateCaseStatusFilters();
+  const normalizeStatusFilter = typeof normalizeCaseStatusFilter === "function"
+    ? normalizeCaseStatusFilter
+    : (value) => String(value || "all").trim().toLowerCase();
   const search = $("#case-search");
   search?.addEventListener("input", renderCases);
 
   const status = $("#case-status-filter");
   if (status) {
-    status.value = normalizeCaseStatusFilter(state.ui?.caseStatusFilter);
+    status.value = normalizeStatusFilter(state.ui?.caseStatusFilter);
     status.addEventListener("change", () => {
-      state.ui.caseStatusFilter = normalizeCaseStatusFilter(status.value);
+      state.ui.caseStatusFilter = normalizeStatusFilter(status.value);
       status.value = state.ui.caseStatusFilter;
       saveState();
       renderCases();

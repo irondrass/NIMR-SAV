@@ -71,6 +71,51 @@ assert.equal(context.escapeHtml('<img src=x onerror=alert(1)>'), '&lt;img src=x 
 assert.equal(context.shortVehicleModel('PICKUP DFM RICH6 4X4 EN SKD'), 'RICH 6', 'RICH6 sans espace doit être affiché seulement RICH 6');
 assert.equal(context.shortVehicleModel('DFM RICH 6 4X2'), 'RICH 6', 'RICH 6 avec espace doit rester seulement RICH 6');
 
+assert.equal(typeof context.normalizeCaseStatusFilter, 'function', 'normalizeCaseStatusFilter doit rester disponible au démarrage');
+assert.equal(context.normalizeCaseStatusFilter('archived'), 'archive', 'le filtre archive anglais doit rester compatible avec le statut interne');
+assert.equal(context.normalizeCaseStatusFilter('delivered'), 'all', 'les anciens statuts livraison ne doivent pas redevenir actifs');
+const caseFilterStartupValue = vm.runInContext(`(() => {
+  const elements = new Map();
+  function makeElement() {
+    return {
+      value: '',
+      textContent: '',
+      innerHTML: '',
+      hidden: false,
+      dataset: {},
+      style: {},
+      classList: { add() {}, remove() {}, toggle() {} },
+      handlers: {},
+      children: [],
+      setAttribute() {},
+      removeAttribute() {},
+      toggleAttribute() {},
+      addEventListener(type, handler) { this.handlers[type] = handler; },
+      append() {},
+      appendChild(child) { this.children.push(child); },
+      replaceChildren() { this.children = []; },
+      querySelector: () => makeElement(),
+      querySelectorAll: () => [],
+    };
+  }
+  const originalQuerySelector = document.querySelector;
+  const originalCreateElement = document.createElement;
+  document.querySelector = (selector) => {
+    if (!elements.has(selector)) elements.set(selector, makeElement());
+    return elements.get(selector);
+  };
+  document.createElement = () => makeElement();
+  state.ui.caseStatusFilter = 'cloture_atelier';
+  try {
+    bindCaseFilters();
+    return elements.get('#case-status-filter').value;
+  } finally {
+    document.querySelector = originalQuerySelector;
+    document.createElement = originalCreateElement;
+  }
+})()`, context);
+assert.equal(caseFilterStartupValue, 'cloture_atelier', 'bindCaseFilters doit démarrer sans ReferenceError et conserver le filtre réel');
+
 const normalized = context.normalizeState({
   ui: { caseStatusFilter: 'cloture_atelier', caseSort: 'client' },
   cases: [{ clientName: 'Test', flags: { delivered: true } }],

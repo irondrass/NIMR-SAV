@@ -4,21 +4,24 @@ function getWorkflowValues(item) {
   return {
     created: true,
     photos: item.photos.length > 0,
-    expert: Boolean(item.expertName || item.expertPhone || item.expertEmail),
+    labor: hasKnownLabor(item),
+    chefValidated: Boolean(item.flags.chefValidated),
+    expert: false,
     expertApproved: Boolean(item.flags.expertApproved),
     expertEstimate: Boolean(item.expertEstimate?.confirmed && expertEstimateTotalHours(item) > 0),
     clientApproved: Boolean(item.flags.clientApproved),
     appointment: hasAppointment,
     // Une étape intermédiaire déjà franchie doit rester cochée quand l'étape suivante est validée.
-    // Avant ce correctif, "En attente réception" redevenait grisée dès que "Véhicule reçu" était coché.
     vehiclePending: hasAppointment || hasReceivedVehicle,
     received: hasReceivedVehicle,
     assigned: state.bookings.some((booking) => booking.caseId === item.id),
     workStarted: Boolean(item.flags.workStarted),
     workCompleted: Boolean(item.flags.workCompleted),
-    qualityApproved: Boolean(item.flags.qualityApproved),
+    qualityApproved: false,
     delivered: Boolean(item.flags.delivered),
     invoiced: Boolean(item.flags.invoiced),
+    atelierClosed: Boolean(item.flags.atelierClosed || item.flags.invoiced),
+    archived: Boolean(item.flags.archived),
   };
 }
 
@@ -29,26 +32,8 @@ function isQualityChecklistComplete(item) {
 async function handlePhotos(event, item, category = "before") {
   category = normalizePhotoCategory(category);
   const files = [...event.target.files].slice(0, 8);
-  if (!files.length) return;
-
-  const quota = await getStorageQuotaInfo();
-  if (quota.supported) {
-    if (quota.percent > 90) {
-      const confirmed = await showConfirmModal(
-        `Le stockage de votre navigateur est presque saturé (${quota.percent.toFixed(1)}% utilisé). Continuer d'ajouter des photos ?`
-      );
-      if (!confirmed) {
-        event.target.value = "";
-        return;
-      }
-    } else if (quota.percent > 80) {
-      quietNotify(`Stockage navigateur utilisé à ${quota.percent.toFixed(1)}%. Pensez à exporter vos données.`, "warn");
-    }
-  }
-
   const loaded = [];
   let rejected = 0;
-  let quotaExceeded = false;
   for (const file of files) {
     try {
       const prepared = await preparePhotoForStorage(file);
@@ -65,20 +50,11 @@ async function handlePhotos(event, item, category = "before") {
     } catch (error) {
       rejected += 1;
       console.warn("Photo ignorée", file?.name, error);
-      if (isQuotaError(error)) {
-        quotaExceeded = true;
-      }
     }
   }
-  if (quotaExceeded) {
-    notifyUser("Stockage navigateur saturé. Supprimez des photos anciennes ou exportez une sauvegarde.", "error");
-  } else if (rejected) {
-    notifyUser("Photo trop volumineuse ou format non supporté.", "error");
-  }
-  if (loaded.length) {
-    item.photos.push(...loaded);
-    addHistory(item, "photos.added", `${loaded.length} photo${loaded.length > 1 ? "s" : ""} ajoutée${loaded.length > 1 ? "s" : ""}`, getPhotoCategoryLabel(category));
-  }
+  if (rejected) notifyUser("Photo trop volumineuse ou format non supporté.", "error");
+  item.photos.push(...loaded);
+  if (loaded.length) addHistory(item, "photos.added", `${loaded.length} photo${loaded.length > 1 ? "s" : ""} ajoutée${loaded.length > 1 ? "s" : ""}`, getPhotoCategoryLabel(category));
   saveState();
   renderCaseDetail();
   event.target.value = "";
@@ -111,14 +87,8 @@ async function preparePhotoForStorage(file) {
     URL.revokeObjectURL(image.src);
     return { blob: blob || file, name: replacePhotoExtension(file.name || "photo", blob ? "jpg" : getFileExtension(file.name) || "jpg") };
   } catch (error) {
-    console.warn("Compression photo impossible", error);
-    if (file.size > 1.5 * 1024 * 1024) {
-      notifyUser(`La compression de la photo a échoué. Le fichier original de ${(file.size / (1024 * 1024)).toFixed(1)} Mo est trop volumineux et a été refusé.`, "error");
-      throw new Error(`Compression échouée et fichier original trop lourd: ${file.name}`);
-    } else {
-      notifyUser(`La compression de la photo a échoué. Le fichier original de ${(file.size / 1024).toFixed(0)} Ko a été conservé.`, "warn");
-      return { blob: file, name: file.name || "photo" };
-    }
+    console.warn("Compression photo impossible, fichier original conservé", error);
+    return { blob: file, name: file.name || "photo" };
   }
 }
 
@@ -212,22 +182,13 @@ function openPhotoDb() {
 }
 
 async function savePhotoRecord(caseId, photo, blob) {
-  try {
-    const db = await openPhotoDb();
-    return await idbRequest(
-      db
-        .transaction(PHOTO_STORE, "readwrite")
-        .objectStore(PHOTO_STORE)
-        .put({ ...photo, caseId, blob }),
-    );
-  } catch (error) {
-    if (isQuotaError(error)) {
-      if (typeof addAuditLog === "function") {
-        addAuditLog("storage.quota_exceeded", "Quota stockage dépassé lors de la sauvegarde photo", error.message || error.name);
-      }
-    }
-    throw error;
-  }
+  const db = await openPhotoDb();
+  return idbRequest(
+    db
+      .transaction(PHOTO_STORE, "readwrite")
+      .objectStore(PHOTO_STORE)
+      .put({ ...photo, caseId, blob }),
+  );
 }
 
 async function getPhotoRecord(id) {
@@ -236,22 +197,13 @@ async function getPhotoRecord(id) {
 }
 
 async function saveDocumentRecord(caseId, documentMeta, blob) {
-  try {
-    const db = await openPhotoDb();
-    return await idbRequest(
-      db
-        .transaction(DOCUMENT_STORE, "readwrite")
-        .objectStore(DOCUMENT_STORE)
-        .put({ ...documentMeta, caseId, blob }),
-    );
-  } catch (error) {
-    if (isQuotaError(error)) {
-      if (typeof addAuditLog === "function") {
-        addAuditLog("storage.quota_exceeded", "Quota stockage dépassé lors de la sauvegarde document", error.message || error.name);
-      }
-    }
-    throw error;
-  }
+  const db = await openPhotoDb();
+  return idbRequest(
+    db
+      .transaction(DOCUMENT_STORE, "readwrite")
+      .objectStore(DOCUMENT_STORE)
+      .put({ ...documentMeta, caseId, blob }),
+  );
 }
 
 async function getDocumentRecord(id) {
@@ -405,91 +357,3 @@ async function restorePhotoRecords(photos) {
   }
   return restored;
 }
-
-async function getStorageQuotaInfo() {
-  if (typeof navigator !== "undefined" && navigator.storage && navigator.storage.estimate) {
-    try {
-      const estimate = await navigator.storage.estimate();
-      const usage = estimate.usage || 0;
-      const quota = estimate.quota || 0;
-      const percent = quota > 0 ? (usage / quota) * 100 : 0;
-      return { usage, quota, percent, supported: true };
-    } catch (error) {
-      console.warn("Storage quota estimation failed", error);
-    }
-  }
-  return { usage: 0, quota: 0, percent: 0, supported: false };
-}
-
-function isQuotaError(error) {
-  if (!error) return false;
-  return error.name === "QuotaExceededError" || 
-         error.name === "NS_ERROR_DOM_QUOTA_REACHED" || 
-         String(error.message || "").includes("QuotaExceededError") ||
-         String(error.message || "").includes("quota");
-}
-
-async function clearDocumentStore() {
-  const db = await openPhotoDb();
-  return idbRequest(db.transaction(DOCUMENT_STORE, "readwrite").objectStore(DOCUMENT_STORE).clear());
-}
-
-async function cleanupOrphanedStorage() {
-  try {
-    const validPhotoIds = new Set();
-    const validDocIds = new Set();
-    
-    if (typeof state !== "undefined" && Array.isArray(state.cases)) {
-      state.cases.forEach((item) => {
-        if (Array.isArray(item.photos)) {
-          item.photos.forEach((photo) => {
-            if (photo.id) validPhotoIds.add(photo.id);
-          });
-        }
-        if (item.expertEstimate?.sourceFile?.id) {
-          validDocIds.add(item.expertEstimate.sourceFile.id);
-        }
-        if (Array.isArray(item.claims)) {
-          item.claims.forEach((claim) => {
-            if (claim.estimate?.sourceFile?.id) {
-              validDocIds.add(claim.estimate.sourceFile.id);
-            }
-          });
-        }
-      });
-    }
-
-    const allPhotos = await getAllPhotoRecords().catch(() => []);
-    let photosDeleted = 0;
-    for (const photo of allPhotos) {
-      if (photo.id && !validPhotoIds.has(photo.id)) {
-        await deletePhotoRecord(photo.id).catch(() => null);
-        photosDeleted += 1;
-      }
-    }
-
-    const allDocs = await getAllDocumentRecords().catch(() => []);
-    let docsDeleted = 0;
-    for (const doc of allDocs) {
-      if (doc.id && !validDocIds.has(doc.id)) {
-        await deleteDocumentRecord(doc.id).catch(() => null);
-        docsDeleted += 1;
-      }
-    }
-
-    if (photosDeleted > 0 || docsDeleted > 0) {
-      console.log(`[Storage Cleanup] Purged ${photosDeleted} orphaned photos and ${docsDeleted} orphaned documents.`);
-    }
-    return { photosDeleted, docsDeleted };
-  } catch (error) {
-    console.warn("Storage cleanup failed", error);
-    return { photosDeleted: 0, docsDeleted: 0 };
-  }
-}
-
-window.getStorageQuotaInfo = getStorageQuotaInfo;
-window.isQuotaError = isQuotaError;
-window.clearDocumentStore = clearDocumentStore;
-window.cleanupOrphanedStorage = cleanupOrphanedStorage;
-
-

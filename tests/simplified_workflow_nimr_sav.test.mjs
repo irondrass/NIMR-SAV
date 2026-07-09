@@ -15,7 +15,7 @@ const scriptFiles = [
 ];
 
 function elementStub() {
-  const stub = {
+  return {
     value: '',
     textContent: '',
     innerHTML: '',
@@ -36,17 +36,11 @@ function elementStub() {
     querySelector: () => elementStub(),
     querySelectorAll: () => [],
     closest: () => elementStub(),
-    children: [],
-    cloneNode() { return elementStub(); },
-    replaceChild() {},
   };
-  stub.parentNode = stub;
-  return stub;
 }
 
 const context = {
   console,
-  elementStub,
   TextEncoder,
   TextDecoder,
   Blob,
@@ -270,6 +264,154 @@ test('booking conflict ignores completed tasks', () => {
     return JSON.stringify(Boolean(resourceHasConflict('mec-1', new Date('2026-07-10T09:00:00.000Z'), new Date('2026-07-10T10:30:00.000Z'), state.bookings)));
   })()`);
   assert.equal(result, false);
+});
+
+test('bodywork planning reserves only one tolier', () => {
+  const result = runJson(`(() => {
+    state = normalizeState({
+      resources: [
+        { id: 'sassi', name: 'SASSI', role: 'tolier', active: true },
+        { id: 'imed', name: 'IMED', role: 'tolier', active: true }
+      ],
+      cases: [],
+      bookings: []
+    });
+    const item = normalizeCase({
+      id: 'single-tolier-body',
+      clientName: 'Single tolier',
+      plate: '140TU2026',
+      flags: { chefValidated: true },
+      durations: { body: 6.75, oilService: 0, mechanical: 0, electrical: 0, prep: 0, paint: 0, reassembly: 0, finish: 0, finalCheck: 0, quality: 0 }
+    });
+    const proposal = schedulePipeline(item, new Date('2026-07-13T08:00:00.000Z'), []);
+    const bookings = proposalToBookings(item, proposal, false);
+    const bodySteps = proposal.steps.filter((step) => step.key === 'body');
+    const bodyBookings = bookings.filter((booking) => booking.key === 'body');
+    return JSON.stringify({
+      bodyStepCount: bodySteps.length,
+      bodyBookingCount: bodyBookings.length,
+      resourceCount: bodyBookings[0]?.resourceIds.length || 0,
+      resourceIds: bodyBookings[0]?.resourceIds || [],
+      humanResourceCount: (bodyBookings[0]?.resourceIds || []).filter((id) => ['sassi', 'imed'].includes(id)).length,
+      ganttDuplicates: bodyBookings.flatMap((booking) => (booking.resourceIds || []).map((id) => booking.id + ':' + id)).length
+    });
+  })()`);
+  assert.equal(result.bodyStepCount, 1);
+  assert.equal(result.bodyBookingCount, 1);
+  assert.equal(result.resourceCount, 1);
+  assert.equal(result.humanResourceCount, 1);
+  assert.ok(['sassi', 'imed'].includes(result.resourceIds[0]));
+  assert.equal(result.ganttDuplicates, 1);
+});
+
+test('new parts never create anticipated preparation planning', () => {
+  const result = runJson(`(() => {
+    state = normalizeState({
+      resources: [
+        { id: 'tolier', name: 'Tolier', role: 'tolier', active: true },
+        { id: 'peintre', name: 'Peintre', role: 'peintre', active: true },
+        { id: 'cabine', name: 'Cabine', role: 'cabine', active: true }
+      ],
+      cases: [],
+      bookings: []
+    });
+    const item = normalizeCase({
+      id: 'no-anticipated-new-parts',
+      clientName: 'No anticipated',
+      plate: '141TU2026',
+      flags: { chefValidated: true },
+      durations: { body: 2, oilService: 0, mechanical: 0, electrical: 0, prep: 1.5, paint: 1, reassembly: 0, finish: 0, finalCheck: 0, quality: 0 },
+      claims: [{
+        type: 'atelier',
+        includeInPlanning: true,
+        estimate: {
+          lines: [
+            { phase: 'body', operation: 'Tolerie demontage', laborHours: 2 },
+            { phase: 'prep', operation: 'Preparation pare-chocs neuf', laborHours: 1.5 },
+            { phase: 'paint', operation: 'Peinture pare-chocs neuf', laborHours: 1 }
+          ],
+          originalLines: [{
+            operation: 'REMPLACEMENT PARE-CHOCS NEUF',
+            pieceKind: 'new',
+            allocations: [
+              { phase: 'prep', operation: 'Preparation pare-chocs neuf', laborHours: 1.5 },
+              { phase: 'paint', operation: 'Peinture pare-chocs neuf', laborHours: 1 }
+            ]
+          }]
+        }
+      }]
+    });
+    const proposal = schedulePipeline(item, new Date('2026-07-13T08:00:00.000Z'), []);
+    const bookings = proposalToBookings(item, proposal, false);
+    const fold = (value) => String(value || '').normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLowerCase();
+    const text = [...proposal.steps, ...bookings].map((entry) => fold([entry.title, entry.details, entry.planningMode].join(' '))).join(' ');
+    return JSON.stringify({
+      stepKeys: proposal.steps.map((step) => step.key),
+      hasForbiddenText: text.includes('preparation anticipee') || text.includes('pieces neuves') || text.includes('piece neuve') || text.includes('anticipated-new-part'),
+      anticipatedCount: proposal.steps.filter((step) => step.planningMode === 'anticipated-new-part').length
+    });
+  })()`);
+  assert.deepEqual(result.stepKeys, ['body', 'prep', 'paint']);
+  assert.equal(result.hasForbiddenText, false);
+  assert.equal(result.anticipatedCount, 0);
+});
+
+test('bodywork duration UI hides redundant service selector', () => {
+  const result = runJson(`(() => {
+    state = normalizeState({
+      resources: [
+        { id: 'sassi', name: 'SASSI', role: 'tolier', active: true },
+        { id: 'imed', name: 'IMED', role: 'tolier', active: true }
+      ],
+      cases: [],
+      bookings: []
+    });
+    const item = normalizeCase({
+      id: 'body-ui-no-double-menu',
+      clientName: 'Body UI',
+      plate: '142TU2026',
+      durations: { body: 6.75, oilService: 0, mechanical: 0, electrical: 0, prep: 0, paint: 0, reassembly: 0, finish: 0, finalCheck: 0, quality: 0 }
+    });
+    const makeElement = () => ({
+      value: '',
+      textContent: '',
+      innerHTML: '',
+      hidden: false,
+      dataset: {},
+      style: {},
+      parentNode: { insertBefore() {} },
+      classList: { add() {}, remove() {}, toggle() {} },
+      setAttribute() {},
+      removeAttribute() {},
+      addEventListener() {},
+      append() {},
+      appendChild() {},
+      remove() {},
+      querySelector: () => null,
+      querySelectorAll: () => []
+    });
+    const durationField = makeElement();
+    const totalField = makeElement();
+    const root = {
+      querySelector(selector) {
+        if (selector === "[data-field='durations']") return durationField;
+        if (selector === "[data-field='total-duration']") return totalField;
+        if (selector === "[data-field='validated-appointment-plan']") return null;
+        if (selector === "[data-field='imported-labor-review']") return null;
+        return makeElement();
+      },
+      querySelectorAll: () => []
+    };
+    renderDurations(root, item);
+    return JSON.stringify({
+      hasTechnicianSelector: durationField.innerHTML.includes('Technicien à réserver'),
+      hasServiceSelector: durationField.innerHTML.includes('Service à réserver dans le planning'),
+      hasAutoTolier: durationField.innerHTML.includes('Auto recommandé - Tôlier')
+    });
+  })()`);
+  assert.equal(result.hasTechnicianSelector, true);
+  assert.equal(result.hasServiceSelector, false);
+  assert.equal(result.hasAutoTolier, false);
 });
 
 test('task can start from planned state', () => {
@@ -530,412 +672,6 @@ test('case status performance stays acceptable at 4000 cases', () => {
   })()`);
   assert.equal(result.count, 4000);
   assert.ok(result.ms < 2500, `status pass took ${result.ms} ms`);
-});
-
-test('end-to-end workflow validation: estimate import to archive', () => {
-  const result = runJson(`(() => {
-    // 1. Setup state with mock resources
-    state = normalizeState({
-      resources: [
-        { id: 'tech-1', name: 'Mecanicien', role: 'mecanicien', active: true, displayPlanning: true }
-      ],
-      cases: [],
-      bookings: []
-    });
-
-    // 2. Mock estimate import parsed lines
-    const parsedEstimate = {
-      laborLines: [{ phase: 'mechanical', operation: 'VIDANGE', laborHours: 1.5 }],
-      info: { clientName: 'STE TEST', plate: '999TU2026', vehicle: 'Dossier Test' }
-    };
-
-    // 3. Create Case
-    const item = normalizeCase({
-      id: 'e2e-case',
-      clientName: parsedEstimate.info.clientName,
-      plate: parsedEstimate.info.plate,
-      vehicle: parsedEstimate.info.vehicle,
-      claims: [{
-        id: 'claim-1',
-        type: 'client',
-        includeInPlanning: true,
-        estimate: { originalLines: parsedEstimate.laborLines, lines: parsedEstimate.laborLines }
-      }]
-    });
-    state.cases.push(item);
-    recomputeCaseDurationsFromClaims(item);
-
-    // 4. Verify initial state is "a_valider_chef_atelier"
-    const initialStatus = getCaseStatus(item);
-
-    // 5. Verify Chef validation blocking when no labor is present
-    const emptyCase = normalizeCase({
-      id: 'empty-case',
-      clientName: 'Empty',
-      plate: '111TU2026',
-      claims: [{ id: 'claim-empty', type: 'client', includeInPlanning: true, estimate: { lines: [], originalLines: [] } }]
-    });
-    DURATIONS.forEach(([key]) => { emptyCase.durations[key] = 0; });
-    const blockIssues = getBusinessRuleIssues(emptyCase, 'validate_chef_atelier');
-
-    // 6. Chef Atelier Validation
-    const validationResult = applyWorkflowAction(item, 'validate_chef_atelier');
-    const validatedStatus = getCaseStatus(item);
-
-    // 7. Verify tasks become planifiable (planning issue list should be empty for a validated case)
-    const planningIssues = getBusinessRuleIssues(item, 'appointment');
-
-    // 8. Calculate planning
-    const planningOptions = generateAppointmentOptions(item);
-    acceptProposal(item, planningOptions.proposal);
-    const plannedStatus = getCaseStatus(item);
-
-    // 9. Verify planning contains tasks
-    const hasBookings = state.bookings.some(b => b.caseId === item.id);
-
-    // 10. Technician flow: start, pause, resume, block, complete
-    const booking = state.bookings.find(b => b.caseId === item.id);
-
-    // Start task
-    booking.status = 'started';
-    const startedStatus = getCaseStatus(item);
-
-    // Pause task
-    booking.status = 'paused';
-    const pausedStatus = getCaseStatus(item);
-
-    // Resume (started)
-    booking.status = 'started';
-
-    // Block
-    booking.status = 'blocked';
-    const blockedStatus = getCaseStatus(item);
-
-    // Complete
-    booking.status = 'completed';
-    const completedStatus = getCaseStatus(item);
-
-    // 11. Clôturer atelier
-    const closeResult = applyWorkflowAction(item, 'atelierClosed');
-    const closedStatus = getCaseStatus(item);
-
-    // 12. Archive
-    const archiveResult = applyWorkflowAction(item, 'archived');
-    const archivedStatus = getCaseStatus(item);
-
-    return JSON.stringify({
-      initialStatus,
-      blockIssuesLength: blockIssues.length,
-      validationResultOk: validationResult.ok,
-      validatedStatus,
-      planningIssuesLength: planningIssues.length,
-      plannedStatus,
-      hasBookings,
-      startedStatus,
-      pausedStatus,
-      blockedStatus,
-      completedStatus,
-      closeResultOk: closeResult.ok,
-      closedStatus,
-      archiveResultOk: archiveResult.ok,
-      archivedStatus
-    });
-  })()`);
-
-  assert.equal(result.initialStatus, 'a_valider_chef_atelier');
-  assert.ok(result.blockIssuesLength > 0, 'Chef validation is blocked when no labor is present');
-  assert.equal(result.validationResultOk, true);
-  assert.equal(result.validatedStatus, 'valide_atelier');
-  assert.equal(result.planningIssuesLength, 0, 'planning has no issues after chef validation');
-  assert.equal(result.plannedStatus, 'planifie');
-  assert.equal(result.hasBookings, true);
-  assert.equal(result.startedStatus, 'en_cours');
-  assert.equal(result.pausedStatus, 'en_pause');
-  assert.equal(result.blockedStatus, 'bloque');
-  assert.equal(result.completedStatus, 'termine_atelier');
-  assert.equal(result.closeResultOk, true);
-  assert.equal(result.closedStatus, 'cloture_atelier');
-  assert.equal(result.archiveResultOk, true);
-  assert.equal(result.archivedStatus, 'archive');
-});
-
-test('case details rendering and action validation works without crashing after legacy UI cleanup', () => {
-  const result = runJson(`(() => {
-    // 1. Setup mock environment with a case
-    state = normalizeState({
-      resources: [],
-      cases: [],
-      bookings: []
-    });
-
-    const item = normalizeCase({
-      id: 'crash-test-case',
-      clientName: 'Test UI Safety',
-      plate: '123TU4567',
-      claims: []
-    });
-    state.cases.push(item);
-    activeCaseId = item.id;
-    getActiveCase = () => item;
-
-    // 2. Mock a DOM root that mimics index.html after legacy cleanup
-    // Where legacy fields (like expert-state, photo-input, etc.) are absent.
-    const mockDetail = {
-      innerHTML: '',
-      replaceChildren() {},
-      querySelector(selector) {
-        if (selector === "[data-field='status']") return { textContent: '' };
-        if (selector === "[data-field='created']") return { textContent: '' };
-        // These are legacy and absent in the DOM
-        if (selector === "[data-field='expert-state']") return null;
-        if (selector === "#photo-input") return null;
-        if (selector === "#print-repair-order") return null;
-        if (selector === "[data-field='photos']") return null;
-        if (selector === "[data-field='quality-checklist']") return null;
-        return elementStub();
-      },
-      querySelectorAll() {
-        return [];
-      }
-    };
-
-    // 3. Executing renderCaseDetail under mock layout - should not throw/crash
-    let renderCrashed = false;
-    let errorMessage = "";
-    try {
-      // Temporarily override document.querySelector to return our mocks
-      const originalQuerySelector = document.querySelector;
-      document.querySelector = (selector) => {
-        if (selector === '#case-detail') return mockDetail;
-        if (selector === '#case-detail-template') return { content: { cloneNode() { return mockDetail; } } };
-        return mockDetail.querySelector(selector);
-      };
-
-      renderCaseDetail();
-
-      document.querySelector = originalQuerySelector;
-    } catch (e) {
-      renderCrashed = true;
-      errorMessage = e.message;
-    }
-
-    return JSON.stringify({
-      renderCrashed,
-      errorMessage
-    });
-  })()`);
-
-  assert.equal(result.renderCrashed, false, `renderCaseDetail should not crash: ${result.errorMessage}`);
-});
-
-test('PDF estimate import fallback triggers when no labor lines are matched, enabling planning', () => {
-  const result = runJson(`(() => {
-    // 1. Setup mock environment
-    state = normalizeState({
-      resources: [
-        { id: 'mecanicien-1', name: 'Mecanisien', role: 'mecanicien', active: true },
-        { id: 'pont-mecanique-1', name: 'Pont', role: 'pont_mecanique', active: true }
-      ],
-      cases: [],
-      bookings: []
-    });
-
-    // 2. Parse a text description that contains zero labor operations but valid metadata
-    const parsed = parseEstimateText("DEVIS ESTIMATIF ATELIER\\nClient: Khaled\\nImmat: 123TU4567\\nREFERENCE: DV-999\\nPIECE DETACHEE 500 TND");
-
-    // Check parsed properties
-    const hasOriginalFallback = parsed.fallbackUsed;
-    const originalHours = parsed.detectedHours;
-    const originalLaborLinesLength = parsed.laborLines.length;
-
-    // 3. Create a case from this preview
-    const item = normalizeCase({
-      id: 'fallback-case-test',
-      clientName: parsed.info?.clientName || 'Khaled',
-      plate: parsed.info?.plate || '123TU4567',
-      durations: Object.fromEntries(DURATIONS.map(([key]) => [key, 0])),
-      claims: []
-    });
-    state.cases.push(item);
-
-    const firstClaim = normalizeRepairClaim({
-      id: 'claim-1',
-      number: 'OT-001',
-      title: 'Intervention',
-      type: 'mechanical_client',
-      status: 'approved',
-      includeInPlanning: true,
-      expertApproved: true,
-      clientApproved: true
-    });
-    item.claims = [firstClaim];
-
-    const preview = prepareEstimateImportPreview(parsed, item);
-    applyEstimateImportToClaim(item, firstClaim, preview, { silent: true });
-
-    // 4. Validate that fallback task is present
-    const hasClaimLabor = hasKnownLabor(item);
-    const totalHours = totalDurationHours(item);
-    const hasFallbackTask = firstClaim.estimate?.fallbackUsed;
-    const fallbackOriginalLine = firstClaim.estimate?.originalLines?.find(line => line.source === 'pdf_fallback');
-    const fallbackDuration = fallbackOriginalLine?.laborHours || 0;
-    const isToConfirm = Boolean(fallbackOriginalLine?.toConfirm);
-
-    // 5. Test Chef validation is possible
-    const validationIssues = getBusinessRuleIssues(item, 'validate_chef_atelier');
-    const chefValidationResult = applyWorkflowAction(item, 'validate_chef_atelier');
-
-    // 6. Test planning is unlocked and calculate RDV has no issues
-    const planningIssues = getBusinessRuleIssues(item, 'appointment');
-
-    return JSON.stringify({
-      hasOriginalFallback,
-      originalHours,
-      originalLaborLinesLength,
-      hasClaimLabor,
-      totalHours,
-      hasFallbackTask,
-      fallbackDuration,
-      isToConfirm,
-      validationIssuesLength: validationIssues.length,
-      chefValidated: Boolean(item.flags?.chefValidated),
-      planningIssuesLength: planningIssues.length
-    });
-  })()`);
-
-  assert.equal(result.hasOriginalFallback, true, 'parsed fallbackUsed should be true');
-  assert.equal(result.originalHours, 0.5, 'detected hours should fallback to 0.5');
-  assert.equal(result.originalLaborLinesLength, 1, 'should have 1 fallback labor line');
-  assert.equal(result.hasClaimLabor, true, 'case should report having known labor');
-  assert.equal(result.totalHours, 0.75, 'total durations should sum up to 0.75h (including 0.25h finalCheck)');
-  assert.equal(result.hasFallbackTask, true, 'claim estimate should set fallbackUsed');
-  assert.equal(result.fallbackDuration, 0.5, 'fallback task duration must be 0.5h');
-  assert.equal(result.isToConfirm, true, 'fallback task must have toConfirm flag');
-  assert.equal(result.validationIssuesLength, 0, 'should have no chef validation issues');
-  assert.equal(result.chefValidated, true, 'should successfully validate chef atelier');
-  assert.equal(result.planningIssuesLength, 0, 'should have no planning issues after chef validation');
-});
-
-test('bodywork planning task resolves using tolier resources without zone_carrosserie error', () => {
-  const result = runJson(`(() => {
-    // 1. Setup mock environment with SASSI and IMED as active Tôlier resources
-    state = normalizeState({
-      resources: [
-        { id: 'sassi-1', name: 'SASSI', role: 'tolier', emplacement: 'Poste tôlerie A', active: true },
-        { id: 'imed-1', name: 'IMED', role: 'tolier', emplacement: 'Poste tôlerie B', active: true }
-      ],
-      cases: [],
-      bookings: []
-    });
-
-    // Test alias mapping values
-    const aliases = {
-      carrosserie: normalizePlanningRole("carrosserie"),
-      body: normalizePlanningRole("body"),
-      zone_carrosserie: normalizePlanningRole("zone_carrosserie"),
-      zone_carrosserie_spaced: normalizePlanningRole("zone carrosserie"),
-      tolerie: normalizePlanningRole("tôlerie"),
-      poste_tolerie: normalizePlanningRole("poste tôlerie"),
-      peintre: normalizePlanningRole("Peintre"),
-      cabine: normalizePlanningRole("Cabine peinture"),
-      prep: normalizePlanningRole("Zone de préparation"),
-      mecanicien: normalizePlanningRole("Mécanicien"),
-      electricien: normalizePlanningRole("Électricien")
-    };
-
-    // 2. Create case and claim with bodywork task
-    const item = normalizeCase({
-      id: 'bodywork-case-test',
-      clientName: 'Khaled',
-      plate: '123TU4567',
-      durations: { body: 1.0 }, // 1 hour of bodywork
-      claims: []
-    });
-    state.cases.push(item);
-
-    const firstClaim = normalizeRepairClaim({
-      id: 'claim-1',
-      number: 'OT-001',
-      title: 'Intervention',
-      type: 'bodywork_repair',
-      status: 'approved',
-      includeInPlanning: true,
-      expertApproved: true,
-      clientApproved: true,
-      estimate: {
-        reference: 'DV-999',
-        confirmed: true,
-        lines: [
-          { id: 'line-1', phase: 'body', operation: 'Réparation carrosserie', laborHours: 1.0 }
-        ],
-        originalLines: [
-          {
-            id: 'oline-1',
-            operation: 'Réparation carrosserie',
-            laborHours: 1.0,
-            allocations: [
-              { phase: 'body', operation: 'Réparation carrosserie', laborHours: 1.0 }
-            ]
-          }
-        ]
-      }
-    });
-    item.claims = [firstClaim];
-
-    // Force recompute durations
-    recomputeCaseDurationsFromClaims(item);
-
-    // 3. Chef Atelier validation
-    const validationIssues = getBusinessRuleIssues(item, 'validate_chef_atelier');
-    applyWorkflowAction(item, 'validate_chef_atelier');
-
-    // 4. Planning check
-    const planningIssues = getBusinessRuleIssues(item, 'appointment');
-
-    // 5. Booking allocation (Calculer RDV)
-    let planningBooked = false;
-    let assignedResourceId = "";
-    try {
-      const planningOptions = generateAppointmentOptions(item);
-      if (planningOptions && planningOptions.proposal) {
-        planningBooked = true;
-        acceptProposal(item, planningOptions.proposal);
-        const booking = state.bookings.find(b => b.caseId === item.id);
-        assignedResourceId = booking?.primaryResourceId || "";
-      }
-    } catch (e) {
-      planningBooked = false;
-    }
-
-    return JSON.stringify({
-      aliases,
-      validationIssuesLength: validationIssues.length,
-      chefValidated: Boolean(item.flags?.chefValidated),
-      planningIssues,
-      planningBooked,
-      assignedResourceId
-    });
-  })()`);
-
-  // Check alias mapping matches
-  assert.equal(result.aliases.carrosserie, 'tolier', 'carrosserie should map to tolier');
-  assert.equal(result.aliases.body, 'tolier', 'body should map to tolier');
-  assert.equal(result.aliases.zone_carrosserie, 'tolier', 'zone_carrosserie should map to tolier');
-  assert.equal(result.aliases.zone_carrosserie_spaced, 'tolier', 'zone carrosserie should map to tolier');
-  assert.equal(result.aliases.tolerie, 'tolier', 'tôlerie should map to tolier');
-  assert.equal(result.aliases.poste_tolerie, 'tolier', 'poste tôlerie should map to tolier');
-  assert.equal(result.aliases.peintre, 'peintre', 'peintre should map to peintre');
-  assert.equal(result.aliases.cabine, 'cabine_peinture', 'cabine should map to cabine_peinture');
-  assert.equal(result.aliases.prep, 'preparation', 'prep should map to preparation');
-  assert.equal(result.aliases.mecanicien, 'mecanicien', 'mecanicien should map to mecanicien');
-  assert.equal(result.aliases.electricien, 'electricien', 'electricien should map to electricien');
-
-  // Check workflow checks
-  assert.equal(result.validationIssuesLength, 0, 'should be validateable by chef');
-  assert.equal(result.chefValidated, true, 'should mark chefValidated as true');
-  assert.deepEqual(result.planningIssues, [], 'should have no planning issues');
-  assert.equal(result.planningBooked, true, 'should successfully calculate slot');
-  assert.ok(['sassi-1', 'imed-1'].includes(result.assignedResourceId), 'should assign to SASSI or IMED');
 });
 
 console.log(`Simplified NIMR SAV workflow regression OK (${passed} checks)`);

@@ -620,47 +620,36 @@ function buildPlanningPdfLines(item) {
 function buildQualityPdfLines(item) {
   const checklist = getQualityChecklistForCase(item);
   return [
-    ...buildCommonPdfHeader(item, "CONTRÔLE QUALITÉ", "Document qualité"),
+    ...buildCommonPdfHeader(item, "VÉRIFICATION FINALE ATELIER", "Document interne atelier"),
     `Type d'intervention: ${getInterventionTypeLabelForPrint(item)}`,
-    `Contrôleur: ______________________________`,
-    `Date/heure contrôle: ______________________________`,
+    `Responsable: ______________________________`,
+    `Date/heure vérification: ______________________________`,
     "",
     ...checklist.map((label) => `${item.qualityChecklist?.[label] ? "[OK]" : "[  ]"} ${label}`),
     "",
-    `Contrôle qualité validé: ${item.flags.qualityApproved ? "Oui" : "Non"}`,
-    `Résultat: [  ] Accepté   [  ] Refusé`,
-    `Défaut constaté: ______________________________`,
+    `Vérification finale atelier: ______________________________`,
+    `Anomalie constatée: ______________________________`,
     `Action corrective: ______________________________`,
-    `Recontrôle nécessaire: [  ] Oui   [  ] Non`,
     "",
-    "Signature qualité: ______________________________",
     "Signature chef atelier: ______________________________",
   ];
 }
 
 function buildDeliveryPdfLines(item) {
   return [
-    ...buildCommonPdfHeader(item, "PV DE RESTITUTION VÉHICULE", "Document client"),
-    `Date/heure livraison: ______________________________`,
-    `Kilométrage sortie: ______________________________ km`,
-    `Véhicule reçu: ${item.flags.received ? "Oui" : "Non"}`,
+    ...buildCommonPdfHeader(item, "CLÔTURE ATELIER", "Document interne atelier"),
+    `Date/heure clôture: ______________________________`,
     `Travaux démarrés: ${item.flags.workStarted ? "Oui" : "Non"}`,
     `Travaux terminés: ${item.flags.workCompleted ? "Oui" : "Non"}`,
-    `Contrôle qualité validé: ${item.flags.qualityApproved ? "Oui" : "Non"}`,
-    `Livraison effectuée: ${item.flags.delivered ? "Oui" : "Non"}`,
+    `Dossier clôturé atelier: ${item.flags.atelierClosed ? "Oui" : "Non"}`,
     `Photos après réparation: ${getPhotoCountByCategory(item, "after") ? "Oui" : "Non"} (${getPhotoCountByCategory(item, "after")})`,
     "",
     "Résumé travaux réalisés:",
     item.damageNotes || "À compléter",
     "",
-    "Réserves client: ______________________________",
-    "Documents remis: [  ] Carte grise   [  ] Rapport contrôle",
-    "Clés / accessoires remis: ______________________________",
+    "Observations atelier: ______________________________",
     "",
-    "Le véhicule est restitué après contrôle qualité, sous réserve des observations mentionnées ci-dessus.",
-    "",
-    "Signature client: ______________________________",
-    "Signature réception: ______________________________",
+    "Signature chef atelier: ______________________________",
   ];
 }
 

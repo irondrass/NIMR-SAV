@@ -21,8 +21,8 @@ function equipmentDayLoad(date) {
 const LOAD_CATEGORIES = {
   body: {
     humanRoles: ["tolier", "peintre", "controle"],
-    equipmentRoles: ["zone_preparation", "cabine"],
-    bookingKeys: ["body", "prep", "paint", "reassembly", "finish", "quality"],
+    equipmentRoles: ["zone_carrosserie", "zone_preparation", "cabine"],
+    bookingKeys: ["body", "prep", "paint", "reassembly", "finish", "finalCheck"],
   },
   fast: {
     humanRoles: ["mecanicien"],
@@ -30,14 +30,9 @@ const LOAD_CATEGORIES = {
     bookingKeys: ["oilService"],
   },
   heavy: {
-    humanRoles: ["mecanicien"],
-    equipmentRoles: ["pont_mecanique"],
-    bookingKeys: ["mechanical"],
-  },
-  electrical: {
-    humanRoles: ["electricien"],
-    equipmentRoles: [],
-    bookingKeys: ["electrical"],
+    humanRoles: ["mecanicien", "electricien"],
+    equipmentRoles: ["pont_mecanique", "zone_diagnostic_electrique"],
+    bookingKeys: ["mechanical", "electrical"],
   },
 };
 
@@ -72,6 +67,7 @@ function dayLoadForResources(date, predicate) {
 
   let busy = 0;
   state.bookings.forEach((booking) => {
+    if (isObsoleteAnticipatedNewPartBooking(booking)) return;
     const usedResourceIds = (booking.resourceIds || []).filter((resourceId) => resourceIds.has(resourceId));
     if (!usedResourceIds.length) return;
 
@@ -97,6 +93,7 @@ function dayLoadForCategory(date, resourcePredicate, bookingPredicate) {
 
   let busy = 0;
   state.bookings.forEach((booking) => {
+    if (isObsoleteAnticipatedNewPartBooking(booking)) return;
     if (!bookingPredicate(booking)) return;
     const usedResourceIds = (booking.resourceIds || []).filter((resourceId) => resourceIds.has(resourceId));
     if (!usedResourceIds.length) return;
@@ -182,7 +179,43 @@ function shortVehicleModel(vehicleText) {
 }
 
 function isEquipmentResource(resource) {
-  return ["zone_preparation", "cabine", "pont_vidange", "pont_mecanique"].includes(resource?.role);
+  return ["zone_carrosserie", "zone_diagnostic_electrique", "zone_preparation", "cabine", "pont_vidange", "pont_mecanique"].includes(resource?.role);
+}
+
+function isSeparateEquipmentRole(role, primaryRole = "") {
+  return Boolean(role && role !== primaryRole && isEquipmentResource({ role }));
+}
+
+function normalizePlanningResourceAssignment(resourceIds = [], options = {}) {
+  const resources = Array.isArray(options.resources) ? options.resources : (typeof state !== "undefined" ? state.resources : []);
+  const resourceById = new Map((resources || []).map((resource) => [resource.id, resource]));
+  const rawIds = [
+    options.primaryResourceId,
+    ...(Array.isArray(resourceIds) ? resourceIds : []),
+    ...(Array.isArray(options.equipmentResourceIds) ? options.equipmentResourceIds : []),
+  ].filter((id, index, list) => id && list.indexOf(id) === index && resourceById.has(id));
+  const primaryId = options.primaryResourceId && rawIds.includes(options.primaryResourceId) ? options.primaryResourceId : rawIds[0] || "";
+  const primaryResource = resourceById.get(primaryId);
+  const primaryRole = options.primaryRole || primaryResource?.role || "";
+  const expectedEquipmentRole = isSeparateEquipmentRole(options.equipmentRole, primaryRole) ? options.equipmentRole : "";
+  const cleanIds = primaryId ? [primaryId] : [];
+  const equipmentIds = [];
+
+  rawIds.forEach((id) => {
+    if (!id || id === primaryId || cleanIds.includes(id)) return;
+    const resource = resourceById.get(id);
+    if (!resource || !isEquipmentResource(resource)) return;
+    if (primaryRole && resource.role === primaryRole) return;
+    if (expectedEquipmentRole && resource.role !== expectedEquipmentRole) return;
+    cleanIds.push(id);
+    equipmentIds.push(id);
+  });
+
+  return {
+    resourceIds: cleanIds,
+    primaryResourceId: primaryId || null,
+    equipmentResourceIds: equipmentIds,
+  };
 }
 
 function isDisplayPlanningResource(resource) {
@@ -195,8 +228,8 @@ function isHumanPlanningResource(resource) {
 
 
 function getPlanningResourceOrder(resource) {
-  const humanOrder = { tolier: 10, peintre: 20, mecanicien: 30, electricien: 40, controle: 50 };
-  const equipmentOrder = { pont_vidange: 105, pont_mecanique: 106, zone_preparation: 110, cabine: 120 };
+  const humanOrder = { chef_atelier: 5, tolier: 10, peintre: 20, mecanicien: 30, electricien: 40, controle: 50 };
+  const equipmentOrder = { pont_vidange: 105, pont_mecanique: 106, zone_diagnostic_electrique: 108, zone_carrosserie: 109, zone_preparation: 110, cabine: 120 };
   if (isEquipmentResource(resource)) return equipmentOrder[resource?.role] || 199;
   return humanOrder[resource?.role] || 90;
 }
@@ -224,56 +257,6 @@ function isPrimaryResourceBooking(booking, resourceId) {
 function sumDurations(item) {
   return formatLocalizedDecimal(totalDurationHours(item));
 }
-
-function normalizeText(str) {
-  return String(str || '')
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .trim();
-}
-
-function normalizePlanningRole(value) {
-  const v = normalizeText(value);
-
-  if (
-    v.includes("carrosserie") ||
-    v.includes("body") ||
-    v.includes("tolerie") ||
-    v.includes("tolier") ||
-    v.includes("tole")
-  ) {
-    return "tolier";
-  }
-
-  if (v.includes("cabine")) {
-    return "cabine_peinture";
-  }
-
-  if (v.includes("peinture") || v.includes("peintre")) {
-    return "peintre";
-  }
-
-  if (v.includes("preparation")) {
-    return "preparation";
-  }
-
-  if (v.includes("mecanique") || v.includes("mecanicien")) {
-    return "mecanicien";
-  }
-
-  if (v.includes("electrique") || v.includes("electricien") || v.includes("diagnostic")) {
-    return "electricien";
-  }
-
-  if (v.includes("controle final") || v.includes("finalcheck")) {
-    return "controle_final";
-  }
-
-  return v;
-}
-
-window.normalizePlanningRole = normalizePlanningRole;
 
 function parseLocalizedDecimal(value) {
   const normalized = String(value ?? "")
@@ -512,15 +495,6 @@ function setupServiceWorkerUpdates(registration) {
 }
 
 function setActiveTab(tab) {
-  if (typeof canAccessTab === "function" && !canAccessTab(tab)) {
-    const allowed = getAllowedTabsForCurrentUser();
-    if (allowed.length > 0) {
-      tab = allowed[0];
-    } else {
-      return;
-    }
-  }
-
   activeTab = tab;
   $$(".nav-button").forEach((button) => {
     const active = button.dataset.tab === tab;
@@ -535,172 +509,12 @@ function setActiveTab(tab) {
   });
 }
 
-function renderNavigationVisibility() {
-  if (typeof getAllowedTabsForCurrentUser !== "function") return;
-  const allowed = getAllowedTabsForCurrentUser();
-  $$(".nav-button").forEach((button) => {
-    const tabId = button.dataset.tab;
-    const isAllowed = allowed.includes(tabId);
-    button.hidden = !isAllowed;
-    button.style.display = isAllowed ? "" : "none";
-  });
-}
-
-
 function normalizeTextInputValue(value) {
   return String(value ?? "").trim().replace(/\s+/g, " ");
 }
 
 function normalizeIdentifierValue(value) {
   return normalizeTextInputValue(value).toUpperCase();
-}
-
-function normalizePhoneValue(value) {
-  return normalizeTextInputValue(value);
-}
-
-function normalizePlateValue(value) {
-  return normalizeIdentifierValue(value);
-}
-
-function normalizeVinValue(value) {
-  return normalizeIdentifierValue(value).replace(/[^A-Z0-9]/g, "");
-}
-
-function normalizeMileageValue(value) {
-  return normalizeIdentifierValue(value).replace(/[^\d]/g, "");
-}
-
-function isValidPhoneValue(value) {
-  const normalized = normalizePhoneValue(value);
-  if (!normalized) return true;
-  const digits = normalized.replace(/\D/g, "");
-  return digits.length >= 8 && digits.length <= 15 && /^\+?[\d\s().-]+$/.test(normalized);
-}
-
-function isValidPlateValue(value) {
-  const normalized = normalizePlateValue(value);
-  if (!normalized) return true;
-  const compact = normalized.replace(/[^A-Z0-9]/g, "");
-  return compact.length >= 3 && compact.length <= 16;
-}
-
-function isValidVinValue(value) {
-  const normalized = normalizeVinValue(value);
-  return !normalized || /^[A-HJ-NPR-Z0-9]{17}$/.test(normalized);
-}
-
-function isValidMileageValue(value) {
-  const raw = normalizeTextInputValue(value).replace(/\s+/g, "");
-  if (!raw) return true;
-  if (!/^\d+$/.test(raw)) return false;
-  const normalized = normalizeMileageValue(raw);
-  if (!normalized) return true;
-  const mileage = Number(normalized);
-  return Number.isInteger(mileage) && mileage >= 0 && mileage <= 9999999;
-}
-
-function normalizeReceptionCaseCandidate(candidate = {}) {
-  const normalized = {
-    ...candidate,
-    clientName: normalizeTextInputValue(candidate.clientName),
-    phone: normalizePhoneValue(candidate.phone),
-    ownerName: normalizeTextInputValue(candidate.ownerName),
-    driverName: normalizeTextInputValue(candidate.driverName),
-    driverPhone: normalizePhoneValue(candidate.driverPhone),
-    vehicle: normalizeTextInputValue(candidate.vehicle),
-    plate: normalizePlateValue(candidate.plate),
-    color: normalizeTextInputValue(candidate.color),
-    mileage: normalizeMileageValue(candidate.mileage),
-    vin: normalizeVinValue(candidate.vin),
-    orNavNumber: normalizeIdentifierValue(candidate.orNavNumber),
-    arrivalNotes: normalizeTextInputValue(candidate.arrivalNotes),
-  };
-  const plateAsIdentifier = normalized.plate.replace(/[^A-Z0-9]/g, "");
-  if (!normalized.vin && /^[A-HJ-NPR-Z0-9]{17}$/.test(plateAsIdentifier)) {
-    normalized.vin = plateAsIdentifier;
-    normalized.plate = "";
-  }
-  return normalized;
-}
-
-function validateReceptionCaseCandidate(candidate = {}) {
-  const normalized = normalizeReceptionCaseCandidate(candidate);
-  const errors = [];
-  const rawMileage = candidate.mileage;
-  if (!normalized.clientName) {
-    errors.push({ field: "clientName", message: "Le nom du client est obligatoire." });
-  }
-  if (!normalized.plate && !normalized.vin) {
-    errors.push({ field: "plate", message: "Renseignez une immatriculation ou un VIN avant de créer le dossier." });
-  }
-  if (normalized.phone && !isValidPhoneValue(normalized.phone)) {
-    errors.push({ field: "phone", message: "Le téléphone client doit contenir 8 à 15 chiffres." });
-  }
-  if (normalized.driverPhone && !isValidPhoneValue(normalized.driverPhone)) {
-    errors.push({ field: "driverPhone", message: "Le téléphone déposant doit contenir 8 à 15 chiffres." });
-  }
-  if (normalized.plate && !isValidPlateValue(normalized.plate)) {
-    errors.push({ field: "plate", message: "L'immatriculation doit contenir 3 à 16 caractères utiles." });
-  }
-  if (normalized.vin && !isValidVinValue(normalized.vin)) {
-    errors.push({ field: "vin", message: "Le VIN doit contenir 17 caractères valides, sans I, O ni Q." });
-  }
-  if (rawMileage && !isValidMileageValue(rawMileage)) {
-    errors.push({ field: "mileage", message: "Le kilométrage doit être un nombre positif réaliste." });
-  }
-  return {
-    ok: errors.length === 0,
-    errors,
-    messages: errors.map((error) => error.message),
-    normalized,
-  };
-}
-
-function renderFormValidationErrors(form, validation = {}, fallbackId = "") {
-  if (!form) return;
-  const errors = Array.isArray(validation.errors) ? validation.errors : [];
-  form.querySelectorAll("[aria-invalid='true']").forEach((control) => {
-    if (typeof control.removeAttribute !== "function") return;
-    control.removeAttribute("aria-invalid");
-    const describedBy = String(typeof control.getAttribute === "function" ? control.getAttribute("aria-describedby") || "" : "")
-      .split(/\s+/)
-      .filter((id) => id && id !== fallbackId)
-      .join(" ");
-    if (describedBy && typeof control.setAttribute === "function") control.setAttribute("aria-describedby", describedBy);
-    else control.removeAttribute("aria-describedby");
-  });
-  const fallbackTarget = fallbackId && typeof document !== "undefined" && typeof document.getElementById === "function"
-    ? document.getElementById(fallbackId)
-    : null;
-  const target = form.querySelector("[data-form-errors]") || fallbackTarget;
-  if (!errors.length) {
-    if (target) {
-      target.hidden = true;
-      target.textContent = "";
-    }
-    return;
-  }
-  if (target) {
-    target.hidden = false;
-    target.textContent = validation.messages?.join(" ") || errors.map((error) => error.message).join(" ");
-  }
-  errors.forEach((error) => {
-    const field = form.elements?.[error.field];
-    if (!field) return;
-    if (typeof field.setAttribute === "function") {
-      field.setAttribute("aria-invalid", "true");
-    }
-    if (fallbackId) {
-      const describedBy = new Set(String(typeof field.getAttribute === "function" ? field.getAttribute("aria-describedby") || "" : "").split(/\s+/).filter(Boolean));
-      describedBy.add(fallbackId);
-      if (typeof field.setAttribute === "function") {
-        field.setAttribute("aria-describedby", [...describedBy].join(" "));
-      }
-    }
-  });
-  const firstField = form.elements?.[errors[0]?.field];
-  firstField?.focus?.();
 }
 
 function findDuplicateCase(candidate) {
@@ -714,27 +528,10 @@ function findDuplicateCase(candidate) {
 }
 
 function focusCaseSearch() {
-  const preferredTab = typeof canAccessTab !== "function" || canAccessTab("reception-workspace")
-    ? "reception-workspace"
-    : "dossiers";
-  setActiveTab(preferredTab);
-  const input = preferredTab === "reception-workspace" ? $("#reception-case-search") : $("#case-search");
+  setActiveTab("dossiers");
+  const input = $("#case-search");
   input?.focus();
   input?.select();
-}
-
-function startReceptionCaseCreation() {
-  if (typeof canAccessTab === "function" && !canAccessTab("reception-workspace")) {
-    setActiveTab("dossiers");
-    $("#case-form input[name='clientName']")?.focus();
-    return;
-  }
-  setActiveTab("reception-workspace");
-  if (typeof isReceptionCreationMode !== "undefined") isReceptionCreationMode = true;
-  if (typeof renderReceptionWorkspace === "function") renderReceptionWorkspace();
-  window.setTimeout(() => {
-    $("#reception-detail-panel input[name='clientName']")?.focus();
-  }, 0);
 }
 
 function bindKeyboardShortcuts() {
@@ -746,7 +543,8 @@ function bindKeyboardShortcuts() {
     }
     if ((event.ctrlKey || event.metaKey) && key === "n") {
       event.preventDefault();
-      startReceptionCaseCreation();
+      setActiveTab("dossiers");
+      $("#case-form input[name='clientName']")?.focus();
     }
   });
 }

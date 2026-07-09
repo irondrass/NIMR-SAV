@@ -816,4 +816,126 @@ test('PDF estimate import fallback triggers when no labor lines are matched, ena
   assert.equal(result.planningIssuesLength, 0, 'should have no planning issues after chef validation');
 });
 
+test('bodywork planning task resolves using tolier resources without zone_carrosserie error', () => {
+  const result = runJson(`(() => {
+    // 1. Setup mock environment with SASSI and IMED as active Tôlier resources
+    state = normalizeState({
+      resources: [
+        { id: 'sassi-1', name: 'SASSI', role: 'tolier', emplacement: 'Poste tôlerie A', active: true },
+        { id: 'imed-1', name: 'IMED', role: 'tolier', emplacement: 'Poste tôlerie B', active: true }
+      ],
+      cases: [],
+      bookings: []
+    });
+
+    // Test alias mapping values
+    const aliases = {
+      carrosserie: normalizePlanningRole("carrosserie"),
+      body: normalizePlanningRole("body"),
+      zone_carrosserie: normalizePlanningRole("zone_carrosserie"),
+      zone_carrosserie_spaced: normalizePlanningRole("zone carrosserie"),
+      tolerie: normalizePlanningRole("tôlerie"),
+      poste_tolerie: normalizePlanningRole("poste tôlerie"),
+      peintre: normalizePlanningRole("Peintre"),
+      cabine: normalizePlanningRole("Cabine peinture"),
+      prep: normalizePlanningRole("Zone de préparation"),
+      mecanicien: normalizePlanningRole("Mécanicien"),
+      electricien: normalizePlanningRole("Électricien")
+    };
+
+    // 2. Create case and claim with bodywork task
+    const item = normalizeCase({
+      id: 'bodywork-case-test',
+      clientName: 'Khaled',
+      plate: '123TU4567',
+      durations: { body: 1.0 }, // 1 hour of bodywork
+      claims: []
+    });
+    state.cases.push(item);
+
+    const firstClaim = normalizeRepairClaim({
+      id: 'claim-1',
+      number: 'OT-001',
+      title: 'Intervention',
+      type: 'bodywork_repair',
+      status: 'approved',
+      includeInPlanning: true,
+      expertApproved: true,
+      clientApproved: true,
+      estimate: {
+        reference: 'DV-999',
+        confirmed: true,
+        lines: [
+          { id: 'line-1', phase: 'body', operation: 'Réparation carrosserie', laborHours: 1.0 }
+        ],
+        originalLines: [
+          {
+            id: 'oline-1',
+            operation: 'Réparation carrosserie',
+            laborHours: 1.0,
+            allocations: [
+              { phase: 'body', operation: 'Réparation carrosserie', laborHours: 1.0 }
+            ]
+          }
+        ]
+      }
+    });
+    item.claims = [firstClaim];
+
+    // Force recompute durations
+    recomputeCaseDurationsFromClaims(item);
+
+    // 3. Chef Atelier validation
+    const validationIssues = getBusinessRuleIssues(item, 'validate_chef_atelier');
+    applyWorkflowAction(item, 'validate_chef_atelier');
+
+    // 4. Planning check
+    const planningIssues = getBusinessRuleIssues(item, 'appointment');
+
+    // 5. Booking allocation (Calculer RDV)
+    let planningBooked = false;
+    let assignedResourceId = "";
+    try {
+      const planningOptions = generateAppointmentOptions(item);
+      if (planningOptions && planningOptions.proposal) {
+        planningBooked = true;
+        acceptProposal(item, planningOptions.proposal);
+        const booking = state.bookings.find(b => b.caseId === item.id);
+        assignedResourceId = booking?.primaryResourceId || "";
+      }
+    } catch (e) {
+      planningBooked = false;
+    }
+
+    return JSON.stringify({
+      aliases,
+      validationIssuesLength: validationIssues.length,
+      chefValidated: Boolean(item.flags?.chefValidated),
+      planningIssues,
+      planningBooked,
+      assignedResourceId
+    });
+  })()`);
+
+  // Check alias mapping matches
+  assert.equal(result.aliases.carrosserie, 'tolier', 'carrosserie should map to tolier');
+  assert.equal(result.aliases.body, 'tolier', 'body should map to tolier');
+  assert.equal(result.aliases.zone_carrosserie, 'tolier', 'zone_carrosserie should map to tolier');
+  assert.equal(result.aliases.zone_carrosserie_spaced, 'tolier', 'zone carrosserie should map to tolier');
+  assert.equal(result.aliases.tolerie, 'tolier', 'tôlerie should map to tolier');
+  assert.equal(result.aliases.poste_tolerie, 'tolier', 'poste tôlerie should map to tolier');
+  assert.equal(result.aliases.peintre, 'peintre', 'peintre should map to peintre');
+  assert.equal(result.aliases.cabine, 'cabine_peinture', 'cabine should map to cabine_peinture');
+  assert.equal(result.aliases.prep, 'preparation', 'prep should map to preparation');
+  assert.equal(result.aliases.mecanicien, 'mecanicien', 'mecanicien should map to mecanicien');
+  assert.equal(result.aliases.electricien, 'electricien', 'electricien should map to electricien');
+
+  // Check workflow checks
+  assert.equal(result.validationIssuesLength, 0, 'should be validateable by chef');
+  assert.equal(result.chefValidated, true, 'should mark chefValidated as true');
+  assert.deepEqual(result.planningIssues, [], 'should have no planning issues');
+  assert.equal(result.planningBooked, true, 'should successfully calculate slot');
+  assert.ok(['sassi-1', 'imed-1'].includes(result.assignedResourceId), 'should assign to SASSI or IMED');
+});
+
 console.log(`Simplified NIMR SAV workflow regression OK (${passed} checks)`);

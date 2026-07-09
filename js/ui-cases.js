@@ -3591,7 +3591,11 @@ function getBusinessRuleIssues(item, action) {
     }
     const missingRoles = missingSchedulingRoles(item);
     if (missingRoles.length) {
-      issues.push(`Aucune ressource active pour : ${missingRoles.join(", ")}.`);
+      if (missingRoles.includes("Zone carrosserie") || missingRoles.includes("Tôlier") || missingRoles.includes("tolier")) {
+        issues.push("Aucune ressource compatible trouvée pour Carrosserie/Tôlerie. Vérifiez qu’au moins un Tôlier actif existe dans Paramètres.");
+      } else {
+        issues.push(`Aucune ressource active pour : ${missingRoles.join(", ")}.`);
+      }
     }
   }
 
@@ -3653,7 +3657,21 @@ function missingSchedulingRoles(item) {
     : STEP_TEMPLATES;
   const roles = [...new Set(templates.flatMap((template) => [template.role, template.equipmentRole].filter(Boolean)))];
   return roles
-    .filter((role) => !state.resources.some((resource) => resource.role === role && resource.active !== false))
+    .filter((role) => {
+      const normRole = normalizePlanningRole(role);
+      return !state.resources.some((resource) => {
+        if (resource.active === false) return false;
+        const rRole = normalizePlanningRole(resource.role);
+        if (rRole === normRole) return true;
+        if (normRole === 'tolier') {
+          const rEmplacement = String(resource.emplacement || '').toLowerCase();
+          if (rEmplacement.includes('tole') || rEmplacement.includes('body') || rEmplacement.includes('carrosserie')) {
+            return true;
+          }
+        }
+        return false;
+      });
+    })
     .map((role) => ROLE_LABELS[role] || role);
 }
 
@@ -3761,8 +3779,22 @@ function getSelectableTechniciansForStep(key, item) {
   const baseTemplate = getBaseStepTemplate(key);
   if (!baseTemplate) return [];
   const template = getPlanningTemplateForItem(item, baseTemplate);
+  const normRole = normalizePlanningRole(template.role);
   return state.resources
-    .filter((resource) => resource.active !== false && resource.role === template.role && !isEquipmentResource(resource))
+    .filter((resource) => {
+      if (resource.active === false) return false;
+      const rRole = normalizePlanningRole(resource.role);
+      if (rRole === normRole) {
+        return !isEquipmentResource(resource);
+      }
+      if (normRole === 'tolier') {
+        const rEmplacement = String(resource.emplacement || '').toLowerCase();
+        if (rEmplacement.includes('tole') || rEmplacement.includes('body') || rEmplacement.includes('carrosserie')) {
+          return !isEquipmentResource(resource);
+        }
+      }
+      return false;
+    })
     .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
 }
 
@@ -3780,6 +3812,7 @@ function getBaseStepTemplate(key) {
 function getServiceResourceHelp(type) {
   const config = SERVICE_TYPE_CONFIG[type] || SERVICE_TYPE_CONFIG.auto;
   if (!config || type === "auto") return "Selon l’étape";
+  if (type === "tolerie") return "Tôlier";
   const roleLabel = ROLE_LABELS[config.role] || config.label;
   const equipmentLabel = config.equipmentRole ? ` + ${ROLE_LABELS[config.equipmentRole] || config.equipmentRole}` : "";
   return `${roleLabel}${equipmentLabel}`;
@@ -3788,6 +3821,7 @@ function getServiceResourceHelp(type) {
 function getAutoServiceHelp(key) {
   const template = getBaseStepTemplate(key);
   if (!template) return "Métier automatique";
+  if (key === "body") return "Tôlier";
   const roleLabel = ROLE_LABELS[template.role] || template.role || "Ressource";
   const equipmentLabel = template.equipmentRole ? ` + ${ROLE_LABELS[template.equipmentRole] || template.equipmentRole}` : "";
   return `${roleLabel}${equipmentLabel}`;

@@ -263,7 +263,7 @@ function findBestResourceSlot(template, startAfter, duration, bookings, fastJob,
   let best = null;
   primaryResources.forEach((primary, primaryIndex) => {
     equipmentResources.forEach((equipment, equipmentIndex) => {
-      const resourceIds = equipment ? [primary.id, equipment.id] : [primary.id];
+      const resourceIds = equipment && equipment.id !== primary.id ? [primary.id, equipment.id] : [primary.id];
       const slot = findEarliestSlot(resourceIds, startAfter, duration, bookings);
       if (!slot) return;
       const candidate = {
@@ -283,8 +283,20 @@ function findBestResourceSlot(template, startAfter, duration, bookings, fastJob,
 }
 
 function getAssignableResources(role, fastJob) {
+  const normRole = normalizePlanningRole(role);
   return state.resources
-    .filter((resource) => resource.role === role && resource.active !== false)
+    .filter((resource) => {
+      if (resource.active === false) return false;
+      const rRole = normalizePlanningRole(resource.role);
+      if (rRole === normRole) return true;
+      if (normRole === 'tolier') {
+        const rEmplacement = String(resource.emplacement || '').toLowerCase();
+        if (rEmplacement.includes('tole') || rEmplacement.includes('body') || rEmplacement.includes('carrosserie')) {
+          return true;
+        }
+      }
+      return false;
+    })
     .filter((resource) => !state.settings.fastLaneEnabled || fastJob || !resource.fastLane)
     .sort((a, b) => {
       if (!state.settings.fastLaneEnabled || !fastJob) return 0;

@@ -225,6 +225,56 @@ function sumDurations(item) {
   return formatLocalizedDecimal(totalDurationHours(item));
 }
 
+function normalizeText(str) {
+  return String(str || '')
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+}
+
+function normalizePlanningRole(value) {
+  const v = normalizeText(value);
+
+  if (
+    v.includes("carrosserie") ||
+    v.includes("body") ||
+    v.includes("tolerie") ||
+    v.includes("tolier") ||
+    v.includes("tole")
+  ) {
+    return "tolier";
+  }
+
+  if (v.includes("cabine")) {
+    return "cabine_peinture";
+  }
+
+  if (v.includes("peinture") || v.includes("peintre")) {
+    return "peintre";
+  }
+
+  if (v.includes("preparation")) {
+    return "preparation";
+  }
+
+  if (v.includes("mecanique") || v.includes("mecanicien")) {
+    return "mecanicien";
+  }
+
+  if (v.includes("electrique") || v.includes("electricien") || v.includes("diagnostic")) {
+    return "electricien";
+  }
+
+  if (v.includes("controle final") || v.includes("finalcheck")) {
+    return "controle_final";
+  }
+
+  return v;
+}
+
+window.normalizePlanningRole = normalizePlanningRole;
+
 function parseLocalizedDecimal(value) {
   const normalized = String(value ?? "")
     .trim()

@@ -6,6 +6,265 @@ function cloneBooking(booking) {
   };
 }
 
+const USER_ROLES = {
+  admin: "Admin technique",
+  admin_technique: "Admin technique",
+  administrateur: "Administrateur",
+  directeur: "Directeur",
+  direction: "Direction",
+  directeur_sav: "Directeur SAV",
+  chef_atelier: "Chef atelier",
+  reception: "Réception",
+  technicien: "Technicien",
+  qualite: "Qualité",
+  readonly: "Lecture seule",
+};
+
+const ROLE_PERMISSIONS = {
+  admin: ["*"],
+  admin_technique: ["*"],
+  administrateur: ["*"],
+  directeur: ["audit.view", "dashboard.view", "delivery.complete", "export.backup", "print.*"],
+  direction: ["audit.view", "dashboard.view", "delivery.complete", "export.backup", "print.*"],
+  directeur_sav: ["audit.view", "dashboard.view", "delivery.complete", "export.backup", "print.*"],
+  chef_atelier: ["dashboard.view", "case.create", "case.edit", "estimate.import", "planning.edit", "quality.*", "task.*", "delivery.complete", "print.*"],
+  reception: ["dashboard.view", "case.create", "case.edit", "estimate.import", "appointment.schedule", "vehicle.receive", "delivery.complete", "print.*"],
+  technicien: ["dashboard.view", "task.start", "task.pause", "task.resume", "task.complete", "task.block", "print.task"],
+  qualite: ["dashboard.view", "quality.validate", "quality.reject", "quality.revalidate", "print.*"],
+  readonly: ["dashboard.view", "print.*"],
+};
+
+const SENSITIVE_ACTION_PERMISSIONS = {
+  "backup.admin": "import.backup",
+  "backup.export": "export.backup",
+  "backup.import": "import.backup",
+  "backup.restore": "import.backup",
+  "case.delete": "case.delete",
+  "case.reset": "case.delete",
+  "clear.storage": "settings.edit",
+  "download.sensitive": "export.backup",
+  "export.backup": "export.backup",
+  "export.clear.json": "export.clear_json",
+  "import.backup": "import.backup",
+  "purge.storage": "settings.edit",
+  "reset.storage": "settings.edit",
+  "restore.backup": "import.backup",
+  "settings.edit": "settings.edit",
+  "storage.clear": "settings.edit",
+  "supabase.configure": "supabase.configure",
+  "users.manage": "users.manage",
+};
+
+const SENSITIVE_KEYWORD_PERMISSIONS = [
+  ["clear_json", "export.clear_json"],
+  ["clear.json", "export.clear_json"],
+  ["json", "export.clear_json"],
+  ["restore", "import.backup"],
+  ["import", "import.backup"],
+  ["delete", "case.delete"],
+  ["purge", "settings.edit"],
+  ["reset", "settings.edit"],
+  ["storage", "settings.edit"],
+  ["supabase", "supabase.configure"],
+  ["users", "users.manage"],
+  ["sensitive", "export.backup"],
+  ["download", "export.backup"],
+  ["export", "export.backup"],
+  ["backup", "export.backup"],
+];
+
+const CLEAR_JSON_ALLOWED_ROLES = new Set(["admin", "admin_technique", "administrateur"]);
+
+function normalizePermissionToken(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s-]+/g, "_");
+}
+
+function makeGuardResult(ok, message = "") {
+  return {
+    ok,
+    allowed: ok,
+    message,
+    reason: message,
+  };
+}
+
+function getUserById(userId) {
+  const currentState = typeof state !== "undefined" ? state : null;
+  const users = Array.isArray(currentState?.users) ? currentState.users : [];
+  return users.find((user) => user.id === userId) || null;
+}
+
+function getCurrentUser() {
+  const currentState = typeof state !== "undefined" ? state : null;
+  const users = Array.isArray(currentState?.users) ? currentState.users.filter((user) => user.active !== false) : [];
+  if (currentState?.currentUserId) {
+    const current = users.find((user) => user.id === currentState.currentUserId);
+    if (current) return current;
+  }
+  return users[0] || { id: "bootstrap-admin", name: "Admin technique", role: "admin", active: true };
+}
+
+function setCurrentUser(userId) {
+  const user = getUserById(userId);
+  if (!user || user.active === false) return false;
+  if (typeof state === "undefined") return false;
+  state.currentUserId = user.id;
+  return true;
+}
+
+function resolvePermissionUser(options = {}) {
+  if (options.user) return options.user;
+  if (options.userId) return getUserById(options.userId);
+  if (options.role) return { role: options.role, active: true };
+  return getCurrentUser();
+}
+
+function hasPermission(permission, options = {}) {
+  const user = resolvePermissionUser(options);
+  if (!user || user.active === false) return false;
+  const role = normalizePermissionToken(options.role || user?.role || "");
+  const permissions = ROLE_PERMISSIONS[role] || [];
+  if (permissions.includes("*")) return true;
+  const requested = normalizePermissionToken(permission).replace(/_/g, ".");
+  return permissions.some((candidate) => {
+    if (candidate === requested) return true;
+    if (candidate.endsWith(".*")) return requested.startsWith(candidate.slice(0, -1));
+    return false;
+  });
+}
+
+function getPermissionDeniedMessage(permission, user = getCurrentUser()) {
+  const role = normalizePermissionToken(user?.role || "");
+  if (role === "readonly") return "Action non autorisée en lecture seule.";
+  return `Action non autorisée pour le rôle ${USER_ROLES[role] || user?.role || "utilisateur"}.`;
+}
+
+function guardAction(permission, context = {}, options = {}) {
+  const user = resolvePermissionUser(context);
+  const ok = hasPermission(permission, context);
+  const message = ok ? "" : getPermissionDeniedMessage(permission, user);
+  if (!ok && options.notify !== false && typeof notifyUser === "function") notifyUser(message, "error");
+  return makeGuardResult(ok, message);
+}
+
+function canRenderAction(permission, context = {}) {
+  return guardAction(permission, context, { notify: false }).ok;
+}
+
+function guardCaseCreate(context = {}, options = {}) {
+  return guardAction("case.create", context, options);
+}
+
+function guardCaseEdit(item, options = {}) {
+  if (typeof isCaseReadonlyArchive === "function" && isCaseReadonlyArchive(item)) {
+    return makeGuardResult(false, typeof getArchivedCaseMessage === "function" ? getArchivedCaseMessage(item) : "Dossier archivé en lecture seule.");
+  }
+  return guardAction("case.edit", { item }, options);
+}
+
+function guardEstimateImport(item, options = {}) {
+  if (item && typeof isCaseReadonlyArchive === "function" && isCaseReadonlyArchive(item)) {
+    return makeGuardResult(false, typeof getArchivedCaseMessage === "function" ? getArchivedCaseMessage(item) : "Dossier archivé en lecture seule.");
+  }
+  return guardAction("estimate.import", { item }, options);
+}
+
+function guardAppointmentSchedule(item, options = {}) {
+  if (item && typeof isCaseReadonlyArchive === "function" && isCaseReadonlyArchive(item)) {
+    return makeGuardResult(false, typeof getArchivedCaseMessage === "function" ? getArchivedCaseMessage(item) : "Dossier archivé en lecture seule.");
+  }
+  return guardAction("appointment.schedule", { item }, options);
+}
+
+function guardVehicleReceive(item, options = {}) {
+  if (item && typeof isCaseReadonlyArchive === "function" && isCaseReadonlyArchive(item)) {
+    return makeGuardResult(false, typeof getArchivedCaseMessage === "function" ? getArchivedCaseMessage(item) : "Dossier archivé en lecture seule.");
+  }
+  return guardAction("vehicle.receive", { item }, options);
+}
+
+function guardDeliveryComplete(item, options = {}) {
+  if (item && typeof isCaseReadonlyArchive === "function" && isCaseReadonlyArchive(item)) {
+    return makeGuardResult(false, typeof getArchivedCaseMessage === "function" ? getArchivedCaseMessage(item) : "Dossier archivé en lecture seule.");
+  }
+  return guardAction("delivery.complete", { item }, options);
+}
+
+function guardQualityValidate(item, options = {}) {
+  return guardAction("quality.validate", { item }, options);
+}
+
+function guardUserSwitch() {
+  return guardAction("users.switch", {}, { notify: false });
+}
+
+function getSensitivePermissionForAction(action) {
+  const normalized = normalizePermissionToken(action).replace(/_/g, ".");
+  if (SENSITIVE_ACTION_PERMISSIONS[normalized]) return SENSITIVE_ACTION_PERMISSIONS[normalized];
+  const normalizedText = normalizePermissionToken(action);
+  const keyword = SENSITIVE_KEYWORD_PERMISSIONS.find(([token]) => normalizedText.includes(token));
+  return keyword?.[1] || "";
+}
+
+function getRoleFromGuardOptions(context = {}) {
+  if (context.role) return context.role;
+  if (context.user?.role) return context.user.role;
+  if (typeof window !== "undefined") {
+    return window.currentUser?.role
+      || window.appState?.currentUser?.role
+      || window.sessionUser?.role
+      || window.NIMR_CURRENT_ROLE
+      || "";
+  }
+  return "";
+}
+
+function guardSensitiveAction(action, context = {}, options = {}) {
+  const explicitRole = getRoleFromGuardOptions(context);
+  const permission = getSensitivePermissionForAction(action);
+  if (!permission) return makeGuardResult(true, "");
+
+  const user = explicitRole ? { role: explicitRole, active: true } : resolvePermissionUser(context);
+  const role = normalizePermissionToken(user?.role || "");
+  let ok = false;
+
+  if (permission === "export.clear_json") {
+    ok = CLEAR_JSON_ALLOWED_ROLES.has(role);
+  } else {
+    ok = hasPermission(permission, { user });
+  }
+
+  const message = ok ? "" : getPermissionDeniedMessage(permission, user);
+  if (!ok && options.notify !== false && typeof notifyUser === "function") notifyUser(message, "error");
+  return makeGuardResult(ok, message);
+}
+
+if (typeof window !== "undefined") {
+  window.USER_ROLES = USER_ROLES;
+  window.ROLE_PERMISSIONS = ROLE_PERMISSIONS;
+  window.getUserById = getUserById;
+  window.getCurrentUser = getCurrentUser;
+  window.setCurrentUser = setCurrentUser;
+  window.hasPermission = hasPermission;
+  window.guardAction = guardAction;
+  window.canRenderAction = canRenderAction;
+  window.getPermissionDeniedMessage = getPermissionDeniedMessage;
+  window.guardSensitiveAction = guardSensitiveAction;
+  window.guardCaseCreate = guardCaseCreate;
+  window.guardCaseEdit = guardCaseEdit;
+  window.guardEstimateImport = guardEstimateImport;
+  window.guardAppointmentSchedule = guardAppointmentSchedule;
+  window.guardVehicleReceive = guardVehicleReceive;
+  window.guardDeliveryComplete = guardDeliveryComplete;
+  window.guardQualityValidate = guardQualityValidate;
+  window.guardUserSwitch = guardUserSwitch;
+}
+
 function dayLoad(date) {
   return dayLoadForResources(date, (resource) => resource.active !== false);
 }

@@ -27,35 +27,67 @@ function createElementStub() {
     textContent: '',
     innerHTML: '',
     hidden: false,
+    disabled: false,
+    checked: false,
+    title: '',
     dataset: {},
+    elements: {},
+    handlers: {},
+    children: [],
+    files: [],
     style: {},
-    classList: { add() {}, remove() {}, toggle() {} },
+    classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
     setAttribute() {},
+    getAttribute: () => '',
     removeAttribute() {},
     toggleAttribute() {},
-    addEventListener() {},
+    addEventListener(type, handler) { this.handlers[type] = handler; },
     append() {},
-    appendChild() {},
-    replaceChildren() {},
+    appendChild(child) { this.children.push(child); return child; },
+    replaceChildren(...children) { this.children = children; },
+    closest: () => createElementStub(),
+    contains: () => false,
+    focus() {},
+    select() {},
+    click() {},
+    remove() {},
+    reset() {},
+    showModal() {},
+    close() {},
+    scrollIntoView() {},
     querySelector: () => createElementStub(),
     querySelectorAll: () => [],
   };
 }
 
+const documentBody = createElementStub();
 const context = {
   console,
-  localStorage: { getItem: () => null, setItem: () => {} },
+  localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+  sessionStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
   document: {
     querySelector: () => createElementStub(),
     querySelectorAll: () => [],
+    getElementById: () => createElementStub(),
     addEventListener: () => {},
     createElement: () => createElementStub(),
+    body: documentBody,
+    visibilityState: 'visible',
   },
-  window: { addEventListener: () => {} },
-  navigator: {},
+  window: {
+    addEventListener: () => {},
+    setTimeout: () => 0,
+    clearTimeout,
+    setInterval: () => 0,
+    clearInterval: () => {},
+    requestAnimationFrame: () => 0,
+  },
+  navigator: { onLine: true },
   fetch: async () => ({ ok: false }),
-  setTimeout,
+  setTimeout: () => 0,
   clearTimeout,
+  setInterval: () => 0,
+  clearInterval: () => {},
   Blob,
   URL: { createObjectURL: () => '', revokeObjectURL: () => {} },
   FormData: class FormData {},
@@ -72,8 +104,46 @@ assert.equal(context.shortVehicleModel('PICKUP DFM RICH6 4X4 EN SKD'), 'RICH 6',
 assert.equal(context.shortVehicleModel('DFM RICH 6 4X2'), 'RICH 6', 'RICH 6 avec espace doit rester seulement RICH 6');
 
 assert.equal(typeof context.normalizeCaseStatusFilter, 'function', 'normalizeCaseStatusFilter doit rester disponible au démarrage');
+for (const helperName of ['normalizeCaseStatusFilter', 'guardSensitiveAction', 'isCaseReadonlyArchive', 'getCaseStatus']) {
+  assert.equal(typeof context[helperName], 'function', `${helperName} doit rester disponible au démarrage`);
+}
 assert.equal(context.normalizeCaseStatusFilter('archived'), 'archive', 'le filtre archive anglais doit rester compatible avec le statut interne');
 assert.equal(context.normalizeCaseStatusFilter('delivered'), 'all', 'les anciens statuts livraison ne doivent pas redevenir actifs');
+assert.equal(context.guardSensitiveAction('export clear json', { role: 'technicien' }).ok, false, 'technicien ne doit pas exporter de JSON clair');
+assert.equal(context.guardSensitiveAction('export clear json', { role: 'admin_technique' }).ok, true, 'admin technique doit pouvoir exporter le JSON clair');
+assert.equal(context.guardSensitiveAction('export clear json', { role: 'chef_atelier' }).ok, false, 'chef atelier non admin ne doit pas exporter de JSON clair');
+assert.equal(context.guardSensitiveAction('import.backup', { role: 'directeur_sav' }).ok, false, 'directeur SAV ne doit pas restaurer une sauvegarde');
+assert.doesNotThrow(
+  () => vm.runInContext('bindBackupActions();', context),
+  'bindBackupActions doit démarrer sans ReferenceError guardSensitiveAction',
+);
+const initAppStartupRegression = JSON.parse(vm.runInContext(`(() => {
+  const errors = [];
+  const originalError = console.error;
+  const originalRender = render;
+  const originalRegisterServiceWorker = registerServiceWorker;
+  const originalLoadBundledVehicleDatabase = loadBundledVehicleDatabase;
+  const originalMigrateLegacyPhotos = migrateLegacyPhotos;
+  const originalCleanupOrphanedStorage = typeof cleanupOrphanedStorage === "function" ? cleanupOrphanedStorage : null;
+  console.error = (...args) => errors.push(args.map((arg) => String(arg)).join(" "));
+  render = () => {};
+  registerServiceWorker = () => {};
+  loadBundledVehicleDatabase = () => Promise.resolve();
+  migrateLegacyPhotos = () => Promise.resolve();
+  cleanupOrphanedStorage = () => Promise.resolve();
+  try {
+    initApp();
+    return JSON.stringify(errors);
+  } finally {
+    console.error = originalError;
+    render = originalRender;
+    registerServiceWorker = originalRegisterServiceWorker;
+    loadBundledVehicleDatabase = originalLoadBundledVehicleDatabase;
+    migrateLegacyPhotos = originalMigrateLegacyPhotos;
+    if (originalCleanupOrphanedStorage) cleanupOrphanedStorage = originalCleanupOrphanedStorage;
+  }
+})()`, context));
+assert.equal(initAppStartupRegression.some((message) => /guardSensitiveAction|ReferenceError/.test(message)), false, 'initApp ne doit pas échouer sur guardSensitiveAction au démarrage');
 const caseFilterStartupValue = vm.runInContext(`(() => {
   const elements = new Map();
   function makeElement() {

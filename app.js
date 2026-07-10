@@ -955,6 +955,14 @@ function bindBackupActions() {
 }
 
 function applyBackupPermissionState() {
+  const guard = typeof guardSensitiveAction === "function"
+    ? guardSensitiveAction
+    : () => ({
+        ok: false,
+        allowed: false,
+        message: "Action sensible indisponible : garde de sécurité non chargée.",
+        reason: "Action sensible indisponible : garde de sécurité non chargée.",
+      });
   [
     ["#export-backup", "export.backup"],
     ["#export-encrypted-backup", "export.backup"],
@@ -964,10 +972,12 @@ function applyBackupPermissionState() {
   ].forEach(([selector, permission]) => {
     const target = $(selector);
     if (!target) return;
-    const guard = guardSensitiveAction(permission, {}, { notify: false });
-    target.disabled = !guard.ok;
-    target.title = guard.message;
-    target.closest("label")?.classList.toggle("disabled-card", !guard.ok);
+    const result = guard(permission, {}, { notify: false });
+    const allowed = result.ok !== false && result.allowed !== false;
+    const message = result.message || result.reason || "";
+    target.disabled = !allowed;
+    target.title = message;
+    target.closest("label")?.classList.toggle("disabled-card", !allowed);
   });
 }
 

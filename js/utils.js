@@ -212,7 +212,7 @@ function getCurrentUser() {
     const current = users.find((user) => user.id === currentState.currentUserId);
     if (current) return current;
   }
-  return users[0] || { id: "bootstrap-admin", name: "Admin technique", role: "admin", active: true };
+  return users[0] || null;
 }
 
 function setCurrentUser(userId) {
@@ -309,6 +309,35 @@ function guardUserSwitch() {
   return guardAction("users.switch", {}, { notify: false });
 }
 
+function getAllowedTabsForCurrentUser(user = getCurrentUser()) {
+  const role = normalizePermissionToken(user?.role || "");
+  if (!user || user.active === false) return ["dossiers"];
+  if (["admin", "admin_technique", "administrateur", "chef_atelier", "directeur_sav", "directeur", "direction"].includes(role)) {
+    return ["dossiers", "today", "pilotage", "planning", "technician", "atelier"];
+  }
+  if (role === "technicien") return ["technician", "today"];
+  if (role === "reception") return ["dossiers", "today", "pilotage"];
+  if (role === "qualite") return ["dossiers", "today", "pilotage"];
+  return ["dossiers", "today", "pilotage"];
+}
+
+function ensureCurrentTabAllowed() {
+  const allowedTabs = getAllowedTabsForCurrentUser();
+  const currentTab = typeof activeTab !== "undefined" ? activeTab : "dossiers";
+  if (!allowedTabs.includes(currentTab)) {
+    setActiveTab(allowedTabs[0] || "dossiers");
+  }
+  $$(".nav-button").forEach((button) => {
+    const tab = button.dataset.tab;
+    if (!tab || button.hasAttribute("data-legacy-ui")) return;
+    const allowed = allowedTabs.includes(tab);
+    button.hidden = !allowed;
+    button.toggleAttribute("aria-hidden", !allowed);
+    button.tabIndex = allowed ? 0 : -1;
+  });
+  return allowedTabs;
+}
+
 function getSensitivePermissionForAction(action) {
   const normalized = normalizePermissionToken(action).replace(/_/g, ".");
   if (SENSITIVE_ACTION_PERMISSIONS[normalized]) return SENSITIVE_ACTION_PERMISSIONS[normalized];
@@ -378,6 +407,8 @@ if (typeof window !== "undefined") {
   window.guardDeliveryComplete = guardDeliveryComplete;
   window.guardQualityValidate = guardQualityValidate;
   window.guardUserSwitch = guardUserSwitch;
+  window.getAllowedTabsForCurrentUser = getAllowedTabsForCurrentUser;
+  window.ensureCurrentTabAllowed = ensureCurrentTabAllowed;
 }
 
 function dayLoad(date) {

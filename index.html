@@ -781,6 +781,39 @@
         <button class="primary-button" type="submit" style="width: 100%; margin-top: 16px;">Se connecter</button>
         <p class="muted status-error" id="user-login-status" style="margin-top: 8px; text-align: center; color: var(--danger-color); font-weight: bold;"></p>
       </form>
+      <form class="local-lock-dialog" id="first-access-recovery-form" role="dialog" aria-modal="true" aria-labelledby="first-access-recovery-title" hidden>
+        <div class="local-lock-logo">!</div>
+        <h2 id="first-access-recovery-title">Premier accès / récupération locale</h2>
+        <p id="first-access-recovery-message">Aucun utilisateur actif trouvé. Créez explicitement un utilisateur local de récupération ou importez une sauvegarde.</p>
+
+        <label>
+          Nom utilisateur
+          <input id="first-access-name" name="name" type="text" autocomplete="name" required placeholder="Nom utilisateur" />
+        </label>
+
+        <label>
+          Rôle
+          <select name="role" required style="width: 100%; margin-bottom: 12px; height: 38px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--border-color); font-size: 1rem;">
+            <option value="admin">Admin technique</option>
+            <option value="directeur_sav">Directeur SAV</option>
+          </select>
+        </label>
+
+        <label>
+          PIN
+          <input name="pin" type="password" inputmode="numeric" autocomplete="new-password" required minlength="6" placeholder="6 chiffres non évidents" />
+        </label>
+
+        <label>
+          Confirmer PIN
+          <input name="pinConfirm" type="password" inputmode="numeric" autocomplete="new-password" required minlength="6" placeholder="Répéter le PIN" />
+        </label>
+
+        <button class="primary-button" type="submit" style="width: 100%; margin-top: 16px;">Créer utilisateur et continuer</button>
+        <button class="ghost-button" id="first-access-import-backup" type="button" style="width: 100%; margin-top: 8px;">Importer une sauvegarde</button>
+        <input type="file" id="first-access-import-input" accept=".json,.nimrsecure,application/json" hidden />
+        <p class="muted status-error" id="first-access-recovery-status" style="margin-top: 8px; text-align: center; color: var(--danger-color); font-weight: bold;"></p>
+      </form>
     </div>
     <div class="local-lock-overlay" id="user-pin-change-overlay" hidden>
       <form class="local-lock-dialog" id="user-pin-change-form" role="dialog" aria-modal="true" aria-labelledby="user-pin-change-title">

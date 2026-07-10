@@ -566,7 +566,8 @@ async function testEncryptedBackup(event) {
 }
 
 async function importBackup(event) {
-  const permissionGuard = guardSensitiveAction("import.backup");
+  const recoveryImport = typeof canUseFirstAccessRecovery === "function" && canUseFirstAccessRecovery();
+  const permissionGuard = recoveryImport ? { ok: true } : guardSensitiveAction("import.backup");
   if (!permissionGuard.ok) {
     if (event?.target) event.target.value = "";
     return;
@@ -649,6 +650,7 @@ async function importBackup(event) {
     }, importActor), { actor: importActor });
     saveState();
     render();
+    if (typeof checkUserSessionStartup === "function") checkUserSessionStartup();
     showBackupStatus(`Sauvegarde importée: ${state.cases.length} dossier(s), ${restoredPhotos} photo(s), ${restoredDocuments} document(s).`, "ok");
   } catch (error) {
     console.error("Import sauvegarde impossible", error);

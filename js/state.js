@@ -342,6 +342,10 @@ function notifyUser(message, variant = "info") {
   }, variant === "error" ? 6500 : 4200);
 }
 
+function quietNotify(message, variant = "info") {
+  notifyUser(message, variant);
+}
+
 function bytesToBase64(bytes) {
   let binary = "";
   new Uint8Array(bytes || []).forEach((byte) => {
@@ -444,6 +448,57 @@ async function deriveLocalPinHash(pin, saltBase64) {
     256,
   );
   return bytesToBase64(bits);
+}
+
+function validateLocalPinStrength(pin) {
+  const value = String(pin || "").trim();
+  if (!/^\d{6,}$/.test(value)) {
+    return { ok: false, value, message: "Le PIN doit contenir au moins 6 chiffres." };
+  }
+  if (/^(\d)\1+$/.test(value)) {
+    return { ok: false, value, message: "Choisissez un PIN non répétitif." };
+  }
+  const ascending = "01234567890123456789";
+  const descending = "98765432109876543210";
+  if (ascending.includes(value) || descending.includes(value)) {
+    return { ok: false, value, message: "Choisissez un PIN non séquentiel." };
+  }
+  const commonPins = new Set(["000000", "111111", "123456", "654321", "121212", "112233", "123123"]);
+  if (commonPins.has(value)) {
+    return { ok: false, value, message: "Choisissez un PIN moins évident." };
+  }
+  return { ok: true, value, message: "" };
+}
+
+async function createLocalPinCredentials(pin) {
+  const validation = validateLocalPinStrength(pin);
+  if (!validation.ok) throw new Error(validation.message || "PIN de sécurité trop faible.");
+  const cryptoApi = getBrowserCrypto();
+  if (!cryptoApi) throw new Error("Le chiffrement navigateur n'est pas disponible sur ce poste.");
+  const salt = new Uint8Array(16);
+  cryptoApi.getRandomValues(salt);
+  const pinSalt = bytesToBase64(salt);
+  const pinHash = await deriveLocalPinHash(validation.value, pinSalt);
+  return { pinHash, pinSalt, pinRequired: true };
+}
+
+async function verifyUserPin(user, pin) {
+  if (!user || !user.pinHash) return false;
+  const legacyMatch = String(user.pinHash).match(/^mockhash:([^:]*):/);
+  if (legacyMatch) return String(pin || "") === legacyMatch[1];
+  if (!user.pinSalt) return false;
+  const hash = await deriveLocalPinHash(pin, user.pinSalt);
+  return hash === user.pinHash;
+}
+
+function isLegacyBootstrapPin(user) {
+  return Boolean(
+    user &&
+    (
+      String(user.pinHash || "").startsWith("mockhash:") ||
+      /^legacy/i.test(String(user.pinSalt || ""))
+    )
+  );
 }
 
 async function verifyLocalPin(pin) {
@@ -720,6 +775,184 @@ function uid(prefix) {
   return `${prefix}-${Math.random().toString(36).slice(2, 9)}-${Date.now().toString(36)}`;
 }
 
+function normalizeLocalUserRole(role) {
+  const normalized = typeof normalizePermissionToken === "function"
+    ? normalizePermissionToken(role)
+    : String(role || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  const aliases = {
+    admin_technique: "admin",
+    administrateur: "admin",
+    directeur: "directeur_sav",
+    direction: "directeur_sav",
+  };
+  const value = aliases[normalized] || normalized;
+  const allowed = new Set(["admin", "directeur_sav", "chef_atelier", "reception", "technicien", "qualite", "readonly"]);
+  return allowed.has(value) ? value : "readonly";
+}
+
+function normalizeUser(user = {}) {
+  if (!user || typeof user !== "object") return null;
+  const now = new Date().toISOString();
+  const name = String(user.name || user.email || "Utilisateur local").trim();
+  return {
+    id: user.id || uid("user"),
+    name: name || "Utilisateur local",
+    role: normalizeLocalUserRole(user.role || "readonly"),
+    email: String(user.email || "").trim(),
+    resourceId: String(user.resourceId || "").trim(),
+    authUserId: String(user.authUserId || "").trim(),
+    active: user.active !== false,
+    pinHash: String(user.pinHash || ""),
+    pinSalt: String(user.pinSalt || ""),
+    pinRequired: Boolean(user.pinRequired || user.pinHash),
+    createdAt: user.createdAt || now,
+    updatedAt: user.updatedAt || user.createdAt || now,
+  };
+}
+
+function normalizeAuditLogEntry(entry = {}) {
+  if (!entry || typeof entry !== "object") return null;
+  const at = entry.at || entry.createdAt || entry.timestamp || new Date().toISOString();
+  return {
+    id: entry.id || uid("audit"),
+    type: String(entry.type || "audit.event"),
+    title: String(entry.title || entry.label || entry.type || "Événement"),
+    details: typeof entry.details === "string" ? entry.details : JSON.stringify(entry.details || ""),
+    at,
+    createdAt: at,
+    userId: String(entry.userId || entry.actor?.userId || ""),
+    userName: String(entry.userName || entry.actor?.userName || ""),
+    userRole: normalizeLocalUserRole(entry.userRole || entry.actor?.userRole || "readonly"),
+    resourceId: String(entry.resourceId || entry.actor?.resourceId || ""),
+    caseId: String(entry.caseId || ""),
+  };
+}
+
+function getCurrentActor(fallback = {}) {
+  const user = fallback.user || (typeof getCurrentUser === "function" ? getCurrentUser() : null);
+  return {
+    userId: user?.id || fallback.userId || "",
+    userName: user?.name || fallback.userName || "Aucun utilisateur actif",
+    userRole: user?.role || fallback.userRole || "",
+    resourceId: user?.resourceId || fallback.resourceId || "",
+  };
+}
+
+function addAuditLog(type, title = "", details = "", options = {}) {
+  if (!type) return null;
+  const actor = options.actor || getCurrentActor();
+  const payloadDetails = typeof title === "object" && title !== null ? title : details;
+  const entry = {
+    id: uid("audit"),
+    type: String(type),
+    title: typeof title === "string" && title ? title : String(type),
+    details: typeof payloadDetails === "string" ? payloadDetails : JSON.stringify(payloadDetails || ""),
+    at: new Date().toISOString(),
+    createdAt: new Date().toISOString(),
+    userId: actor.userId || "",
+    userName: actor.userName || "",
+    userRole: actor.userRole || "",
+    resourceId: actor.resourceId || "",
+    caseId: options.caseId || options.item?.id || "",
+  };
+  state.auditLog = Array.isArray(state.auditLog) ? state.auditLog : [];
+  state.auditLog.unshift(entry);
+  state.auditLog = state.auditLog.slice(0, 500);
+  return entry;
+}
+
+function getActiveLocalUsers() {
+  return Array.isArray(state?.users) ? state.users.filter((user) => user.active !== false) : [];
+}
+
+function hasActiveLocalUsers() {
+  return getActiveLocalUsers().length > 0;
+}
+
+function getUserManageDeniedMessage() {
+  return "Action réservée administrateur technique.";
+}
+
+function canManageLocalUsers(actor = null) {
+  const user = actor || (typeof getCurrentUser === "function" ? getCurrentUser() : null);
+  if (!user || user.active === false) return false;
+  if (typeof hasPermission === "function") return hasPermission("users.manage", { user });
+  return ["admin", "admin_technique", "administrateur"].includes(normalizeLocalUserRole(user.role));
+}
+
+function wouldRemoveLastActiveAdmin(userId, nextUser) {
+  const users = Array.isArray(state.users) ? state.users : [];
+  const activeAdmins = users.filter((user) => user.active !== false && normalizeLocalUserRole(user.role) === "admin");
+  const current = users.find((user) => user.id === userId);
+  if (!current || normalizeLocalUserRole(current.role) !== "admin" || current.active === false) return false;
+  const nextIsActiveAdmin = nextUser.active !== false && normalizeLocalUserRole(nextUser.role) === "admin";
+  return activeAdmins.length <= 1 && !nextIsActiveAdmin;
+}
+
+function createUserLocal(payload = {}, actor = null) {
+  if (!canManageLocalUsers(actor)) {
+    return { ok: false, message: getUserManageDeniedMessage() };
+  }
+  const user = normalizeUser({
+    ...payload,
+    active: payload.active !== false,
+  });
+  if (!user.name) return { ok: false, message: "Nom utilisateur obligatoire." };
+  const users = Array.isArray(state.users) ? state.users : [];
+  const emailNorm = user.email.trim().toLowerCase();
+  if (emailNorm && users.some((other) => other.active !== false && other.role === user.role && String(other.email || "").trim().toLowerCase() === emailNorm)) {
+    return { ok: false, message: "Un utilisateur actif existe déjà avec ce même email et rôle." };
+  }
+  state.users = users;
+  state.users.push(user);
+  if (!state.currentUserId && user.active !== false) state.currentUserId = user.id;
+  addAuditLog("users.created", `Utilisateur créé : ${user.name}`, `Rôle : ${user.role}`, { actor: getCurrentActor({ user: actor }) });
+  return { ok: true, user };
+}
+
+function updateUserLocal(userId, patch = {}, actor = null) {
+  if (!canManageLocalUsers(actor)) {
+    return { ok: false, message: getUserManageDeniedMessage() };
+  }
+  const users = Array.isArray(state.users) ? state.users : [];
+  const index = users.findIndex((user) => user.id === userId);
+  if (index < 0) return { ok: false, message: "Utilisateur introuvable." };
+  const nextUser = normalizeUser({ ...users[index], ...patch, id: users[index].id });
+  if (wouldRemoveLastActiveAdmin(userId, nextUser)) {
+    return { ok: false, message: "Impossible de désactiver ou de retirer le dernier administrateur actif." };
+  }
+  const emailNorm = nextUser.email.trim().toLowerCase();
+  if (emailNorm && users.some((other) => other.id !== userId && other.active !== false && other.role === nextUser.role && String(other.email || "").trim().toLowerCase() === emailNorm)) {
+    return { ok: false, message: "Un utilisateur actif existe déjà avec ce même email et rôle." };
+  }
+  users[index] = { ...nextUser, updatedAt: new Date().toISOString() };
+  if (state.currentUserId === userId && users[index].active === false) state.currentUserId = "";
+  addAuditLog("users.updated", `Utilisateur modifié : ${users[index].name}`, `Rôle : ${users[index].role}`, { actor: getCurrentActor({ user: actor }) });
+  return { ok: true, user: users[index] };
+}
+
+function createFirstAccessRecoveryUser(payload = {}) {
+  if (hasActiveLocalUsers()) {
+    return { ok: false, message: "La récupération locale est disponible uniquement sans utilisateur actif." };
+  }
+  const role = normalizeLocalUserRole(payload.role);
+  if (!["admin", "directeur_sav"].includes(role)) {
+    return { ok: false, message: "Le premier accès doit créer un Directeur SAV ou un Admin technique." };
+  }
+  const user = normalizeUser({
+    ...payload,
+    role,
+    active: true,
+  });
+  if (!user.name) return { ok: false, message: "Nom utilisateur obligatoire." };
+  state.users = Array.isArray(state.users) ? state.users : [];
+  state.users.push(user);
+  addAuditLog("users.first_access_recovery_created", `Utilisateur local créé : ${user.name}`, "Création explicite depuis le mode premier accès / récupération locale", {
+    actor: { userId: user.id, userName: user.name, userRole: user.role, resourceId: user.resourceId || "" },
+  });
+  return { ok: true, user };
+}
+
 function createDefaultState() {
   const today = new Date();
   const tomorrow = addDays(today, 1);
@@ -789,6 +1022,9 @@ function createDefaultState() {
       { id: "pont-mecanique-3", name: "Pont mécanique 3", role: "pont_mecanique", location: "Grands travaux", active: true },
     ],
     bookings: [],
+    users: [],
+    currentUserId: "",
+    auditLog: [],
     holidays: [
       { date: `${today.getFullYear()}-01-01`, label: "Nouvel an" },
       { date: `${today.getFullYear()}-03-20`, label: "Indépendance" },
@@ -891,10 +1127,16 @@ function normalizeState(raw) {
   ensureMinimumEquipmentResources(resources, seed.resources, "zone_carrosserie", 1);
   ensureMinimumEquipmentResources(resources, seed.resources, "zone_diagnostic_electrique", 1);
   ensureMinimumEquipmentResources(resources, seed.resources, "cabine", 1);
+  const users = Array.isArray(raw.users) ? raw.users.map(normalizeUser).filter(Boolean) : seed.users;
+  const activeUserIds = new Set(users.filter((user) => user.active !== false).map((user) => user.id));
+  const currentUserId = activeUserIds.has(raw.currentUserId) ? raw.currentUserId : "";
   return {
     cases: Array.isArray(raw.cases) ? raw.cases.map(normalizeCase) : seed.cases,
     resources,
     bookings: normalizeBookings(raw.bookings, resources),
+    users,
+    currentUserId,
+    auditLog: Array.isArray(raw.auditLog) ? raw.auditLog.map(normalizeAuditLogEntry).filter(Boolean) : seed.auditLog,
     holidays: Array.isArray(raw.holidays) ? raw.holidays : seed.holidays,
     planningDate: raw.planningDate || todayKey(new Date()),
     settings: {
@@ -1009,6 +1251,19 @@ function getCaseStatus(item) {
 
 if (typeof window !== "undefined") {
   window.getCaseStatus = getCaseStatus;
+  window.validateLocalPinStrength = validateLocalPinStrength;
+  window.createLocalPinCredentials = createLocalPinCredentials;
+  window.verifyUserPin = verifyUserPin;
+  window.isLegacyBootstrapPin = isLegacyBootstrapPin;
+  window.normalizeUser = normalizeUser;
+  window.createUserLocal = createUserLocal;
+  window.updateUserLocal = updateUserLocal;
+  window.createFirstAccessRecoveryUser = createFirstAccessRecoveryUser;
+  window.getActiveLocalUsers = getActiveLocalUsers;
+  window.hasActiveLocalUsers = hasActiveLocalUsers;
+  window.getCurrentActor = getCurrentActor;
+  window.addAuditLog = addAuditLog;
+  window.quietNotify = quietNotify;
 }
 
 function getCaseBlockerLabel(item) {

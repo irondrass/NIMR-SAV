@@ -263,8 +263,34 @@ async function main() {
         "setHtmlIfExists",
         "setTextIfExists",
         "bindIfExists",
+        "validateLocalPinStrength",
+        "createLocalPinCredentials",
+        "verifyUserPin",
+        "createFirstAccessRecoveryUser",
+        "canUseFirstAccessRecovery",
+        "handleFirstAccessRecoverySubmit",
       ];
       const helperTypes = Object.fromEntries(requiredHelpers.map((name) => [name, typeof window[name]]));
+      const recoveryForm = document.querySelector("#first-access-recovery-form");
+      const createRecoveryButton = recoveryForm?.querySelector("button[type='submit']");
+      const recoveryBefore = {
+        overlayVisible: document.querySelector("#user-login-overlay")?.hidden === false,
+        loginHidden: document.querySelector("#user-login-form")?.hidden === true,
+        recoveryVisible: recoveryForm?.hidden === false,
+        title: document.querySelector("#first-access-recovery-title")?.textContent || "",
+        text: recoveryForm?.textContent || "",
+        hasCreateButton: Boolean(createRecoveryButton && /Créer utilisateur et continuer/.test(createRecoveryButton.textContent || "")),
+        deadEndNoUser: /Aucun utilisateur actif trouvé/i.test(document.body.textContent || "") && !createRecoveryButton,
+      };
+      let recoveryCreated = false;
+      if (recoveryForm && recoveryForm.hidden === false) {
+        recoveryForm.elements.name.value = "Admin startup test";
+        recoveryForm.elements.role.value = "admin";
+        recoveryForm.elements.pin.value = "730184";
+        recoveryForm.elements.pinConfirm.value = "730184";
+        recoveryCreated = await handleFirstAccessRecoverySubmit({ preventDefault() {}, currentTarget: recoveryForm });
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      }
       if (typeof setActiveTab === "function") setActiveTab("dossiers");
       if (Array.isArray(state?.cases) && state.cases[0]) activeCaseId = state.cases[0].id;
       if (typeof renderCases === "function") renderCases();
@@ -272,6 +298,14 @@ async function main() {
       await new Promise((resolve) => setTimeout(resolve, 100));
       return {
         helperTypes,
+        recoveryBefore,
+        recoveryCreated,
+        usersCount: Array.isArray(state?.users) ? state.users.length : -1,
+        activeUsersCount: Array.isArray(state?.users) ? state.users.filter((user) => user.active !== false).length : -1,
+        currentUserId: state?.currentUserId || "",
+        currentUserRole: typeof getCurrentUser === "function" ? getCurrentUser()?.role || "" : "",
+        sessionUnlocked: sessionStorage.getItem("nimr-user-pin-unlocked") === state?.currentUserId,
+        overlayHiddenAfterRecovery: document.querySelector("#user-login-overlay")?.hidden === true,
         activeCaseId: typeof activeCaseId !== "undefined" ? activeCaseId : null,
         caseDetailText: document.querySelector("#case-detail")?.textContent?.slice(0, 400) || "",
         caseDetailHasContent: Boolean(document.querySelector("#case-detail")?.children?.length),
@@ -283,6 +317,17 @@ async function main() {
     for (const [helper, type] of Object.entries(pageState.helperTypes || {})) {
       assert.equal(type, "function", `${helper} doit être disponible dans le vrai navigateur`);
     }
+    assert.equal(pageState.recoveryBefore.overlayVisible, true, "le démarrage sans utilisateur actif doit afficher l'overlay de session");
+    assert.equal(pageState.recoveryBefore.loginHidden, true, "le login classique doit être masqué sans utilisateur actif");
+    assert.equal(pageState.recoveryBefore.recoveryVisible, true, "le mode récupération locale doit être visible");
+    assert.match(pageState.recoveryBefore.title, /Premier accès \/ récupération locale/, "le titre récupération locale doit être explicite");
+    assert.equal(pageState.recoveryBefore.hasCreateButton, true, "l'écran sans utilisateur actif doit proposer la création locale");
+    assert.equal(pageState.recoveryBefore.deadEndNoUser, false, "Aucun utilisateur actif trouvé ne doit jamais être une impasse");
+    assert.equal(pageState.recoveryCreated, true, "la création du premier utilisateur local doit réussir");
+    assert.equal(pageState.activeUsersCount, 1, "un utilisateur actif local doit exister après récupération");
+    assert.equal(pageState.currentUserRole, "admin", "le compte de récupération doit ouvrir une session admin technique");
+    assert.equal(pageState.sessionUnlocked, true, "la session PIN doit être ouverte après création du premier utilisateur");
+    assert.equal(pageState.overlayHiddenAfterRecovery, true, "l'overlay de session doit disparaître après récupération");
     assert.equal(pageState.caseDetailHasContent, true, "renderCaseDetail doit afficher un contenu sans planter");
     assert.match(pageState.currentBuild, /23\.2\.7-hotfix-startup/, "le navigateur doit charger la version hotfix");
     assert.match(pageState.cacheName, /23\.2\.7-hotfix-startup/, "le cache PWA doit être bumpé");

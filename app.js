@@ -1345,6 +1345,32 @@ function bindUserSessionOverlayKeyboard(overlay) {
   overlay.addEventListener("keydown", handleUserSessionOverlayKeydown);
 }
 
+function getSessionActiveUsers() {
+  return (state.users || []).filter(user => user.active !== false);
+}
+
+function canUseFirstAccessRecovery() {
+  return getSessionActiveUsers().length === 0;
+}
+
+function renderFirstAccessRecoveryState(activeUsers = getSessionActiveUsers()) {
+  const loginForm = document.getElementById("user-login-form");
+  const recoveryForm = document.getElementById("first-access-recovery-form");
+  const recoveryStatus = document.getElementById("first-access-recovery-status");
+  const recoveryMessage = document.getElementById("first-access-recovery-message");
+  const hasActiveUsers = activeUsers.length > 0;
+
+  if (loginForm) loginForm.hidden = !hasActiveUsers;
+  if (recoveryForm) recoveryForm.hidden = hasActiveUsers;
+  if (recoveryStatus) recoveryStatus.textContent = "";
+  if (recoveryMessage) {
+    recoveryMessage.textContent = hasActiveUsers
+      ? ""
+      : "Aucun utilisateur actif trouvé. Créez explicitement un utilisateur local de récupération ou importez une sauvegarde.";
+  }
+  return !hasActiveUsers;
+}
+
 function checkUserSessionStartup() {
   if (typeof isLocalSessionUnlocked === "function" && !isLocalSessionUnlocked()) {
     // PIN local activé et verrouillé -> priorité au PIN, on attend le déverrouillage
@@ -1392,7 +1418,7 @@ function showUserLoginScreen() {
     overlay.hidden = false;
     document.querySelector(".app-shell")?.setAttribute("inert", "");
     renderUserLoginScreen();
-    focusUserSessionDialog(overlay, "#user-login-select");
+    focusUserSessionDialog(overlay, canUseFirstAccessRecovery() ? "#first-access-name" : "#user-login-select");
   }
 }
 
@@ -1402,6 +1428,8 @@ function hideUserLoginScreen() {
     overlay.hidden = true;
     const status = document.getElementById("user-login-status");
     if (status) status.textContent = "";
+    const recoveryStatus = document.getElementById("first-access-recovery-status");
+    if (recoveryStatus) recoveryStatus.textContent = "";
     checkOverlaysInertState();
     restoreUserSessionReturnFocus();
   }
@@ -1462,7 +1490,8 @@ function renderUserLoginScreen() {
   const selectEl = document.getElementById("user-login-select");
   if (!selectEl) return;
 
-  const activeUsers = (state.users || []).filter(user => user.active !== false);
+  const activeUsers = getSessionActiveUsers();
+  const recoveryMode = renderFirstAccessRecoveryState(activeUsers);
 
   selectEl.innerHTML = activeUsers.map(user => {
     const roleLabel = {
@@ -1484,6 +1513,11 @@ function renderUserLoginScreen() {
 
     return `<option value="${escapeAttr(user.id)}">${escapeHtml(displayLabel)}</option>`;
   }).join("") || `<option value="">Aucun utilisateur actif trouvé</option>`;
+
+  if (recoveryMode) {
+    updateLoginPinRequirement();
+    return;
+  }
 
   // Sélectionner par défaut l'utilisateur actuel s'il existe et est actif
   const currentUser = getCurrentUser();
@@ -1636,6 +1670,70 @@ function renderCurrentSessionIndicator() {
   }
 }
 
+async function handleFirstAccessRecoverySubmit(event) {
+  event?.preventDefault?.();
+  const form = event?.currentTarget || event?.target || document.getElementById("first-access-recovery-form");
+  const statusEl = document.getElementById("first-access-recovery-status");
+  if (statusEl) statusEl.textContent = "";
+  if (!form) return false;
+
+  if (!canUseFirstAccessRecovery()) {
+    if (statusEl) statusEl.textContent = "La récupération locale est indisponible car un utilisateur actif existe déjà.";
+    renderUserLoginScreen();
+    return false;
+  }
+
+  const name = normalizeTextInputValue(form.elements.name.value);
+  const role = form.elements.role.value;
+  const pin = String(form.elements.pin.value || "").trim();
+  const pinConfirm = String(form.elements.pinConfirm.value || "").trim();
+
+  if (!name) {
+    if (statusEl) statusEl.textContent = "Nom utilisateur obligatoire.";
+    form.elements.name.focus();
+    return false;
+  }
+  if (!["admin", "directeur_sav"].includes(role)) {
+    if (statusEl) statusEl.textContent = "Rôle de récupération invalide.";
+    return false;
+  }
+  if (pin !== pinConfirm) {
+    if (statusEl) statusEl.textContent = "Les deux PIN ne correspondent pas.";
+    form.elements.pinConfirm.focus();
+    return false;
+  }
+
+  const validation = typeof validateLocalPinStrength === "function"
+    ? validateLocalPinStrength(pin)
+    : { ok: pin.length >= 6, value: pin, message: "PIN trop faible." };
+  if (!validation.ok) {
+    if (statusEl) statusEl.textContent = validation.message || "PIN trop faible.";
+    form.elements.pin.focus();
+    return false;
+  }
+
+  try {
+    const pinData = await createLocalPinCredentials(validation.value);
+    const result = createFirstAccessRecoveryUser({ name, role, ...pinData });
+    if (!result.ok) {
+      if (statusEl) statusEl.textContent = result.message || "Création utilisateur impossible.";
+      return false;
+    }
+    try {
+      sessionStorage.setItem("nimr-user-pin-unlocked", result.user.id);
+    } catch (error) {
+      // Session storage peut être indisponible dans certains navigateurs.
+    }
+    form.reset();
+    completeUserLogin(result.user);
+    notifyUser("Utilisateur local créé. Pensez à sauvegarder vos données.", "success");
+    return true;
+  } catch (error) {
+    if (statusEl) statusEl.textContent = error.message || "Création utilisateur impossible.";
+    return false;
+  }
+}
+
 function bindUserSessionActions() {
   // Option checkbox dans Paramètres
   const alwaysPromptCheckbox = document.getElementById("always-prompt-startup");
@@ -1685,6 +1783,15 @@ function bindUserSessionActions() {
     window.pendingSelectorUser = null;
     showUserLoginScreen();
     hideUserPinChangeOverlay();
+  });
+
+  const firstAccessForm = document.getElementById("first-access-recovery-form");
+  firstAccessForm?.addEventListener("submit", handleFirstAccessRecoverySubmit);
+  document.getElementById("first-access-import-backup")?.addEventListener("click", () => {
+    document.getElementById("first-access-import-input")?.click();
+  });
+  document.getElementById("first-access-import-input")?.addEventListener("change", (event) => {
+    if (typeof importBackup === "function") importBackup(event);
   });
 
   // Soumission du formulaire unique de login
@@ -1861,6 +1968,8 @@ function bindUserSessionIdleEvents() {
 }
 
 window.checkUserSessionStartup = checkUserSessionStartup;
+window.canUseFirstAccessRecovery = canUseFirstAccessRecovery;
+window.handleFirstAccessRecoverySubmit = handleFirstAccessRecoverySubmit;
 window.renderCurrentSessionIndicator = renderCurrentSessionIndicator;
 window.resetUserSessionIdleTimer = resetUserSessionIdleTimer;
 window.bindUserSessionIdleEvents = bindUserSessionIdleEvents;

@@ -102,6 +102,11 @@ const serviceWorker = fs.readFileSync(new URL("../sw.js", import.meta.url), "utf
 const versionJs = fs.readFileSync(new URL("../js/version.js", import.meta.url), "utf8");
 assert.equal(/v=23\.2\.6/.test(indexHtml), false, "index.html ne doit plus référencer l'ancien cache-bust 23.2.6");
 assert.match(indexHtml, /v=23\.2\.7-hotfix-startup/, "index.html doit pointer sur la version hotfix startup");
+assert.match(indexHtml, /first-access-recovery-form/, "index.html doit contenir le formulaire de récupération premier accès");
+assert.match(indexHtml, /Premier accès \/ récupération locale/, "le mode récupération locale doit avoir un titre explicite");
+assert.match(indexHtml, /Créer utilisateur et continuer/, "le mode récupération locale doit proposer la création du premier utilisateur");
+assert.match(sources["app.js"], /function\s+handleFirstAccessRecoverySubmit\s*\(/, "app.js doit gérer la création explicite du premier utilisateur local");
+assert.match(sources["app.js"], /window\.canUseFirstAccessRecovery\s*=\s*canUseFirstAccessRecovery/, "le test navigateur doit pouvoir vérifier le mode récupération");
 assert.match(serviceWorker, /nimr-sav-v23\.2\.7-hotfix-startup/, "sw.js doit invalider l'ancien cache PWA");
 assert.match(versionJs, /nimr-sav-v23\.2\.7-hotfix-startup/, "js/version.js doit déclarer le nouveau cache");
 

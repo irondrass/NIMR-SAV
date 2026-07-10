@@ -55,6 +55,17 @@ function wait(ms) {
   return new Promise((resolveWait) => setTimeout(resolveWait, ms));
 }
 
+function waitForProcessExit(child, timeoutMs = 5000) {
+  if (!child || child.exitCode !== null || child.signalCode) return Promise.resolve();
+  return new Promise((resolveExit) => {
+    const timer = setTimeout(resolveExit, timeoutMs);
+    child.once("exit", () => {
+      clearTimeout(timer);
+      resolveExit();
+    });
+  });
+}
+
 async function waitForCdp(port) {
   const endpoint = `http://127.0.0.1:${port}/json/version`;
   for (let attempt = 0; attempt < 40; attempt += 1) {
@@ -73,13 +84,17 @@ function isCriticalConsoleText(text) {
   return /ReferenceError|TypeError|Cannot set properties of null|is not defined|Uncaught/i.test(String(text || ""));
 }
 
+function isExpectedCleanupError(error) {
+  return /Inspected target navigated or closed/i.test(String(error?.message || error || ""));
+}
+
 async function main() {
   if (!chromePath) {
     throw new Error("Chrome/Edge introuvable: le test navigateur startup ne peut pas garantir zéro erreur console.");
   }
 
   const server = await startStaticServer();
-  const port = Number(process.env.NIMR_STARTUP_CDP_PORT || 9236);
+  const port = Number(process.env.NIMR_STARTUP_CDP_PORT || (9236 + (process.pid % 1000)));
   const profile = join(tmpdir(), `nimr-startup-browser-${Date.now()}`);
   const chrome = spawn(chromePath, [
     "--headless=new",
@@ -92,10 +107,17 @@ async function main() {
   ], { stdio: "ignore" });
 
   const pending = new Map();
+  const eventWaiters = new Map();
   const findings = [];
   let nextId = 1;
   let socket;
+  let testFinished = false;
+  let cleanupStarted = false;
+  let messageHandler = null;
   const send = (method, params = {}, sessionId) => {
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      return Promise.reject(new Error(`CDP socket fermé avant ${method}`));
+    }
     const id = nextId++;
     socket.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
     return new Promise((resolveSend, rejectSend) => {
@@ -104,6 +126,7 @@ async function main() {
         rejectSend(new Error(`CDP timeout: ${method}`));
       }, 15000);
       pending.set(id, {
+        method,
         resolve: (value) => {
           clearTimeout(timer);
           resolveSend(value);
@@ -115,20 +138,52 @@ async function main() {
       });
     });
   };
+  const waitForEvent = (method, timeoutMs = 15000) => new Promise((resolveEvent, rejectEvent) => {
+    const waiter = {
+      resolve: (value) => {
+        clearTimeout(timer);
+        resolveEvent(value);
+      },
+      reject: (error) => {
+        clearTimeout(timer);
+        rejectEvent(error);
+      },
+    };
+    const timer = setTimeout(() => {
+      const waiters = eventWaiters.get(method) || [];
+      eventWaiters.set(method, waiters.filter((candidate) => candidate !== waiter));
+      rejectEvent(new Error(`CDP event timeout: ${method}`));
+    }, timeoutMs);
+    const waiters = eventWaiters.get(method) || [];
+    waiters.push(waiter);
+    eventWaiters.set(method, waiters);
+  });
 
   try {
     const version = await waitForCdp(port);
     socket = new WebSocket(version.webSocketDebuggerUrl);
-    socket.addEventListener("message", (event) => {
+    messageHandler = (event) => {
       const message = JSON.parse(event.data);
       if (message.id && pending.has(message.id)) {
         const { resolve: resolveSend, reject: rejectSend } = pending.get(message.id);
+        const { method } = pending.get(message.id);
         pending.delete(message.id);
-        if (message.error) rejectSend(new Error(message.error.message));
-        else resolveSend(message.result || {});
+        if (message.error) {
+          const error = new Error(`${method}: ${message.error.message}`);
+          if (cleanupStarted && testFinished && isExpectedCleanupError(error)) resolveSend({});
+          else rejectSend(error);
+        } else {
+          resolveSend(message.result || {});
+        }
         return;
       }
+      if (cleanupStarted) return;
       const params = message.params || {};
+      const waiters = eventWaiters.get(message.method);
+      if (waiters?.length) {
+        eventWaiters.delete(message.method);
+        waiters.forEach((waiter) => waiter.resolve(params));
+      }
       if (message.method === "Runtime.exceptionThrown") {
         findings.push({
           type: "pageerror",
@@ -145,7 +200,8 @@ async function main() {
           findings.push({ type: "log.error", text: entry.text || "" });
         }
       }
-    });
+    };
+    socket.addEventListener("message", messageHandler);
     await new Promise((resolveOpen, rejectOpen) => {
       socket.addEventListener("open", resolveOpen, { once: true });
       socket.addEventListener("error", rejectOpen, { once: true });
@@ -170,13 +226,9 @@ async function main() {
     };
 
     const navigate = async (url) => {
+      const loadPromise = waitForEvent("Page.loadEventFired");
       await send("Page.navigate", { url }, sessionId);
-      for (let attempt = 0; attempt < 80; attempt += 1) {
-        const readyState = await evaluate("document.readyState");
-        if (readyState === "complete") return;
-        await wait(125);
-      }
-      throw new Error(`Chargement incomplet: ${url}`);
+      await loadPromise;
     };
 
     await navigate(`${origin}/?startup-browser-console-clean=1`);
@@ -240,11 +292,26 @@ async function main() {
       throw new Error(`Erreurs console au démarrage:\n${critical.map((finding) => `[${finding.type}] ${finding.text}`).join("\n")}`);
     }
 
+    testFinished = true;
     console.log(JSON.stringify({ targetUrl, activeCaseId: pageState.activeCaseId, build: pageState.currentBuild, errors: critical.length }, null, 2));
-    await send("Target.closeTarget", { targetId }).catch(() => null);
+    cleanupStarted = true;
+    await send("Target.closeTarget", { targetId }).catch((error) => {
+      if (!isExpectedCleanupError(error)) throw error;
+    });
   } finally {
+    cleanupStarted = true;
+    if (messageHandler) socket?.removeEventListener?.("message", messageHandler);
+    for (const { resolve } of pending.values()) {
+      resolve({});
+    }
+    pending.clear();
+    for (const waiters of eventWaiters.values()) {
+      waiters.forEach((waiter) => waiter.resolve({}));
+    }
+    eventWaiters.clear();
     socket?.close?.();
-    chrome.kill();
+    if (!chrome.killed) chrome.kill();
+    await waitForProcessExit(chrome);
     server?.close?.();
   }
 }

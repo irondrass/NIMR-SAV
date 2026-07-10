@@ -10,7 +10,7 @@ const RECEPTION_QUICK_MOTIFS = [
   { label: "Contrôle voyant", value: "Diagnostic voyant tableau de bord", orderType: "diagnostic" },
   { label: "Carrosserie", value: "Réparation carrosserie / peinture", orderType: "client" },
   { label: "Électricité", value: "Diagnostic électrique", orderType: "electrical_client" },
-  { label: "Expertise assurance", value: "Ouverture dossier assurance / expert", orderType: "assurance" },
+  { label: "Assurance", value: "Ouverture dossier assurance", orderType: "assurance" },
 ];
 
 const RECEPTION_QUICK_CLAIMS = [
@@ -50,8 +50,8 @@ const RECEPTION_STEP_LABELS = [
   "Réception véhicule",
   "Envoi atelier",
   "Suivi des travaux",
-  "Contrôle qualité",
-  "Livraison",
+  "Clôture atelier",
+  "Archive",
 ];
 
 function initReceptionWorkspace() {
@@ -383,7 +383,7 @@ function renderStep1_Creation(item, container) {
               <option value="electrical_client" ${primaryClaimType === "electrical_client" ? "selected" : ""}>Réparation électrique client</option>
               <option value="diagnostic" ${primaryClaimType === "diagnostic" ? "selected" : ""}>Diagnostic</option>
               <option value="garantie" ${primaryClaimType === "garantie" ? "selected" : ""}>Garantie constructeur</option>
-              <option value="assurance" ${primaryClaimType === "assurance" ? "selected" : ""}>Assurance / expert</option>
+              <option value="assurance" ${primaryClaimType === "assurance" ? "selected" : ""}>Assurance</option>
             </select>
           </label>
         </div>
@@ -675,7 +675,7 @@ function renderStep6_ConfirmRDV(item) {
       <div class="step-info-box">
         ${proposal ? `
           <div><strong>Début travaux :</strong> ${proposal.startDate ? formatDateTime(proposal.startDate) : "À préciser"}</div>
-          <div><strong>Livraison estimée :</strong> ${proposal.deliveryDate ? formatDateTime(proposal.deliveryDate) : "À préciser"}</div>
+          <div><strong>Fin estimée :</strong> ${proposal.deliveryDate ? formatDateTime(proposal.deliveryDate) : "À préciser"}</div>
         ` : "<em>Planification à préciser</em>"}
       </div>
 
@@ -804,7 +804,7 @@ function renderStep9_TrackVehicle(item) {
       <div class="step-info-box">
         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
           <span class="tag ${statusClass}" style="font-size:1rem;padding:6px 14px;">${globalStatus}</span>
-          ${item.appointment?.delivery ? `<span style="font-size:0.9rem;">Livraison estimée : <strong>${formatDateTime(item.appointment.delivery)}</strong></span>` : ""}
+          ${item.appointment?.delivery ? `<span style="font-size:0.9rem;">Fin estimée : <strong>${formatDateTime(item.appointment.delivery)}</strong></span>` : ""}
         </div>
         ${isCaseBlocked(item) ? `<div style="margin-top:10px;color:var(--red,#e74c3c);"><strong>Blocage :</strong> ${escapeHtml(getCaseBlockerLabel(item))}</div>` : ""}
         ${openClaims.length > 0 ? `<div style="margin-top:10px;"><strong>Réclamations en attente :</strong> ${openClaims.length}</div>` : ""}
@@ -832,7 +832,7 @@ function renderStep9_TrackVehicle(item) {
 
       ${f.workCompleted ? `
         <div style="margin-top:16px;padding:12px;background:var(--green-bg,#eaffea);border-radius:var(--radius-sm);border:1px solid var(--green,#27ae60);">
-          <strong>✓ Travaux terminés.</strong> Passez à l'étape Contrôle Qualité.
+          <strong>✓ Travaux terminés.</strong> Le dossier peut être clôturé depuis l'onglet Atelier.
         </div>
       ` : ""}
     </div>
@@ -891,7 +891,7 @@ function renderStep10_QualityCheck(item) {
 
       ${rw.qualityStatus === "validated" ? `
         <div style="margin-top:16px;padding:12px;background:var(--green-bg,#eaffea);border-radius:var(--radius-sm);border:1px solid var(--green,#27ae60);">
-          <strong>✓ Contrôle qualité validé.</strong> Vous pouvez préparer la livraison.
+          <strong>✓ Action héritée enregistrée.</strong> Vous pouvez finaliser le dossier atelier.
         </div>
       ` : ""}
 
@@ -935,25 +935,25 @@ function renderStep11_Delivery(item) {
       <div class="step-card-header">
         <span class="step-number-badge">11</span>
         <div>
-          <h2 class="step-title">${isDelivered ? "Véhicule livré ✓" : "Livraison du véhicule"}</h2>
-          <p class="step-desc">${isDelivered ? `Livré le ${formatDateTime(rw.deliveredAt)}.` : "Remettez le véhicule au client après vérification complète."}</p>
+          <h2 class="step-title">${isDelivered ? "Dossier atelier finalisé ✓" : "Clôture atelier"}</h2>
+          <p class="step-desc">${isDelivered ? `Finalisé le ${formatDateTime(rw.deliveredAt)}.` : "Finalisez le dossier après vérification complète."}</p>
         </div>
       </div>
 
       ${hasDeliveryBlock && !isDelivered ? `
         <div class="step-warning-box" style="background:rgba(231,76,60,0.08);border-color:rgba(231,76,60,0.4);">
-          <strong>⚠️ Livraison avec override requis :</strong> ${openClaims.length} réclamation(s) client non résolue(s). Seul un administrateur, chef d'atelier ou Directeur SAV peut forcer la livraison avec motif.
+          <strong>⚠️ Clôture avec override requis :</strong> ${openClaims.length} réclamation(s) client non résolue(s). Seul un administrateur, chef d'atelier ou Directeur SAV peut forcer la clôture avec motif.
           <ul style="margin:6px 0 0 16px;">${openClaims.map((c) => `<li>${escapeHtml(c.text || c.title)}</li>`).join("")}</ul>
         </div>
       ` : ""}
       ${!qcOk && !isDelivered ? `
         <div class="step-warning-box" style="background:rgba(231,76,60,0.08);border-color:rgba(231,76,60,0.4);">
-          <strong>Livraison bloquée :</strong> le contrôle qualité doit être validé. Aucun override ne contourne ce contrôle.
+          <strong>Clôture bloquée :</strong> action héritée non validée.
         </div>
       ` : ""}
       ${blockerLabel && !isDelivered ? `
         <div class="step-warning-box" style="background:rgba(231,76,60,0.08);border-color:rgba(231,76,60,0.4);">
-          <strong>Livraison bloquée :</strong> résoudre le blocage dossier avant livraison (${escapeHtml(blockerLabel)}).
+          <strong>Clôture bloquée :</strong> résoudre le blocage dossier avant clôture (${escapeHtml(blockerLabel)}).
         </div>
       ` : ""}
 
@@ -1421,7 +1421,7 @@ async function handleCreateCase(form) {
     history: [makeHistoryEntry("case.created", "Dossier créé", new Date().toISOString())]
   });
 
-  const firstClaim = normalizeRepairClaim({ id: uid("claim"), number: "OT-001", title: orderTitle, type: orderType, status: isClientOnlyRepairClaim({ type: orderType }) ? "client_pending" : "expert_pending", includeInPlanning: true, expertApproved: isClientOnlyRepairClaim({ type: orderType }), clientApproved: false, orNumber: item.orNavNumber || "" }, 0);
+  const firstClaim = normalizeRepairClaim({ id: uid("claim"), number: "OT-001", title: orderTitle, type: orderType, status: "draft", includeInPlanning: true, expertApproved: true, clientApproved: true, orNumber: item.orNavNumber || "" }, 0);
   item.claims = [firstClaim];
   addHistory(item, "claim.created", "Premier ordre de réparation créé", getClaimLabel(firstClaim));
 
@@ -1582,7 +1582,7 @@ function printDeliverySheet(item) {
   ${claimsRows ? `<table><thead><tr><th>Description</th><th style="width:100px;">Priorité</th><th style="width:160px;">Statut final</th></tr></thead><tbody>${claimsRows}</tbody></table>` : "<p>Aucune réclamation ou demande enregistrée.</p>"}
 
   ${qcChecklist ? `
-    <h2>Contrôle qualité</h2>
+    <h2>Points de finition atelier</h2>
     <table><thead><tr><th>Point de contrôle</th><th style="width:80px;">Validé</th><th>Note</th></tr></thead><tbody>${qcChecklist}</tbody></table>
   ` : ""}
 
@@ -1738,18 +1738,18 @@ function showTextPromptModal(title, htmlMessage, placeholder) {
 async function verifyDeliveryClaimsBlock(item) {
   const hasUnresolved = (item.customerClaims || []).some((c) => ["open", "in_progress", "unresolved"].includes(c.status));
   if (!hasUnresolved) return true;
-  if (typeof addAuditLog === "function") addAuditLog("reception.delivery_warning", "Avertissement livraison", `Réclamations non résolues pour ${item.plate || item.vin}.`, { caseId: item.id });
+  if (typeof addAuditLog === "function") addAuditLog("reception.delivery_warning", "Avertissement clôture", `Réclamations non résolues pour ${item.plate || item.vin}.`, { caseId: item.id });
   const user = typeof getCurrentUser === "function" ? getCurrentUser() : null;
   const isAuthorized = user && ["admin", "chef_atelier", "directeur_sav"].includes(user.role);
   if (!isAuthorized) {
-    if (typeof showConfirmModal === "function") await showConfirmModal("Livraison bloquée : réclamations client non résolues. Seul un administrateur, chef d'atelier ou Directeur SAV peut forcer la livraison avec motif.");
-    else alert("Livraison bloquée : réclamations client non résolues.");
+    if (typeof showConfirmModal === "function") await showConfirmModal("Clôture bloquée : réclamations client non résolues. Seul un administrateur, chef d'atelier ou Directeur SAV peut forcer la clôture avec motif.");
+    else alert("Clôture bloquée : réclamations client non résolues.");
     return false;
   }
-  const reason = await showTextPromptModal("Override Livraison", "Le dossier comporte des réclamations non résolues. Saisissez le motif obligatoire :");
-  if (!reason) { if (typeof notifyUser === "function") notifyUser("Motif d'override obligatoire. Livraison annulée.", "error"); return false; }
-  if (typeof addAuditLog === "function") addAuditLog("reception.delivery_override", "Override livraison", `Livraison autorisée avec motif : ${reason}`, { caseId: item.id });
-  if (typeof addHistory === "function") addHistory(item, "reception.delivery_override", "Livraison forcée (Override)", `Motif : ${reason}`);
+  const reason = await showTextPromptModal("Override clôture", "Le dossier comporte des réclamations non résolues. Saisissez le motif obligatoire :");
+  if (!reason) { if (typeof notifyUser === "function") notifyUser("Motif d'override obligatoire. Clôture annulée.", "error"); return false; }
+  if (typeof addAuditLog === "function") addAuditLog("reception.delivery_override", "Override clôture", `Clôture autorisée avec motif : ${reason}`, { caseId: item.id });
+  if (typeof addHistory === "function") addHistory(item, "reception.delivery_override", "Clôture forcée (Override)", `Motif : ${reason}`);
   return true;
 }
 

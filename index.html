@@ -16,8 +16,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <script src="js/version.js?v=23.2.6"></script>
-    <link rel="stylesheet" href="styles.css?v=23.2.6" />
+    <script src="js/version.js?v=23.2.7"></script>
+    <link rel="stylesheet" href="styles.css?v=23.2.7" />
   </head>
   <body>
     <a class="skip-link" href="#main-content">Aller au contenu principal</a>
@@ -61,9 +61,9 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L4 17l3 3 5.3-5.3a4 4 0 0 0 5.4-5.4l-2.4 2.4-3-3 2.4-2.4Z"/><path d="m7 17 3 3"/></svg>
             Technicien
           </button>
-          <button class="nav-button" type="button" data-tab="qc-workspace">
+          <button class="nav-button" type="button" data-tab="qc-workspace" hidden aria-hidden="true" style="display:none !important;" data-simplified-removed="qc-workspace">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 12l2 2 4-4"/><path d="M21 12c0 4.97-4.03 9-9 9s-9-4.03-9-9 4.03-9 9-9c2.07 0 3.98.7 5.5 1.86"/><path d="M22 4L12 14l-3-3"/></svg>
-            Contr&#244;le Qualit&#233;
+            Espace hérité
           </button>
           <button class="nav-button" type="button" data-tab="atelier">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -79,11 +79,11 @@
             <strong id="metric-active">0</strong>
           </article>
           <article class="metric">
-            <span>Accords en attente</span>
+            <span>Actions à traiter</span>
             <strong id="metric-waiting">0</strong>
           </article>
           <article class="metric">
-            <span>Livraisons planifiées</span>
+            <span>RDV planifiés</span>
             <strong id="metric-deliveries">0</strong>
           </article>
           <article class="metric metric-split">
@@ -263,7 +263,7 @@
                     <option value="electrical_client">Réparation électrique client</option>
                     <option value="diagnostic">Diagnostic</option>
                     <option value="garantie">Garantie constructeur</option>
-                    <option value="assurance">Assurance / expert</option>
+                    <option value="assurance">Assurance</option>
                   </select>
                 </label>
                 <label data-quick-optional>
@@ -303,7 +303,7 @@
                   Type de dossier
                   <select id="case-type-filter" aria-label="Filtrer par type de dossier">
                     <option value="all">Tous les types</option>
-                    <option value="assurance">Assurance / expert</option>
+                    <option value="assurance">Assurance</option>
                     <option value="client">Client direct / intervention SAV</option>
                     <option value="vidange">Vidange / entretien rapide</option>
                     <option value="mechanical_client">Réparation mécanique client</option>
@@ -355,7 +355,7 @@
                 Type de dossier
                 <select id="sav-dashboard-type-filter" aria-label="Filtrer le dashboard par type de dossier">
                   <option value="all">Tous les types</option>
-                  <option value="assurance">Assurance / expert</option>
+                  <option value="assurance">Assurance</option>
                   <option value="client">Client direct / intervention SAV</option>
                   <option value="vidange">Vidange / entretien rapide</option>
                   <option value="mechanical_client">Réparation mécanique client</option>
@@ -478,7 +478,7 @@
                   <option value="cabine">Cabine peinture</option>
                   <option value="pont_vidange">Pont vidange</option>
                   <option value="pont_mecanique">Pont grands travaux mécaniques</option>
-                  <option value="controle">Contrôle qualité</option>
+                  <option value="controle">Finition atelier</option>
                 </select>
                 <input name="location" placeholder="Emplacement" />
                 <label class="check-card">
@@ -897,7 +897,7 @@
         <button class="case-subtab" type="button" data-case-tab="photos">📷 Photos</button>
         <button class="case-subtab" type="button" data-case-tab="planning">📅 RDV & Planning</button>
         <button class="case-subtab" type="button" data-case-tab="atelier">🛠️ Atelier & Compléments</button>
-        <button class="case-subtab" type="button" data-case-tab="livraison">✅ Livraison & Clôture</button>
+        <button class="case-subtab" type="button" data-case-tab="livraison" hidden aria-hidden="true" style="display:none !important;" data-simplified-removed="livraison">Clôture héritée</button>
       </nav>
 
       <section class="case-panel active" data-case-panel="claims">
@@ -975,7 +975,7 @@
             <div class="form-grid">
               <label>Client / société propriétaire<input data-input="clientName" placeholder="Nom client ou société" /></label>
               <label>Téléphone client<input data-input="phone" inputmode="tel" placeholder="+216 ..." /></label>
-              <label>Propriétaire / société facturée<input data-input="ownerName" placeholder="Si différent du client" /></label>
+              <label>Propriétaire / société<input data-input="ownerName" placeholder="Si différent du client" /></label>
               <label>Personne déposante<input data-input="driverName" placeholder="Personne qui a amené le véhicule" /></label>
               <label>Téléphone déposant<input data-input="driverPhone" inputmode="tel" placeholder="+216 ..." /></label>
               <label>Immatriculation<input data-input="plate" placeholder="Ex. 6486TU169" /></label>
@@ -991,7 +991,7 @@
         </section>
       
         <div class="detail-grid">
-          <section class="detail-section">
+          <section class="detail-section" hidden aria-hidden="true" style="display:none !important;" data-simplified-removed="expertise">
             <div class="section-heading">
               <h2>Expert assurance</h2>
               <span data-field="expert-state"></span>
@@ -1005,11 +1005,11 @@
             <div class="approval-row">
               <button class="primary-button" type="button" data-action-flag="expertApproved">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg>
-                Valider accord expert
+                Action héritée
               </button>
               <label class="check-card">
                 <input type="checkbox" data-toggle="clientApproved" />
-                <span>Validation client/interne</span>
+                <span>Action héritée</span>
               </label>
             </div>
           </section>
@@ -1051,13 +1051,13 @@
                   <option value="electrical_client">Client - réparation électrique</option>
                   <option value="diagnostic">Diagnostic</option>
                   <option value="garantie">Garantie</option>
-                  <option value="assurance">Assurance / expert</option>
+                  <option value="assurance">Assurance</option>
                 </select>
               </label>
               <label>Statut
                 <select name="status">
                   <option value="draft">Brouillon</option>
-                  <option value="expert_pending">En attente expert</option>
+                  <option value="expert_pending" hidden>État hérité</option>
                   <option value="client_pending">En attente client</option>
                   <option value="approved">Accepté</option>
                 </select>
@@ -1066,13 +1066,13 @@
               <label>N° OR<input name="orNumber" placeholder="OR-SRV-..." /></label>
             </div>
             <div class="approval-row">
-              <label class="check-card"><input type="checkbox" name="expertApproved" /><span>Accord expert</span></label>
-              <label class="check-card"><input type="checkbox" name="clientApproved" /><span>Validation client/interne</span></label>
+              <label class="check-card" hidden aria-hidden="true" style="display:none !important;" data-simplified-removed="expert-agreement"><input type="checkbox" name="expertApproved" /><span>Action héritée</span></label>
+              <label class="check-card" hidden aria-hidden="true" style="display:none !important;" data-simplified-removed="client-agreement"><input type="checkbox" name="clientApproved" /><span>Action héritée</span></label>
               <label class="check-card"><input type="checkbox" name="includeInPlanning" checked /><span>Inclure dans planning global</span></label>
               <button class="primary-button" type="submit">Ajouter ordre de réparation</button>
             </div>
           </form>
-          <p class="muted">Importez un devis ou saisissez directement la main-d’œuvre dans chaque ordre. Assurance : accord expert + client. Service rapide, mécanique, électrique, diagnostic et garantie : validation client/interne sans expert.</p>
+          <p class="muted">Importez un devis ou saisissez directement la main-d’œuvre dans chaque ordre. Le planning atelier se base sur les heures et ressources renseignées.</p>
           <div class="claim-list" data-field="claims"></div>
         </section>
       </section>
@@ -1084,7 +1084,7 @@
             <label class="photo-category-picker">Catégorie
               <select id="photo-category">
                 <option value="before">Avant réparation</option>
-                <option value="supplement">Complément avant accord</option>
+                <option value="supplement">Complément</option>
                 <option value="during">En cours</option>
                 <option value="after">Après réparation</option>
               </select>
@@ -1142,6 +1142,10 @@
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg>
               Finaliser travaux via chef atelier
             </button>
+            <button class="primary-button" type="button" data-action-flag="invoiced" title="Clôture atelier après travaux terminés.">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg>
+              Clôturer atelier
+            </button>
           </div>
           <p class="muted">Le suivi opérationnel se fait dans l’onglet Technicien. La finalisation globale reste réservée au chef atelier avec les contrôles de permissions.</p>
           <div class="assignment-list" data-field="assignments"></div>
@@ -1150,7 +1154,7 @@
           <div class="section-heading">
             <div>
               <h2>Réparations complémentaires</h2>
-              <span>Ajouter un complément sans écraser le devis initial : photos, accord, MO et impact planning.</span>
+              <span>Ajouter un complément sans écraser le devis initial : photos, MO et impact planning.</span>
             </div>
             <button class="ghost-button" type="button" id="print-supplement-orders">Imprimer compléments</button>
           </div>
@@ -1161,8 +1165,8 @@
               <label>Statut
                 <select name="status">
                   <option value="draft">Brouillon</option>
-                  <option value="expert_pending">En attente expert</option>
-                  <option value="client_pending">En attente client</option>
+                  <option value="expert_pending" hidden>État hérité</option>
+                  <option value="client_pending" hidden>État hérité</option>
                   <option value="approved">Accepté</option>
                 </select>
               </label>
@@ -1183,27 +1187,13 @@
               <label class="wide">Pièces complémentaires<textarea name="parts" rows="3" placeholder="Une pièce par ligne. Exemple : Renfort pare-chocs arrière x1"></textarea></label>
             </div>
             <div class="approval-row">
-              <label class="check-card"><input type="checkbox" name="expertApproved" /><span>Accord expert reçu</span></label>
-              <label class="check-card"><input type="checkbox" name="clientApproved" /><span>Validation client/interne</span></label>
+              <label class="check-card" hidden aria-hidden="true" style="display:none !important;" data-simplified-removed="expert-agreement"><input type="checkbox" name="expertApproved" /><span>Action héritée</span></label>
+              <label class="check-card" hidden aria-hidden="true" style="display:none !important;" data-simplified-removed="client-agreement"><input type="checkbox" name="clientApproved" /><span>Action héritée</span></label>
               <button class="primary-button" type="submit">Ajouter complément</button>
             </div>
           </form>
-          <p class="muted">Astuce : ajoutez les photos justificatives dans l’onglet Photos avec la catégorie “Complément avant accord”.</p>
+          <p class="muted">Astuce : ajoutez les photos justificatives dans l’onglet Photos avec la catégorie complément.</p>
           <div class="supplement-list" data-field="supplements"></div>
-        </section>
-      </section>
-
-      <section class="case-panel" data-case-panel="livraison" hidden>
-        <section class="detail-section full-width">
-          <div class="section-heading">
-            <h2>Contrôle qualité, livraison &amp; clôture</h2>
-          </div>
-          <div class="approval-row">
-            <label class="check-card"><input type="checkbox" data-toggle="qualityApproved" /><span>Contrôle qualité validé</span></label>
-            <label class="check-card"><input type="checkbox" data-toggle="delivered" /><span>Livraison effectuée</span></label>
-            <label class="check-card"><input type="checkbox" data-toggle="invoiced" /><span>Dossier Facturé &amp; Clôturé</span></label>
-          </div>
-          <div class="quality-checklist" data-field="quality-checklist"></div>
         </section>
         <section class="detail-section full-width">
           <div class="section-heading">
@@ -1215,6 +1205,41 @@
               </button>
               <button class="ghost-button" type="button" id="export-client-folder">Exporter dossier client</button>
               <button class="ghost-button danger-button" type="button" id="delete-case">Supprimer dossier</button>
+            </div>
+          </div>
+          <p class="muted" data-field="dossier-export-summary"></p>
+        </section>
+        <section class="detail-section full-width">
+          <div class="section-heading">
+            <h2>Historique du dossier</h2>
+            <span data-field="history-count"></span>
+          </div>
+          <div class="history-list" data-field="history"></div>
+        </section>
+      </section>
+
+      <section class="case-panel" data-case-panel="livraison" hidden aria-hidden="true" style="display:none !important;" data-simplified-removed="livraison">
+        <section class="detail-section full-width">
+          <div class="section-heading">
+            <h2>Clôture héritée</h2>
+          </div>
+          <div class="approval-row">
+            <label class="check-card"><input type="checkbox" data-toggle="qualityApproved" /><span>Action héritée</span></label>
+            <label class="check-card"><input type="checkbox" data-toggle="delivered" /><span>Action héritée</span></label>
+            <label class="check-card"><input type="checkbox" data-toggle="invoiced" /><span>Clôture atelier</span></label>
+          </div>
+          <div class="quality-checklist" data-field="quality-checklist"></div>
+        </section>
+        <section class="detail-section full-width">
+          <div class="section-heading">
+            <h2>Dossier Windows complet</h2>
+            <div class="case-actions">
+              <button class="primary-button" type="button" id="legacy-export-case-folder">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M7 10l5 5 5-5" /><path d="M12 15V3" /></svg>
+                Exporter dossier ZIP
+              </button>
+              <button class="ghost-button" type="button" id="legacy-export-client-folder">Exporter dossier client</button>
+              <button class="ghost-button danger-button" type="button" id="legacy-delete-case">Supprimer dossier</button>
             </div>
           </div>
           <p class="muted" data-field="dossier-export-summary"></p>
@@ -1241,21 +1266,21 @@
     </div>
 
     <script src="vendor/pdf.min.js" defer></script>
-    <script src="js/utils.js?v=23.2.6" defer></script>
-    <script src="js/state.js?v=23.2.6" defer></script>
-    <script src="js/ui-cases.js?v=23.2.6" defer></script>
-    <script src="js/estimate-import.js?v=23.2.6" defer></script>
-    <script src="js/ui-planning.js?v=23.2.6" defer></script>
-    <script src="js/ui-reception.js?v=23.2.6" defer></script>
-    <script src="js/photos.js?v=23.2.6" defer></script>
-    <script src="js/storage.js?v=23.2.6" defer></script>
-    <script src="js/planning.js?v=23.2.6" defer></script>
-    <script src="js/exports.js?v=23.2.6" defer></script>
-    <script src="js/business-rules-v2187.js?v=23.2.6" defer></script>
+    <script src="js/utils.js?v=23.2.7" defer></script>
+    <script src="js/state.js?v=23.2.7" defer></script>
+    <script src="js/ui-cases.js?v=23.2.7" defer></script>
+    <script src="js/estimate-import.js?v=23.2.7" defer></script>
+    <script src="js/ui-planning.js?v=23.2.7" defer></script>
+    <script src="js/ui-reception.js?v=23.2.7" defer></script>
+    <script src="js/photos.js?v=23.2.7" defer></script>
+    <script src="js/storage.js?v=23.2.7" defer></script>
+    <script src="js/planning.js?v=23.2.7" defer></script>
+    <script src="js/exports.js?v=23.2.7" defer></script>
+    <script src="js/business-rules-v2187.js?v=23.2.7" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
-    <script src="js/supabase-config.js?v=23.2.6" defer></script>
-    <script src="js/supabase-client.js?v=23.2.6" defer></script>
-    <script src="js/supabase-sync.js?v=23.2.6" defer></script>
-    <script src="app.js?v=23.2.6" defer></script>
+    <script src="js/supabase-config.js?v=23.2.7" defer></script>
+    <script src="js/supabase-client.js?v=23.2.7" defer></script>
+    <script src="js/supabase-sync.js?v=23.2.7" defer></script>
+    <script src="app.js?v=23.2.7" defer></script>
   </body>
 </html>

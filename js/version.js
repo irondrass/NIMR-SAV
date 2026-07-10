@@ -1,6 +1,6 @@
-window.APP_VERSION = "v23.2.6";
-window.NIMR_BUILD = "v23.2.6";
-window.NIMR_CACHE_NAME = "nimr-sav-v23.2.6-reception-qc-field-usability";
+window.APP_VERSION = "v23.2.7";
+window.NIMR_BUILD = "v23.2.7-simplified-startup";
+window.NIMR_CACHE_NAME = "nimr-sav-v23.2.7-simplified-startup";
 
 if ("caches" in window) {
   caches.keys().then((keys) => Promise.all(

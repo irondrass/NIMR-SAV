@@ -154,14 +154,9 @@ async function exportCaseFolderZip(item, { clientOnly = false } = {}) {
 
     addPdf("00_Fiche_reception_vehicule", buildReceptionPdfLines(item));
     addPdf("01_Devis_initial", buildEstimatePdfLines(item));
-    addPdf("02_Devis_expert_confirme", buildConfirmedExpertEstimatePdfLines(item));
-    addPdf("03_Confirmation_expert", buildExpertPdfLines(item));
-    addPdf("04_Confirmation_client", buildClientPdfLines(item));
-    addPdf("05_Affectations_planning", buildPlanningPdfLines(item));
-    addPdf("06_Controle_qualite", buildQualityPdfLines(item));
-    addPdf("07_PV_restitution_client", buildDeliveryPdfLines(item));
+    addPdf("02_Affectations_planning", buildPlanningPdfLines(item));
     if (!clientOnly) {
-      addPdf("08_Logs_dossier", buildLogsPdfLines(item));
+      addPdf("03_Logs_dossier", buildLogsPdfLines(item));
       files.push({ path: `${folder}/dossier.json`, data: new TextEncoder().encode(JSON.stringify(item, null, 2)), type: "application/json" });
     }
 
@@ -200,8 +195,6 @@ function buildClaimPdfLines(item, claim) {
     `Statut: ${CLAIM_STATUS_LABELS?.[claim.status] || claim.status || ''}`,
     `N° devis: ${claim.estimateNumber || claim.estimate?.reference || ''}`,
     `N° ordre: ${claim.orNumber || ''}`,
-    `Accord expert: ${claim.expertApproved ? 'Oui' : 'Non'}`,
-    `Validation client/interne: ${claim.clientApproved ? 'Oui' : 'Non'}`,
     `Inclus planning global: ${claim.includeInPlanning !== false ? 'Oui' : 'Non'}`,
     '',
     'LIGNES MAIN-D\'OEUVRE',
@@ -211,7 +204,7 @@ function buildClaimPdfLines(item, claim) {
     '',
     'PIÈCES / ARTICLES IMPORTÉS',
     ...((claim.estimate?.parts || []).length
-      ? claim.estimate.parts.map((part) => `${part.designation || 'Article'} - Qté ${formatLocalizedDecimal(part.quantity || 0)} - PU ${part.unitPrice ? formatLocalizedDecimal(part.unitPrice) : '-'} - Montant ${part.amount ? formatLocalizedDecimal(part.amount) : '-'}`)
+      ? claim.estimate.parts.map((part) => `${part.designation || 'Article'} - Qté ${formatLocalizedDecimal(part.quantity || 0)}`)
       : ['Aucune pièce importée.']),
   ];
 }
@@ -508,8 +501,6 @@ function buildClaimEstimatePartHtmlRows(item) {
       <td>${escapeHtml(part.claimLabel)}</td>
       <td>${escapeHtml(part.designation || '-')}</td>
       <td class="num">${formatLocalizedDecimal(part.quantity || 0)}</td>
-      <td class="num">${part.unitPrice ? formatLocalizedDecimal(part.unitPrice) : '-'}</td>
-      <td class="num">${part.amount ? formatLocalizedDecimal(part.amount) : '-'}</td>
     </tr>
   `).join('');
 }
@@ -590,18 +581,16 @@ function buildExpertPdfLines(item) {
     `Téléphone expert: ${item.expertPhone || ""}`,
     `Email expert: ${item.expertEmail || ""}`,
     `Assurance: ${item.insurance || ""}`,
-    `Accord expert: ${item.flags.expertApproved ? "Validé" : "Non validé"}`,
-    `Devis expert confirmé: ${item.expertEstimate?.confirmed ? "Oui" : "Non"}`,
-    `Total MO devis expert: ${formatLocalizedDecimal(expertEstimateTotalHours(item))} h`,
+    `Devis importé confirmé: ${item.expertEstimate?.confirmed ? "Oui" : "Non"}`,
+    `Total MO devis importé: ${formatLocalizedDecimal(expertEstimateTotalHours(item))} h`,
   ];
 }
 
 function buildClientPdfLines(item) {
   return [
     ...buildCommonPdfHeader(item, "CONFIRMATION CLIENT", "Document client"),
-    `Validation client/interne: ${item.flags.clientApproved ? "Reçue" : "Non reçue"}`,
     item.appointment ? `RDV fixé: ${formatDateTime(item.appointment.start)}` : "RDV non fixé",
-    item.appointment ? `Livraison estimée: ${formatDateTime(item.appointment.delivery)}` : "Livraison estimée non planifiée",
+    item.appointment ? `Fin estimée: ${formatDateTime(item.appointment.delivery)}` : "Fin estimée non planifiée",
   ];
 }
 
@@ -626,46 +615,46 @@ function buildPlanningPdfLines(item) {
 function buildQualityPdfLines(item) {
   const checklist = getQualityChecklistForCase(item);
   return [
-    ...buildCommonPdfHeader(item, "CONTRÔLE QUALITÉ", "Document qualité"),
+    ...buildCommonPdfHeader(item, "POINTS DE FINITION ATELIER", "Document atelier"),
     `Type d'intervention: ${getInterventionTypeLabelForPrint(item)}`,
     `Contrôleur: ______________________________`,
-    `Date/heure contrôle: ______________________________`,
+    `Date/heure vérification: ______________________________`,
     "",
     ...checklist.map((label) => `${item.qualityChecklist?.[label] ? "[OK]" : "[  ]"} ${label}`),
     "",
-    `Contrôle qualité validé: ${item.flags.qualityApproved ? "Oui" : "Non"}`,
-    `Résultat: [  ] Accepté   [  ] Refusé`,
+    `Vérification atelier enregistrée: ${item.flags.qualityApproved ? "Oui" : "Non"}`,
+    `Résultat: [  ] Conforme   [  ] À reprendre`,
     `Défaut constaté: ______________________________`,
     `Action corrective: ______________________________`,
     `Recontrôle nécessaire: [  ] Oui   [  ] Non`,
     "",
-    "Signature qualité: ______________________________",
+    "Signature atelier: ______________________________",
     "Signature chef atelier: ______________________________",
   ];
 }
 
 function buildDeliveryPdfLines(item) {
   return [
-    ...buildCommonPdfHeader(item, "PV DE RESTITUTION VÉHICULE", "Document client"),
-    `Date/heure livraison: ______________________________`,
+    ...buildCommonPdfHeader(item, "FICHE CLÔTURE ATELIER", "Document atelier"),
+    `Date/heure clôture: ______________________________`,
     `Kilométrage sortie: ______________________________ km`,
     `Véhicule reçu: ${item.flags.received ? "Oui" : "Non"}`,
     `Travaux démarrés: ${item.flags.workStarted ? "Oui" : "Non"}`,
     `Travaux terminés: ${item.flags.workCompleted ? "Oui" : "Non"}`,
-    `Contrôle qualité validé: ${item.flags.qualityApproved ? "Oui" : "Non"}`,
-    `Livraison effectuée: ${item.flags.delivered ? "Oui" : "Non"}`,
+    `Vérification atelier enregistrée: ${item.flags.qualityApproved ? "Oui" : "Non"}`,
+    `Clôture effectuée: ${item.flags.delivered ? "Oui" : "Non"}`,
     `Photos après réparation: ${getPhotoCountByCategory(item, "after") ? "Oui" : "Non"} (${getPhotoCountByCategory(item, "after")})`,
     "",
     "Résumé travaux réalisés:",
     item.damageNotes || "À compléter",
     "",
-    "Réserves client: ______________________________",
-    "Documents remis: [  ] Facture   [  ] Carte grise   [  ] Rapport contrôle",
-    "Clés / accessoires remis: ______________________________",
+    "Observations atelier: ______________________________",
+    "Documents suivis: [  ] Carte grise   [  ] Rapport atelier",
+    "Clés / accessoires contrôlés: ______________________________",
     "",
-    "Le véhicule est restitué après contrôle qualité, sous réserve des observations mentionnées ci-dessus.",
+    "Le dossier atelier est clôturé sous réserve des observations mentionnées ci-dessus.",
     "",
-    "Signature client: ______________________________",
+    "Signature atelier: ______________________________",
     "Signature réception: ______________________________",
   ];
 }
@@ -928,7 +917,7 @@ function printRepairOrder(item) {
         </section>
         ${renderPartsBlockerHtml(item)}
         <section class="avoid-break">
-          <h2>Devis / main-d’œuvre confirmé</h2>
+          <h2>Main-d’œuvre importée</h2>
           <p><strong>Référence:</strong> ${escapeHtml(item.expertEstimate?.reference || "-")}</p>
           <p><strong>État:</strong> ${item.expertEstimate?.confirmed ? "Confirmé" : "Non confirmé"}</p>
           <table>
@@ -940,8 +929,8 @@ function printRepairOrder(item) {
         <section class="avoid-break">
           <h2>Pièces / articles importés du devis</h2>
           <table>
-            <thead><tr><th>Ordre</th><th>Désignation</th><th>Qté</th><th>PU</th><th>Montant</th></tr></thead>
-            <tbody>${partRows || `<tr><td colspan="5">Aucune pièce ou article importé depuis le devis.</td></tr>`}</tbody>
+            <thead><tr><th>Ordre</th><th>Désignation</th><th>Qté</th></tr></thead>
+            <tbody>${partRows || `<tr><td colspan="3">Aucune pièce ou article importé depuis le devis.</td></tr>`}</tbody>
           </table>
         </section>
         <section class="avoid-break">
@@ -957,14 +946,6 @@ function printRepairOrder(item) {
           <table>
             <thead><tr><th>Travail</th><th>Ressource</th><th>Début</th><th>Fin</th><th>Statut</th></tr></thead>
             <tbody>${assignmentRows || `<tr><td colspan="5">Aucune affectation planifiée.</td></tr>`}</tbody>
-          </table>
-        </section>
-        <section class="avoid-break">
-          <h2>Checklist qualité</h2>
-          <table>
-            <tbody>${getQualityChecklistForCase(item).map(
-              (label) => `<tr><td>${escapeHtml(label)}</td><td>${item.qualityChecklist?.[label] ? "OK" : "À faire"}</td></tr>`,
-            ).join("")}</tbody>
           </table>
         </section>
         <section class="avoid-break">
@@ -1242,7 +1223,7 @@ function printDailyPlanningGantt(dateKey = state.planningDate) {
         <div><strong>Occupation humaine</strong><br>${Math.round(humanDayLoad(date) * 100)}%</div>
         <div><strong>Occupation matérielle</strong><br>${Math.round(equipmentDayLoad(date) * 100)}%</div>
         <div><strong>Dossiers bloqués</strong><br>${blockedCases.length}</div>
-        <div><strong>Livraisons prévues</strong><br>${deliveryCases.length}</div>
+        <div><strong>Fins prévues</strong><br>${deliveryCases.length}</div>
         <div><strong>Travaux en retard</strong><br>${lateEntries.length}</div>
         <div><strong>Ressources absentes</strong><br>${absentResources.length}</div>
       </section>
@@ -1252,10 +1233,10 @@ function printDailyPlanningGantt(dateKey = state.planningDate) {
         ${blockedCases.length ? `<table><thead><tr><th>Client</th><th>Véhicule</th><th>Blocage</th></tr></thead><tbody>${blockedCases.map((item) => `<tr><td>${escapeHtml(item.clientName || "-")}</td><td>${escapeHtml(item.vehicle || "-")}<br><span class="muted">${escapeHtml(item.plate || item.vin || "-")}</span></td><td>${escapeHtml(getCaseBlockerLabel(item) || "-")}</td></tr>`).join("")}</tbody></table>` : `<div class="empty">Aucun dossier bloqué planifié ce jour.</div>`}
       </section>
       <section class="task-legend">
-        <h2>Livraisons prévues / retards / absences</h2>
+        <h2>Fins prévues / retards / absences</h2>
         <table>
           <tbody>
-            <tr><th>Livraisons prévues</th><td>${deliveryCases.map((item) => escapeHtml(`${item.clientName || "-"} - ${item.plate || item.vin || ""}`)).join("<br>") || "Aucune"}</td></tr>
+            <tr><th>Fins prévues</th><td>${deliveryCases.map((item) => escapeHtml(`${item.clientName || "-"} - ${item.plate || item.vin || ""}`)).join("<br>") || "Aucune"}</td></tr>
             <tr><th>Travaux en retard</th><td>${lateEntries.map((entry) => escapeHtml(`${entry.item.clientName || "-"} - ${entry.booking.title || "Travail"}`)).join("<br>") || "Aucun"}</td></tr>
             <tr><th>Ressources absentes</th><td>${absentResources.map((name) => escapeHtml(name)).join("<br>") || "Aucune"}</td></tr>
           </tbody>
@@ -1450,7 +1431,7 @@ function printDailyPlanning(dateKey = state.planningDate) {
                 <th>Statut dossier</th>
                 <th>Statut pièces</th>
                 <th>Blocage</th>
-                <th>Livraison prévue</th>
+                <th>Fin prévue</th>
                 <th>Début réel</th>
                 <th>Fin réelle</th>
                 <th>Observation</th>
@@ -1582,7 +1563,7 @@ function printSupplementWorkOrders(item, supplementId = null) {
           <div class="box"><h2>Véhicule</h2><p><strong>Modèle :</strong> ${escapeHtml(item.vehicle || '-')}</p><p><strong>Immat. :</strong> ${escapeHtml(item.plate || '-')}</p><p><strong>VIN :</strong> ${escapeHtml(item.vin || '-')}</p><p><strong>Zone :</strong> ${escapeHtml(supplement.vehicleArea || '-')}</p></div>
         </section>
         <section><h2>Motif / dommage découvert</h2><p>${escapeHtml(supplement.reason || 'Aucun motif renseigné.')}</p></section>
-        <section><h2>Accords</h2><p>Accord expert : <strong>${supplement.expertApproved ? 'Oui' : 'Non'}</strong> · Validation client/interne : <strong>${supplement.clientApproved ? 'Oui' : 'Non'}</strong></p></section>
+        <section><h2>Suivi atelier</h2><p>Complément intégré : <strong>${supplement.integrated ? 'Oui' : 'Non'}</strong></p></section>
         <section><h2>Impact atelier / client</h2>
           <table><tbody>
             <tr><td>Impact délai livraison</td><td></td><td>Impact planning</td><td></td></tr>

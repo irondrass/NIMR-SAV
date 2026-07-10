@@ -20,7 +20,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v23.2.6";
+const APP_VERSION = "v23.2.7";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const WORKSHOP_NAME = "NIMR SAV";
@@ -89,7 +89,7 @@ const DURATIONS = [
   ["paint", "Peinture + vernis"],
   ["reassembly", "Remontage"],
   ["finish", "Finition + lavage"],
-  ["quality", "Contrôle qualité"],
+  ["quality", "Finition atelier"],
 ];
 
 const DEFAULT_QUALITY_CHECKS = [
@@ -104,15 +104,15 @@ const PHOTO_CATEGORIES = {
   before: "Avant réparation",
   during: "En cours",
   after: "Après réparation",
-  supplement: "Complément avant accord",
+  supplement: "Complément",
 };
 
 
 const CLAIM_STATUS_LABELS = {
   draft: "Brouillon",
-  expert_pending: "En attente expert",
-  client_pending: "En attente client",
-  approved: "Accepté",
+  expert_pending: "À compléter",
+  client_pending: "À compléter",
+  approved: "Prêt planning",
   refused: "Refusé",
   planned: "Planifié",
   done: "Terminé",
@@ -121,15 +121,15 @@ const CLAIM_STATUS_LABELS = {
 const ACTION_LABELS = {
   claim: "Créer le premier ordre de travail",
   labor: "Saisir la main-d’œuvre",
-  expertApproved: "Valider l'accord expert",
-  clientApproved: "Valider client / interne",
+  expertApproved: "Action héritée",
+  clientApproved: "Action héritée",
   appointment: "Fixer le RDV de dépôt",
   received: "Confirmer la réception véhicule",
   workStarted: "Démarrer les travaux",
   workCompleted: "Terminer les travaux",
-  qualityApproved: "Valider le contrôle qualité",
-  delivered: "Livrer le véhicule",
-  invoiced: "Facturer le dossier",
+  qualityApproved: "Action héritée",
+  delivered: "Action héritée",
+  invoiced: "Clôturer le dossier atelier",
 };
 
 const PARTS_STATUS_OPTIONS = [
@@ -158,43 +158,38 @@ const BLOCKER_REASON_OPTIONS = [
 const BLOCKER_REASON_LABELS = Object.fromEntries(BLOCKER_REASON_OPTIONS);
 
 const FLAG_HISTORY_EVENTS = {
-  expertApproved: { on: ["expert.approved", "Accord expert validé"] },
+  expertApproved: { on: ["expert.approved", "Action héritée enregistrée"] },
   clientApproved: {
-    on: ["client.approved", "Validation client/interne enregistrée"],
-    off: ["client.revoked", "Validation client/interne retirée"],
+    on: ["client.approved", "Action héritée enregistrée"],
+    off: ["client.revoked", "Action héritée retirée"],
   },
   received: { on: ["vehicle.received", "Véhicule reçu à l'atelier"] },
   workStarted: { on: ["work.started", "Travaux démarrés"], off: ["work.paused", "Travaux remis en attente"] },
   workCompleted: { on: ["work.completed", "Travaux terminés"], off: ["work.reopened", "Travaux rouverts"] },
   qualityApproved: {
-    on: ["quality.approved", "Contrôle qualité validé"],
-    off: ["quality.revoked", "Contrôle qualité annulé"],
+    on: ["quality.approved", "Action héritée enregistrée"],
+    off: ["quality.revoked", "Action héritée retirée"],
   },
   delivered: {
-    on: ["vehicle.delivered", "Livraison effectuée"],
-    off: ["vehicle.delivery.revoked", "Livraison annulée"],
+    on: ["vehicle.delivered", "Action héritée enregistrée"],
+    off: ["vehicle.delivery.revoked", "Action héritée retirée"],
   },
   invoiced: {
-    on: ["case.invoiced", "Dossier facturé et clôturé"],
-    off: ["case.invoice.revoked", "Facturation annulée"],
+    on: ["case.invoiced", "Dossier atelier clôturé"],
+    off: ["case.invoice.revoked", "Clôture atelier retirée"],
   },
 };
 
 const WORKFLOW = [
   ["created", "Réception à compléter"],
   ["photos", "Photos avant réparation"],
-  ["expert", "Expert assigné"],
-  ["expertApproved", "Accord expert"],
-  ["clientApproved", "Validation client/interne"],
   ["appointment", "RDV fixé"],
   ["vehiclePending", "En attente réception"],
   ["received", "Véhicule reçu"],
   ["assigned", "Travaux planifiés"],
   ["workStarted", "Travaux en cours"],
   ["workCompleted", "Travaux terminés"],
-  ["qualityApproved", "Contrôle qualité"],
-  ["delivered", "Livraison"],
-  ["invoiced", "Dossier facturé"],
+  ["invoiced", "Clôture atelier"],
 ];
 
 const STEP_TEMPLATES = [
@@ -252,7 +247,7 @@ const STEP_TEMPLATES = [
   },
   {
     key: "quality",
-    title: "Contrôle qualité",
+    title: "Finition atelier",
     role: "controle",
     color: "#1f7a54",
   },
@@ -267,7 +262,7 @@ const ROLE_LABELS = {
   cabine: "Cabine peinture",
   pont_vidange: "Pont vidange",
   pont_mecanique: "Pont grands travaux mécaniques",
-  controle: "Contrôle qualité",
+  controle: "Finition atelier",
 };
 
 const USER_ROLES = {
@@ -394,7 +389,7 @@ const ESTIMATE_ALLOWED_KEYS = [...ESTIMATE_PLANNING_KEYS, "quality"];
 
 const CASE_STATUS_DEFINITIONS = Object.freeze([
   ["receptionDraft", "Réception à compléter"],
-  ["approvals", "Accords à finaliser"],
+  ["approvals", "Dossier à compléter"],
   ["appointment", "RDV à fixer"],
   ["appointmentScheduled", "RDV fixé"],
   ["noShow", "Client absent"],
@@ -402,11 +397,11 @@ const CASE_STATUS_DEFINITIONS = Object.freeze([
   ["vehicleReceived", "Véhicule reçu"],
   ["workScheduled", "Travaux planifiés"],
   ["work", "En travaux"],
-  ["quality", "Contrôle qualité"],
-  ["qualityRejected", "QC refusé"],
-  ["qualityRework", "Retour atelier / retravail"],
-  ["delivered", "Livré"],
-  ["invoiced", "Clôturé & facturé"],
+  ["quality", "Travaux terminés"],
+  ["qualityRejected", "Retour atelier"],
+  ["qualityRework", "Retour atelier"],
+  ["delivered", "Clôturé atelier"],
+  ["invoiced", "Clôturé atelier"],
 ]);
 const CASE_STATUS_LABELS = Object.freeze(Object.fromEntries(CASE_STATUS_DEFINITIONS));
 const CASE_STATUS_KEYS = Object.freeze(CASE_STATUS_DEFINITIONS.map(([key]) => key));
@@ -420,8 +415,8 @@ const CASE_STATUS_TRANSITIONS = Object.freeze({
   awaitingVehicle: ["vehicleReceived", "appointment"],
   vehicleReceived: ["workScheduled", "work"],
   workScheduled: ["work", "vehicleReceived"],
-  work: ["quality", "qualityRejected"],
-  quality: ["qualityRejected", "delivered"],
+  work: ["quality", "invoiced"],
+  quality: ["qualityRejected", "invoiced"],
   qualityRejected: ["qualityRework"],
   qualityRework: ["work", "quality"],
   delivered: ["invoiced"],
@@ -497,8 +492,8 @@ function getCaseStatus(item) {
     return appointmentIsDue ? "awaitingVehicle" : "appointmentScheduled";
   }
 
-  if (flags.expertApproved && flags.clientApproved) return "appointment";
-  if (item.expertName || hasRepairClaims(item)) return "approvals";
+  if (hasRepairClaims(item)) return "appointment";
+  if (item.expertName) return "approvals";
   return "receptionDraft";
 }
 
@@ -1520,8 +1515,8 @@ function getPermissionDeniedMessage(permission, context = {}) {
   if (requested === "settings.edit" || requested === "users.manage") return "Action réservée administrateur technique. Vérifiez la session active.";
   if (requested === "export.backup") return "Export sauvegarde réservé directeur SAV/chef atelier/admin technique. Demandez un export à un responsable autorisé.";
   if (requested === "quality.validate" || requested === "quality.reject") return "Action réservée qualité/chef atelier/admin. Vérifiez le rôle de la session active.";
-  if (requested === "case.close") return "Clôture/Facturation réservée chef atelier/admin. Finalisez depuis une session responsable.";
-  if (requested === "delivery.complete") return "Livraison réservée réception/directeur SAV/chef atelier/admin technique. Basculez vers un rôle autorisé.";
+  if (requested === "case.close") return "Clôture atelier réservée chef atelier/admin. Finalisez depuis une session responsable.";
+  if (requested === "delivery.complete") return "Action héritée réservée réception/directeur SAV/chef atelier/admin technique.";
   if (["case.create", "case.edit", "estimate.import", "appointment.schedule", "schedule_appointment", "vehicle.receive", "receive_vehicle"].includes(requested)) {
     return "Action réservée réception/chef atelier/admin. Connectez-vous avec un rôle autorisé.";
   }
@@ -2278,7 +2273,7 @@ function isClientOnlyRepairClaim(claim) {
 
 function getClaimTypeLabel(type) {
   const labels = {
-    assurance: "Assurance / expert",
+    assurance: "Assurance",
     client: "Client direct / intervention SAV",
     vidange: "Service rapide / entretien",
     mechanical_client: "Service mécanique",
@@ -2423,9 +2418,9 @@ function normalizeRepairSupplementLine(line) {
 
 const SUPPLEMENT_STATUS_LABELS = {
   draft: "Brouillon",
-  expert_pending: "En attente expert",
-  client_pending: "En attente client",
-  approved: "Accepté",
+  expert_pending: "À compléter",
+  client_pending: "À compléter",
+  approved: "Prêt planning",
   refused: "Refusé",
   planned: "Intégré au planning",
   done: "Terminé",
@@ -2806,7 +2801,7 @@ function resolveSyncConflict(conflictIdOrKey, action = "mark_resolved") {
       // Save a silent local case snapshot
       const snapshotKey = `nimr-sav-conflict-safety-snapshot:${caseId}:${conflictId}`;
       const snapshotPayload = {
-        version: "v23.2.6",
+        version: "v23.2.7",
         timestamp: new Date().toISOString(),
         cases: [JSON.parse(JSON.stringify(localCase))],
         source: "conflict_safety_snapshot"
@@ -3530,15 +3525,15 @@ function showInputPromptModal({
 
 // v23.2.5 — Workspaces par rôle
 // directeur_sav : vision métier (pas admin technique)
-// qualite : vue QC dédiée (qc-workspace) + dossiers
+// qualite : rôle conservé, sans workspace QC dans le flux simplifié
 // readonly : uniquement pilotage (lecture)
 const ROLE_TABS = {
-  admin:         ["reception-workspace", "dossiers", "today", "pilotage", "planning", "technician", "qc-workspace", "atelier"],
-  directeur_sav: ["dossiers", "today", "pilotage", "planning", "qc-workspace", "atelier"],
+  admin:         ["reception-workspace", "dossiers", "today", "pilotage", "planning", "technician", "atelier"],
+  directeur_sav: ["dossiers", "today", "pilotage", "planning", "atelier"],
   chef_atelier:  ["reception-workspace", "dossiers", "today", "pilotage", "planning", "technician", "atelier"],
   reception:     ["reception-workspace", "dossiers", "today"],
   technicien:    ["technician"],
-  qualite:       ["qc-workspace", "dossiers"],
+  qualite:       ["dossiers"],
   readonly:      ["pilotage"],
 };
 
@@ -3549,7 +3544,7 @@ const ROLE_DEFAULT_TABS = {
   chef_atelier:  "planning",
   reception:     "reception-workspace",
   technicien:    "technician",
-  qualite:       "qc-workspace",
+  qualite:       "dossiers",
   readonly:      "pilotage",
 };
 
@@ -3566,7 +3561,7 @@ function getAllowedTabsForCurrentUser() {
   if (!user) {
     const activeUsers = (state?.users || []).filter((u) => u.active !== false);
     if (activeUsers.length === 0) {
-      return ["reception-workspace", "dossiers", "today", "pilotage", "planning", "technician", "qc-workspace", "atelier"];
+      return ["reception-workspace", "dossiers", "today", "pilotage", "planning", "technician", "atelier"];
     }
     return [];
   }
@@ -3676,7 +3671,7 @@ function updateCaseNote(caseId, noteType, content) {
 // ─── RÉCEPTION WORKFLOW — LOGIQUE MÉTIER v23.1C ────────────────────────────
 
 /**
- * Retourne le numéro de l'étape active (1–11) pour un dossier.
+ * Retourne le numéro de l'étape active pour un dossier.
  * Basé sur l'état réel des flags et receptionWorkflow.
  */
 function getReceptionWorkflowStep(caseItem) {
@@ -3684,13 +3679,8 @@ function getReceptionWorkflowStep(caseItem) {
   const rw = caseItem.receptionWorkflow || {};
   const f = caseItem.flags || {};
 
-  // Étape 11 — livraison effectuée ou en cours
-  if (f.delivered) return 11;
-  // Étape 11 — prêt pour livraison (QC validé ou override)
-  if (rw.readyForDeliveryAt) return 11;
-  // Étape 10 — suivi qualité
-  if (rw.sentToWorkshopAt && (f.workCompleted || rw.qualityStatus !== "not_started")) return 10;
-  // Étape 9 — suivi atelier
+  // Flux simplifié : le suivi atelier reste l'étape finale visible.
+  if (f.invoiced || f.delivered) return 9;
   if (rw.sentToWorkshopAt) return 9;
   // Étape 8 — envoi atelier
   if (f.received && !rw.sentToWorkshopAt) return 8;
@@ -3960,8 +3950,8 @@ function advanceReceptionWorkflow(caseId, action, payload = {}) {
       rw.deliveredAt = now;
       rw.deliveredBy = actor.userId;
       if (typeof recordFlagHistory === "function") recordFlagHistory(item, "delivered", true);
-      if (typeof addAuditLog === "function") addAuditLog("reception.delivery_completed", "Véhicule livré", `Livré par ${actor.userName}`, { caseId });
-      if (typeof addHistory === "function") addHistory(item, "reception.delivery_completed", "Véhicule livré", `Livraison par ${actor.userName}`);
+      if (typeof addAuditLog === "function") addAuditLog("reception.delivery_completed", "Dossier atelier finalisé", `Finalisé par ${actor.userName}`, { caseId });
+      if (typeof addHistory === "function") addHistory(item, "reception.delivery_completed", "Dossier atelier finalisé", `Clôture par ${actor.userName}`);
       return { ok: true, message: "" };
     }
     default:

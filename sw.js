@@ -1,4 +1,4 @@
-const CACHE_NAME = "nimr-sav-v23.2.6-reception-qc-field-usability";
+const CACHE_NAME = "nimr-sav-v23.2.7-simplified-startup";
 const ASSETS = [
   "./",
   "./index.html",

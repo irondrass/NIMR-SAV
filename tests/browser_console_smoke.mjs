@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 
 const root = resolve(process.cwd());
 const defaultPort = Number(process.env.NIMR_BROWSER_TEST_PORT || 8787);
-const targetUrl = process.env.NIMR_BROWSER_TEST_URL || `http://127.0.0.1:${defaultPort}/?browser-smoke=23.2.6`;
+const targetUrl = process.env.NIMR_BROWSER_TEST_URL || `http://127.0.0.1:${defaultPort}/?browser-smoke=23.2.7`;
 const chromePath = process.env.CHROME_PATH || [
   "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
   "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
@@ -29,7 +29,7 @@ function startStaticServer() {
   if (process.env.NIMR_BROWSER_TEST_URL) return Promise.resolve(null);
   const server = createServer(async (request, response) => {
     const url = new URL(request.url || "/", `http://127.0.0.1:${defaultPort}`);
-    const pathname = decodeURIComponent(url.pathname === "/" ? "/index.html" : url.pathname);
+    const pathname = decodeURIComponent(url.pathname === "/" ? "index.html" : url.pathname.replace(/^\/+/, ""));
     const path = resolve(join(root, pathname));
     if (!path.startsWith(root)) {
       response.writeHead(403).end("Forbidden");
@@ -149,7 +149,7 @@ async function main() {
       returnByValue: true,
       expression: `Promise.all([
         navigator.serviceWorker?.getRegistration?.().then(Boolean).catch(() => false),
-        caches?.keys?.().then((keys) => keys.some((key) => key.includes('v23.2.6-reception-qc-field-usability'))).catch(() => false),
+        caches?.keys?.().then((keys) => keys.some((key) => key.includes('v23.2.7-simplified-startup'))).catch(() => false),
       ]).then(([hasServiceWorker, hasExpectedCache]) => ({ hasServiceWorker, hasExpectedCache }))`,
     }, sessionId);
 

@@ -166,8 +166,8 @@ function scrubUnauthorizedViewContent(tab, view) {
 function renderMetrics() {
   const dashboard = typeof buildSavPerformanceDashboard === "function" ? buildSavPerformanceDashboard() : null;
   const active = dashboard ? dashboard.metrics.activeCases : state.cases.filter((item) => !item.flags.delivered).length;
-  const waiting = dashboard ? dashboard.metrics.pendingAgreements : state.cases.filter((item) => getNextWorkflowAction(item) && getBusinessRuleIssues(item, getNextWorkflowAction(item)).length).length;
-  const deliveries = dashboard ? dashboard.metrics.plannedDeliveries : state.cases.filter((item) => item.appointment && !item.flags.delivered).length;
+  const waiting = dashboard ? dashboard.metrics.withoutNextAction : state.cases.filter((item) => getNextWorkflowAction(item) && getBusinessRuleIssues(item, getNextWorkflowAction(item)).length).length;
+  const deliveries = dashboard ? dashboard.metrics.scheduledAppointments : state.cases.filter((item) => item.appointment && !isCaseOperationallyClosed(item)).length;
   $("#metric-active").textContent = active;
   $("#metric-waiting").textContent = waiting;
   $("#metric-deliveries").textContent = deliveries;
@@ -235,16 +235,16 @@ function buildSavKpis(now = new Date()) {
       level: metrics.receivedVehicles ? "info" : "neutral",
     },
     {
-      label: periodLabel === "Aujourd'hui" ? "Livraisons prévues aujourd'hui" : "Livraisons prévues",
-      value: String(metrics.plannedDeliveries),
-      detail: "Selon livraison estimée",
-      level: metrics.plannedDeliveries ? "info" : "neutral",
+      label: periodLabel === "Aujourd'hui" ? "RDV prévus aujourd'hui" : "RDV prévus",
+      value: String(metrics.scheduledAppointments),
+      detail: "Selon date de rendez-vous",
+      level: metrics.scheduledAppointments ? "info" : "neutral",
     },
     {
-      label: "Livraisons en retard",
-      value: String(metrics.overdueDeliveries),
-      detail: "Non livrées après l'heure prévue",
-      level: metrics.overdueDeliveries ? "danger" : "success",
+      label: "Travaux en retard",
+      value: String(metrics.overdueWorkshopCases),
+      detail: "Tâches atelier dépassées",
+      level: metrics.overdueWorkshopCases ? "danger" : "success",
     },
     {
       label: "Dossiers bloqués",
@@ -271,34 +271,16 @@ function buildSavKpis(now = new Date()) {
       level: metrics.blockedOver7d ? "danger" : "success",
     },
     {
-      label: "Accords en attente",
+      label: "Actions à traiter",
       value: String(metrics.pendingAgreements),
-      detail: "Client ou expert",
+      detail: "Dossiers sans prochaine étape claire",
       level: metrics.pendingAgreements ? "warn" : "success",
     },
     {
-      label: "Contrôles qualité en attente",
-      value: String(metrics.pendingQualityControls),
-      detail: "Travaux terminés non validés",
-      level: metrics.pendingQualityControls ? "warn" : "success",
-    },
-    {
-      label: "Attente QC",
-      value: String(metrics.pendingQualityControls),
-      detail: "Dossiers prêts pour contrôle",
-      level: metrics.pendingQualityControls ? "warn" : "success",
-    },
-    {
-      label: "QC refusés",
-      value: String(metrics.qcRejectedCases),
-      detail: "Retour atelier à suivre",
-      level: metrics.qcRejectedCases ? "danger" : "success",
-    },
-    {
-      label: "Livrables aujourd'hui",
-      value: String(metrics.deliverableToday),
-      detail: "QC validé, livraison du jour",
-      level: metrics.deliverableToday ? "info" : "neutral",
+      label: "Travaux terminés",
+      value: String(metrics.completedWorkCases),
+      detail: "Dossiers prêts à clôturer",
+      level: metrics.completedWorkCases ? "info" : "success",
     },
     {
       label: "Charge humaine vs capacité",
@@ -325,15 +307,15 @@ function buildSavKpis(now = new Date()) {
       level: metrics.workshopLoad > 12 ? "warn" : metrics.workshopLoad ? "info" : "neutral",
     },
     {
-      label: "Charge QC",
-      value: String(metrics.qcLoad),
-      detail: "Attente QC + revalidations",
-      level: metrics.qcLoad ? "warn" : "success",
+      label: "Clôtures atelier",
+      value: String(metrics.completedWorkCases),
+      detail: "Travaux terminés non clôturés",
+      level: metrics.completedWorkCases ? "warn" : "success",
     },
     {
       label: "Temps moyen cycle dossier",
       value: metrics.averageCycleHours ? `${formatLocalizedDecimal(metrics.averageCycleHours)} h` : "0 h",
-      detail: "Création → livraison",
+      detail: "Création → clôture atelier",
       level: metrics.averageCycleHours > 72 ? "warn" : "neutral",
     },
     {
@@ -405,21 +387,15 @@ function buildSavPerformanceDashboard(now = new Date()) {
   const range = getSavDashboardRange(now);
   const cases = getSavDashboardCases(range);
   const activeCases = cases.periodCases.filter(isSavDashboardActiveCase);
-  const openCases = activeCases.filter((item) => !item.flags?.delivered).length;
+  const openCases = activeCases.length;
   const createdCases = cases.filteredCases.filter((item) => dateInRange(item.createdAt, range)).length;
   const receivedVehicles = cases.filteredCases.filter((item) => dateInRange(getCaseVehicleReceivedAt(item), range)).length;
-  const plannedDeliveries = cases.filteredCases.filter((item) => dateInRange(item.appointment?.delivery, range)).length;
-  const overdueDeliveries = activeCases.filter((item) => isDeliveryOverdue(item, now)).length;
+  const scheduledAppointments = cases.filteredCases.filter((item) => dateInRange(item.appointment?.start, range)).length;
+  const overdueWorkshopCases = activeCases.filter((item) => isCaseLate(item, now)).length;
   const blockedCases = activeCases.filter(isCaseBlocked).length;
   const blockedOver48h = activeCases.filter((item) => isCaseBlocked(item) && getCaseBlockedHours(item, now) >= 48).length;
   const blockedOver7d = activeCases.filter((item) => isCaseBlocked(item) && getCaseBlockedHours(item, now) >= 168).length;
-  const pendingAgreements = activeCases.filter(caseHasPendingAgreement).length;
-  const pendingQualityControls = activeCases.filter(isDashboardQualityPending).length;
-  const qcRejectedCases = activeCases.filter((item) => {
-    const qStatus = normalizeQualityStatus(item.receptionWorkflow?.qualityStatus);
-    return qStatus === "rejected" || qStatus === "rework";
-  }).length;
-  const deliverableToday = activeCases.filter((item) => isCaseDeliverableToday(item, now)).length;
+  const completedWorkCases = activeCases.filter((item) => item.flags?.workCompleted && !item.flags?.invoiced).length;
   const receptionLoad = activeCases.filter((item) => (
     dateInRange(item.createdAt, range)
     || dateInRange(item.appointment?.start, range)
@@ -427,13 +403,9 @@ function buildSavPerformanceDashboard(now = new Date()) {
   )).length;
   const workshopLoad = activeCases.filter((item) => (
     item.flags?.received
-    && !item.flags?.delivered
-    && (!item.flags?.qualityApproved || isCaseBlocked(item) || !item.flags?.workCompleted)
+    && !item.flags?.invoiced
+    && (isCaseBlocked(item) || !item.flags?.workCompleted)
   )).length;
-  const qcLoad = activeCases.filter((item) => {
-    const qStatus = normalizeQualityStatus(item.receptionWorkflow?.qualityStatus);
-    return !item.flags?.delivered && (isDashboardQualityPending(item) || qStatus === "rejected" || qStatus === "rework");
-  }).length;
   const withoutNextAction = activeCases.filter((item) => caseWithoutScheduledNextAction(item, now)).length;
   const cycleHours = cases.filteredCases
     .map((item) => getCaseCycleHours(item, range))
@@ -458,18 +430,19 @@ function buildSavPerformanceDashboard(now = new Date()) {
       openCases,
       createdCases,
       receivedVehicles,
-      plannedDeliveries,
-      overdueDeliveries,
+      scheduledAppointments,
+      overdueWorkshopCases,
       blockedCases,
       blockedOver48h,
       blockedOver7d,
-      pendingAgreements,
-      pendingQualityControls,
-      qcRejectedCases,
-      deliverableToday,
+      pendingAgreements: 0,
+      pendingQualityControls: 0,
+      qcRejectedCases: 0,
+      deliverableToday: 0,
+      completedWorkCases,
       receptionLoad,
       workshopLoad,
-      qcLoad,
+      qcLoad: 0,
       humanLoadPercent,
       equipmentLoadPercent,
       liftLoadPercent,
@@ -567,27 +540,20 @@ function isDeliveryOverdue(item, now = new Date()) {
 }
 
 function caseHasPendingAgreement(item) {
-  const claims = normalizeRepairClaims(item?.claims || [], item).filter((claim) => claim.includeInPlanning !== false);
-  if (!claims.length) return !(item?.flags?.clientApproved && item?.flags?.expertApproved);
-  return claims.some((claim) => !claim.clientApproved || (!isClientOnlyRepairClaim(claim) && !claim.expertApproved));
+  return false;
 }
 
 function isDashboardQualityPending(item) {
-  if (!item || item.flags?.qualityApproved) return false;
-  const qualityStatus = normalizeQualityStatus(item.receptionWorkflow?.qualityStatus);
-  if (qualityStatus === "rework" || qualityStatus === "rejected") return true;
-  if (!item.flags?.workCompleted) return false;
-  return ["not_started", "in_progress"].includes(qualityStatus);
+  return false;
 }
 
 function caseWithoutScheduledNextAction(item, now = new Date()) {
   if (!item || isCaseBlocked(item) || isCaseOperationallyClosed(item)) return false;
-  if (caseHasPendingAgreement(item) || isDashboardQualityPending(item) || isDeliveryOverdue(item, now)) return false;
   const hasFutureBooking = state.bookings.some((booking) => {
     if (booking.caseId !== item.id || booking.type === "leave") return false;
     return (booking.segments || []).some((segment) => isValidDateValue(segment.end) && new Date(segment.end) >= now);
   });
-  const hasFutureAppointment = ["start", "delivery", "end"].some((field) => isValidDateValue(item.appointment?.[field]) && new Date(item.appointment[field]) >= now);
+  const hasFutureAppointment = ["start", "end"].some((field) => isValidDateValue(item.appointment?.[field]) && new Date(item.appointment[field]) >= now);
   return !hasFutureBooking && !hasFutureAppointment;
 }
 
@@ -729,9 +695,7 @@ function hasKnownLabor(item) {
 }
 
 function caseHasCompletedValidations(item) {
-  const workflowClaims = getWorkflowClaims(item);
-  if (!workflowClaims.length) return false;
-  return workflowClaims.every((claim) => claim.clientApproved && (isClientOnlyRepairClaim(claim) || claim.expertApproved));
+  return getWorkflowClaims(item).length > 0;
 }
 
 function getDeliveryDueState(item, now = new Date()) {
@@ -789,14 +753,6 @@ function getCaseNextAction(item) {
       reason: "La main-d'œuvre est connue mais aucun RDV ou créneau atelier n'est planifié.",
     };
   }
-  if (!caseHasCompletedValidations(item)) {
-    return {
-      code: "validate_customer_or_internal",
-      label: "Valider client / interne",
-      priority: "attention",
-      reason: "Les accords nécessaires ne sont pas encore complets.",
-    };
-  }
   if (!item.flags.received) {
     const start = item.appointment?.start ? new Date(item.appointment.start) : null;
     const due = start && !Number.isNaN(start.getTime()) && start <= new Date();
@@ -841,21 +797,15 @@ function getCaseNextAction(item) {
       reason: "Les travaux sont en cours.",
     };
   }
-  if (!item.flags.qualityApproved) {
+  if (!item.flags.invoiced) {
     return {
-      code: "quality_check",
-      label: "Contrôle qualité",
-      priority: "attention",
-      reason: "Les travaux sont terminés, le contrôle qualité reste à valider.",
+      code: "close_workshop",
+      label: "Clôturer atelier",
+      priority: "normal",
+      reason: "Les travaux sont terminés. Clôturez le dossier atelier.",
     };
   }
-  if (!item.flags.delivered) {
-    const deliveryState = getDeliveryDueState(item);
-    return deliveryState === "due" || deliveryState === "soon"
-      ? { code: "deliver_vehicle", label: "Livrer le véhicule", priority: deliveryState === "due" ? "urgent" : "attention", reason: "Le véhicule est prêt pour la livraison." }
-      : { code: "prepare_delivery", label: "Préparer livraison", priority: "normal", reason: "Le véhicule est contrôlé et attend la livraison." };
-  }
-  return { code: "done", label: "Terminé", priority: "normal", reason: "Le dossier est livré." };
+  return { code: "done", label: "Clôturé atelier", priority: "normal", reason: "Le dossier atelier est clôturé." };
 }
 
 function getCaseNextActionTab(actionCode) {
@@ -864,16 +814,13 @@ function getCaseNextActionTab(actionCode) {
     add_labor: "claims",
     schedule_appointment: "planning",
     receive_vehicle: "atelier",
-    validate_customer_or_internal: "claims",
     schedule_work: "planning",
     start_work: "atelier",
     resume_or_replan_work: "atelier",
     finish_work: "atelier",
-    quality_check: "livraison",
-    prepare_delivery: "livraison",
-    deliver_vehicle: "livraison",
+    close_workshop: "atelier",
     resolve_blocker: "claims",
-    done: "livraison",
+    done: "atelier",
   };
   return mapping[actionCode] || "claims";
 }
@@ -1011,8 +958,6 @@ const TODAY_GROUP_CONFIG = [
   { key: "toStart", label: "Travaux à démarrer" },
   { key: "inProgress", label: "Travaux en cours" },
   { key: "late", label: "Travaux en retard" },
-  { key: "quality", label: "Contrôle qualité à faire" },
-  { key: "deliveries", label: "Livraisons prévues" },
   { key: "blocked", label: "Dossiers bloqués" },
 ];
 
@@ -1217,9 +1162,7 @@ const WORKSHOP_FIELD_GROUP_CONFIG = [
   { key: "diagnostic", label: "En attente diagnostic", level: "warn" },
   { key: "parts", label: "En attente pièce", level: "warn" },
   { key: "repair", label: "En réparation", level: "info" },
-  { key: "workDoneQc", label: "Travail terminé / attente QC", level: "warn" },
-  { key: "qcReturn", label: "QC refusé / retour atelier", level: "danger" },
-  { key: "deliverableToday", label: "Livrable aujourd'hui", level: "success" },
+  { key: "workDone", label: "Travail terminé", level: "success" },
   { key: "blocked48", label: "Bloqué > 48h", level: "danger" },
   { key: "blocked7", label: "Bloqué > 7 jours", level: "danger" },
 ];
@@ -1229,7 +1172,6 @@ function buildWorkshopFieldGroups(now = new Date()) {
   (state.cases || [])
     .filter((item) => item && !item.deletedAt && !item.archivedAt && !item.flags?.delivered)
     .forEach((item) => {
-      const qStatus = normalizeQualityStatus(item.receptionWorkflow?.qualityStatus);
       const partsStatus = normalizePartsStatus(item.partsStatus);
       const blockerReason = normalizeBlockerReason(item.blockerReason);
       const primaryType = getCasePrimaryType(item);
@@ -1245,17 +1187,11 @@ function buildWorkshopFieldGroups(now = new Date()) {
       if (["waiting_parts", "blocked_parts"].includes(partsStatus) || blockerReason === "waiting_parts") {
         groups.parts.push(item);
       }
-      if (item.flags?.workStarted && !item.flags?.workCompleted && qStatus !== "rejected" && qStatus !== "rework") {
+      if (item.flags?.workStarted && !item.flags?.workCompleted) {
         groups.repair.push(item);
       }
-      if (item.flags?.workCompleted && !item.flags?.qualityApproved && !["rejected", "rework", "validated"].includes(qStatus)) {
-        groups.workDoneQc.push(item);
-      }
-      if (qStatus === "rejected" || qStatus === "rework") {
-        groups.qcReturn.push(item);
-      }
-      if (isCaseDeliverableToday(item, now)) {
-        groups.deliverableToday.push(item);
+      if (item.flags?.workCompleted && !item.flags?.invoiced) {
+        groups.workDone.push(item);
       }
       if (blockedHours >= 48) groups.blocked48.push(item);
       if (blockedHours >= 168) groups.blocked7.push(item);
@@ -1270,7 +1206,7 @@ function renderWorkshopFieldGroups(now = new Date()) {
       <div class="section-heading compact-heading">
         <div>
           <h2>Synthèse atelier terrain</h2>
-          <p>Diagnostic, pièces, réparation, QC et livrables du jour.</p>
+          <p>Diagnostic, pièces, réparation et clôtures atelier.</p>
         </div>
       </div>
       <div class="chief-summary-grid workshop-field-grid">
@@ -1503,7 +1439,6 @@ function buildTodayWorkshopGroups(now = new Date()) {
 function getTodayCaseEntries(item, action, now = new Date()) {
   const entries = [];
   const start = item.appointment?.start ? new Date(item.appointment.start) : null;
-  const delivery = item.appointment?.delivery ? new Date(item.appointment.delivery) : null;
   const bookings = getCaseBookings(item);
   const hasBookings = bookings.length > 0;
   const workingNow = item.flags.workStarted && !item.flags.workCompleted;
@@ -1522,12 +1457,6 @@ function getTodayCaseEntries(item, action, now = new Date()) {
   }
   if (isCaseLate(item, now)) {
     entries.push({ group: "late", risk: "urgent", timeLabel: "Retard" });
-  }
-  if (item.flags.workCompleted && !item.flags.qualityApproved) {
-    entries.push({ group: "quality", risk: "attention", timeLabel: "À contrôler" });
-  }
-  if (delivery && isSameBusinessDay(delivery, now) && item.flags.qualityApproved && !item.flags.delivered) {
-    entries.push({ group: "deliveries", risk: delivery <= now ? "urgent" : "normal", timeLabel: formatTime(delivery) });
   }
   if (!entries.length && action.priority !== "normal") {
     entries.push({ group: action.code === "resolve_blocker" ? "blocked" : "late", risk: action.priority, timeLabel: action.label });
@@ -1592,8 +1521,6 @@ function isSameBusinessDay(value, now = new Date()) {
 
 function isCaseLate(item, now = new Date()) {
   if (isCaseBlocked(item)) return false;
-  const delivery = item.appointment?.delivery ? new Date(item.appointment.delivery) : null;
-  if (delivery && !Number.isNaN(delivery.getTime()) && delivery < now && !item.flags.delivered) return true;
   return getCaseBookings(item).some((booking) => {
     if (["completed"].includes(getBookingOperationalStatus(booking))) return false;
     const end = booking.end ? new Date(booking.end) : null;
@@ -1693,7 +1620,7 @@ function buildPilotageAlerts(now = new Date(), options = {}) {
   const sourceCases = Array.isArray(options.cases) ? options.cases : getSavDashboardCases(getSavDashboardRange(now)).periodCases.filter(isSavDashboardActiveCase);
   const limit = Number(options.limit || 8);
   return sourceCases
-    .filter((item) => item && item.flags && !item.flags.delivered)
+    .filter((item) => item && item.flags && !isCaseOperationallyClosed(item))
     .flatMap((item) => caseOperationalAlerts(item, now))
     .sort((a, b) => a.priority - b.priority || new Date(a.when || 0) - new Date(b.when || 0))
     .slice(0, limit);
@@ -1704,8 +1631,6 @@ function caseOperationalAlerts(item, now = new Date()) {
   const alerts = [];
   const flags = item.flags || {};
   const appointment = item.appointment || {};
-  const rw = item.receptionWorkflow || {};
-
   const label = getDashboardCaseReference(item);
   const statusLabel = statusLabels[getCaseStatus(item)] || "Statut à vérifier";
   if (isCaseBlocked(item)) {
@@ -1716,27 +1641,6 @@ function caseOperationalAlerts(item, now = new Date()) {
       title: 'Dossier bloqué',
       details: `${label} · ${statusLabel} · ${getDashboardBlockerLabel(item)}`,
       when: item.updatedAt || item.createdAt,
-    });
-  }
-  const qualityStatus = normalizeQualityStatus(rw.qualityStatus);
-  if (qualityStatus === "rejected") {
-    alerts.push({
-      caseId: item.id,
-      level: "danger",
-      priority: 1,
-      title: "QC refusé",
-      details: `${label} · ${rw.qualityReturnReason || "Motif à traiter"}`,
-      when: rw.qualityReviewedAt || item.updatedAt || item.createdAt,
-    });
-  }
-  if (qualityStatus === "rework") {
-    alerts.push({
-      caseId: item.id,
-      level: "warn",
-      priority: 2,
-      title: "Retour atelier / retravail",
-      details: `${label} · Reprise à suivre avant revalidation QC`,
-      when: rw.qualityReworkStartedAt || item.updatedAt || item.createdAt,
     });
   }
   if (appointment.start && !flags.received) {
@@ -1753,20 +1657,6 @@ function caseOperationalAlerts(item, now = new Date()) {
       });
     }
   }
-  if (appointment.delivery && !flags.delivered) {
-    const delivery = new Date(appointment.delivery);
-    const minutesToDelivery = diffMinutes(now, delivery);
-    if (minutesToDelivery <= DELIVERY_ALERT_HOURS * 60 && !flags.qualityApproved) {
-      alerts.push({
-        caseId: item.id,
-        level: minutesToDelivery < 0 ? 'danger' : 'warn',
-        priority: minutesToDelivery < 0 ? 2 : 3,
-        title: minutesToDelivery < 0 ? 'Livraison dépassée' : 'Livraison proche',
-        details: `${label} · livraison estimée ${formatDateTime(delivery)}`,
-        when: appointment.delivery,
-      });
-    }
-  }
   const bookings = Array.isArray(state?.bookings) ? state.bookings : [];
   if (flags.received && !flags.workStarted && !bookings.some((booking) => booking.caseId === item.id)) {
     alerts.push({
@@ -1778,24 +1668,14 @@ function caseOperationalAlerts(item, now = new Date()) {
       when: item.createdAt,
     });
   }
-  if (flags.workCompleted && !flags.qualityApproved && isCaseQualityChecklistComplete(item)) {
+  if (flags.workCompleted && !flags.invoiced) {
     alerts.push({
       caseId: item.id,
       level: 'info',
       priority: 5,
-      title: 'Contrôle qualité prêt',
-      details: `${label} · checklist prête`,
-      when: item.createdAt,
-    });
-  }
-  if (caseHasPendingAgreement(item)) {
-    alerts.push({
-      caseId: item.id,
-      level: 'warn',
-      priority: 6,
-      title: 'Accord en attente',
-      details: `${label} · client/expert`,
-      when: item.createdAt,
+      title: 'Clôture atelier à finaliser',
+      details: `${label} · travaux terminés`,
+      when: item.updatedAt || item.createdAt,
     });
   }
   if (caseWithoutScheduledNextAction(item, now)) {
@@ -1915,8 +1795,7 @@ function renderClaims(root, item) {
 
 
 function shouldClearPlanningAfterClaimFieldChange(field, nextValue) {
-  return ['includeInPlanning', 'status'].includes(field)
-    || ((field === 'expertApproved' || field === 'clientApproved') && !nextValue);
+  return ['includeInPlanning', 'status'].includes(field);
 }
 
 
@@ -1933,8 +1812,6 @@ function validateClaimFieldChange(item, claim, field, nextValue) {
     if (!claimHasLaborEstimate(claim)) issues.push('Importer ou saisir la main-d’œuvre de l’ordre avant l’accord client/interne.');
   }
   if (field === 'status' && ['approved', 'planned', 'done'].includes(nextValue)) {
-    if (!clientOnly && !claim.expertApproved) issues.push('Le statut Accepté/Planifié/Terminé exige l’accord expert pour les ordres assurance.');
-    if (!claim.clientApproved) issues.push('Le statut Accepté/Planifié/Terminé exige une validation client/interne.');
     if (!claimHasLaborEstimate(claim)) issues.push('Le statut Accepté/Planifié/Terminé exige de la main-d’œuvre.');
   }
   return issues;
@@ -1942,21 +1819,8 @@ function validateClaimFieldChange(item, claim, field, nextValue) {
 
 function synchronizeClaimStatus(claim, changedField = '') {
   if (claim.status === 'refused') return;
-  if (isClientOnlyRepairClaim(claim)) {
-    claim.expertApproved = true;
-    claim.status = claim.clientApproved ? 'approved' : 'client_pending';
-    return;
-  }
-  if (claim.clientApproved && claim.expertApproved) {
-    if (claim.status === 'draft' || claim.status === 'expert_pending' || claim.status === 'client_pending') claim.status = 'approved';
-    return;
-  }
-  if (claim.expertApproved && !claim.clientApproved) {
-    claim.status = 'client_pending';
-    return;
-  }
-  if (!claim.expertApproved && (claim.status === 'approved' || claim.status === 'planned' || claim.status === 'done' || changedField === 'expertApproved')) {
-    claim.status = 'expert_pending';
+  if (claimHasLaborEstimate(claim) && (claim.status === 'draft' || claim.status === 'expert_pending' || claim.status === 'client_pending')) {
+    claim.status = 'approved';
   }
 }
 
@@ -2006,7 +1870,6 @@ function renderClaimCard(claim, index) {
   const total = totalSourceLines.reduce((sum, line) => sum + Number(line.laborHours || 0), 0);
   const laborDetailsOpen = totalSourceLines.length === 0 || total <= 0 || totalSourceLines.some((line) => line.manual);
   const defaultPhase = getDefaultClaimLaborPhase(claim.type);
-  const clientApprovalLabel = isClientOnlyRepairClaim(claim) ? "Validation client/interne" : "Accord client";
   const lineRows = totalSourceLines.length ? totalSourceLines.map((line) => `
     <li>
       <strong>${escapeHtml(line.operation || line.rawText || 'Ligne main-d’œuvre')}</strong>
@@ -2015,7 +1878,7 @@ function renderClaimCard(claim, index) {
     </li>
   `).join('') : `<li class="muted">Aucune main-d’œuvre saisie ou importée pour cet ordre.</li>`;
   const partRows = partsLines.length ? partsLines.slice(0, 20).map((part) => `
-    <li><strong>${escapeHtml(part.designation || 'Article devis')}</strong><span>Qté ${formatLocalizedDecimal(part.quantity || 0)}${part.amount ? ` · ${formatLocalizedDecimal(part.amount)}` : ''}</span></li>
+    <li><strong>${escapeHtml(part.designation || 'Article devis')}</strong><span>Qté ${formatLocalizedDecimal(part.quantity || 0)}</span></li>
   `).join('') : `<li class="muted">Aucune pièce/article importé.</li>`;
   return `
     <article class="claim-card">
@@ -2039,8 +1902,6 @@ function renderClaimCard(claim, index) {
         </select></label>
       </div>
       <div class="approval-row">
-        ${isClientOnlyRepairClaim(claim) ? `<span class="tag ok">Expert non requis</span>` : `<label class="check-card"><input type="checkbox" data-claim-id="${escapeHtml(claim.id)}" data-claim-field="expertApproved" ${claim.expertApproved ? 'checked' : ''}/><span>Accord expert</span></label>`}
-        <label class="check-card"><input type="checkbox" data-claim-id="${escapeHtml(claim.id)}" data-claim-field="clientApproved" ${claim.clientApproved ? 'checked' : ''}/><span>${clientApprovalLabel}</span></label>
         <label class="check-card"><input type="checkbox" data-claim-id="${escapeHtml(claim.id)}" data-claim-field="includeInPlanning" ${claim.includeInPlanning !== false ? 'checked' : ''}/><span>Inclure planning</span></label>
         <span class="tag ${total > 0 ? 'ok' : 'warn'}">${formatLocalizedDecimal(total)} h MO</span>
         <button class="ghost-button danger-button" type="button" data-claim-delete="${escapeHtml(claim.id)}">Supprimer</button>
@@ -2303,7 +2164,7 @@ function renderSupplements(root, item) {
               </div>
             </div>
             <p>${escapeHtml(supplement.reason || 'Aucun motif renseigné.')}</p>
-            <p class="muted">Ordre lié : ${escapeHtml(getSupplementClaimLabel(item, supplement))} · Zone : ${escapeHtml(supplement.vehicleArea || '-')} · Expert : ${supplement.expertApproved ? 'OK' : 'en attente'} · Client : ${supplement.clientApproved ? 'OK' : 'en attente'}${supplement.integratedAt ? ` · intégré le ${formatDateTime(supplement.integratedAt)}` : ''}</p>
+            <p class="muted">Ordre lié : ${escapeHtml(getSupplementClaimLabel(item, supplement))} · Zone : ${escapeHtml(supplement.vehicleArea || '-')}${supplement.integratedAt ? ` · intégré le ${formatDateTime(supplement.integratedAt)}` : ''}</p>
             <div class="supplement-columns">
               <div><h3>Pièces complémentaires</h3><ul>${partRows}</ul></div>
               <div><h3>Main-d’œuvre complémentaire</h3><ul>${laborRows}</ul></div>
@@ -2433,11 +2294,6 @@ async function integrateSupplementDurations(item, supplementId) {
     notifyUser('Ce complément est déjà intégré aux durées atelier.', 'warn');
     return;
   }
-  let confirmed = true;
-  if (!supplement.expertApproved && !supplement.clientApproved) {
-    confirmed = await showConfirmModal('Ce complément n’a pas encore d’accord expert/client. Intégrer quand même les durées au planning ?');
-  }
-  if (!confirmed) return;
   let total = 0;
   (supplement.laborLines || []).forEach((line) => {
     if (!DURATIONS.some(([key]) => key === line.phase)) return;
@@ -2480,8 +2336,8 @@ function renderKanban() {
     { key: "approvals", label: "Accords", statuses: ["approvals"] },
     { key: "appointment", label: "RDV", statuses: ["appointment", "appointmentScheduled", "workScheduled", "noShow"] },
     { key: "work", label: "En travaux", statuses: ["work"] },
-    { key: "quality", label: "Qualité", statuses: ["quality", "qualityRejected", "qualityRework"] },
-    { key: "delivered", label: "Livré", statuses: ["delivered"] },
+    { key: "quality", label: "Travaux terminés", statuses: ["quality", "qualityRejected", "qualityRework"] },
+    { key: "delivered", label: "Clôturé atelier", statuses: ["delivered", "invoiced"] },
   ];
   const dashboardCases = getSavDashboardCases(getSavDashboardRange()).periodCases;
   board.innerHTML = columns
@@ -2500,7 +2356,7 @@ function renderKanban() {
                     .map(
                       (item) => {
                         const nextAction = getCaseNextAction(item);
-                        const deliveryLine = item.appointment?.delivery ? ` · Livraison ${formatDate(item.appointment.delivery)}` : "";
+                        const deliveryLine = item.appointment?.delivery ? ` · Fin ${formatDate(item.appointment.delivery)}` : "";
                         return `
                         <button class="kanban-card ${isCaseBlocked(item) ? "blocked-case" : ""}" type="button" data-kanban-case="${escapeAttr(item.id)}">
                           <strong>${escapeHtml(getDashboardCaseReference(item))}</strong>
@@ -2750,9 +2606,9 @@ function setupCaseDetailTabs(root, item) {
   const user = getCurrentUser();
   const role = user?.role || "readonly";
 
-  let allowedSubTabs = ["claims", "photos", "planning", "atelier", "livraison"];
+  let allowedSubTabs = ["claims", "photos", "planning", "atelier"];
   if (role === "qualite") {
-    allowedSubTabs = ["claims", "photos", "livraison"];
+    allowedSubTabs = ["claims", "photos", "atelier"];
   } else if (role === "technicien") {
     allowedSubTabs = [];
   }
@@ -2828,10 +2684,8 @@ function setupCaseDetailTabs(root, item) {
 function getTabForAction(action) {
   if (action === "claim") return "claims";
   if (action === "labor") return "claims";
-  if (action === "expertApproved" || action === "clientApproved") return "claims";
   if (action === "appointment") return "planning";
-  if (action === "received" || action === "workStarted" || action === "workCompleted") return "atelier";
-  if (action === "qualityApproved" || action === "delivered" || action === "invoiced") return "livraison";
+  if (action === "received" || action === "workStarted" || action === "workCompleted" || action === "invoiced") return "atelier";
   return "claims";
 }
 
@@ -2939,7 +2793,7 @@ function renderCaseSummary(root, item) {
   setText(root, "summary-vehicle", item.vehicle || "Véhicule non renseigné");
   setText(root, "summary-vehicle-extra", `${item.plate || "Sans immatriculation"} · ${item.vin || "VIN non renseigné"}`);
   setText(root, "summary-planning", item.appointment ? formatDateTime(item.appointment.start) : "RDV non planifié");
-  setText(root, "summary-delivery", item.appointment ? `Livraison estimée : ${formatDateTime(item.appointment.delivery)}` : "Calculez un RDV pour obtenir la livraison estimée.");
+  setText(root, "summary-delivery", item.appointment ? `Fin estimée : ${formatDateTime(item.appointment.delivery)}` : "Calculez un RDV pour obtenir une fin estimée.");
 
   const workflowClaims = getWorkflowClaims(item);
   const primaryClaim = workflowClaims[0] || item.claims?.[0] || null;
@@ -2953,9 +2807,8 @@ function renderCaseSummary(root, item) {
   setText(root, "summary-order-extra", orderNumbers || "N° OR / N° devis non renseigné");
 
   setText(root, "summary-photos", `${item.photos.length} photo${item.photos.length > 1 ? "s" : ""}`);
-  const hasInsuranceClaim = workflowClaims.some((claim) => !isClientOnlyRepairClaim(claim));
-  setText(root, "summary-expert", hasInsuranceClaim ? (item.flags.expertApproved ? "Accord expert validé" : "Accord expert à traiter") : "Expert non requis");
-  setText(root, "summary-quality", item.flags.qualityApproved ? "Qualité validée" : `${assignments.length} affectation${assignments.length > 1 ? "s" : ""}`);
+  setText(root, "summary-expert", `${workflowClaims.length} intervention${workflowClaims.length > 1 ? "s" : ""}`);
+  setText(root, "summary-quality", `${assignments.length} affectation${assignments.length > 1 ? "s" : ""}`);
 
   const nextButton = $(`[data-next-action-tab]`, root);
   if (nextButton) {
@@ -3087,21 +2940,15 @@ function updateCaseHeader(root, item) {
 }
 
 function getWorkflowStepsForCase(item) {
-  const workflowClaims = getWorkflowClaims(item);
-  const hasInsurance = workflowClaims.some((claim) => !isClientOnlyRepairClaim(claim));
-  if (!workflowClaims.length || hasInsurance) return WORKFLOW;
   return [
     ["created", "Réception à compléter"],
-    ["clientApproved", "Validation client/interne"],
     ["appointment", "RDV fixé"],
     ["vehiclePending", "En attente réception"],
     ["received", "Véhicule reçu"],
     ["assigned", "Travaux planifiés"],
     ["workStarted", "Travaux en cours"],
     ["workCompleted", "Travaux terminés"],
-    ["qualityApproved", "Contrôle qualité"],
-    ["delivered", "Livraison"],
-    ["invoiced", "Dossier facturé"],
+    ["invoiced", "Clôture atelier"],
   ];
 }
 
@@ -3126,18 +2973,14 @@ const CASE_STAGE_FLOW = [
   ["appointment", "RDV"],
   ["received", "Véhicule reçu"],
   ["labor", "Main-d'œuvre"],
-  ["validation", "Validation"],
   ["planned", "Planifié"],
   ["work", "En travaux"],
-  ["quality", "Qualité"],
-  ["readyDelivery", "Prêt livraison"],
-  ["delivered", "Livré"],
+  ["closed", "Clôturé"],
 ];
 
 function getCaseStageFlow(item) {
   const values = getWorkflowValues(item);
   const nextAction = getCaseNextAction(item);
-  const hasValidation = getWorkflowClaims(item).length > 0;
   const hasLabor = hasKnownLabor(item);
   const hasPlanning = hasCaseBookings(item);
   const done = {
@@ -3145,36 +2988,28 @@ function getCaseStageFlow(item) {
     appointment: Boolean(item.appointment),
     received: Boolean(item.flags.received),
     labor: hasLabor,
-    validation: hasValidation ? caseHasCompletedValidations(item) : false,
     planned: hasPlanning,
     work: Boolean(item.flags.workCompleted),
-    quality: Boolean(item.flags.qualityApproved),
-    readyDelivery: Boolean(item.flags.qualityApproved),
-    delivered: Boolean(item.flags.delivered),
+    closed: Boolean(item.flags.invoiced || item.flags.delivered),
   };
   const currentByAction = {
     complete_vehicle_identity: "opened",
     add_labor: "labor",
     schedule_appointment: "appointment",
     receive_vehicle: "received",
-    validate_customer_or_internal: "validation",
     schedule_work: "planned",
     start_work: "work",
     resume_or_replan_work: "work",
     finish_work: "work",
-    quality_check: "quality",
-    prepare_delivery: "readyDelivery",
-    deliver_vehicle: "delivered",
-    resolve_blocker: hasPlanning || values.workStarted ? "work" : hasLabor ? "validation" : "labor",
-    done: "delivered",
+    close_workshop: "closed",
+    resolve_blocker: hasPlanning || values.workStarted ? "work" : "labor",
+    done: "closed",
   };
   const currentKey = currentByAction[nextAction.code] || "opened";
   return CASE_STAGE_FLOW.map(([key, label]) => {
     let stateName = done[key] ? "done" : key === currentKey ? "current" : "todo";
-    if (key === "validation" && !hasValidation) stateName = "na";
     if (nextAction.code === "resolve_blocker" && key === currentKey) stateName = "blocked";
     if (key === "work" && item.flags.workStarted && !item.flags.workCompleted && stateName !== "blocked") stateName = "current";
-    if (key === "readyDelivery" && item.flags.qualityApproved && !item.flags.delivered) stateName = "current";
     return { key, label, state: stateName };
   });
 }
@@ -3328,7 +3163,7 @@ function refreshCaseActionAvailability(root, item) {
 
 
 function isProductionLocked(item) {
-  return Boolean(item?.flags?.workStarted || item?.flags?.workCompleted || item?.flags?.qualityApproved || item?.flags?.delivered);
+  return Boolean(item?.flags?.workStarted || item?.flags?.workCompleted || item?.flags?.qualityApproved || item?.flags?.delivered || item?.flags?.invoiced);
 }
 
 function applyProductionLock(root, item) {
@@ -3338,7 +3173,7 @@ function applyProductionLock(root, item) {
 
   const isInvoiced = Boolean(item?.flags?.invoiced);
   const lockedPanels = isInvoiced
-    ? ["claims", "photos", "planning", "atelier", "livraison"]
+    ? ["claims", "photos", "planning", "atelier"]
     : ["claims", "planning"];
 
   lockedPanels.forEach((panelName) => {
@@ -3346,7 +3181,7 @@ function applyProductionLock(root, item) {
     if (!panel) return;
     panel.classList.add("production-locked-panel");
     disablePanelControls(panel);
-    prependLockNotice(panel, isInvoiced ? "Dossier facturé et clôturé : cette section est figée en lecture seule." : "Dossier en travaux : les données de base sont figées. Utilisez les actions de tâche du planning pour démarrer, terminer, mettre en pause ou reporter un reliquat.");
+    prependLockNotice(panel, isInvoiced ? "Dossier atelier clôturé : cette section est figée en lecture seule." : "Dossier en travaux : les données de base sont figées. Utilisez les actions de tâche du planning pour démarrer, terminer, mettre en pause ou reporter un reliquat.");
   });
 
   const planningPanel = root.querySelector(`[data-case-panel='planning']`);
@@ -3465,14 +3300,10 @@ function getNextWorkflowAction(item) {
   const claimsToCheck = getWorkflowClaims(item);
   if (!claimsToCheck.length) return "claim";
   if (claimsToCheck.some((claim) => !claimHasLaborEstimate(claim))) return "labor";
-  if (claimsToCheck.some((claim) => !isClientOnlyRepairClaim(claim) && !claim.expertApproved)) return "expertApproved";
   if (!item.appointment || appointmentNeedsReschedule(item)) return "appointment";
-  if (claimsToCheck.some((claim) => !claim.clientApproved)) return "clientApproved";
   if (!item.flags.received) return "received";
   if (!item.flags.workStarted) return "workStarted";
   if (!item.flags.workCompleted) return "workCompleted";
-  if (!item.flags.qualityApproved) return "qualityApproved";
-  if (!item.flags.delivered) return "delivered";
   if (!item.flags.invoiced) return "invoiced";
   return null;
 }
@@ -3492,7 +3323,7 @@ function getBusinessRuleIssues(item, action) {
     return issues;
   }
 
-  if (isCaseBlocked(item) && !["claim", "labor", "expertApproved", "clientApproved"].includes(action)) {
+  if (isCaseBlocked(item) && !["claim", "labor"].includes(action)) {
     issues.push(`Résoudre le blocage avant de continuer : ${getCaseBlockerLabel(item) || "dossier bloqué"}.`);
     return issues;
   }
@@ -3528,7 +3359,6 @@ function getBusinessRuleIssues(item, action) {
 
   if (action === "workStarted") {
     if (!item.flags.received) issues.push("Confirmer la réception physique du véhicule avant de démarrer les travaux.");
-    if (workflowClaims.some((claim) => !claim.clientApproved)) issues.push("Enregistrer la validation client/interne avant de démarrer les travaux.");
     if (!hasAssignments) issues.push("Aucune affectation atelier n'est planifiée pour ce dossier.");
   }
 
@@ -3556,14 +3386,8 @@ function getBusinessRuleIssues(item, action) {
   }
 
   if (action === "invoiced") {
-    if (!item.flags.qualityApproved) issues.push("Le contrôle qualité doit être validé.");
-    if (!item.flags.delivered) issues.push("Livrer le véhicule avant de facturer le dossier.");
-    if (workflowClaims.some((claim) => !claim.clientApproved)) {
-      issues.push("La validation client/interne doit être enregistrée.");
-    }
-    if (workflowClaims.some((claim) => !isClientOnlyRepairClaim(claim) && !claim.expertApproved)) {
-      issues.push("L'accord expert sur les ordres assurance doit être validé.");
-    }
+    if (!item.flags.workStarted) issues.push("Démarrer les travaux avant de clôturer le dossier atelier.");
+    if (!item.flags.workCompleted) issues.push("Terminer les travaux avant de clôturer le dossier atelier.");
     if (isCaseBlocked(item)) {
       issues.push("Le dossier ne doit pas présenter de blocage actif.");
     }
@@ -3582,8 +3406,6 @@ function getBusinessRuleWarnings(item, action) {
   const workflowClaims = getWorkflowClaims(item);
 
   if (action === "appointment") {
-    if (workflowClaims.some((claim) => !isClientOnlyRepairClaim(claim) && !claim.expertApproved)) warnings.push("Accord expert manquant : ce RDV sera prévisionnel.");
-    if (workflowClaims.some((claim) => !claim.clientApproved)) warnings.push("Validation client/interne manquante : ce RDV sera prévisionnel.");
   }
 
   if (action === "received") {
@@ -3883,7 +3705,7 @@ function renderValidatedAppointmentPlan(root, item) {
       </div>
       <div class="validated-plan-summary">
         <strong>RDV ${formatDateTime(item.appointment.start)}</strong>
-        <span>Livraison estimée ${formatDateTime(item.appointment.delivery)}</span>
+        <span>Fin estimée ${formatDateTime(item.appointment.delivery)}</span>
       </div>
     </div>
       <div class="validated-plan-table">
@@ -4400,12 +4222,12 @@ function renderExpertEstimate(root, item) {
           `,
         )
         .join("")
-    : `<div class="empty-inline">Ajoutez les lignes MO du devis expert confirmé.</div>`;
+    : `<div class="empty-inline">Ajoutez les lignes MO du devis importé.</div>`;
 
   target.innerHTML = `
     <div class="expert-estimate-head">
       <label>
-        Référence devis expert
+        Référence devis importé
         <input type="text" data-estimate-reference value="${escapeAttr(estimate.reference)}" placeholder="Ex. DEV-EXPERT-2026-001" />
       </label>
       <div class="expert-estimate-status">
@@ -4413,7 +4235,7 @@ function renderExpertEstimate(root, item) {
           ${estimate.confirmed ? `Confirmé le ${formatDate(estimate.confirmedAt || new Date())}` : "En attente confirmation"}
         </span>
         <button class="primary-button" type="button" data-confirm-expert-estimate ${total <= 0 ? "disabled" : ""}>
-          Confirmer devis expert
+          Confirmer devis importé
         </button>
       </div>
     </div>
@@ -4459,7 +4281,7 @@ function renderExpertEstimate(root, item) {
     estimate.confirmed = false;
     estimate.confirmedAt = "";
     generatedProposals[item.id] = null;
-    addHistory(item, "expert.estimate.line_added", "Ligne MO devis expert ajoutée", `${getDurationLabel(phase)}: ${formatLocalizedDecimal(laborHours)} h`);
+    addHistory(item, "expert.estimate.line_added", "Ligne MO devis importé ajoutée", `${getDurationLabel(phase)}: ${formatLocalizedDecimal(laborHours)} h`);
     saveState();
     renderCaseDetail();
   });
@@ -4471,7 +4293,7 @@ function renderExpertEstimate(root, item) {
       estimate.confirmed = false;
       estimate.confirmedAt = "";
       generatedProposals[item.id] = null;
-      if (line) addHistory(item, "expert.estimate.line_removed", "Ligne MO devis expert supprimée", line.operation || getDurationLabel(line.phase));
+      if (line) addHistory(item, "expert.estimate.line_removed", "Ligne MO devis importé supprimée", line.operation || getDurationLabel(line.phase));
       saveState();
       renderCaseDetail();
     });
@@ -4634,7 +4456,7 @@ function renderProposals(root, item) {
       <div>
         <span class="tag ok">Premier RDV disponible</span>
         <strong>RDV ${formatDateTime(proposal.start)}</strong>
-        <p class="muted">Livraison estimée ${formatDateTime(proposal.delivery)}</p>
+        <p class="muted">Fin estimée ${formatDateTime(proposal.delivery)}</p>
       </div>
       <ol>
         ${proposal.steps.map((step) => `<li>${step.title}: ${formatDateTime(step.start)} → ${formatDateTime(step.end)}</li>`).join("")}
@@ -4657,7 +4479,7 @@ function renderProposals(root, item) {
                   (option, index) => `
                     <button class="appointment-date-card" type="button" data-accept-date-proposal="${index}">
                       <strong>${longDate(option.date)}</strong>
-                      <span>Début ${formatTime(option.proposal.start)} · Livraison ${formatDateTime(option.proposal.delivery)}</span>
+                      <span>Début ${formatTime(option.proposal.start)} · Fin ${formatDateTime(option.proposal.delivery)}</span>
                     </button>
                   `,
                 )
@@ -4689,10 +4511,11 @@ function normalizeAppointmentOptions(value) {
 function renderAssignments(root, item) {
   const target = $("[data-field='assignments']", root);
   const delivery = $("[data-field='delivery-estimate']", root);
+  if (!target) return;
   if (appointmentNeedsReschedule(item)) {
-    delivery.textContent = item.appointmentStatus === "no_show" ? "RDV manqué : report nécessaire" : "Report RDV en attente";
+    if (delivery) delivery.textContent = item.appointmentStatus === "no_show" ? "RDV manqué : report nécessaire" : "Report RDV en attente";
   } else {
-    delivery.textContent = item.appointment ? `Livraison estimée: ${formatDateTime(item.appointment.delivery)}` : "Livraison non planifiée";
+    if (delivery) delivery.textContent = item.appointment ? `Fin estimée: ${formatDateTime(item.appointment.delivery)}` : "Fin non planifiée";
   }
   const assignmentRows = typeof getCaseBusinessTaskRows === "function"
     ? getCaseBusinessTaskRows(item)
@@ -4739,6 +4562,7 @@ function renderAssignments(root, item) {
 
 function renderQualityChecklist(root, item) {
   const target = $("[data-field='quality-checklist']", root);
+  if (!target) return;
   target.innerHTML = `
     <div class="section-heading compact-heading">
       <h2>Checklist qualité</h2>

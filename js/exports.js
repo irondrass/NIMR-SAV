@@ -155,7 +155,11 @@ async function exportCaseFolderZip(item, { clientOnly = false } = {}) {
     addPdf("00_Fiche_reception_vehicule", buildReceptionPdfLines(item));
     addPdf("01_Devis_initial", buildEstimatePdfLines(item));
     addPdf("02_Devis_expert_confirme", buildConfirmedExpertEstimatePdfLines(item));
+    addPdf("03_Confirmation_expert", buildExpertPdfLines(item));
+    addPdf("04_Confirmation_client", buildClientPdfLines(item));
     addPdf("05_Affectations_planning", buildPlanningPdfLines(item));
+    addPdf("06_Controle_qualite", buildQualityPdfLines(item));
+    addPdf("07_PV_restitution_client", buildDeliveryPdfLines(item));
     if (!clientOnly) {
       addPdf("08_Logs_dossier", buildLogsPdfLines(item));
       files.push({ path: `${folder}/dossier.json`, data: new TextEncoder().encode(JSON.stringify(item, null, 2)), type: "application/json" });
@@ -207,7 +211,7 @@ function buildClaimPdfLines(item, claim) {
     '',
     'PIÈCES / ARTICLES IMPORTÉS',
     ...((claim.estimate?.parts || []).length
-      ? claim.estimate.parts.map((part) => `${part.designation || 'Article'} - Qté ${formatLocalizedDecimal(part.quantity || 0)}`)
+      ? claim.estimate.parts.map((part) => `${part.designation || 'Article'} - Qté ${formatLocalizedDecimal(part.quantity || 0)} - PU ${part.unitPrice ? formatLocalizedDecimal(part.unitPrice) : '-'} - Montant ${part.amount ? formatLocalizedDecimal(part.amount) : '-'}`)
       : ['Aucune pièce importée.']),
   ];
 }
@@ -230,7 +234,7 @@ async function deleteActiveCase(item) {
   try {
     addAuditLog("case.deleted", "Dossier supprimé", `${item.clientName || "Client"} - ${item.plate || item.vin || item.id}`, { item });
     await Promise.all((item.photos || []).map((photo) => deletePhotoRecord(photo.id).catch(() => null)));
-
+    
     // Nettoyer les documents associés dans IndexedDB
     const docsToDelete = [];
     if (item.expertEstimate?.sourceFile?.id) {
@@ -251,7 +255,7 @@ async function deleteActiveCase(item) {
     if (activeCaseId === item.id) activeCaseId = state.cases[0]?.id || null;
     delete generatedProposals[item.id];
     delete estimateImportPreviews[item.id];
-
+    
     // Déclencher un nettoyage des orphelins en arrière-plan
     if (typeof cleanupOrphanedStorage === "function") {
       cleanupOrphanedStorage().catch(() => null);
@@ -504,6 +508,8 @@ function buildClaimEstimatePartHtmlRows(item) {
       <td>${escapeHtml(part.claimLabel)}</td>
       <td>${escapeHtml(part.designation || '-')}</td>
       <td class="num">${formatLocalizedDecimal(part.quantity || 0)}</td>
+      <td class="num">${part.unitPrice ? formatLocalizedDecimal(part.unitPrice) : '-'}</td>
+      <td class="num">${part.amount ? formatLocalizedDecimal(part.amount) : '-'}</td>
     </tr>
   `).join('');
 }
@@ -620,36 +626,47 @@ function buildPlanningPdfLines(item) {
 function buildQualityPdfLines(item) {
   const checklist = getQualityChecklistForCase(item);
   return [
-    ...buildCommonPdfHeader(item, "VÉRIFICATION FINALE ATELIER", "Document interne atelier"),
+    ...buildCommonPdfHeader(item, "CONTRÔLE QUALITÉ", "Document qualité"),
     `Type d'intervention: ${getInterventionTypeLabelForPrint(item)}`,
-    `Responsable: ______________________________`,
-    `Date/heure vérification: ______________________________`,
+    `Contrôleur: ______________________________`,
+    `Date/heure contrôle: ______________________________`,
     "",
     ...checklist.map((label) => `${item.qualityChecklist?.[label] ? "[OK]" : "[  ]"} ${label}`),
     "",
-    `Vérification finale atelier: ______________________________`,
-    `Anomalie constatée: ______________________________`,
+    `Contrôle qualité validé: ${item.flags.qualityApproved ? "Oui" : "Non"}`,
+    `Résultat: [  ] Accepté   [  ] Refusé`,
+    `Défaut constaté: ______________________________`,
     `Action corrective: ______________________________`,
+    `Recontrôle nécessaire: [  ] Oui   [  ] Non`,
     "",
+    "Signature qualité: ______________________________",
     "Signature chef atelier: ______________________________",
   ];
 }
 
 function buildDeliveryPdfLines(item) {
   return [
-    ...buildCommonPdfHeader(item, "CLÔTURE ATELIER", "Document interne atelier"),
-    `Date/heure clôture: ______________________________`,
+    ...buildCommonPdfHeader(item, "PV DE RESTITUTION VÉHICULE", "Document client"),
+    `Date/heure livraison: ______________________________`,
+    `Kilométrage sortie: ______________________________ km`,
+    `Véhicule reçu: ${item.flags.received ? "Oui" : "Non"}`,
     `Travaux démarrés: ${item.flags.workStarted ? "Oui" : "Non"}`,
     `Travaux terminés: ${item.flags.workCompleted ? "Oui" : "Non"}`,
-    `Dossier clôturé atelier: ${item.flags.atelierClosed ? "Oui" : "Non"}`,
+    `Contrôle qualité validé: ${item.flags.qualityApproved ? "Oui" : "Non"}`,
+    `Livraison effectuée: ${item.flags.delivered ? "Oui" : "Non"}`,
     `Photos après réparation: ${getPhotoCountByCategory(item, "after") ? "Oui" : "Non"} (${getPhotoCountByCategory(item, "after")})`,
     "",
     "Résumé travaux réalisés:",
     item.damageNotes || "À compléter",
     "",
-    "Observations atelier: ______________________________",
+    "Réserves client: ______________________________",
+    "Documents remis: [  ] Facture   [  ] Carte grise   [  ] Rapport contrôle",
+    "Clés / accessoires remis: ______________________________",
     "",
-    "Signature chef atelier: ______________________________",
+    "Le véhicule est restitué après contrôle qualité, sous réserve des observations mentionnées ci-dessus.",
+    "",
+    "Signature client: ______________________________",
+    "Signature réception: ______________________________",
   ];
 }
 
@@ -923,8 +940,8 @@ function printRepairOrder(item) {
         <section class="avoid-break">
           <h2>Pièces / articles importés du devis</h2>
           <table>
-            <thead><tr><th>Ordre</th><th>Désignation</th><th>Qté</th></tr></thead>
-            <tbody>${partRows || `<tr><td colspan="3">Aucune pièce ou article importé depuis le devis.</td></tr>`}</tbody>
+            <thead><tr><th>Ordre</th><th>Désignation</th><th>Qté</th><th>PU</th><th>Montant</th></tr></thead>
+            <tbody>${partRows || `<tr><td colspan="5">Aucune pièce ou article importé depuis le devis.</td></tr>`}</tbody>
           </table>
         </section>
         <section class="avoid-break">

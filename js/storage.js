@@ -472,7 +472,6 @@ async function exportBackup() {
       cases: state.cases.length,
       photos: payload.photos.length,
       documents: payload.documents?.length || 0,
-      clearJson: true,
     }));
     saveState({ skipCloud: true, skipSnapshot: true });
     showBackupStatus(`Sauvegarde JSON non chiffrée exportée: ${state.cases.length} dossier(s), ${payload.photos.length} photo(s). Protégez ce fichier.`, "ok");
@@ -518,7 +517,6 @@ async function exportEncryptedBackup() {
       cases: state.cases.length,
       photos: payload.photos.length,
       documents: payload.documents?.length || 0,
-      clearJson: false,
     }));
     saveState({ skipCloud: true, skipSnapshot: true });
     showBackupStatus(`Sauvegarde chiffrée exportée: ${state.cases.length} dossier(s), ${payload.photos.length} photo(s). Testez-la avant archivage.`, "ok");
@@ -566,8 +564,7 @@ async function testEncryptedBackup(event) {
 }
 
 async function importBackup(event) {
-  const recoveryImport = typeof canUseFirstAccessRecovery === "function" && canUseFirstAccessRecovery();
-  const permissionGuard = recoveryImport ? { ok: true } : guardSensitiveAction("import.backup");
+  const permissionGuard = guardSensitiveAction("import.backup");
   if (!permissionGuard.ok) {
     if (event?.target) event.target.value = "";
     return;
@@ -627,16 +624,16 @@ async function importBackup(event) {
     }
     activeCaseId = state.cases[0]?.id ?? null;
     generatedProposals = {};
-
+    
     // Nettoyer à la fois les photos et les documents
     await clearPhotoStore();
     if (typeof clearDocumentStore === "function") {
       await clearDocumentStore();
     }
-
+    
     const restoredPhotos = await restorePhotoRecords(photos);
     const restoredDocuments = typeof restoreDocumentRecords === "function" ? await restoreDocumentRecords(documents) : 0;
-
+    
     // Déclencher le nettoyage des orphelins
     if (typeof cleanupOrphanedStorage === "function") {
       await cleanupOrphanedStorage().catch(() => null);
@@ -650,7 +647,6 @@ async function importBackup(event) {
     }, importActor), { actor: importActor });
     saveState();
     render();
-    if (typeof checkUserSessionStartup === "function") checkUserSessionStartup();
     showBackupStatus(`Sauvegarde importée: ${state.cases.length} dossier(s), ${restoredPhotos} photo(s), ${restoredDocuments} document(s).`, "ok");
   } catch (error) {
     console.error("Import sauvegarde impossible", error);
@@ -1026,16 +1022,3 @@ function estimateBackupSize() {
 }
 
 window.estimateBackupSize = estimateBackupSize;
-
-function canExportClearJson(role) {
-  return role === "admin_technique" || role === "admin";
-}
-
-function assertCanExportClearJson(role) {
-  if (!canExportClearJson(role)) {
-    throw new Error("Action réservée à l'admin technique.");
-  }
-}
-
-window.canExportClearJson = canExportClearJson;
-window.assertCanExportClearJson = assertCanExportClearJson;

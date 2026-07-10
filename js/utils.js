@@ -6,411 +6,6 @@ function cloneBooking(booking) {
   };
 }
 
-const USER_ROLES = {
-  admin: "Admin technique",
-  admin_technique: "Admin technique",
-  administrateur: "Administrateur",
-  directeur: "Directeur",
-  direction: "Direction",
-  directeur_sav: "Directeur SAV",
-  chef_atelier: "Chef atelier",
-  reception: "Réception",
-  technicien: "Technicien",
-  qualite: "Qualité",
-  readonly: "Lecture seule",
-};
-
-const ROLE_PERMISSIONS = {
-  admin: ["*"],
-  admin_technique: ["*"],
-  administrateur: ["*"],
-  directeur: ["audit.view", "dashboard.view", "delivery.complete", "export.backup", "print.*"],
-  direction: ["audit.view", "dashboard.view", "delivery.complete", "export.backup", "print.*"],
-  directeur_sav: ["audit.view", "dashboard.view", "delivery.complete", "export.backup", "print.*"],
-  chef_atelier: ["dashboard.view", "case.create", "case.edit", "estimate.import", "planning.edit", "quality.*", "task.*", "delivery.complete", "print.*"],
-  reception: ["dashboard.view", "case.create", "case.edit", "estimate.import", "appointment.schedule", "vehicle.receive", "delivery.complete", "print.*"],
-  technicien: ["dashboard.view", "task.start", "task.pause", "task.resume", "task.complete", "task.block", "print.task"],
-  qualite: ["dashboard.view", "quality.validate", "quality.reject", "quality.revalidate", "print.*"],
-  readonly: ["dashboard.view", "print.*"],
-};
-
-const SENSITIVE_ACTION_PERMISSIONS = {
-  "backup.admin": "import.backup",
-  "backup.export": "export.backup",
-  "backup.import": "import.backup",
-  "backup.restore": "import.backup",
-  "case.delete": "case.delete",
-  "case.reset": "case.delete",
-  "clear.storage": "settings.edit",
-  "download.sensitive": "export.backup",
-  "export.backup": "export.backup",
-  "export.clear.json": "export.clear_json",
-  "import.backup": "import.backup",
-  "purge.storage": "settings.edit",
-  "reset.storage": "settings.edit",
-  "restore.backup": "import.backup",
-  "settings.edit": "settings.edit",
-  "storage.clear": "settings.edit",
-  "supabase.configure": "supabase.configure",
-  "users.manage": "users.manage",
-};
-
-const SENSITIVE_KEYWORD_PERMISSIONS = [
-  ["clear_json", "export.clear_json"],
-  ["clear.json", "export.clear_json"],
-  ["json", "export.clear_json"],
-  ["restore", "import.backup"],
-  ["import", "import.backup"],
-  ["delete", "case.delete"],
-  ["purge", "settings.edit"],
-  ["reset", "settings.edit"],
-  ["storage", "settings.edit"],
-  ["supabase", "supabase.configure"],
-  ["users", "users.manage"],
-  ["sensitive", "export.backup"],
-  ["download", "export.backup"],
-  ["export", "export.backup"],
-  ["backup", "export.backup"],
-];
-
-const CLEAR_JSON_ALLOWED_ROLES = new Set(["admin", "admin_technique", "administrateur"]);
-
-function normalizePermissionToken(value) {
-  return String(value || "")
-    .trim()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[\s-]+/g, "_");
-}
-
-function makeGuardResult(ok, message = "") {
-  return {
-    ok,
-    allowed: ok,
-    message,
-    reason: message,
-  };
-}
-
-function safeQuerySelector(selector, root = undefined) {
-  if (!selector) return null;
-  if (typeof selector !== "string") return selector;
-  const scope = root && typeof root.querySelector === "function"
-    ? root
-    : (typeof document !== "undefined" ? document : null);
-  if (!scope) return null;
-  try {
-    return scope.querySelector(selector);
-  } catch (error) {
-    return null;
-  }
-}
-
-function getEl(selector, root = undefined) {
-  return safeQuerySelector(selector, root);
-}
-
-function setHtmlIfExists(selector, html, root = undefined) {
-  const element = safeQuerySelector(selector, root);
-  if (!element) return false;
-  element.innerHTML = html;
-  return true;
-}
-
-function setTextIfExists(selector, text, root = undefined) {
-  const element = safeQuerySelector(selector, root);
-  if (!element) return false;
-  element.textContent = text;
-  return true;
-}
-
-function bindIfExists(selector, eventName, handler, options = undefined, root = undefined) {
-  const element = safeQuerySelector(selector, root);
-  if (!element || typeof element.addEventListener !== "function") return false;
-  element.addEventListener(eventName, handler, options);
-  return true;
-}
-
-function toggleClassIfExists(selector, className, force, root = undefined) {
-  const element = safeQuerySelector(selector, root);
-  if (!element?.classList) return false;
-  element.classList.toggle(className, force);
-  return true;
-}
-
-function normalizePlanningRole(role) {
-  const normalized = normalizePermissionToken(role).replace(/_/g, "-");
-  const aliases = {
-    body: "tolier",
-    bodywork: "tolier",
-    carrosserie: "tolier",
-    tolerie: "tolier",
-    tolier: "tolier",
-    mechanic: "mecanicien",
-    mechanical: "mecanicien",
-    mecanique: "mecanicien",
-    mecanicien: "mecanicien",
-    electric: "electricien",
-    electrical: "electricien",
-    electricite: "electricien",
-    electricien: "electricien",
-    prep: "zone_preparation",
-    preparation: "zone_preparation",
-    "zone-preparation": "zone_preparation",
-    paint: "peintre",
-    peinture: "peintre",
-    peintre: "peintre",
-    quality: "controle",
-    qc: "controle",
-    controle: "controle",
-    finalcheck: "chef_atelier",
-    "final-check": "chef_atelier",
-    "chef-atelier": "chef_atelier",
-  };
-  return aliases[normalized] || normalized.replace(/-/g, "_");
-}
-
-function normalizePlanningEntryText(entry) {
-  return String(`${entry?.planningMode || ""} ${entry?.mode || ""} ${entry?.type || ""} ${entry?.title || ""} ${entry?.details || ""}`)
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
-}
-
-function isAnticipatedPartsPreparation(entry) {
-  if (!entry || typeof entry !== "object") return false;
-  const text = normalizePlanningEntryText(entry);
-  return (
-    entry.planningMode === "anticipated-new-part"
-    || text.includes("anticipated-new-part")
-    || (text.includes("preparation anticipee") && (text.includes("piece neuve") || text.includes("pieces neuves")))
-  );
-}
-
-function isLegacyPlanningEntry(entry) {
-  if (!entry || typeof entry !== "object") return false;
-  const text = normalizePlanningEntryText(entry);
-  return Boolean(
-    entry.legacy === true
-    || entry.isLegacy === true
-    || text.includes("legacy")
-    || text.includes("ancien planning")
-  );
-}
-
-function getUserById(userId) {
-  const currentState = typeof state !== "undefined" ? state : null;
-  const users = Array.isArray(currentState?.users) ? currentState.users : [];
-  return users.find((user) => user.id === userId) || null;
-}
-
-function getCurrentUser() {
-  const currentState = typeof state !== "undefined" ? state : null;
-  const users = Array.isArray(currentState?.users) ? currentState.users.filter((user) => user.active !== false) : [];
-  if (currentState?.currentUserId) {
-    const current = users.find((user) => user.id === currentState.currentUserId);
-    if (current) return current;
-  }
-  return users[0] || null;
-}
-
-function setCurrentUser(userId) {
-  const user = getUserById(userId);
-  if (!user || user.active === false) return false;
-  if (typeof state === "undefined") return false;
-  state.currentUserId = user.id;
-  return true;
-}
-
-function resolvePermissionUser(options = {}) {
-  if (options.user) return options.user;
-  if (options.userId) return getUserById(options.userId);
-  if (options.role) return { role: options.role, active: true };
-  return getCurrentUser();
-}
-
-function hasPermission(permission, options = {}) {
-  const user = resolvePermissionUser(options);
-  if (!user || user.active === false) return false;
-  const role = normalizePermissionToken(options.role || user?.role || "");
-  const permissions = ROLE_PERMISSIONS[role] || [];
-  if (permissions.includes("*")) return true;
-  const requested = normalizePermissionToken(permission).replace(/_/g, ".");
-  return permissions.some((candidate) => {
-    if (candidate === requested) return true;
-    if (candidate.endsWith(".*")) return requested.startsWith(candidate.slice(0, -1));
-    return false;
-  });
-}
-
-function getPermissionDeniedMessage(permission, user = getCurrentUser()) {
-  const role = normalizePermissionToken(user?.role || "");
-  if (role === "readonly") return "Action non autorisée en lecture seule.";
-  return `Action non autorisée pour le rôle ${USER_ROLES[role] || user?.role || "utilisateur"}.`;
-}
-
-function guardAction(permission, context = {}, options = {}) {
-  const user = resolvePermissionUser(context);
-  const ok = hasPermission(permission, context);
-  const message = ok ? "" : getPermissionDeniedMessage(permission, user);
-  if (!ok && options.notify !== false && typeof notifyUser === "function") notifyUser(message, "error");
-  return makeGuardResult(ok, message);
-}
-
-function canRenderAction(permission, context = {}) {
-  return guardAction(permission, context, { notify: false }).ok;
-}
-
-function guardCaseCreate(context = {}, options = {}) {
-  return guardAction("case.create", context, options);
-}
-
-function guardCaseEdit(item, options = {}) {
-  if (typeof isCaseReadonlyArchive === "function" && isCaseReadonlyArchive(item)) {
-    return makeGuardResult(false, typeof getArchivedCaseMessage === "function" ? getArchivedCaseMessage(item) : "Dossier archivé en lecture seule.");
-  }
-  return guardAction("case.edit", { item }, options);
-}
-
-function guardEstimateImport(item, options = {}) {
-  if (item && typeof isCaseReadonlyArchive === "function" && isCaseReadonlyArchive(item)) {
-    return makeGuardResult(false, typeof getArchivedCaseMessage === "function" ? getArchivedCaseMessage(item) : "Dossier archivé en lecture seule.");
-  }
-  return guardAction("estimate.import", { item }, options);
-}
-
-function guardAppointmentSchedule(item, options = {}) {
-  if (item && typeof isCaseReadonlyArchive === "function" && isCaseReadonlyArchive(item)) {
-    return makeGuardResult(false, typeof getArchivedCaseMessage === "function" ? getArchivedCaseMessage(item) : "Dossier archivé en lecture seule.");
-  }
-  return guardAction("appointment.schedule", { item }, options);
-}
-
-function guardVehicleReceive(item, options = {}) {
-  if (item && typeof isCaseReadonlyArchive === "function" && isCaseReadonlyArchive(item)) {
-    return makeGuardResult(false, typeof getArchivedCaseMessage === "function" ? getArchivedCaseMessage(item) : "Dossier archivé en lecture seule.");
-  }
-  return guardAction("vehicle.receive", { item }, options);
-}
-
-function guardDeliveryComplete(item, options = {}) {
-  if (item && typeof isCaseReadonlyArchive === "function" && isCaseReadonlyArchive(item)) {
-    return makeGuardResult(false, typeof getArchivedCaseMessage === "function" ? getArchivedCaseMessage(item) : "Dossier archivé en lecture seule.");
-  }
-  return guardAction("delivery.complete", { item }, options);
-}
-
-function guardQualityValidate(item, options = {}) {
-  return guardAction("quality.validate", { item }, options);
-}
-
-function guardUserSwitch() {
-  return guardAction("users.switch", {}, { notify: false });
-}
-
-function getAllowedTabsForCurrentUser(user = getCurrentUser()) {
-  const role = normalizePermissionToken(user?.role || "");
-  if (!user || user.active === false) return ["dossiers"];
-  if (["admin", "admin_technique", "administrateur", "chef_atelier", "directeur_sav", "directeur", "direction"].includes(role)) {
-    return ["dossiers", "today", "pilotage", "planning", "technician", "atelier"];
-  }
-  if (role === "technicien") return ["technician", "today"];
-  if (role === "reception") return ["dossiers", "today", "pilotage"];
-  if (role === "qualite") return ["dossiers", "today", "pilotage"];
-  return ["dossiers", "today", "pilotage"];
-}
-
-function ensureCurrentTabAllowed() {
-  const allowedTabs = getAllowedTabsForCurrentUser();
-  const currentTab = typeof activeTab !== "undefined" ? activeTab : "dossiers";
-  if (!allowedTabs.includes(currentTab)) {
-    setActiveTab(allowedTabs[0] || "dossiers");
-  }
-  $$(".nav-button").forEach((button) => {
-    const tab = button.dataset.tab;
-    if (!tab || button.hasAttribute("data-legacy-ui")) return;
-    const allowed = allowedTabs.includes(tab);
-    button.hidden = !allowed;
-    button.toggleAttribute("aria-hidden", !allowed);
-    button.tabIndex = allowed ? 0 : -1;
-  });
-  return allowedTabs;
-}
-
-function getSensitivePermissionForAction(action) {
-  const normalized = normalizePermissionToken(action).replace(/_/g, ".");
-  if (SENSITIVE_ACTION_PERMISSIONS[normalized]) return SENSITIVE_ACTION_PERMISSIONS[normalized];
-  const normalizedText = normalizePermissionToken(action);
-  const keyword = SENSITIVE_KEYWORD_PERMISSIONS.find(([token]) => normalizedText.includes(token));
-  return keyword?.[1] || "";
-}
-
-function getRoleFromGuardOptions(context = {}) {
-  if (context.role) return context.role;
-  if (context.user?.role) return context.user.role;
-  if (typeof window !== "undefined") {
-    return window.currentUser?.role
-      || window.appState?.currentUser?.role
-      || window.sessionUser?.role
-      || window.NIMR_CURRENT_ROLE
-      || "";
-  }
-  return "";
-}
-
-function guardSensitiveAction(action, context = {}, options = {}) {
-  const explicitRole = getRoleFromGuardOptions(context);
-  const permission = getSensitivePermissionForAction(action);
-  if (!permission) return makeGuardResult(true, "");
-
-  const user = explicitRole ? { role: explicitRole, active: true } : resolvePermissionUser(context);
-  const role = normalizePermissionToken(user?.role || "");
-  let ok = false;
-
-  if (permission === "export.clear_json") {
-    ok = CLEAR_JSON_ALLOWED_ROLES.has(role);
-  } else {
-    ok = hasPermission(permission, { user });
-  }
-
-  const message = ok ? "" : getPermissionDeniedMessage(permission, user);
-  if (!ok && options.notify !== false && typeof notifyUser === "function") notifyUser(message, "error");
-  return makeGuardResult(ok, message);
-}
-
-if (typeof window !== "undefined") {
-  window.USER_ROLES = USER_ROLES;
-  window.ROLE_PERMISSIONS = ROLE_PERMISSIONS;
-  window.getUserById = getUserById;
-  window.getCurrentUser = getCurrentUser;
-  window.setCurrentUser = setCurrentUser;
-  window.hasPermission = hasPermission;
-  window.guardAction = guardAction;
-  window.canRenderAction = canRenderAction;
-  window.getPermissionDeniedMessage = getPermissionDeniedMessage;
-  window.safeQuerySelector = safeQuerySelector;
-  window.getEl = getEl;
-  window.setHtmlIfExists = setHtmlIfExists;
-  window.setTextIfExists = setTextIfExists;
-  window.bindIfExists = bindIfExists;
-  window.toggleClassIfExists = toggleClassIfExists;
-  window.normalizePlanningRole = normalizePlanningRole;
-  window.isLegacyPlanningEntry = isLegacyPlanningEntry;
-  window.isAnticipatedPartsPreparation = isAnticipatedPartsPreparation;
-  window.guardSensitiveAction = guardSensitiveAction;
-  window.guardCaseCreate = guardCaseCreate;
-  window.guardCaseEdit = guardCaseEdit;
-  window.guardEstimateImport = guardEstimateImport;
-  window.guardAppointmentSchedule = guardAppointmentSchedule;
-  window.guardVehicleReceive = guardVehicleReceive;
-  window.guardDeliveryComplete = guardDeliveryComplete;
-  window.guardQualityValidate = guardQualityValidate;
-  window.guardUserSwitch = guardUserSwitch;
-  window.getAllowedTabsForCurrentUser = getAllowedTabsForCurrentUser;
-  window.ensureCurrentTabAllowed = ensureCurrentTabAllowed;
-}
-
 function dayLoad(date) {
   return dayLoadForResources(date, (resource) => resource.active !== false);
 }
@@ -426,8 +21,8 @@ function equipmentDayLoad(date) {
 const LOAD_CATEGORIES = {
   body: {
     humanRoles: ["tolier", "peintre", "controle"],
-    equipmentRoles: ["zone_carrosserie", "zone_preparation", "cabine"],
-    bookingKeys: ["body", "prep", "paint", "reassembly", "finish", "finalCheck"],
+    equipmentRoles: ["zone_preparation", "cabine"],
+    bookingKeys: ["body", "prep", "paint", "reassembly", "finish", "quality"],
   },
   fast: {
     humanRoles: ["mecanicien"],
@@ -435,9 +30,14 @@ const LOAD_CATEGORIES = {
     bookingKeys: ["oilService"],
   },
   heavy: {
-    humanRoles: ["mecanicien", "electricien"],
-    equipmentRoles: ["pont_mecanique", "zone_diagnostic_electrique"],
-    bookingKeys: ["mechanical", "electrical"],
+    humanRoles: ["mecanicien"],
+    equipmentRoles: ["pont_mecanique"],
+    bookingKeys: ["mechanical"],
+  },
+  electrical: {
+    humanRoles: ["electricien"],
+    equipmentRoles: [],
+    bookingKeys: ["electrical"],
   },
 };
 
@@ -472,7 +72,6 @@ function dayLoadForResources(date, predicate) {
 
   let busy = 0;
   state.bookings.forEach((booking) => {
-    if (isObsoleteAnticipatedNewPartBooking(booking)) return;
     const usedResourceIds = (booking.resourceIds || []).filter((resourceId) => resourceIds.has(resourceId));
     if (!usedResourceIds.length) return;
 
@@ -498,7 +97,6 @@ function dayLoadForCategory(date, resourcePredicate, bookingPredicate) {
 
   let busy = 0;
   state.bookings.forEach((booking) => {
-    if (isObsoleteAnticipatedNewPartBooking(booking)) return;
     if (!bookingPredicate(booking)) return;
     const usedResourceIds = (booking.resourceIds || []).filter((resourceId) => resourceIds.has(resourceId));
     if (!usedResourceIds.length) return;
@@ -584,43 +182,7 @@ function shortVehicleModel(vehicleText) {
 }
 
 function isEquipmentResource(resource) {
-  return ["zone_carrosserie", "zone_diagnostic_electrique", "zone_preparation", "cabine", "pont_vidange", "pont_mecanique"].includes(resource?.role);
-}
-
-function isSeparateEquipmentRole(role, primaryRole = "") {
-  return Boolean(role && role !== primaryRole && isEquipmentResource({ role }));
-}
-
-function normalizePlanningResourceAssignment(resourceIds = [], options = {}) {
-  const resources = Array.isArray(options.resources) ? options.resources : (typeof state !== "undefined" ? state.resources : []);
-  const resourceById = new Map((resources || []).map((resource) => [resource.id, resource]));
-  const rawIds = [
-    options.primaryResourceId,
-    ...(Array.isArray(resourceIds) ? resourceIds : []),
-    ...(Array.isArray(options.equipmentResourceIds) ? options.equipmentResourceIds : []),
-  ].filter((id, index, list) => id && list.indexOf(id) === index && resourceById.has(id));
-  const primaryId = options.primaryResourceId && rawIds.includes(options.primaryResourceId) ? options.primaryResourceId : rawIds[0] || "";
-  const primaryResource = resourceById.get(primaryId);
-  const primaryRole = options.primaryRole || primaryResource?.role || "";
-  const expectedEquipmentRole = isSeparateEquipmentRole(options.equipmentRole, primaryRole) ? options.equipmentRole : "";
-  const cleanIds = primaryId ? [primaryId] : [];
-  const equipmentIds = [];
-
-  rawIds.forEach((id) => {
-    if (!id || id === primaryId || cleanIds.includes(id)) return;
-    const resource = resourceById.get(id);
-    if (!resource || !isEquipmentResource(resource)) return;
-    if (primaryRole && resource.role === primaryRole) return;
-    if (expectedEquipmentRole && resource.role !== expectedEquipmentRole) return;
-    cleanIds.push(id);
-    equipmentIds.push(id);
-  });
-
-  return {
-    resourceIds: cleanIds,
-    primaryResourceId: primaryId || null,
-    equipmentResourceIds: equipmentIds,
-  };
+  return ["zone_preparation", "cabine", "pont_vidange", "pont_mecanique"].includes(resource?.role);
 }
 
 function isDisplayPlanningResource(resource) {
@@ -633,8 +195,8 @@ function isHumanPlanningResource(resource) {
 
 
 function getPlanningResourceOrder(resource) {
-  const humanOrder = { chef_atelier: 5, tolier: 10, peintre: 20, mecanicien: 30, electricien: 40, controle: 50 };
-  const equipmentOrder = { pont_vidange: 105, pont_mecanique: 106, zone_diagnostic_electrique: 108, zone_carrosserie: 109, zone_preparation: 110, cabine: 120 };
+  const humanOrder = { tolier: 10, peintre: 20, mecanicien: 30, electricien: 40, controle: 50 };
+  const equipmentOrder = { pont_vidange: 105, pont_mecanique: 106, zone_preparation: 110, cabine: 120 };
   if (isEquipmentResource(resource)) return equipmentOrder[resource?.role] || 199;
   return humanOrder[resource?.role] || 90;
 }
@@ -900,6 +462,15 @@ function setupServiceWorkerUpdates(registration) {
 }
 
 function setActiveTab(tab) {
+  if (typeof canAccessTab === "function" && !canAccessTab(tab)) {
+    const allowed = getAllowedTabsForCurrentUser();
+    if (allowed.length > 0) {
+      tab = allowed[0];
+    } else {
+      return;
+    }
+  }
+
   activeTab = tab;
   $$(".nav-button").forEach((button) => {
     const active = button.dataset.tab === tab;
@@ -914,12 +485,172 @@ function setActiveTab(tab) {
   });
 }
 
+function renderNavigationVisibility() {
+  if (typeof getAllowedTabsForCurrentUser !== "function") return;
+  const allowed = getAllowedTabsForCurrentUser();
+  $$(".nav-button").forEach((button) => {
+    const tabId = button.dataset.tab;
+    const isAllowed = allowed.includes(tabId);
+    button.hidden = !isAllowed;
+    button.style.display = isAllowed ? "" : "none";
+  });
+}
+
+
 function normalizeTextInputValue(value) {
   return String(value ?? "").trim().replace(/\s+/g, " ");
 }
 
 function normalizeIdentifierValue(value) {
   return normalizeTextInputValue(value).toUpperCase();
+}
+
+function normalizePhoneValue(value) {
+  return normalizeTextInputValue(value);
+}
+
+function normalizePlateValue(value) {
+  return normalizeIdentifierValue(value);
+}
+
+function normalizeVinValue(value) {
+  return normalizeIdentifierValue(value).replace(/[^A-Z0-9]/g, "");
+}
+
+function normalizeMileageValue(value) {
+  return normalizeIdentifierValue(value).replace(/[^\d]/g, "");
+}
+
+function isValidPhoneValue(value) {
+  const normalized = normalizePhoneValue(value);
+  if (!normalized) return true;
+  const digits = normalized.replace(/\D/g, "");
+  return digits.length >= 8 && digits.length <= 15 && /^\+?[\d\s().-]+$/.test(normalized);
+}
+
+function isValidPlateValue(value) {
+  const normalized = normalizePlateValue(value);
+  if (!normalized) return true;
+  const compact = normalized.replace(/[^A-Z0-9]/g, "");
+  return compact.length >= 3 && compact.length <= 16;
+}
+
+function isValidVinValue(value) {
+  const normalized = normalizeVinValue(value);
+  return !normalized || /^[A-HJ-NPR-Z0-9]{17}$/.test(normalized);
+}
+
+function isValidMileageValue(value) {
+  const raw = normalizeTextInputValue(value).replace(/\s+/g, "");
+  if (!raw) return true;
+  if (!/^\d+$/.test(raw)) return false;
+  const normalized = normalizeMileageValue(raw);
+  if (!normalized) return true;
+  const mileage = Number(normalized);
+  return Number.isInteger(mileage) && mileage >= 0 && mileage <= 9999999;
+}
+
+function normalizeReceptionCaseCandidate(candidate = {}) {
+  const normalized = {
+    ...candidate,
+    clientName: normalizeTextInputValue(candidate.clientName),
+    phone: normalizePhoneValue(candidate.phone),
+    ownerName: normalizeTextInputValue(candidate.ownerName),
+    driverName: normalizeTextInputValue(candidate.driverName),
+    driverPhone: normalizePhoneValue(candidate.driverPhone),
+    vehicle: normalizeTextInputValue(candidate.vehicle),
+    plate: normalizePlateValue(candidate.plate),
+    color: normalizeTextInputValue(candidate.color),
+    mileage: normalizeMileageValue(candidate.mileage),
+    vin: normalizeVinValue(candidate.vin),
+    orNavNumber: normalizeIdentifierValue(candidate.orNavNumber),
+    arrivalNotes: normalizeTextInputValue(candidate.arrivalNotes),
+  };
+  const plateAsIdentifier = normalized.plate.replace(/[^A-Z0-9]/g, "");
+  if (!normalized.vin && /^[A-HJ-NPR-Z0-9]{17}$/.test(plateAsIdentifier)) {
+    normalized.vin = plateAsIdentifier;
+    normalized.plate = "";
+  }
+  return normalized;
+}
+
+function validateReceptionCaseCandidate(candidate = {}) {
+  const normalized = normalizeReceptionCaseCandidate(candidate);
+  const errors = [];
+  const rawMileage = candidate.mileage;
+  if (!normalized.clientName) {
+    errors.push({ field: "clientName", message: "Le nom du client est obligatoire." });
+  }
+  if (!normalized.plate && !normalized.vin) {
+    errors.push({ field: "plate", message: "Renseignez une immatriculation ou un VIN avant de créer le dossier." });
+  }
+  if (normalized.phone && !isValidPhoneValue(normalized.phone)) {
+    errors.push({ field: "phone", message: "Le téléphone client doit contenir 8 à 15 chiffres." });
+  }
+  if (normalized.driverPhone && !isValidPhoneValue(normalized.driverPhone)) {
+    errors.push({ field: "driverPhone", message: "Le téléphone déposant doit contenir 8 à 15 chiffres." });
+  }
+  if (normalized.plate && !isValidPlateValue(normalized.plate)) {
+    errors.push({ field: "plate", message: "L'immatriculation doit contenir 3 à 16 caractères utiles." });
+  }
+  if (normalized.vin && !isValidVinValue(normalized.vin)) {
+    errors.push({ field: "vin", message: "Le VIN doit contenir 17 caractères valides, sans I, O ni Q." });
+  }
+  if (rawMileage && !isValidMileageValue(rawMileage)) {
+    errors.push({ field: "mileage", message: "Le kilométrage doit être un nombre positif réaliste." });
+  }
+  return {
+    ok: errors.length === 0,
+    errors,
+    messages: errors.map((error) => error.message),
+    normalized,
+  };
+}
+
+function renderFormValidationErrors(form, validation = {}, fallbackId = "") {
+  if (!form) return;
+  const errors = Array.isArray(validation.errors) ? validation.errors : [];
+  form.querySelectorAll("[aria-invalid='true']").forEach((control) => {
+    if (typeof control.removeAttribute !== "function") return;
+    control.removeAttribute("aria-invalid");
+    const describedBy = String(typeof control.getAttribute === "function" ? control.getAttribute("aria-describedby") || "" : "")
+      .split(/\s+/)
+      .filter((id) => id && id !== fallbackId)
+      .join(" ");
+    if (describedBy && typeof control.setAttribute === "function") control.setAttribute("aria-describedby", describedBy);
+    else control.removeAttribute("aria-describedby");
+  });
+  const fallbackTarget = fallbackId && typeof document !== "undefined" && typeof document.getElementById === "function"
+    ? document.getElementById(fallbackId)
+    : null;
+  const target = form.querySelector("[data-form-errors]") || fallbackTarget;
+  if (!errors.length) {
+    if (target) {
+      target.hidden = true;
+      target.textContent = "";
+    }
+    return;
+  }
+  if (target) {
+    target.hidden = false;
+    target.textContent = validation.messages?.join(" ") || errors.map((error) => error.message).join(" ");
+  }
+  errors.forEach((error) => {
+    const field = form.elements?.[error.field];
+    if (!field) return;
+    if (typeof field.setAttribute === "function") {
+      field.setAttribute("aria-invalid", "true");
+    }
+    if (fallbackId) {
+      const describedBy = new Set(String(typeof field.getAttribute === "function" ? field.getAttribute("aria-describedby") || "" : "").split(/\s+/).filter(Boolean));
+      describedBy.add(fallbackId);
+      if (typeof field.setAttribute === "function") {
+        field.setAttribute("aria-describedby", [...describedBy].join(" "));
+      }
+    }
+  });
+  const firstField = form.elements?.[errors[0]?.field];
+  firstField?.focus?.();
 }
 
 function findDuplicateCase(candidate) {
@@ -933,10 +664,27 @@ function findDuplicateCase(candidate) {
 }
 
 function focusCaseSearch() {
-  setActiveTab("dossiers");
-  const input = $("#case-search");
+  const preferredTab = typeof canAccessTab !== "function" || canAccessTab("reception-workspace")
+    ? "reception-workspace"
+    : "dossiers";
+  setActiveTab(preferredTab);
+  const input = preferredTab === "reception-workspace" ? $("#reception-case-search") : $("#case-search");
   input?.focus();
   input?.select();
+}
+
+function startReceptionCaseCreation() {
+  if (typeof canAccessTab === "function" && !canAccessTab("reception-workspace")) {
+    setActiveTab("dossiers");
+    $("#case-form input[name='clientName']")?.focus();
+    return;
+  }
+  setActiveTab("reception-workspace");
+  if (typeof isReceptionCreationMode !== "undefined") isReceptionCreationMode = true;
+  if (typeof renderReceptionWorkspace === "function") renderReceptionWorkspace();
+  window.setTimeout(() => {
+    $("#reception-detail-panel input[name='clientName']")?.focus();
+  }, 0);
 }
 
 function bindKeyboardShortcuts() {
@@ -948,8 +696,7 @@ function bindKeyboardShortcuts() {
     }
     if ((event.ctrlKey || event.metaKey) && key === "n") {
       event.preventDefault();
-      setActiveTab("dossiers");
-      $("#case-form input[name='clientName']")?.focus();
+      startReceptionCaseCreation();
     }
   });
 }

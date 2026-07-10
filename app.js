@@ -162,187 +162,32 @@ function bindCaseList() {
   });
 }
 
-function updateMissingFieldsUI(draft) {
-  const container = document.getElementById("missing-fields-container");
-  const btnCreate = document.getElementById("btn-create-case-from-pdf");
-  const previewDiv = document.getElementById("devis-pdf-preview-info");
-  const extractedSummary = document.getElementById("devis-pdf-extracted-summary");
-
-  if (!container || !btnCreate) return;
-
-  if (!draft) {
-    container.innerHTML = "";
-    container.style.display = "none";
-    if (previewDiv) previewDiv.style.display = "none";
-    btnCreate.disabled = true;
-    return;
-  }
-
-  const info = draft.parsed.info || {};
-
-  // Show preview
-  if (previewDiv && extractedSummary) {
-    extractedSummary.innerHTML = `
-      <strong>Client :</strong> ${escapeHtml(info.clientName || "-")}<br>
-      <strong>Véhicule :</strong> ${escapeHtml(info.vehicle || "-")}<br>
-      <strong>N° Devis :</strong> ${escapeHtml(info.estimateNumber || info.orNumber || "-")}<br>
-      <strong>Heures MO détectées :</strong> ${formatLocalizedDecimal(draft.parsed.detectedHours)} h
-    `;
-    previewDiv.style.display = "block";
-  }
-
-  let html = "";
-
-  const needsPlateOrVin = !info.plate && !info.vin;
-  if (needsPlateOrVin) {
-    html += `
-      <label style="display: block; margin-top: 10px;">
-        Immatriculation ou VIN <span class="required-marker">*</span>
-        <input name="plate" placeholder="Ex. 123 TU 4567 ou VIN de 17 caract." required style="width: 100%; margin-top: 4px;" />
-      </label>
-    `;
-  }
-
-  const needsMileage = !info.mileage;
-  if (needsMileage) {
-    html += `
-      <label style="display: block; margin-top: 10px;">
-        Kilométrage <span class="required-marker">*</span>
-        <input name="mileage" type="text" inputmode="numeric" placeholder="Ex. 120000" required style="width: 100%; margin-top: 4px;" />
-      </label>
-    `;
-  }
-
-  const needsPhone = !info.phone;
-  if (needsPhone) {
-    html += `
-      <label style="display: block; margin-top: 10px;">
-        Téléphone client <span class="required-marker">*</span>
-        <input name="phone" type="tel" placeholder="Ex. +216 55 111 222" required style="width: 100%; margin-top: 4px;" />
-      </label>
-    `;
-  }
-
-  container.innerHTML = html;
-  container.style.display = html ? "block" : "none";
-  btnCreate.disabled = false;
-}
-
-// Le devis PDF est le point d'entrée obligatoire du dossier atelier.
 function bindCaseCreation() {
   const form = $("#case-form");
   if (!form) return;
-
-  const dropZone = document.getElementById("devis-pdf-drop-zone");
-  const fileInput = document.getElementById("quick-estimate-file-input");
-
-  const handleEstimateFile = async (file) => {
-    quickEstimateCreationDraft = null;
-    const previewDiv = document.getElementById("devis-pdf-preview-info");
-    const container = document.getElementById("missing-fields-container");
-    const btnCreate = document.getElementById("btn-create-case-from-pdf");
-    const status = document.getElementById("quick-estimate-import-status");
-
-    if (previewDiv) previewDiv.style.display = "none";
-    if (container) {
-      container.innerHTML = "";
-      container.style.display = "none";
-    }
-    if (btnCreate) btnCreate.disabled = true;
-
-    if (!file) {
-      if (status) status.textContent = "Fichier PDF uniquement";
-      return;
-    }
-
-    const validationError = validateEstimateImportFile(file);
-    if (validationError) {
-      if (status) status.textContent = validationError;
-      notifyUser(validationError, "error");
-      return;
-    }
-
-    try {
-      if (status) status.textContent = "Lecture du devis en cours...";
-      quickEstimateCreationDraft = await buildQuickEstimateCreationDraft(file, form);
-
-      const info = quickEstimateCreationDraft.parsed.info || {};
-      const reference = cleanParsedEstimateNumber(info.estimateNumber) || info.orNumber || file.name;
-      if (status) {
-        status.textContent = `Devis lu : ${reference} - ${formatLocalizedDecimal(quickEstimateCreationDraft.parsed.detectedHours)} h MO détectées.`;
-      }
-
-      updateMissingFieldsUI(quickEstimateCreationDraft);
-    } catch (error) {
-      console.error("Pré-import devis création impossible", error);
-      quickEstimateCreationDraft = null;
-      if (status) status.textContent = "Import devis impossible.";
-      notifyUser(error.message || "Impossible de lire ce devis.", "error");
-    }
-  };
-
-  if (dropZone && fileInput) {
-    dropZone.addEventListener("click", () => fileInput.click());
-
-    dropZone.addEventListener("dragover", (e) => {
-      e.preventDefault();
-      dropZone.classList.add("dragover");
-    });
-
-    dropZone.addEventListener("dragleave", () => {
-      dropZone.classList.remove("dragover");
-    });
-
-    dropZone.addEventListener("drop", (e) => {
-      e.preventDefault();
-      dropZone.classList.remove("dragover");
-      const file = e.dataTransfer.files?.[0];
-      if (file) {
-        const dataTransfer = new DataTransfer();
-        dataTransfer.items.add(file);
-        fileInput.files = dataTransfer.files;
-        handleEstimateFile(file);
-      }
-    });
-
-    fileInput.addEventListener("change", () => {
-      const file = fileInput.files?.[0];
-      handleEstimateFile(file);
-    });
-  }
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const createGuard = guardCaseCreate();
     if (!createGuard.ok) return;
-
-    if (!quickEstimateCreationDraft) {
-      notifyUser("Veuillez importer un devis PDF avant de créer le dossier.", "error");
-      return;
-    }
-
     const data = new FormData(form);
-    const info = quickEstimateCreationDraft.parsed.info || {};
-
-    let plateVal = data.has("plate") ? data.get("plate") : (info.plate || "");
-    let vinVal = data.has("vin") ? data.get("vin") : (info.vin || "");
-
-    const normPlateVal = normalizeIdentifierValue(plateVal);
-    if (normPlateVal.length === 17) {
-      vinVal = normPlateVal;
-      plateVal = "";
-    }
-
+    const estimateFile = data.get("estimateFile");
+    const hasEstimateFile = estimateFile && estimateFile.name;
+    const orderType = data.get("orderType") || "vidange";
+    const orderTitle = normalizeTextInputValue(data.get("orderTitle")) || getClaimTypeLabel(orderType);
     let candidate = {
-      clientName: info.clientName || "Client devis",
-      phone: data.has("phone") ? data.get("phone") : (info.phone || ""),
-      vehicle: info.vehicle || "Véhicule à compléter",
-      plate: plateVal,
-      vin: vinVal,
-      mileage: data.has("mileage") ? data.get("mileage") : (info.mileage || ""),
-      orNavNumber: info.estimateNumber || info.orNumber || "",
+      clientName: normalizeTextInputValue(data.get("clientName")),
+      phone: normalizeTextInputValue(data.get("phone")),
+      ownerName: normalizeTextInputValue(data.get("ownerName")),
+      driverName: normalizeTextInputValue(data.get("driverName")),
+      driverPhone: normalizeTextInputValue(data.get("driverPhone")),
+      vehicle: normalizeTextInputValue(data.get("vehicle")),
+      plate: normalizeIdentifierValue(data.get("plate")),
+      color: normalizeTextInputValue(data.get("color")),
+      mileage: normalizeIdentifierValue(data.get("mileage")),
+      vin: normalizeIdentifierValue(data.get("vin")),
+      orNavNumber: normalizeIdentifierValue(data.get("orNavNumber")),
     };
-
     const validation = validateReceptionCaseCandidate(candidate);
     candidate = validation.normalized;
     if (!validation.ok) {
@@ -351,7 +196,9 @@ function bindCaseCreation() {
       return;
     }
     renderFormValidationErrors(form, validation, "case-form-errors");
-
+    if (!candidate.vehicle) {
+      candidate.vehicle = "Véhicule à compléter";
+    }
     const duplicate = findDuplicateCase(candidate);
     if (duplicate) {
       const isStrictDuplicate = duplicate.clientName === candidate.clientName && (duplicate.plate === candidate.plate || duplicate.vin === candidate.vin) && !duplicate.flags?.delivered;
@@ -371,24 +218,22 @@ function bindCaseCreation() {
 
     const item = normalizeCase({
       ...candidate,
+      clientName: candidate.clientName || "Client devis",
       id: uid("case"),
       createdAt: new Date().toISOString(),
       durations: Object.fromEntries(DURATIONS.map(([key]) => [key, 0])),
       history: [makeHistoryEntry("case.created", "Dossier créé", new Date().toISOString())],
     });
 
-    const inferredType = inferOrderTypeFromEstimate(quickEstimateCreationDraft.parsed);
-    const orderTitle = inferOrderTitleFromEstimate(quickEstimateCreationDraft.parsed) || getClaimTypeLabel(inferredType);
-
     const firstClaim = normalizeRepairClaim({
       id: uid("claim"),
       number: "OT-001",
       title: orderTitle,
-      type: inferredType,
-      status: "approved",
+      type: orderType,
+      status: isClientOnlyRepairClaim({ type: orderType }) ? "client_pending" : "expert_pending",
       includeInPlanning: true,
-      expertApproved: true,
-      clientApproved: true,
+      expertApproved: isClientOnlyRepairClaim({ type: orderType }),
+      clientApproved: false,
       orNumber: item.orNavNumber || "",
     }, 0);
     item.claims = [firstClaim];
@@ -396,22 +241,76 @@ function bindCaseCreation() {
 
     state.cases.unshift(item);
     activeCaseId = item.id;
-    activeCaseDetailTab = "claims";
+    activeCaseDetailTab = "infos";
 
-    const parsed = enrichParsedEstimateInfo(quickEstimateCreationDraft.parsed, quickEstimateCreationDraft.metadata);
-    const preview = prepareEstimateImportPreview(parsed, item);
-    preview.sourceFile = makeQuickEstimateSourceFile(fileInput.files?.[0]);
-    await applyEstimateImportToClaim(item, firstClaim, preview, { silent: true });
-    if (parsed.info?.clientName) item.clientName = parsed.info.clientName;
-    addHistory(item, "claim.estimate.imported", "Devis importé à la création", `${formatLocalizedDecimal(preview.detectedHours)} h MO détectées.`);
+    if (hasEstimateFile) {
+      const quickStatus = $("#quick-estimate-import-status");
+      const validationError = validateEstimateImportFile(estimateFile);
+      if (validationError) {
+        notifyUser(validationError, "error");
+      } else {
+        try {
+          if (quickStatus) quickStatus.textContent = "Analyse du devis...";
+          const draft = quickEstimateCreationDraft?.signature === getQuickEstimateFileSignature(estimateFile)
+            ? quickEstimateCreationDraft
+            : await buildQuickEstimateCreationDraft(estimateFile, form);
+          const parsed = enrichParsedEstimateInfo(draft.parsed, draft.metadata);
+          const preview = prepareEstimateImportPreview(parsed, item);
+          preview.sourceFile = makeQuickEstimateSourceFile(estimateFile);
+          await applyEstimateImportToClaim(item, firstClaim, preview, { silent: true });
+          if (!candidate.clientName && parsed.info?.clientName) item.clientName = parsed.info.clientName;
+          addHistory(item, "claim.estimate.imported", "Devis importé à la création", `${formatLocalizedDecimal(preview.detectedHours)} h MO détectées.`);
+          if (quickStatus) quickStatus.textContent = "Devis importé dans le premier OR.";
+        } catch (error) {
+          console.error("Import devis à la création impossible", error);
+          if (quickStatus) quickStatus.textContent = "Import devis impossible.";
+          notifyUser(error.message || "Dossier créé, mais import devis impossible.", "error");
+        }
+      }
+    }
 
     refreshCaseApprovalFlagsFromClaims(item);
     saveState();
     form.reset();
-    quickEstimateCreationDraft = null;
-    updateMissingFieldsUI(null);
     render();
-    notifyUser("Dossier créé avec devis importé.", "success");
+    notifyUser(hasEstimateFile ? "Dossier créé avec devis importé." : "Dossier créé avec premier ordre de réparation.", "success");
+  });
+
+
+  form.elements?.orderType?.addEventListener("change", () => {
+    form.elements.orderType.dataset.userSelected = "true";
+  });
+
+  const quickEstimateInput = $("#quick-estimate-file-input", form);
+  quickEstimateInput?.addEventListener("change", async () => {
+    const file = quickEstimateInput.files?.[0];
+    const status = $("#quick-estimate-import-status");
+    quickEstimateCreationDraft = null;
+    if (!file) {
+      if (status) status.textContent = "Optionnel : le devis remplit client, véhicule, OR et main-d'œuvre.";
+      return;
+    }
+    const validationError = validateEstimateImportFile(file);
+    if (validationError) {
+      if (status) status.textContent = validationError;
+      notifyUser(validationError, "error");
+      return;
+    }
+    try {
+      if (status) status.textContent = "Lecture du devis en cours...";
+      quickEstimateCreationDraft = await buildQuickEstimateCreationDraft(file, form);
+      applyQuickEstimateCreationDraftToForm(form, quickEstimateCreationDraft);
+      if (status) {
+        const info = quickEstimateCreationDraft.parsed.info || {};
+        const reference = cleanParsedEstimateNumber(info.estimateNumber) || info.orNumber || file.name;
+        status.textContent = `Devis lu : ${reference} - ${formatLocalizedDecimal(quickEstimateCreationDraft.parsed.detectedHours)} h MO détectées. Cliquez sur Créer dossier pour valider.`;
+      }
+    } catch (error) {
+      console.error("Pré-import devis création impossible", error);
+      quickEstimateCreationDraft = null;
+      if (status) status.textContent = "Import devis impossible.";
+      notifyUser(error.message || "Impossible de lire ce devis.", "error");
+    }
   });
 
   $("#new-case-shortcut")?.addEventListener("click", () => {
@@ -446,58 +345,6 @@ function makeQuickEstimateSourceFile(file) {
     createdAt: new Date().toISOString(),
     blob: file.slice(0, file.size, file.type || "application/octet-stream"),
   };
-}
-
-function normalizeCaseStatusFilter(value) {
-  const raw = String(value || "").trim().toLowerCase();
-  if (!raw || raw === "all" || raw === "tous") return "all";
-
-  const normalized = raw
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[_\s-]+/g, "_");
-
-  const aliases = {
-    imported: "devis_importe",
-    devis_importe: "devis_importe",
-    estimate_imported: "devis_importe",
-
-    chef_validation: "a_valider_chef_atelier",
-    a_valider_chef: "a_valider_chef_atelier",
-    pending_chef_validation: "a_valider_chef_atelier",
-    a_valider_chef_atelier: "a_valider_chef_atelier",
-
-    atelier_validated: "valide_atelier",
-    valide_atelier: "valide_atelier",
-
-    planned: "planifie",
-    planifie: "planifie",
-
-    in_progress: "en_cours",
-    en_cours: "en_cours",
-
-    paused: "en_pause",
-    en_pause: "en_pause",
-
-    blocked: "bloque",
-    bloque: "bloque",
-
-    atelier_completed: "termine_atelier",
-    termine_atelier: "termine_atelier",
-
-    atelier_closed: "cloture_atelier",
-    cloture_atelier: "cloture_atelier",
-
-    archived: "archive",
-    archive: "archive",
-  };
-
-  const knownStatuses = typeof statusLabels === "object" && statusLabels ? statusLabels : {};
-  return aliases[normalized] || (knownStatuses[normalized] ? normalized : "all");
-}
-
-if (typeof window !== "undefined") {
-  window.normalizeCaseStatusFilter = normalizeCaseStatusFilter;
 }
 
 function populateCaseStatusFilters() {
@@ -537,7 +384,7 @@ async function buildQuickEstimateCreationDraft(file, form) {
     claimType,
   });
   if (!parsedBase.laborLines.length) {
-    notifyUser("Aucune ligne de main-d’œuvre détectée dans le devis PDF. Vous pourrez ajouter des tâches manuellement.", "warning");
+    throw new Error("Aucune ligne de main-d'œuvre détectée dans le devis importé.");
   }
   const metadata = inferEstimateCreationMetadata(parsedBase, extracted);
   return {
@@ -666,17 +513,14 @@ function inferEstimateCreationMetadata(parsed, extracted = {}) {
 
 function bindCaseFilters() {
   populateCaseStatusFilters();
-  const normalizeStatusFilter = typeof normalizeCaseStatusFilter === "function"
-    ? normalizeCaseStatusFilter
-    : (value) => String(value || "all").trim().toLowerCase();
   const search = $("#case-search");
   search?.addEventListener("input", renderCases);
 
   const status = $("#case-status-filter");
   if (status) {
-    status.value = normalizeStatusFilter(state.ui?.caseStatusFilter);
+    status.value = normalizeCaseStatusFilter(state.ui?.caseStatusFilter);
     status.addEventListener("change", () => {
-      state.ui.caseStatusFilter = normalizeStatusFilter(status.value);
+      state.ui.caseStatusFilter = normalizeCaseStatusFilter(status.value);
       status.value = state.ui.caseStatusFilter;
       saveState();
       renderCases();
@@ -955,14 +799,6 @@ function bindBackupActions() {
 }
 
 function applyBackupPermissionState() {
-  const guard = typeof guardSensitiveAction === "function"
-    ? guardSensitiveAction
-    : () => ({
-        ok: false,
-        allowed: false,
-        message: "Action sensible indisponible : garde de sécurité non chargée.",
-        reason: "Action sensible indisponible : garde de sécurité non chargée.",
-      });
   [
     ["#export-backup", "export.backup"],
     ["#export-encrypted-backup", "export.backup"],
@@ -972,12 +808,10 @@ function applyBackupPermissionState() {
   ].forEach(([selector, permission]) => {
     const target = $(selector);
     if (!target) return;
-    const result = guard(permission, {}, { notify: false });
-    const allowed = result.ok !== false && result.allowed !== false;
-    const message = result.message || result.reason || "";
-    target.disabled = !allowed;
-    target.title = message;
-    target.closest("label")?.classList.toggle("disabled-card", !allowed);
+    const guard = guardSensitiveAction(permission, {}, { notify: false });
+    target.disabled = !guard.ok;
+    target.title = guard.message;
+    target.closest("label")?.classList.toggle("disabled-card", !guard.ok);
   });
 }
 
@@ -997,7 +831,7 @@ function registerServiceWorker() {
   });
   window.addEventListener("load", async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=23.2.7-hotfix-startup", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=23.2.6", { updateViaCache: "none" });
       registration.update?.();
       if (registration.waiting) showUpdateAvailable(registration);
       window.setInterval(() => registration.update?.(), 10 * 60 * 1000);
@@ -1223,7 +1057,7 @@ function renderActivityLog() {
         const localVal = targetConflict ? (targetConflict.localCase || targetConflict.localValue) : null;
         if (localVal) {
           const payload = {
-            version: "v23.2.7-hotfix-startup",
+            version: "v23.2.6",
             timestamp: new Date().toISOString(),
             cases: [JSON.parse(JSON.stringify(localVal))],
             source: "manual_conflict_backup"
@@ -1345,32 +1179,6 @@ function bindUserSessionOverlayKeyboard(overlay) {
   overlay.addEventListener("keydown", handleUserSessionOverlayKeydown);
 }
 
-function getSessionActiveUsers() {
-  return (state.users || []).filter(user => user.active !== false);
-}
-
-function canUseFirstAccessRecovery() {
-  return getSessionActiveUsers().length === 0;
-}
-
-function renderFirstAccessRecoveryState(activeUsers = getSessionActiveUsers()) {
-  const loginForm = document.getElementById("user-login-form");
-  const recoveryForm = document.getElementById("first-access-recovery-form");
-  const recoveryStatus = document.getElementById("first-access-recovery-status");
-  const recoveryMessage = document.getElementById("first-access-recovery-message");
-  const hasActiveUsers = activeUsers.length > 0;
-
-  if (loginForm) loginForm.hidden = !hasActiveUsers;
-  if (recoveryForm) recoveryForm.hidden = hasActiveUsers;
-  if (recoveryStatus) recoveryStatus.textContent = "";
-  if (recoveryMessage) {
-    recoveryMessage.textContent = hasActiveUsers
-      ? ""
-      : "Aucun utilisateur actif trouvé. Créez explicitement un utilisateur local de récupération ou importez une sauvegarde.";
-  }
-  return !hasActiveUsers;
-}
-
 function checkUserSessionStartup() {
   if (typeof isLocalSessionUnlocked === "function" && !isLocalSessionUnlocked()) {
     // PIN local activé et verrouillé -> priorité au PIN, on attend le déverrouillage
@@ -1418,7 +1226,7 @@ function showUserLoginScreen() {
     overlay.hidden = false;
     document.querySelector(".app-shell")?.setAttribute("inert", "");
     renderUserLoginScreen();
-    focusUserSessionDialog(overlay, canUseFirstAccessRecovery() ? "#first-access-name" : "#user-login-select");
+    focusUserSessionDialog(overlay, "#user-login-select");
   }
 }
 
@@ -1428,8 +1236,6 @@ function hideUserLoginScreen() {
     overlay.hidden = true;
     const status = document.getElementById("user-login-status");
     if (status) status.textContent = "";
-    const recoveryStatus = document.getElementById("first-access-recovery-status");
-    if (recoveryStatus) recoveryStatus.textContent = "";
     checkOverlaysInertState();
     restoreUserSessionReturnFocus();
   }
@@ -1490,8 +1296,7 @@ function renderUserLoginScreen() {
   const selectEl = document.getElementById("user-login-select");
   if (!selectEl) return;
 
-  const activeUsers = getSessionActiveUsers();
-  const recoveryMode = renderFirstAccessRecoveryState(activeUsers);
+  const activeUsers = (state.users || []).filter(user => user.active !== false);
 
   selectEl.innerHTML = activeUsers.map(user => {
     const roleLabel = {
@@ -1513,11 +1318,6 @@ function renderUserLoginScreen() {
 
     return `<option value="${escapeAttr(user.id)}">${escapeHtml(displayLabel)}</option>`;
   }).join("") || `<option value="">Aucun utilisateur actif trouvé</option>`;
-
-  if (recoveryMode) {
-    updateLoginPinRequirement();
-    return;
-  }
 
   // Sélectionner par défaut l'utilisateur actuel s'il existe et est actif
   const currentUser = getCurrentUser();
@@ -1670,70 +1470,6 @@ function renderCurrentSessionIndicator() {
   }
 }
 
-async function handleFirstAccessRecoverySubmit(event) {
-  event?.preventDefault?.();
-  const form = event?.currentTarget || event?.target || document.getElementById("first-access-recovery-form");
-  const statusEl = document.getElementById("first-access-recovery-status");
-  if (statusEl) statusEl.textContent = "";
-  if (!form) return false;
-
-  if (!canUseFirstAccessRecovery()) {
-    if (statusEl) statusEl.textContent = "La récupération locale est indisponible car un utilisateur actif existe déjà.";
-    renderUserLoginScreen();
-    return false;
-  }
-
-  const name = normalizeTextInputValue(form.elements.name.value);
-  const role = form.elements.role.value;
-  const pin = String(form.elements.pin.value || "").trim();
-  const pinConfirm = String(form.elements.pinConfirm.value || "").trim();
-
-  if (!name) {
-    if (statusEl) statusEl.textContent = "Nom utilisateur obligatoire.";
-    form.elements.name.focus();
-    return false;
-  }
-  if (!["admin", "directeur_sav"].includes(role)) {
-    if (statusEl) statusEl.textContent = "Rôle de récupération invalide.";
-    return false;
-  }
-  if (pin !== pinConfirm) {
-    if (statusEl) statusEl.textContent = "Les deux PIN ne correspondent pas.";
-    form.elements.pinConfirm.focus();
-    return false;
-  }
-
-  const validation = typeof validateLocalPinStrength === "function"
-    ? validateLocalPinStrength(pin)
-    : { ok: pin.length >= 6, value: pin, message: "PIN trop faible." };
-  if (!validation.ok) {
-    if (statusEl) statusEl.textContent = validation.message || "PIN trop faible.";
-    form.elements.pin.focus();
-    return false;
-  }
-
-  try {
-    const pinData = await createLocalPinCredentials(validation.value);
-    const result = createFirstAccessRecoveryUser({ name, role, ...pinData });
-    if (!result.ok) {
-      if (statusEl) statusEl.textContent = result.message || "Création utilisateur impossible.";
-      return false;
-    }
-    try {
-      sessionStorage.setItem("nimr-user-pin-unlocked", result.user.id);
-    } catch (error) {
-      // Session storage peut être indisponible dans certains navigateurs.
-    }
-    form.reset();
-    completeUserLogin(result.user);
-    notifyUser("Utilisateur local créé. Pensez à sauvegarder vos données.", "success");
-    return true;
-  } catch (error) {
-    if (statusEl) statusEl.textContent = error.message || "Création utilisateur impossible.";
-    return false;
-  }
-}
-
 function bindUserSessionActions() {
   // Option checkbox dans Paramètres
   const alwaysPromptCheckbox = document.getElementById("always-prompt-startup");
@@ -1783,15 +1519,6 @@ function bindUserSessionActions() {
     window.pendingSelectorUser = null;
     showUserLoginScreen();
     hideUserPinChangeOverlay();
-  });
-
-  const firstAccessForm = document.getElementById("first-access-recovery-form");
-  firstAccessForm?.addEventListener("submit", handleFirstAccessRecoverySubmit);
-  document.getElementById("first-access-import-backup")?.addEventListener("click", () => {
-    document.getElementById("first-access-import-input")?.click();
-  });
-  document.getElementById("first-access-import-input")?.addEventListener("change", (event) => {
-    if (typeof importBackup === "function") importBackup(event);
   });
 
   // Soumission du formulaire unique de login
@@ -1968,8 +1695,6 @@ function bindUserSessionIdleEvents() {
 }
 
 window.checkUserSessionStartup = checkUserSessionStartup;
-window.canUseFirstAccessRecovery = canUseFirstAccessRecovery;
-window.handleFirstAccessRecoverySubmit = handleFirstAccessRecoverySubmit;
 window.renderCurrentSessionIndicator = renderCurrentSessionIndicator;
 window.resetUserSessionIdleTimer = resetUserSessionIdleTimer;
 window.bindUserSessionIdleEvents = bindUserSessionIdleEvents;

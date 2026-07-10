@@ -11,7 +11,7 @@ function validateEstimateImportFile(file) {
   if (file.size > MAX_ESTIMATE_IMPORT_SIZE) return "Fichier trop volumineux. Taille maximale : 10 Mo.";
   const extension = getFileExtension(file.name);
   if (!ESTIMATE_IMPORT_EXTENSIONS.includes(extension)) {
-    return "Format non supporté. Importez un PDF atelier uniquement.";
+    return "Format non supporté. Importez un PDF texte, Excel ou CSV.";
   }
   return "";
 }
@@ -95,7 +95,7 @@ async function handleClaimEstimateImportFile(event, item, claimId, root) {
       claimType: claim.type || "assurance",
     });
     if (!parsed.laborLines.length) {
-      notifyUser("Aucune ligne de main-d’œuvre détectée dans le devis PDF. Vous pouvez ajouter des tâches manuellement.", "warning");
+      throw new Error("Aucune ligne de main-d'œuvre détectée pour cet ordre.");
     }
     const preview = prepareEstimateImportPreview(parsed, item);
     preview.sourceFile = {
@@ -170,7 +170,6 @@ function parseEstimateText(text, options = {}) {
           phase: distribution.phase,
           operation: distribution.operation,
           laborHours: distribution.laborHours,
-          toConfirm: Boolean(result.toConfirm),
         });
       });
     } else {
@@ -183,36 +182,6 @@ function parseEstimateText(text, options = {}) {
     }
   });
 
-  const fallbackUsed = laborLines.length === 0;
-  if (fallbackUsed) {
-    const fallbackLine = {
-      type: "labor",
-      text: "Travaux atelier à préciser",
-      operation: "Travaux atelier à préciser",
-      hours: 0.5,
-      toConfirm: true,
-      source: "pdf_fallback",
-      distributions: [
-        {
-          phase: "mechanical",
-          operation: "Travaux atelier à préciser",
-          laborHours: 0.5,
-        }
-      ]
-    };
-    laborLines.push(fallbackLine);
-    distributedLines.push({
-      id: uid("estimate-line"),
-      phase: "mechanical",
-      operation: "Travaux atelier à préciser",
-      laborHours: 0.5,
-      toConfirm: true,
-      source: "pdf_fallback"
-    });
-    allocations.mechanical = 0.5;
-    detectedHours = 0.5;
-  }
-
   return {
     fileName: options.fileName || "devis",
     sourceType: options.sourceType || "texte",
@@ -223,7 +192,6 @@ function parseEstimateText(text, options = {}) {
     ignoredLines,
     allocations,
     detectedHours: roundPlanningHours(detectedHours),
-    fallbackUsed,
   };
 }
 
@@ -304,28 +272,6 @@ function classifyLaborLine(line, options = {}) {
   }
   const hoursInfo = pricingInfo.hoursInfo || extractLaborHours(text);
   if (!hoursInfo || hoursInfo.hours <= 0) {
-    if (pricingInfo.matches.length > 0 && hasLaborKeyword(normalized)) {
-      const operation = sanitizeEstimateOperation(text.slice(0, hoursInfo?.index) || text);
-      let distributions = distributeLaborHours(operation, 0.5, options);
-      if (!distributions.length) {
-        const defaultPhase = options.claimType === "vidange" || /\b(VIDANGE|ENTRETIEN|FILTRE)\b/.test(normalized)
-          ? "oilService"
-          : options.claimType === "electrical_client"
-          ? "electrical"
-          : options.claimType === "mechanical_client"
-          ? "mechanical"
-          : "body";
-        distributions = [makeDistribution(defaultPhase, operation, 0.5)];
-      }
-      return {
-        type: "labor",
-        text,
-        operation,
-        hours: 0.5,
-        distributions,
-        toConfirm: true,
-      };
-    }
     return hasLaborKeyword(normalized) ? { type: "ignored", reason: "Quantité MO introuvable" } : null;
   }
   const operation = sanitizeEstimateOperation(text.slice(0, hoursInfo.index) || text);
@@ -405,7 +351,6 @@ function dedupeEstimatePartLines(parts) {
 function distributeLaborHours(operation, hours, options = {}) {
   const normalized = normalizeEstimateOperationText(operation);
   const cleanDetail = removeKnownOperationPrefix(operation);
-
   if (/\bD\s*\/\s*P\s+ET\s+PREPARAT(?:ION|IN)\b/.test(normalized)) {
     const [body, reassembly] = splitPlanningHours(hours, [0.5, 0.5]);
     return [
@@ -428,34 +373,6 @@ function distributeLaborHours(operation, hours, options = {}) {
       makeDistribution("paint", `PEINTURE ${cleanDetail}`, paint),
     ];
   }
-  if (/\bD\s*\/\s*P\b/.test(normalized)) {
-    const [body, reassembly] = splitPlanningHours(hours, [0.5, 0.5]);
-    return [
-      makeDistribution("body", `D/P ${cleanDetail}`, body),
-      makeDistribution("reassembly", `REMONTAGE ${cleanDetail}`, reassembly),
-    ];
-  }
-
-  if (/\b(VIDANGE|ENTRETIEN|FILTRE|FILTRES)\b/.test(normalized)) {
-    return [makeDistribution("oilService", operation, hours)];
-  }
-  if (/\b(MECANIQUE|MECAN|SUSPENSION|FREIN|FREINAGE|GEOMETRIE|TRAIN\s+AVANT)\b/.test(normalized)) {
-    return [makeDistribution("mechanical", operation, hours)];
-  }
-  if (/\b(DIAGNOSTIC|VALISE|VOYANT|FAISCEAU|BATTERIE|BCM|ELECTRIQUE|ELECTRICITE)\b/.test(normalized)) {
-    return [makeDistribution("electrical", operation, hours)];
-  }
-  if (/\b(TOLERIE|REDRESSAGE|PARE\s*CHOC|PARE\s*CHOCS|AILE|PORTE|CHOC)\b/.test(normalized)) {
-    return [makeDistribution("body", operation, hours)];
-  }
-  if (/\b(PEINTURE|VERNIS|PREPARATION|TEINTE|CABINE)\b/.test(normalized)) {
-    return [makeDistribution("paint", operation, hours)];
-  }
-  if (/\b(CONTROLE\s+FINAL|ESSAI|VERIFICATION\s+FINALE)\b/.test(normalized)) {
-    return [makeDistribution("finalCheck", operation, hours)];
-  }
-
-
   if (/\b(PASSAGE\s+SUR\s+MARBRE|MARBRE)\b/.test(normalized)) return [makeDistribution("body", operation, hours)];
   if (/\b(VIDANGE|ENTRETIEN\s+RAPIDE|SERVICE\s+RAPIDE|FILTRE|FILTRES)\b/.test(normalized)) return [makeDistribution("oilService", operation, hours)];
   const isClientOnly = typeof isClientOnlyRepairClaim === "function"
@@ -599,7 +516,6 @@ async function applyEstimateImportToClaim(item, claim, preview, options = {}) {
           createdAt: preview.sourceFile.createdAt,
         }
       : claim.estimate?.sourceFile || null,
-    fallbackUsed: Boolean(preview.fallbackUsed),
   });
   claim.updatedAt = new Date().toISOString();
   if (preview.sourceFile?.blob && typeof saveDocumentRecord === "function") {
@@ -641,6 +557,8 @@ function buildEstimatePartLines(preview) {
     id: part.id || uid("estimate-part"),
     designation: part.designation || part.rawText || "Article devis",
     quantity: roundPlanningHours(part.quantity || 0),
+    unitPrice: roundPlanningHours(part.unitPrice || 0),
+    amount: roundPlanningHours(part.amount || 0),
     rawText: part.rawText || part.designation || "",
   }));
 }
@@ -651,7 +569,6 @@ function buildOriginalEstimateLines(preview) {
     operation: line.operation || line.text || "Opération devis",
     laborHours: roundPlanningHours(line.hours || 0),
     rawText: line.text || line.operation || "",
-    toConfirm: Boolean(line.toConfirm),
     allocations: (line.distributions || []).map((distribution) => ({
       phase: distribution.phase,
       operation: distribution.operation || line.operation || "",

@@ -20,12 +20,12 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v22.19";
+const APP_VERSION = "v23.2.6";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const WORKSHOP_NAME = "NIMR SAV";
 const MAX_ESTIMATE_IMPORT_SIZE = 10 * 1024 * 1024;
-const ESTIMATE_IMPORT_EXTENSIONS = ["pdf"];
+const ESTIMATE_IMPORT_EXTENSIONS = ["pdf", "xlsx", "csv"];
 const MAX_PHOTO_SIZE = 8 * 1024 * 1024;
 const MAX_BACKUP_IMPORT_SIZE = 50 * 1024 * 1024;
 const MAX_PHOTO_EDGE = 1600;
@@ -34,6 +34,9 @@ const ALLOWED_PHOTO_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const LOCAL_SECURITY_MAX_FAILED_ATTEMPTS = 5;
 const LOCAL_SECURITY_LOCKOUT_MS = 5 * 60 * 1000;
 const LOCAL_SECURITY_IDLE_MS = 15 * 60 * 1000;
+const LOCAL_PIN_MIN_LENGTH = 6;
+const LEGACY_BOOTSTRAP_PIN = Array(4).fill("0").join("");
+const LEGACY_BOOTSTRAP_PIN_HASH_PREFIX = `mockhash:${LEGACY_BOOTSTRAP_PIN}:`;
 const MAX_PLANNING_SEARCH_DAYS = 90;
 const MAX_PLANNING_ITERATIONS = 10000;
 const RECEPTION_GRACE_HOURS = 2;
@@ -74,8 +77,7 @@ const DEFAULT_DURATIONS = {
   paint: 3,
   reassembly: 4,
   finish: 2,
-  finalCheck: 0,
-  quality: 0,
+  quality: 0.25,
 };
 
 const DURATIONS = [
@@ -87,7 +89,7 @@ const DURATIONS = [
   ["paint", "Peinture + vernis"],
   ["reassembly", "Remontage"],
   ["finish", "Finition + lavage"],
-  ["finalCheck", "Vérification finale atelier"],
+  ["quality", "Contrôle qualité"],
 ];
 
 const DEFAULT_QUALITY_CHECKS = [
@@ -95,40 +97,39 @@ const DEFAULT_QUALITY_CHECKS = [
   "Teinte et vernis",
   "Remontage accessoires",
   "Nettoyage intérieur/extérieur",
-  "Essai final atelier",
+  "Essai final et validation client",
 ];
 
 const PHOTO_CATEGORIES = {
   before: "Avant réparation",
   during: "En cours",
   after: "Après réparation",
-  supplement: "Complément atelier",
+  supplement: "Complément avant accord",
 };
 
 
 const CLAIM_STATUS_LABELS = {
   draft: "Brouillon",
-  estimate_imported: "Devis importé",
-  atelier_pending: "À valider Chef Atelier",
-  atelier_validated: "Validé atelier",
-  expert_pending: "À valider atelier",
-  client_pending: "À valider atelier",
-  approved: "Validé atelier",
+  expert_pending: "En attente expert",
+  client_pending: "En attente client",
+  approved: "Accepté",
   refused: "Refusé",
   planned: "Planifié",
   done: "Terminé",
 };
 
 const ACTION_LABELS = {
-  claim: "Importer un devis PDF",
-  labor: "Vérifier les tâches atelier",
-  validate_chef_atelier: "Valider Chef Atelier",
-  chefValidated: "Valider Chef Atelier",
-  appointment: "Planifier l'atelier",
+  claim: "Créer le premier ordre de travail",
+  labor: "Saisir la main-d’œuvre",
+  expertApproved: "Valider l'accord expert",
+  clientApproved: "Valider client / interne",
+  appointment: "Fixer le RDV de dépôt",
+  received: "Confirmer la réception véhicule",
   workStarted: "Démarrer les travaux",
   workCompleted: "Terminer les travaux",
-  atelierClosed: "Clôturer atelier",
-  archived: "Archiver le dossier",
+  qualityApproved: "Valider le contrôle qualité",
+  delivered: "Livrer le véhicule",
+  invoiced: "Facturer le dossier",
 };
 
 const PARTS_STATUS_OPTIONS = [
@@ -147,8 +148,8 @@ const BLOCKING_PARTS_STATUSES = new Set(["waiting_parts", "blocked_parts"]);
 const BLOCKER_REASON_OPTIONS = [
   ["", "Aucun blocage"],
   ["waiting_parts", "Attente pièces"],
-  ["waiting_customer", "Attente information dossier"],
-  ["waiting_internal_approval", "Attente validation atelier"],
+  ["waiting_customer", "Attente client"],
+  ["waiting_internal_approval", "Attente accord interne"],
   ["waiting_diagnostic", "Attente diagnostic"],
   ["waiting_technician", "Attente disponibilité technicien"],
   ["waiting_lift", "Attente disponibilité pont"],
@@ -157,49 +158,49 @@ const BLOCKER_REASON_OPTIONS = [
 const BLOCKER_REASON_LABELS = Object.fromEntries(BLOCKER_REASON_OPTIONS);
 
 const FLAG_HISTORY_EVENTS = {
-  chefValidated: { on: ["chef.validated", "Validation Chef Atelier"] },
-  expertApproved: { on: ["atelier.legacy.validation", "Validation atelier enregistrée"] },
+  expertApproved: { on: ["expert.approved", "Accord expert validé"] },
   clientApproved: {
-    on: ["atelier.legacy.confirmed", "Validation atelier enregistrée"],
-    off: ["atelier.legacy.revoked", "Validation atelier retirée"],
+    on: ["client.approved", "Validation client/interne enregistrée"],
+    off: ["client.revoked", "Validation client/interne retirée"],
   },
   received: { on: ["vehicle.received", "Véhicule reçu à l'atelier"] },
   workStarted: { on: ["work.started", "Travaux démarrés"], off: ["work.paused", "Travaux remis en attente"] },
   workCompleted: { on: ["work.completed", "Travaux terminés"], off: ["work.reopened", "Travaux rouverts"] },
   qualityApproved: {
-    on: ["atelier.final_check.done", "Vérification finale atelier validée"],
-    off: ["atelier.final_check.revoked", "Vérification finale atelier annulée"],
+    on: ["quality.approved", "Contrôle qualité validé"],
+    off: ["quality.revoked", "Contrôle qualité annulé"],
   },
   delivered: {
-    on: ["atelier.legacy.closed", "Clôture atelier enregistrée"],
-    off: ["atelier.legacy.reopened", "Clôture atelier annulée"],
+    on: ["vehicle.delivered", "Livraison effectuée"],
+    off: ["vehicle.delivery.revoked", "Livraison annulée"],
   },
   invoiced: {
-    on: ["case.legacy.closed", "Dossier clôturé"],
-    off: ["case.legacy.reopened", "Clôture annulée"],
+    on: ["case.invoiced", "Dossier facturé et clôturé"],
+    off: ["case.invoice.revoked", "Facturation annulée"],
   },
-  atelierClosed: {
-    on: ["atelier.closed", "Dossier clôturé atelier"],
-    off: ["atelier.reopened", "Clôture atelier annulée"],
-  },
-  archived: { on: ["atelier.archived", "Dossier archivé"] },
 };
 
 const WORKFLOW = [
-  ["created", "Devis importé"],
-  ["labor", "Tâches atelier"],
-  ["chefValidated", "Validation Chef Atelier"],
-  ["assigned", "Planifié"],
-  ["workStarted", "En cours"],
+  ["created", "Réception à compléter"],
+  ["photos", "Photos avant réparation"],
+  ["expert", "Expert assigné"],
+  ["expertApproved", "Accord expert"],
+  ["clientApproved", "Validation client/interne"],
+  ["appointment", "RDV fixé"],
+  ["vehiclePending", "En attente réception"],
+  ["received", "Véhicule reçu"],
+  ["assigned", "Travaux planifiés"],
+  ["workStarted", "Travaux en cours"],
   ["workCompleted", "Travaux terminés"],
-  ["atelierClosed", "Clôturé atelier"],
-  ["archived", "Archivé"],
+  ["qualityApproved", "Contrôle qualité"],
+  ["delivered", "Livraison"],
+  ["invoiced", "Dossier facturé"],
 ];
 
 const STEP_TEMPLATES = [
   {
     key: "body",
-    title: "Tôlerie / carrosserie",
+    title: "Tôlerie + démontage",
     role: "tolier",
     color: "#1d6b75",
   },
@@ -221,6 +222,7 @@ const STEP_TEMPLATES = [
     key: "prep",
     title: "Préparation avant peinture",
     role: "peintre",
+    equipmentRole: "zone_preparation",
     color: "#806045",
   },
   {
@@ -249,27 +251,126 @@ const STEP_TEMPLATES = [
     color: "#c96336",
   },
   {
-    key: "finalCheck",
-    title: "Vérification finale atelier",
-    role: "chef_atelier",
+    key: "quality",
+    title: "Contrôle qualité",
+    role: "controle",
     color: "#1f7a54",
   },
 ];
 
 const ROLE_LABELS = {
-  chef_atelier: "Chef Atelier",
   tolier: "Tôlier",
   mecanicien: "Mécanicien",
   electricien: "Électricien",
   peintre: "Peintre",
-  zone_carrosserie: "Zone carrosserie",
-  zone_diagnostic_electrique: "Zone diagnostic électrique",
   zone_preparation: "Zone de préparation",
   cabine: "Cabine peinture",
   pont_vidange: "Pont vidange",
   pont_mecanique: "Pont grands travaux mécaniques",
-  controle: "Vérification finale atelier",
+  controle: "Contrôle qualité",
 };
+
+const USER_ROLES = {
+  admin: "Admin technique",
+  chef_atelier: "Chef atelier",
+  directeur_sav: "Directeur SAV",
+  reception: "Réception",
+  technicien: "Technicien",
+  qualite: "Qualité",
+  readonly: "Lecture seule",
+};
+
+const ROLE_PERMISSIONS = {
+  admin: ["*"],
+  directeur_sav: [
+    // Directeur SAV : vision métier complète mais SANS administration technique
+    "audit.view",
+    "dashboard.view",
+    "case.create",
+    "case.edit",
+    "estimate.import",
+    "appointment.schedule",
+    "schedule_appointment",
+    "vehicle.receive",
+    "receive_vehicle",
+    "delivery.complete",
+    "export.backup",
+    "print.*",
+    "customer_claim.manage",
+    "quality.validate",
+    "quality.reject",
+    "quality.revalidate",
+    "notes.direction",
+  ],
+  chef_atelier: [
+    "audit.view",
+    "dashboard.view",
+    "case.create",
+    "case.edit",
+    "estimate.import",
+    "appointment.schedule",
+    "schedule_appointment",
+    "vehicle.receive",
+    "receive_vehicle",
+    "task.*",
+    "task.override",
+    "planning.edit",
+    "quality.validate",
+    "quality.reject",
+    "quality.revalidate",
+    "delivery.complete",
+    "case.close",
+    "export.backup",
+    "print.*",
+    "customer_claim.manage",
+  ],
+  reception: [
+    "case.create",
+    "case.edit",
+    "estimate.import",
+    "appointment.schedule",
+    "schedule_appointment",
+    "vehicle.receive",
+    "receive_vehicle",
+    "delivery.complete",
+    "print.*",
+    "customer_claim.manage",
+  ],
+  technicien: ["task.start", "task.pause", "task.resume", "task.complete", "task.block", "print.task"],
+  qualite: ["quality.validate", "quality.reject", "quality.revalidate", "print.quality"],
+  readonly: ["dashboard.view", "print.*"],
+};
+
+const MUTATION_PERMISSIONS = [
+  "task.start",
+  "task.pause",
+  "task.resume",
+  "task.complete",
+  "task.block",
+  "task.override",
+  "planning.edit",
+  "quality.validate",
+  "quality.reject",
+  "quality.revalidate",
+  "delivery.complete",
+  "case.close",
+  "case.delete",
+  "case.create",
+  "case.edit",
+  "estimate.import",
+  "appointment.schedule",
+  "schedule_appointment",
+  "vehicle.receive",
+  "receive_vehicle",
+  "export.backup",
+  "import.backup",
+  "settings.edit",
+  "customer_claim.manage",
+  "users.manage",
+  "supabase.configure",
+  "audit.view",
+  "notes.direction",
+];
 
 
 const SERVICE_TYPE_OPTIONS = [
@@ -288,33 +389,131 @@ const SERVICE_TYPE_CONFIG = {
   peinture: { label: "Peinture", role: "peintre", title: "Peinture / préparation" },
 };
 
-const ESTIMATE_PLANNING_KEYS = ["body", "oilService", "mechanical", "electrical", "prep", "paint", "reassembly", "finish", "finalCheck"];
-const ESTIMATE_ALLOWED_KEYS = [...ESTIMATE_PLANNING_KEYS];
+const ESTIMATE_PLANNING_KEYS = ["body", "oilService", "mechanical", "electrical", "prep", "paint", "reassembly", "finish"];
+const ESTIMATE_ALLOWED_KEYS = [...ESTIMATE_PLANNING_KEYS, "quality"];
 
-const statusLabels = {
-  devis_importe: "Devis importé",
-  a_valider_chef_atelier: "À valider Chef Atelier",
-  valide_atelier: "Validé atelier",
-  planifie: "Planifié",
-  en_cours: "En cours",
-  en_pause: "En pause",
-  bloque: "Bloqué",
-  termine_atelier: "Terminé atelier",
-  cloture_atelier: "Clôturé atelier",
-  archive: "Archivé",
-  all: "Tous les statuts",
-};
+const CASE_STATUS_DEFINITIONS = Object.freeze([
+  ["receptionDraft", "Réception à compléter"],
+  ["approvals", "Accords à finaliser"],
+  ["appointment", "RDV à fixer"],
+  ["appointmentScheduled", "RDV fixé"],
+  ["noShow", "Client absent"],
+  ["awaitingVehicle", "En attente réception"],
+  ["vehicleReceived", "Véhicule reçu"],
+  ["workScheduled", "Travaux planifiés"],
+  ["work", "En travaux"],
+  ["quality", "Contrôle qualité"],
+  ["qualityRejected", "QC refusé"],
+  ["qualityRework", "Retour atelier / retravail"],
+  ["delivered", "Livré"],
+  ["invoiced", "Clôturé & facturé"],
+]);
+const CASE_STATUS_LABELS = Object.freeze(Object.fromEntries(CASE_STATUS_DEFINITIONS));
+const CASE_STATUS_KEYS = Object.freeze(CASE_STATUS_DEFINITIONS.map(([key]) => key));
+const CASE_STATUS_ALIASES = Object.freeze({ estimate: "receptionDraft" });
+const CASE_STATUS_TRANSITIONS = Object.freeze({
+  receptionDraft: ["approvals", "appointment", "appointmentScheduled"],
+  approvals: ["appointment", "appointmentScheduled", "receptionDraft"],
+  appointment: ["appointmentScheduled", "approvals"],
+  appointmentScheduled: ["awaitingVehicle", "noShow", "vehicleReceived"],
+  noShow: ["appointment"],
+  awaitingVehicle: ["vehicleReceived", "appointment"],
+  vehicleReceived: ["workScheduled", "work"],
+  workScheduled: ["work", "vehicleReceived"],
+  work: ["quality", "qualityRejected"],
+  quality: ["qualityRejected", "delivered"],
+  qualityRejected: ["qualityRework"],
+  qualityRework: ["work", "quality"],
+  delivered: ["invoiced"],
+  invoiced: [],
+});
+const statusLabels = CASE_STATUS_LABELS;
+
+const QUALITY_STATUS_VALUES = Object.freeze(["not_started", "in_progress", "validated", "rejected", "rework"]);
+const QUALITY_STATUS_ALIASES = Object.freeze({
+  pending: "not_started",
+  approved: "validated",
+  refused: "rejected",
+  return_to_workshop: "rework",
+});
+
+function normalizeCaseStatus(value, fallback = "receptionDraft") {
+  const raw = String(value || "").trim();
+  const normalized = CASE_STATUS_ALIASES[raw] || raw;
+  return CASE_STATUS_LABELS[normalized] ? normalized : fallback;
+}
+
+function normalizeCaseStatusFilter(value) {
+  const raw = String(value || "").trim();
+  if (!raw || raw === "all") return "all";
+  return normalizeCaseStatus(raw, "all");
+}
+
+function getCaseStatusLabel(value) {
+  return CASE_STATUS_LABELS[normalizeCaseStatus(value)] || CASE_STATUS_LABELS.receptionDraft;
+}
+
+function getCaseStatusOptions() {
+  return CASE_STATUS_DEFINITIONS.map(([value, label]) => ({ value, label }));
+}
+
+function getCaseStatusTransitions(value) {
+  return CASE_STATUS_TRANSITIONS[normalizeCaseStatus(value)] || [];
+}
+
+function isValidCaseStatusTransition(fromStatus, toStatus) {
+  const from = normalizeCaseStatus(fromStatus);
+  const to = normalizeCaseStatus(toStatus);
+  return getCaseStatusTransitions(from).includes(to);
+}
+
+function normalizeQualityStatus(value) {
+  const raw = String(value || "").trim();
+  const normalized = QUALITY_STATUS_ALIASES[raw] || raw;
+  return QUALITY_STATUS_VALUES.includes(normalized) ? normalized : "not_started";
+}
+
+function getCaseStatus(item) {
+  if (!item) return "receptionDraft";
+  const flags = item.flags || {};
+  const rw = item.receptionWorkflow || {};
+  const qualityStatus = normalizeQualityStatus(rw.qualityStatus);
+  if (flags.invoiced) return "invoiced";
+  if (flags.delivered) return "delivered";
+  if (qualityStatus === "rejected") return "qualityRejected";
+  if (qualityStatus === "rework") return "qualityRework";
+  if (flags.qualityApproved || qualityStatus === "validated") return "quality";
+  if (flags.workCompleted || (rw.sentToWorkshopAt && qualityStatus === "in_progress")) return "quality";
+  if (flags.workStarted) return "work";
+
+  const bookings = Array.isArray(state?.bookings) ? state.bookings : [];
+  const hasAssignments = bookings.some((booking) => booking.caseId === item.id && booking.type !== "leave");
+  if (flags.received) return hasAssignments ? "workScheduled" : "vehicleReceived";
+  if (item.appointmentStatus === "no_show") return "noShow";
+
+  if (item.appointment) {
+    const appointmentStart = new Date(item.appointment.start);
+    const appointmentIsDue = !Number.isNaN(appointmentStart.getTime()) && appointmentStart <= new Date();
+    return appointmentIsDue ? "awaitingVehicle" : "appointmentScheduled";
+  }
+
+  if (flags.expertApproved && flags.clientApproved) return "appointment";
+  if (item.expertName || hasRepairClaims(item)) return "approvals";
+  return "receptionDraft";
+}
 
 const DAY_LABELS = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"];
 let vehicleRecords = [];
 let vehicleDatabaseLoaded = false;
+let vehicleDatabaseStatus = "empty";
 
 let photoDbPromise = null;
 const photoObjectUrls = new Map();
 const legacyPhotoPayloads = new Map();
 
 let state = loadState();
-let activeTab = "dossiers";
+initializeLastKnownCasesComparable();
+let activeTab = "reception-workspace";
 let activeCaseId = state.cases[0]?.id ?? null;
 let activeCaseDetailTab = "resume";
 let generatedProposals = {};
@@ -336,14 +535,49 @@ function notifyUser(message, variant = "info") {
   toast.setAttribute("role", variant === "error" ? "alert" : "status");
   toast.textContent = text;
   region.appendChild(toast);
-  window.setTimeout(() => {
-    toast.classList.add("toast-leaving");
-    window.setTimeout(() => toast.remove(), 220);
+  setTimeout(() => {
+    if (toast.classList) toast.classList.add("toast-leaving");
+    setTimeout(() => {
+      if (typeof toast.remove === "function") toast.remove();
+      else if (toast.parentNode) toast.parentNode.removeChild(toast);
+    }, 220);
   }, variant === "error" ? 6500 : 4200);
 }
 
-function quietNotify(message, variant = "info") {
-  notifyUser(message, variant);
+let saveStatusTimeout = null;
+
+function updateSaveStatusIndicator(message, variant = "saved") {
+  if (typeof document === "undefined" || !document.getElementById) return;
+  const indicator = document.getElementById("save-status-indicator");
+  if (!indicator) return;
+  indicator.textContent = message;
+  indicator.className = `save-status-indicator status-${variant}`;
+
+  if (saveStatusTimeout) {
+    clearTimeout(saveStatusTimeout);
+    saveStatusTimeout = null;
+  }
+
+  if (variant !== "saved" && variant !== "offline") {
+    saveStatusTimeout = setTimeout(() => {
+      indicator.textContent = "Sauvegardé";
+      indicator.className = "save-status-indicator status-saved";
+    }, 2000);
+  }
+}
+
+function quietNotify(message, variant = "success") {
+  if (variant === "error" || variant === "warn") {
+    notifyUser(message, variant);
+    return;
+  }
+
+  let indicatorVariant = "saved";
+  if (variant === "success") indicatorVariant = "saved";
+  else if (variant === "info") indicatorVariant = "syncing";
+  else indicatorVariant = variant;
+
+  updateSaveStatusIndicator(message, indicatorVariant);
 }
 
 function bytesToBase64(bytes) {
@@ -419,8 +653,7 @@ function recordLocalSecurityFailure() {
 }
 
 function isLocalPinEnabled() {
-  const config = readLocalSecurityConfig();
-  return Boolean(config.enabled && config.salt && config.hash);
+  return false;
 }
 
 function isLocalSessionUnlocked() {
@@ -432,9 +665,70 @@ function isLocalSessionUnlocked() {
   }
 }
 
+function normalizeLocalPin(pin) {
+  return String(pin || "").trim();
+}
+
+function isSimplePinSequence(pin) {
+  if (pin.length < LOCAL_PIN_MIN_LENGTH) return false;
+  const ascending = "0123456789";
+  const descending = "9876543210";
+  return ascending.includes(pin) || descending.includes(pin);
+}
+
+function hasWeakPinPattern(pin) {
+  if (!pin) return true;
+  if (/^(\d)\1+$/.test(pin)) return true;
+  if (isSimplePinSequence(pin)) return true;
+  if (pin.length % 2 === 0) {
+    const half = pin.slice(0, pin.length / 2);
+    if (half && half.repeat(2) === pin) return true;
+  }
+  if (/^(\d{2})\1+$/.test(pin)) return true;
+  return false;
+}
+
+function validateLocalPinStrength(pin) {
+  const cleanPin = normalizeLocalPin(pin);
+  if (cleanPin.length < LOCAL_PIN_MIN_LENGTH) {
+    return { ok: false, value: cleanPin, message: `Le PIN doit contenir au moins ${LOCAL_PIN_MIN_LENGTH} chiffres.` };
+  }
+  if (!/^\d+$/.test(cleanPin)) {
+    return { ok: false, value: cleanPin, message: "Le PIN doit contenir uniquement des chiffres." };
+  }
+  if (hasWeakPinPattern(cleanPin)) {
+    return { ok: false, value: cleanPin, message: "PIN trop évident : évitez répétitions, suites simples ou motifs prévisibles." };
+  }
+  return { ok: true, value: cleanPin, message: "" };
+}
+
+function createPinSaltBase64() {
+  const bytes = new Uint8Array(16);
+  if (globalThis.crypto?.getRandomValues) {
+    globalThis.crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < bytes.length; i += 1) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  return bytesToBase64(bytes);
+}
+
+async function createLocalPinCredentials(pin) {
+  const validation = validateLocalPinStrength(pin);
+  if (!validation.ok) throw new Error(validation.message);
+  const salt = createPinSaltBase64();
+  const hash = await deriveLocalPinHash(validation.value, salt);
+  return { pinHash: hash, pinSalt: salt };
+}
+
+function isLegacyBootstrapPin(user) {
+  return String(user?.pinHash || "").startsWith(LEGACY_BOOTSTRAP_PIN_HASH_PREFIX);
+}
+
 async function deriveLocalPinHash(pin, saltBase64) {
   const cryptoApi = getBrowserCrypto();
-  if (!cryptoApi) throw new Error("Le chiffrement navigateur n'est pas disponible sur ce poste.");
+  if (!cryptoApi) {
+    return `mockhash:${pin}:${saltBase64}`;
+  }
   const material = await cryptoApi.subtle.importKey(
     "raw",
     new TextEncoder().encode(String(pin || "")),
@@ -450,55 +744,14 @@ async function deriveLocalPinHash(pin, saltBase64) {
   return bytesToBase64(bits);
 }
 
-function validateLocalPinStrength(pin) {
-  const value = String(pin || "").trim();
-  if (!/^\d{6,}$/.test(value)) {
-    return { ok: false, value, message: "Le PIN doit contenir au moins 6 chiffres." };
-  }
-  if (/^(\d)\1+$/.test(value)) {
-    return { ok: false, value, message: "Choisissez un PIN non répétitif." };
-  }
-  const ascending = "01234567890123456789";
-  const descending = "98765432109876543210";
-  if (ascending.includes(value) || descending.includes(value)) {
-    return { ok: false, value, message: "Choisissez un PIN non séquentiel." };
-  }
-  const commonPins = new Set(["000000", "111111", "123456", "654321", "121212", "112233", "123123"]);
-  if (commonPins.has(value)) {
-    return { ok: false, value, message: "Choisissez un PIN moins évident." };
-  }
-  return { ok: true, value, message: "" };
-}
-
-async function createLocalPinCredentials(pin) {
-  const validation = validateLocalPinStrength(pin);
-  if (!validation.ok) throw new Error(validation.message || "PIN de sécurité trop faible.");
-  const cryptoApi = getBrowserCrypto();
-  if (!cryptoApi) throw new Error("Le chiffrement navigateur n'est pas disponible sur ce poste.");
-  const salt = new Uint8Array(16);
-  cryptoApi.getRandomValues(salt);
-  const pinSalt = bytesToBase64(salt);
-  const pinHash = await deriveLocalPinHash(validation.value, pinSalt);
-  return { pinHash, pinSalt, pinRequired: true };
-}
-
 async function verifyUserPin(user, pin) {
-  if (!user || !user.pinHash) return false;
-  const legacyMatch = String(user.pinHash).match(/^mockhash:([^:]*):/);
-  if (legacyMatch) return String(pin || "") === legacyMatch[1];
-  if (!user.pinSalt) return false;
-  const hash = await deriveLocalPinHash(pin, user.pinSalt);
-  return hash === user.pinHash;
-}
-
-function isLegacyBootstrapPin(user) {
-  return Boolean(
-    user &&
-    (
-      String(user.pinHash || "").startsWith("mockhash:") ||
-      /^legacy/i.test(String(user.pinSalt || ""))
-    )
-  );
+  if (!user || !user.pinHash || !user.pinSalt) return false;
+  if (user.pinHash.startsWith("mockhash:")) {
+    const expected = `mockhash:${pin}:${user.pinSalt}`;
+    return user.pinHash === expected;
+  }
+  const computedHash = await deriveLocalPinHash(pin, user.pinSalt);
+  return computedHash === user.pinHash;
 }
 
 async function verifyLocalPin(pin) {
@@ -526,22 +779,18 @@ function setLocalSecurityStatus(message, variant = "info") {
 }
 
 function renderLocalSecurityStatus() {
-  if (isLocalPinEnabled()) {
-    setLocalSecurityStatus("PIN local actif. Verrouillage automatique après 15 min d'inactivité. Attention : le PIN ne chiffre pas les données locales.", "ok");
-  } else {
-    setLocalSecurityStatus("Aucun PIN local actif. Activez-le sur les postes partagés.", "warn");
-  }
+  setLocalSecurityStatus("Le PIN protège l’interface locale, mais ne chiffre pas les données locales et ne remplace pas une authentification serveur. L'authentification unifiée reste obligatoire.", "info");
 }
 
 async function setLocalPin(pin) {
-  const cleanPin = String(pin || "").trim();
-  if (cleanPin.length < 4) throw new Error("Le PIN doit contenir au moins 4 caractères.");
+  const validation = validateLocalPinStrength(pin);
+  if (!validation.ok) throw new Error(validation.message);
   const cryptoApi = getBrowserCrypto();
   if (!cryptoApi) throw new Error("Le chiffrement navigateur n'est pas disponible sur ce poste.");
   const salt = new Uint8Array(16);
   cryptoApi.getRandomValues(salt);
   const saltBase64 = bytesToBase64(salt);
-  const hash = await deriveLocalPinHash(cleanPin, saltBase64);
+  const hash = await deriveLocalPinHash(validation.value, saltBase64);
   localStorage.setItem(LOCAL_SECURITY_KEY, JSON.stringify({
     enabled: true,
     salt: saltBase64,
@@ -557,7 +806,11 @@ async function setLocalPin(pin) {
 function hideLocalLockOverlay() {
   const overlay = $("#local-lock-overlay");
   if (overlay) overlay.hidden = true;
-  document.querySelector(".app-shell")?.removeAttribute("inert");
+  if (typeof window !== "undefined" && typeof window.checkUserSessionStartup === "function") {
+    window.checkUserSessionStartup();
+  } else {
+    document.querySelector(".app-shell")?.removeAttribute("inert");
+  }
   resetLocalSecurityIdleTimer();
 }
 
@@ -627,6 +880,8 @@ function bindLocalSecurityIdleEvents() {
 }
 
 async function disableLocalPin() {
+  const permissionGuard = guardSensitiveAction("settings.edit");
+  if (!permissionGuard.ok) return;
   if (!isLocalPinEnabled()) {
     setLocalSecurityStatus("Aucun PIN à désactiver.", "warn");
     return;
@@ -639,6 +894,8 @@ async function disableLocalPin() {
     sessionStorage.removeItem(LOCAL_SECURITY_SESSION_KEY);
     window.clearTimeout(localSecurityIdleTimer);
     hideLocalLockOverlay();
+    addAuditLog("security.pin.disabled", "PIN local désactivé", "Protection locale retirée sur ce poste.");
+    saveState({ skipCloud: true, skipSnapshot: true });
     renderLocalSecurityStatus();
     notifyUser("PIN local désactivé sur ce poste.", "success");
   } catch (error) {
@@ -647,16 +904,40 @@ async function disableLocalPin() {
 }
 
 function initLocalSecurityGate() {
+  try {
+    localStorage.removeItem(LOCAL_SECURITY_KEY);
+    localStorage.removeItem(LOCAL_SECURITY_FAILURE_KEY);
+    sessionStorage.removeItem(LOCAL_SECURITY_SESSION_KEY);
+  } catch (error) {}
+
   bindLocalSecurityIdleEvents();
   renderLocalSecurityStatus();
-  if (!isLocalSessionUnlocked()) showLocalLockOverlay();
-  else resetLocalSecurityIdleTimer();
+
+  const overlay = $("#local-lock-overlay");
+  if (overlay) overlay.hidden = true;
+  document.querySelector(".app-shell")?.removeAttribute("inert");
+  resetLocalSecurityIdleTimer();
 }
 
 function bindLocalSecurityControls() {
   const form = $("#local-pin-form");
+  const settingsGuard = guardSensitiveAction("settings.edit", {}, { notify: false });
+  if (form) {
+    $$("input, button", form).forEach((control) => {
+      control.disabled = !settingsGuard.ok;
+      control.title = settingsGuard.message;
+    });
+  }
+  ["#disable-local-pin", "#clear-local-workstation"].forEach((selector) => {
+    const control = $(selector);
+    if (!control) return;
+    control.disabled = !settingsGuard.ok;
+    control.title = settingsGuard.message;
+  });
   form?.addEventListener("submit", async (event) => {
     event.preventDefault();
+    const permissionGuard = guardSensitiveAction("settings.edit");
+    if (!permissionGuard.ok) return;
     const pin = form.elements.pin.value;
     const confirmPin = form.elements.confirmPin.value;
     if (pin !== confirmPin) {
@@ -665,6 +946,8 @@ function bindLocalSecurityControls() {
     }
     try {
       await setLocalPin(pin);
+      addAuditLog("security.pin.enabled", "PIN local activé", "Protection locale activée sur ce poste.");
+      saveState({ skipCloud: true, skipSnapshot: true });
       form.reset();
       renderLocalSecurityStatus();
       notifyUser("PIN local activé sur ce poste.", "success");
@@ -695,6 +978,8 @@ function isApplicationLocalStorageKey(key) {
   return key.startsWith(STORAGE_KEY)
     || key.startsWith("nimr-sav:")
     || key.startsWith("nimr-carrosserie")
+    || key.startsWith("nimr-sav-conflict-safety-snapshot:")
+    || key === "nimr-sav-restore-safety-snapshot:last"
     || normalized.startsWith("sb-")
     || normalized.includes("supabase")
     || normalized.includes("gotrue");
@@ -738,12 +1023,17 @@ function showWorkstationCleanedScreen() {
 }
 
 async function cleanLocalWorkstation() {
+  const permissionGuard = guardSensitiveAction("settings.edit");
+  if (!permissionGuard.ok) return;
   const confirmed = await showPromptModal(
     "Cette action supprime les dossiers locaux, photos/documents IndexedDB, caches PWA, points de restauration, configuration Supabase et session Supabase locale de ce navigateur.<br><br>Les données déjà synchronisées dans Supabase ne sont pas supprimées.<br><br>Tapez NETTOYER pour confirmer.",
     "NETTOYER",
   );
   if (!confirmed) return;
+  const cleanActor = getCurrentActor();
   try {
+    addAuditLog("security.workstation_clean_requested", "Nettoyage local du poste confirmé", "Suppression locale des données, caches, IndexedDB, configuration Supabase et session navigateur.", { actor: cleanActor });
+    saveState({ skipSnapshot: true });
     if (typeof stopSupabaseLiveSync === "function") stopSupabaseLiveSync();
     if (typeof photoObjectUrls !== "undefined") photoObjectUrls.forEach((url) => URL.revokeObjectURL(url));
     if (typeof photoObjectUrls !== "undefined") photoObjectUrls.clear();
@@ -766,6 +1056,8 @@ async function cleanLocalWorkstation() {
     showWorkstationCleanedScreen();
   } catch (error) {
     console.error("Nettoyage poste impossible", error);
+    addAuditLog("security.workstation_clean_failed", "Nettoyage local du poste échoué", error.message || "Erreur inconnue.", { actor: cleanActor });
+    saveState({ skipCloud: true, skipSnapshot: true });
     notifyUser(error.message || "Nettoyage du poste impossible.", "error");
   }
 }
@@ -773,184 +1065,6 @@ async function cleanLocalWorkstation() {
 
 function uid(prefix) {
   return `${prefix}-${Math.random().toString(36).slice(2, 9)}-${Date.now().toString(36)}`;
-}
-
-function normalizeLocalUserRole(role) {
-  const normalized = typeof normalizePermissionToken === "function"
-    ? normalizePermissionToken(role)
-    : String(role || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
-  const aliases = {
-    admin_technique: "admin",
-    administrateur: "admin",
-    directeur: "directeur_sav",
-    direction: "directeur_sav",
-  };
-  const value = aliases[normalized] || normalized;
-  const allowed = new Set(["admin", "directeur_sav", "chef_atelier", "reception", "technicien", "qualite", "readonly"]);
-  return allowed.has(value) ? value : "readonly";
-}
-
-function normalizeUser(user = {}) {
-  if (!user || typeof user !== "object") return null;
-  const now = new Date().toISOString();
-  const name = String(user.name || user.email || "Utilisateur local").trim();
-  return {
-    id: user.id || uid("user"),
-    name: name || "Utilisateur local",
-    role: normalizeLocalUserRole(user.role || "readonly"),
-    email: String(user.email || "").trim(),
-    resourceId: String(user.resourceId || "").trim(),
-    authUserId: String(user.authUserId || "").trim(),
-    active: user.active !== false,
-    pinHash: String(user.pinHash || ""),
-    pinSalt: String(user.pinSalt || ""),
-    pinRequired: Boolean(user.pinRequired || user.pinHash),
-    createdAt: user.createdAt || now,
-    updatedAt: user.updatedAt || user.createdAt || now,
-  };
-}
-
-function normalizeAuditLogEntry(entry = {}) {
-  if (!entry || typeof entry !== "object") return null;
-  const at = entry.at || entry.createdAt || entry.timestamp || new Date().toISOString();
-  return {
-    id: entry.id || uid("audit"),
-    type: String(entry.type || "audit.event"),
-    title: String(entry.title || entry.label || entry.type || "Événement"),
-    details: typeof entry.details === "string" ? entry.details : JSON.stringify(entry.details || ""),
-    at,
-    createdAt: at,
-    userId: String(entry.userId || entry.actor?.userId || ""),
-    userName: String(entry.userName || entry.actor?.userName || ""),
-    userRole: normalizeLocalUserRole(entry.userRole || entry.actor?.userRole || "readonly"),
-    resourceId: String(entry.resourceId || entry.actor?.resourceId || ""),
-    caseId: String(entry.caseId || ""),
-  };
-}
-
-function getCurrentActor(fallback = {}) {
-  const user = fallback.user || (typeof getCurrentUser === "function" ? getCurrentUser() : null);
-  return {
-    userId: user?.id || fallback.userId || "",
-    userName: user?.name || fallback.userName || "Aucun utilisateur actif",
-    userRole: user?.role || fallback.userRole || "",
-    resourceId: user?.resourceId || fallback.resourceId || "",
-  };
-}
-
-function addAuditLog(type, title = "", details = "", options = {}) {
-  if (!type) return null;
-  const actor = options.actor || getCurrentActor();
-  const payloadDetails = typeof title === "object" && title !== null ? title : details;
-  const entry = {
-    id: uid("audit"),
-    type: String(type),
-    title: typeof title === "string" && title ? title : String(type),
-    details: typeof payloadDetails === "string" ? payloadDetails : JSON.stringify(payloadDetails || ""),
-    at: new Date().toISOString(),
-    createdAt: new Date().toISOString(),
-    userId: actor.userId || "",
-    userName: actor.userName || "",
-    userRole: actor.userRole || "",
-    resourceId: actor.resourceId || "",
-    caseId: options.caseId || options.item?.id || "",
-  };
-  state.auditLog = Array.isArray(state.auditLog) ? state.auditLog : [];
-  state.auditLog.unshift(entry);
-  state.auditLog = state.auditLog.slice(0, 500);
-  return entry;
-}
-
-function getActiveLocalUsers() {
-  return Array.isArray(state?.users) ? state.users.filter((user) => user.active !== false) : [];
-}
-
-function hasActiveLocalUsers() {
-  return getActiveLocalUsers().length > 0;
-}
-
-function getUserManageDeniedMessage() {
-  return "Action réservée administrateur technique.";
-}
-
-function canManageLocalUsers(actor = null) {
-  const user = actor || (typeof getCurrentUser === "function" ? getCurrentUser() : null);
-  if (!user || user.active === false) return false;
-  if (typeof hasPermission === "function") return hasPermission("users.manage", { user });
-  return ["admin", "admin_technique", "administrateur"].includes(normalizeLocalUserRole(user.role));
-}
-
-function wouldRemoveLastActiveAdmin(userId, nextUser) {
-  const users = Array.isArray(state.users) ? state.users : [];
-  const activeAdmins = users.filter((user) => user.active !== false && normalizeLocalUserRole(user.role) === "admin");
-  const current = users.find((user) => user.id === userId);
-  if (!current || normalizeLocalUserRole(current.role) !== "admin" || current.active === false) return false;
-  const nextIsActiveAdmin = nextUser.active !== false && normalizeLocalUserRole(nextUser.role) === "admin";
-  return activeAdmins.length <= 1 && !nextIsActiveAdmin;
-}
-
-function createUserLocal(payload = {}, actor = null) {
-  if (!canManageLocalUsers(actor)) {
-    return { ok: false, message: getUserManageDeniedMessage() };
-  }
-  const user = normalizeUser({
-    ...payload,
-    active: payload.active !== false,
-  });
-  if (!user.name) return { ok: false, message: "Nom utilisateur obligatoire." };
-  const users = Array.isArray(state.users) ? state.users : [];
-  const emailNorm = user.email.trim().toLowerCase();
-  if (emailNorm && users.some((other) => other.active !== false && other.role === user.role && String(other.email || "").trim().toLowerCase() === emailNorm)) {
-    return { ok: false, message: "Un utilisateur actif existe déjà avec ce même email et rôle." };
-  }
-  state.users = users;
-  state.users.push(user);
-  if (!state.currentUserId && user.active !== false) state.currentUserId = user.id;
-  addAuditLog("users.created", `Utilisateur créé : ${user.name}`, `Rôle : ${user.role}`, { actor: getCurrentActor({ user: actor }) });
-  return { ok: true, user };
-}
-
-function updateUserLocal(userId, patch = {}, actor = null) {
-  if (!canManageLocalUsers(actor)) {
-    return { ok: false, message: getUserManageDeniedMessage() };
-  }
-  const users = Array.isArray(state.users) ? state.users : [];
-  const index = users.findIndex((user) => user.id === userId);
-  if (index < 0) return { ok: false, message: "Utilisateur introuvable." };
-  const nextUser = normalizeUser({ ...users[index], ...patch, id: users[index].id });
-  if (wouldRemoveLastActiveAdmin(userId, nextUser)) {
-    return { ok: false, message: "Impossible de désactiver ou de retirer le dernier administrateur actif." };
-  }
-  const emailNorm = nextUser.email.trim().toLowerCase();
-  if (emailNorm && users.some((other) => other.id !== userId && other.active !== false && other.role === nextUser.role && String(other.email || "").trim().toLowerCase() === emailNorm)) {
-    return { ok: false, message: "Un utilisateur actif existe déjà avec ce même email et rôle." };
-  }
-  users[index] = { ...nextUser, updatedAt: new Date().toISOString() };
-  if (state.currentUserId === userId && users[index].active === false) state.currentUserId = "";
-  addAuditLog("users.updated", `Utilisateur modifié : ${users[index].name}`, `Rôle : ${users[index].role}`, { actor: getCurrentActor({ user: actor }) });
-  return { ok: true, user: users[index] };
-}
-
-function createFirstAccessRecoveryUser(payload = {}) {
-  if (hasActiveLocalUsers()) {
-    return { ok: false, message: "La récupération locale est disponible uniquement sans utilisateur actif." };
-  }
-  const role = normalizeLocalUserRole(payload.role);
-  if (!["admin", "directeur_sav"].includes(role)) {
-    return { ok: false, message: "Le premier accès doit créer un Directeur SAV ou un Admin technique." };
-  }
-  const user = normalizeUser({
-    ...payload,
-    role,
-    active: true,
-  });
-  if (!user.name) return { ok: false, message: "Nom utilisateur obligatoire." };
-  state.users = Array.isArray(state.users) ? state.users : [];
-  state.users.push(user);
-  addAuditLog("users.first_access_recovery_created", `Utilisateur local créé : ${user.name}`, "Création explicite depuis le mode premier accès / récupération locale", {
-    actor: { userId: user.id, userName: user.name, userRole: user.role, resourceId: user.resourceId || "" },
-  });
-  return { ok: true, user };
 }
 
 function createDefaultState() {
@@ -973,9 +1087,9 @@ function createDefaultState() {
         blockerReason: "",
         blockerDetails: "",
         damageNotes: "Aile avant droite, pare-chocs et peinture.",
-        expertName: "Chef Atelier",
+        expertName: "Expert assigné",
         expertPhone: "+216 00 111 222",
-        expertEmail: "atelier@example.com",
+        expertEmail: "expert@example.com",
         expertEstimate: {
           reference: "",
           confirmed: false,
@@ -1006,14 +1120,11 @@ function createDefaultState() {
       { id: "tolier-2", name: "Tôlier 2", role: "tolier", location: "Poste tôlerie B", active: true, fastLane: true },
       { id: "mecanicien-1", name: "Mécanicien 1", role: "mecanicien", location: "Poste mécanique", active: true },
       { id: "electricien-1", name: "Électricien 1", role: "electricien", location: "Poste électrique", active: true },
-      { id: "chef-atelier-1", name: "Chef Atelier", role: "chef_atelier", location: "Pilotage atelier", active: true },
       { id: "peintre-1", name: "Peintre 1", role: "peintre", location: "Zone peinture", active: true },
       { id: "peintre-2", name: "Peintre 2", role: "peintre", location: "Préparation", active: true, fastLane: true },
-      { id: "zone-carrosserie-1", name: "Zone carrosserie", role: "zone_carrosserie", location: "Carrosserie", active: true },
-      { id: "zone-diagnostic-electrique-1", name: "Zone diagnostic électrique", role: "zone_diagnostic_electrique", location: "Diagnostic électrique", active: true },
       { id: "zone-preparation-1", name: "Zone de préparation", role: "zone_preparation", location: "Zone préparation 1", active: true },
       { id: "cabine-1", name: "Cabine peinture", role: "cabine", location: "Cabine 1", active: true },
-      { id: "controle-1", name: "Chef atelier", role: "controle", location: "Vérification finale", active: true },
+      { id: "controle-1", name: "Chef atelier", role: "controle", location: "Contrôle final", active: true },
       { id: "pont-vidange-1", name: "Pont vidange 1", role: "pont_vidange", location: "Service rapide", active: true },
       { id: "pont-vidange-2", name: "Pont vidange 2", role: "pont_vidange", location: "Service rapide", active: true },
       { id: "pont-vidange-3", name: "Pont vidange 3", role: "pont_vidange", location: "Service rapide", active: true },
@@ -1021,10 +1132,12 @@ function createDefaultState() {
       { id: "pont-mecanique-2", name: "Pont mécanique 2", role: "pont_mecanique", location: "Grands travaux", active: true },
       { id: "pont-mecanique-3", name: "Pont mécanique 3", role: "pont_mecanique", location: "Grands travaux", active: true },
     ],
-    bookings: [],
     users: [],
     currentUserId: "",
     auditLog: [],
+    syncLog: [],
+    syncConflicts: [],
+    bookings: [],
     holidays: [
       { date: `${today.getFullYear()}-01-01`, label: "Nouvel an" },
       { date: `${today.getFullYear()}-03-20`, label: "Indépendance" },
@@ -1042,8 +1155,16 @@ function createDefaultState() {
       caseStatusFilter: "all",
       caseTypeFilter: "all",
       caseSort: "recent",
+      savDashboardPeriod: "today",
+      savDashboardStatusFilter: "all",
+      savDashboardTypeFilter: "all",
+      technicianId: "",
+      technicianDate: todayKey(new Date()),
     },
   };
+  const admin = createBootstrapAdminUser();
+  stateSeed.users = [admin];
+  stateSeed.currentUserId = admin.id;
   return stateSeed;
 }
 
@@ -1113,6 +1234,536 @@ function loadState() {
   return createDefaultState();
 }
 
+function normalizeUserRole(role) {
+  return Object.prototype.hasOwnProperty.call(USER_ROLES, role) ? role : "readonly";
+}
+
+function createBootstrapAdminUser(seed = {}) {
+  const now = new Date().toISOString();
+  return normalizeUser({
+    id: seed.id || uid("user"),
+    authUserId: seed.authUserId || "",
+    name: seed.name || seed.email || "Admin local",
+    email: seed.email || "",
+    role: "admin",
+    resourceId: seed.resourceId || "",
+    active: seed.active !== false,
+    createdAt: seed.createdAt || now,
+    updatedAt: seed.updatedAt || now,
+    pinHash: seed.pinHash || "",
+    pinSalt: seed.pinSalt || "",
+  });
+}
+
+function normalizeUser(user = {}, resources = []) {
+  const allowedResourceIds = new Set((resources || []).map((resource) => resource.id).filter(Boolean));
+  const role = normalizeUserRole(user.role || user.userRole || (user.isAdmin ? "admin" : ""));
+  const createdAt = user.createdAt || new Date().toISOString();
+  const resourceId = String(user.resourceId || user.technicianId || "").trim();
+  return {
+    id: String(user.id || user.userId || uid("user")).trim(),
+    authUserId: String(user.authUserId || user.auth_user_id || user.supabaseUserId || "").trim(),
+    name: String(user.name || user.displayName || user.email || "Utilisateur atelier").trim(),
+    email: String(user.email || "").trim().toLowerCase(),
+    role,
+    resourceId: !allowedResourceIds.size || allowedResourceIds.has(resourceId) ? resourceId : "",
+    active: user.active !== false,
+    createdAt,
+    updatedAt: user.updatedAt || createdAt,
+    pinHash: String(user.pinHash || user.userPinHash || "").trim(),
+    pinSalt: String(user.pinSalt || user.userPinSalt || "").trim(),
+  };
+}
+
+function normalizeUsers(users, resources = []) {
+  const normalized = Array.isArray(users)
+    ? users.map((user) => normalizeUser(user, resources)).filter((user) => user.id && user.name)
+    : [];
+  const byId = new Map();
+  normalized.forEach((user) => {
+    if (!byId.has(user.id)) byId.set(user.id, user);
+  });
+  const unique = [...byId.values()];
+  if (!unique.some((user) => user.active)) {
+    unique.push(createBootstrapAdminUser());
+  }
+  return unique;
+}
+
+function resolveCurrentUserId(currentUserId, users = []) {
+  const activeUsers = users.filter((user) => user.active !== false);
+  const current = activeUsers.find((user) => user.id === currentUserId);
+  if (current) return current.id;
+  return "";
+}
+
+function linkResourcesToUsers(resources = [], users = []) {
+  const usersByResource = new Map(users.filter((user) => user.resourceId).map((user) => [user.resourceId, user]));
+  resources.forEach((resource) => {
+    const linkedUser = usersByResource.get(resource.id);
+    if (!linkedUser) return;
+    resource.userId = linkedUser.id;
+    resource.authUserId = linkedUser.authUserId || resource.authUserId || "";
+  });
+}
+
+function getUserById(userId) {
+  return (state.users || []).find((user) => user.id === userId) || null;
+}
+
+function getCurrentUser() {
+  const users = Array.isArray(state?.users) ? state.users : [];
+  const activeUsers = users.filter((user) => user.active !== false);
+  return activeUsers.find((user) => user.id === state.currentUserId)
+    || activeUsers.find((user) => user.role === "admin")
+    || activeUsers[0]
+    || null;
+}
+
+function getCurrentActor() {
+  const user = getCurrentUser();
+  if (!user) {
+    return { userId: "", userName: "Atelier", userRole: "", resourceId: "" };
+  }
+  return {
+    userId: user.id,
+    userName: user.name || user.email || "Utilisateur atelier",
+    userRole: user.role || "readonly",
+    resourceId: user.resourceId || "",
+  };
+}
+
+function setCurrentUser(userId) {
+  const user = getUserById(userId);
+  if (!user || user.active === false) return false;
+  state.currentUserId = user.id;
+  return true;
+}
+
+function canDisableOrDemoteUser(userId, newRole, newActive) {
+  const user = getUserById(userId);
+  if (!user) return { ok: true };
+  const wasAdmin = user.role === "admin" && user.active !== false;
+  const becomesInactiveOrNonAdmin = newActive === false || newRole !== "admin";
+  if (wasAdmin && becomesInactiveOrNonAdmin) {
+    const otherActiveAdmins = (state.users || []).filter(
+      (u) => u.id !== userId && u.role === "admin" && u.active !== false
+    );
+    if (otherActiveAdmins.length === 0) {
+      return { ok: false, message: "Impossible de désactiver ou de retirer le rôle du dernier administrateur actif." };
+    }
+  }
+  return { ok: true };
+}
+
+function createUserLocal(userData, actor = null) {
+  const resolvedActor = actor || getCurrentActor();
+  if (!hasPermission("users.manage", { user: resolvedActor })) {
+    return { ok: false, message: "Action réservée administrateur technique." };
+  }
+  const name = String(userData?.name || "").trim();
+  const role = String(userData?.role || "").trim();
+  if (!name) return { ok: false, message: "Le nom complet est obligatoire." };
+  if (!role || !Object.prototype.hasOwnProperty.call(USER_ROLES, role)) {
+    return { ok: false, message: "Le rôle sélectionné est invalide." };
+  }
+
+  const emailNorm = String(userData?.email || "").trim().toLowerCase();
+  const activeVal = userData?.active !== false;
+  if (activeVal && emailNorm) {
+    const isDuplicate = (state.users || []).some(
+      (u) => u.active !== false && String(u.email || "").trim().toLowerCase() === emailNorm && u.role === role
+    );
+    if (isDuplicate) {
+      return { ok: false, message: "Un autre utilisateur actif possède déjà cet email avec le même rôle." };
+    }
+  }
+
+  const newUser = normalizeUser({
+    id: userData.id || uid("user"),
+    name,
+    role,
+    email: userData.email || "",
+    resourceId: userData.resourceId || "",
+    active: userData.active !== false,
+    authUserId: userData.authUserId || "",
+    pinHash: userData.pinHash || "",
+    pinSalt: userData.pinSalt || "",
+  }, state.resources || []);
+
+  if (!state.users) state.users = [];
+  state.users.push(newUser);
+  linkResourcesToUsers(state.resources, state.users);
+
+  addAuditLog("users.created", `Utilisateur créé : ${newUser.name} (${USER_ROLES[newUser.role]})`, "", { actor: resolvedActor });
+  return { ok: true, user: newUser };
+}
+
+function updateUserLocal(userId, userData, actor = null) {
+  const resolvedActor = actor || getCurrentActor();
+  if (!hasPermission("users.manage", { user: resolvedActor })) {
+    return { ok: false, message: "Action réservée administrateur technique." };
+  }
+  const user = getUserById(userId);
+  if (!user) return { ok: false, message: "Utilisateur introuvable." };
+
+  const name = String(userData?.name || "").trim();
+  const role = String(userData?.role || "").trim();
+  if (!name) return { ok: false, message: "Le nom complet est obligatoire." };
+  if (!role || !Object.prototype.hasOwnProperty.call(USER_ROLES, role)) {
+    return { ok: false, message: "Le rôle sélectionné est invalide." };
+  }
+
+  const emailNorm = String(userData?.email || "").trim().toLowerCase();
+  const activeVal = userData?.active !== false;
+  if (activeVal && emailNorm) {
+    const isDuplicate = (state.users || []).some(
+      (u) => u.id !== userId && u.active !== false && String(u.email || "").trim().toLowerCase() === emailNorm && u.role === role
+    );
+    if (isDuplicate) {
+      return { ok: false, message: "Un autre utilisateur actif possède déjà cet email avec le même rôle." };
+    }
+  }
+
+  const newActive = userData.active !== false;
+  const safety = canDisableOrDemoteUser(userId, role, newActive);
+  if (!safety.ok) return safety;
+
+  const oldRole = user.role;
+  const oldActive = user.active;
+
+  user.name = name;
+  user.role = role;
+  user.email = String(userData.email || "").trim().toLowerCase();
+  user.resourceId = String(userData.resourceId || "").trim();
+  user.active = newActive;
+  user.updatedAt = new Date().toISOString();
+  if (userData.authUserId !== undefined) {
+    user.authUserId = String(userData.authUserId || "").trim();
+  }
+  if (userData.pinHash !== undefined) {
+    user.pinHash = String(userData.pinHash || "").trim();
+  }
+  if (userData.pinSalt !== undefined) {
+    user.pinSalt = String(userData.pinSalt || "").trim();
+  }
+
+  const normalized = normalizeUser(user, state.resources || []);
+  Object.assign(user, normalized);
+
+  linkResourcesToUsers(state.resources, state.users);
+
+  if (oldRole !== role) {
+    addAuditLog("users.role_changed", `Rôle modifié pour ${user.name} : ${USER_ROLES[oldRole]} -> ${USER_ROLES[role]}`, "", { actor: resolvedActor });
+  }
+  if (oldActive !== newActive) {
+    if (newActive === false) {
+      addAuditLog("users.disabled", `Utilisateur désactivé : ${user.name}`, "", { actor: resolvedActor });
+    } else {
+      addAuditLog("users.updated", `Utilisateur réactivé : ${user.name}`, "", { actor: resolvedActor });
+    }
+  } else if (oldRole === role) {
+    addAuditLog("users.updated", `Utilisateur modifié : ${user.name}`, "", { actor: resolvedActor });
+  }
+
+  if (state.currentUserId === userId && newActive === false) {
+    state.currentUserId = resolveCurrentUserId(state.currentUserId, state.users);
+  }
+
+  return { ok: true, user };
+}
+
+function resolvePermissionUser(userOrId = null) {
+  if (!userOrId) return getCurrentUser();
+  if (typeof userOrId === "string") return getUserById(userOrId);
+  return normalizeUser(userOrId, state.resources || []);
+}
+
+function permissionMatches(granted, requested) {
+  if (granted === "*" || granted === requested) return true;
+  if (granted.endsWith(".*")) {
+    return requested.startsWith(granted.slice(0, -1));
+  }
+  return false;
+}
+
+function hasPermission(permission, context = {}) {
+  const requested = String(permission || "").trim();
+  if (!requested) return false;
+  const user = resolvePermissionUser(context.user || context.userId);
+  if (!user || user.active === false) return false;
+  const permissions = ROLE_PERMISSIONS[user.role] || [];
+  return permissions.some((granted) => permissionMatches(granted, requested));
+}
+
+function requirePermission(permission, context = {}) {
+  const allowed = hasPermission(permission, context);
+  if (!allowed && context.notify !== false && typeof notifyUser === "function") {
+    notifyUser(context.message || "Action non autorisée pour ce rôle utilisateur.", "error");
+  }
+  return allowed;
+}
+
+function getPermissionDeniedMessage(permission, context = {}) {
+  const requested = String(permission || "").trim();
+  const user = resolvePermissionUser(context.user || context.userId);
+  const role = user?.role || "";
+  if (context.item && isCaseReadonlyArchive(context.item) && MUTATION_PERMISSIONS.includes(requested)) {
+    return getArchivedCaseMessage(context.item);
+  }
+  if (!user) return "Aucun utilisateur actif n'est sélectionné. Choisissez une session utilisateur avant de continuer.";
+  if (user.active === false) return "Utilisateur inactif. Sélectionnez un compte actif pour continuer.";
+  if (role === "readonly" && MUTATION_PERMISSIONS.includes(requested)) return "Mode lecture seule : modification impossible. Connectez-vous avec un rôle autorisé pour enregistrer des changements.";
+  if (requested === "case.delete") return "Suppression réservée administrateur technique. Demandez une validation avant de supprimer un dossier.";
+  if (requested === "supabase.configure") return "Configuration Supabase réservée administrateur. Connectez-vous avec un administrateur technique.";
+  if (requested === "import.backup") return "Import sauvegarde réservé administrateur technique. Vérifiez le rôle actif avant restauration complète.";
+  if (requested === "settings.edit" || requested === "users.manage") return "Action réservée administrateur technique. Vérifiez la session active.";
+  if (requested === "export.backup") return "Export sauvegarde réservé directeur SAV/chef atelier/admin technique. Demandez un export à un responsable autorisé.";
+  if (requested === "quality.validate" || requested === "quality.reject") return "Action réservée qualité/chef atelier/admin. Vérifiez le rôle de la session active.";
+  if (requested === "case.close") return "Clôture/Facturation réservée chef atelier/admin. Finalisez depuis une session responsable.";
+  if (requested === "delivery.complete") return "Livraison réservée réception/directeur SAV/chef atelier/admin technique. Basculez vers un rôle autorisé.";
+  if (["case.create", "case.edit", "estimate.import", "appointment.schedule", "schedule_appointment", "vehicle.receive", "receive_vehicle"].includes(requested)) {
+    return "Action réservée réception/chef atelier/admin. Connectez-vous avec un rôle autorisé.";
+  }
+  if (requested === "task.override" || requested === "planning.edit") return "Action réservée chef atelier/admin. Demandez un ajustement planning à un responsable.";
+  if (requested.startsWith("task.")) {
+    if (role === "technicien" && !user.resourceId) return "Aucune ressource technicien liée à cet utilisateur. Associez le profil à une ressource atelier.";
+    if (role === "technicien" && context.booking && !canActOnTechnicianTask(user, context.booking)) {
+      return "Cette tâche est affectée à un autre technicien. Seul le technicien assigné ou un responsable peut agir.";
+    }
+    if (role === "readonly") return "Mode lecture seule : modification impossible. Connectez-vous avec un rôle atelier autorisé.";
+    if (role === "reception" || role === "qualite") return "Action réservée au technicien affecté ou au chef atelier/admin.";
+  }
+  return "Permission insuffisante. Vérifiez le rôle de la session active.";
+}
+
+function guardAction(permission, context = {}, options = {}) {
+  const requested = String(permission || "").trim();
+  const user = resolvePermissionUser(context.user || context.userId);
+  let allowed = hasPermission(requested, { user });
+  if (allowed && context.item && isCaseReadonlyArchive(context.item) && MUTATION_PERMISSIONS.includes(requested)) {
+    allowed = false;
+  }
+  if (allowed && requested.startsWith("task.") && requested !== "task.override") {
+    allowed = canActOnTechnicianTask(user, context.booking);
+  }
+  let blockedByConflict = false;
+  if (allowed) {
+    let targetCaseId = "";
+    if (context.item && context.item.id) targetCaseId = context.item.id;
+    else if (context.case && context.case.id) targetCaseId = context.case.id;
+    else if (context.booking && context.booking.caseId) targetCaseId = context.booking.caseId;
+    else if (context.caseId) targetCaseId = context.caseId;
+
+    if (targetCaseId) {
+      const openConflicts = typeof getOpenSyncConflicts === "function" ? getOpenSyncConflicts() : [];
+      const hasConflict = openConflicts.some((c) => c.caseId === targetCaseId || c.entityId === targetCaseId);
+      if (hasConflict) {
+        const isSensitive = [
+          "planning.edit",
+          "task.start",
+          "task.pause",
+          "task.resume",
+          "task.complete",
+          "task.block",
+          "task.override",
+          "quality.validate",
+          "quality.reject",
+          "delivery.complete",
+          "case.delete",
+          "case.edit"
+        ].includes(requested);
+        if (isSensitive) {
+          allowed = false;
+          blockedByConflict = true;
+        }
+      }
+    }
+  }
+  if (!allowed) {
+    const actorUser = user || (typeof getCurrentUser === "function" ? getCurrentUser() : null);
+    if (actorUser && (actorUser.role === "technicien" || requested.startsWith("task."))) {
+      if (typeof addAuditLog === "function") {
+        addAuditLog(
+          "security.permission_denied",
+          "Accès refusé",
+          `L'utilisateur ${actorUser.name} (${actorUser.role}) a tenté d'effectuer l'action '${requested}' qui a été bloquée (isolation/droits).`,
+          { caseId: context.caseId || context.item?.id || "" }
+        );
+      }
+    }
+  }
+  const message = allowed ? "" : (blockedByConflict ? "Action bloquée : ce dossier présente un conflit de synchronisation non résolu. Veuillez d'abord résoudre le conflit." : (options.message || context.message || getPermissionDeniedMessage(requested, { ...context, user })));
+  if (!allowed && options.notify !== false && context.notify !== false && typeof notifyUser === "function") {
+    notifyUser(message, "error");
+  }
+  return {
+    ok: allowed,
+    allowed,
+    permission: requested,
+    message,
+    user,
+    actor: user ? {
+      userId: user.id,
+      userName: user.name || user.email || "Utilisateur atelier",
+      userRole: user.role || "readonly",
+      resourceId: user.resourceId || "",
+    } : { userId: "", userName: "Atelier", userRole: "", resourceId: "" },
+  };
+}
+
+function canRenderAction(permission, context = {}, options = {}) {
+  return guardAction(permission, context, { ...options, notify: false }).ok;
+}
+
+function makeDeniedPermissionGuard(permission, message, context = {}, options = {}) {
+  if (options.notify !== false && context.notify !== false && typeof notifyUser === "function") {
+    notifyUser(message, "error");
+  }
+  return {
+    ok: false,
+    allowed: false,
+    permission: permission || "",
+    message,
+    user: getCurrentUser(),
+    actor: getCurrentActor(),
+  };
+}
+
+function guardArchivedCaseMutation(permission, item, context = {}, options = {}) {
+  if (!isCaseReadonlyArchive(item)) return null;
+  return makeDeniedPermissionGuard(permission, getArchivedCaseMessage(item), { ...context, item }, options);
+}
+
+// Règle v22.26: un dossier livré sort du flux atelier actif, mais seule la
+// facturation/clôture/archive/suppression rend le dossier totalement lecture seule.
+function isCaseArchived(item) {
+  if (!item) return false;
+  const flags = item.flags || {};
+  return Boolean(flags.invoiced || item.closedAt || item.archivedAt || item.deletedAt);
+}
+
+function isCaseReadonlyArchive(item) {
+  return isCaseArchived(item);
+}
+
+function isCaseOperationallyClosed(item) {
+  if (!item) return false;
+  const flags = item.flags || {};
+  return Boolean(isCaseArchived(item) || flags.delivered || flags.invoiced || item.closedAt || item.deletedAt);
+}
+
+function getArchivedCaseMessage(item) {
+  if (!isCaseReadonlyArchive(item)) return "";
+  return "Dossier clôturé — aucune action requise.";
+}
+
+function getWorkflowActionPermission(action, checked = true) {
+  if (action === "claim" || action === "labor" || action === "expertApproved" || action === "clientApproved") return "case.edit";
+  if (action === "appointment") return "appointment.schedule";
+  if (action === "received") return "vehicle.receive";
+  if (action === "qualityApproved") return checked ? "quality.validate" : "quality.reject";
+  if (action === "delivered") return "delivery.complete";
+  if (action === "invoiced") return "case.close";
+  return "";
+}
+
+function guardWorkflowAction(action, item, checked = true, options = {}) {
+  const permission = getWorkflowActionPermission(action, checked);
+  const archivedGuard = guardArchivedCaseMutation(permission || "case.edit", item, { action, checked }, options);
+  if (archivedGuard) return archivedGuard;
+  if (!permission) {
+    return {
+      ok: true,
+      allowed: true,
+      permission: "",
+      message: "",
+      user: getCurrentUser(),
+      actor: getCurrentActor(),
+    };
+  }
+  return guardAction(permission, { item, action, checked }, options);
+}
+
+function guardCaseCreate(options = {}) {
+  return guardAction("case.create", {}, options);
+}
+
+function guardCaseEdit(item, options = {}) {
+  const archivedGuard = guardArchivedCaseMutation("case.edit", item, {}, options);
+  if (archivedGuard) return archivedGuard;
+  return guardAction("case.edit", { item }, options);
+}
+
+function guardEstimateImport(item, options = {}) {
+  const archivedGuard = guardArchivedCaseMutation("estimate.import", item, {}, options);
+  if (archivedGuard) return archivedGuard;
+  return guardAction("estimate.import", { item }, options);
+}
+
+function guardAppointmentSchedule(item, options = {}) {
+  const archivedGuard = guardArchivedCaseMutation("appointment.schedule", item, {}, options);
+  if (archivedGuard) return archivedGuard;
+  return guardAction("appointment.schedule", { item }, options);
+}
+
+function guardVehicleReceive(item, options = {}) {
+  const archivedGuard = guardArchivedCaseMutation("vehicle.receive", item, {}, options);
+  if (archivedGuard) return archivedGuard;
+  return guardAction("vehicle.receive", { item }, options);
+}
+
+function guardQualityValidate(item, options = {}) {
+  const archivedGuard = guardArchivedCaseMutation("quality.validate", item, {}, options);
+  if (archivedGuard) return archivedGuard;
+  return guardAction("quality.validate", { item }, options);
+}
+
+function guardDeliveryComplete(item, options = {}) {
+  const archivedGuard = guardArchivedCaseMutation("delivery.complete", item, {}, options);
+  if (archivedGuard) return archivedGuard;
+  return guardAction("delivery.complete", { item }, options);
+}
+
+function guardSensitiveAction(permission, context = {}, options = {}) {
+  return guardAction(permission, context, options);
+}
+
+function isWorkshopManager(user = getCurrentUser()) {
+  const role = resolvePermissionUser(user)?.role || "";
+  return role === "admin" || role === "chef_atelier";
+}
+
+function isReadOnlyMode() {
+  return getCurrentUser()?.role === "readonly";
+}
+
+function canActOnTechnicianTask(user, booking) {
+  const resolvedUser = resolvePermissionUser(user);
+  if (!resolvedUser || !booking || resolvedUser.active === false) return false;
+  if (isWorkshopManager(resolvedUser)) return true;
+  if (resolvedUser.role !== "technicien" || !resolvedUser.resourceId) return false;
+  return (booking.resourceIds || []).includes(resolvedUser.resourceId);
+}
+
+function syncCurrentUserWithSupabaseAuth(authUser) {
+  if (!authUser?.id) return false;
+  state.users = normalizeUsers(state.users, state.resources);
+  let user = state.users.find((candidate) => candidate.authUserId === authUser.id)
+    || state.users.find((candidate) => authUser.email && candidate.email === String(authUser.email).toLowerCase());
+  if (!user) {
+    user = getCurrentUser() || createBootstrapAdminUser();
+    if (!state.users.some((candidate) => candidate.id === user.id)) state.users.push(user);
+  }
+  user.authUserId = authUser.id;
+  user.email = String(authUser.email || user.email || "").trim().toLowerCase();
+  if (!user.name || user.name === "Admin local") user.name = user.email || "Utilisateur Supabase";
+  user.updatedAt = new Date().toISOString();
+  state.currentUserId = user.id;
+  linkResourcesToUsers(state.resources, state.users);
+  return true;
+}
+
 function normalizeState(raw) {
   raw = raw && typeof raw === "object" ? raw : {};
   const seed = createDefaultState();
@@ -1124,19 +1775,18 @@ function normalizeState(raw) {
   });
   ensureMinimumEquipmentResources(resources, seed.resources, "pont_vidange", 3);
   ensureMinimumEquipmentResources(resources, seed.resources, "pont_mecanique", 3);
-  ensureMinimumEquipmentResources(resources, seed.resources, "zone_carrosserie", 1);
-  ensureMinimumEquipmentResources(resources, seed.resources, "zone_diagnostic_electrique", 1);
-  ensureMinimumEquipmentResources(resources, seed.resources, "cabine", 1);
-  const users = Array.isArray(raw.users) ? raw.users.map(normalizeUser).filter(Boolean) : seed.users;
-  const activeUserIds = new Set(users.filter((user) => user.active !== false).map((user) => user.id));
-  const currentUserId = activeUserIds.has(raw.currentUserId) ? raw.currentUserId : "";
+  const users = normalizeUsers(raw.users, resources);
+  const currentUserId = resolveCurrentUserId(raw.currentUserId, users);
+  linkResourcesToUsers(resources, users);
   return {
-    cases: Array.isArray(raw.cases) ? raw.cases.map(normalizeCase) : seed.cases,
+    cases: Array.isArray(raw.cases) ? raw.cases.map((c) => normalizeCase(c, raw.bookings)) : seed.cases,
     resources,
-    bookings: normalizeBookings(raw.bookings, resources),
     users,
     currentUserId,
-    auditLog: Array.isArray(raw.auditLog) ? raw.auditLog.map(normalizeAuditLogEntry).filter(Boolean) : seed.auditLog,
+    auditLog: normalizeAuditLog(raw.auditLog),
+    syncLog: normalizeSyncLog(raw.syncLog),
+    syncConflicts: normalizeSyncConflicts(raw.syncConflicts),
+    bookings: normalizeBookings(raw.bookings, resources),
     holidays: Array.isArray(raw.holidays) ? raw.holidays : seed.holidays,
     planningDate: raw.planningDate || todayKey(new Date()),
     settings: {
@@ -1163,12 +1813,17 @@ function ensureMinimumEquipmentResources(resources, defaults, role, minimum) {
 
 function normalizeUiPreferences(ui = {}) {
   const allowedSorts = new Set(["recent", "oldest", "client", "appointment"]);
-  const allowedStatuses = new Set(["all", ...Object.keys(statusLabels)]);
-  const allowedTypes = new Set(["all", "atelier", "client", "vidange", "mechanical_client", "electrical_client", "diagnostic", "garantie"]);
+  const allowedTypes = new Set(["all", "assurance", "client", "vidange", "mechanical_client", "electrical_client", "diagnostic", "garantie"]);
+  const allowedDashboardPeriods = new Set(["today", "week", "month"]);
   return {
-    caseStatusFilter: allowedStatuses.has(ui.caseStatusFilter) ? ui.caseStatusFilter : "all",
+    caseStatusFilter: normalizeCaseStatusFilter(ui.caseStatusFilter),
     caseTypeFilter: allowedTypes.has(ui.caseTypeFilter) ? ui.caseTypeFilter : "all",
     caseSort: allowedSorts.has(ui.caseSort) ? ui.caseSort : "recent",
+    savDashboardPeriod: allowedDashboardPeriods.has(ui.savDashboardPeriod) ? ui.savDashboardPeriod : "today",
+    savDashboardStatusFilter: normalizeCaseStatusFilter(ui.savDashboardStatusFilter),
+    savDashboardTypeFilter: allowedTypes.has(ui.savDashboardTypeFilter) ? ui.savDashboardTypeFilter : "all",
+    technicianId: typeof ui.technicianId === "string" ? ui.technicianId : "",
+    technicianDate: /^\d{4}-\d{2}-\d{2}$/.test(String(ui.technicianDate || "")) ? ui.technicianDate : todayKey(new Date()),
   };
 }
 
@@ -1209,63 +1864,6 @@ function isCaseBlocked(item) {
   return BLOCKING_PARTS_STATUSES.has(status) || Boolean(reason);
 }
 
-function isCaseReadonlyArchive(item) {
-  if (!item) return false;
-  return Boolean(
-    item?.flags?.archived ||
-    item?.flags?.atelierArchived ||
-    item?.status === "archived" ||
-    item?.status === "archive" ||
-    item?.workflowStatus === "archived" ||
-    item?.workflowStatus === "archive"
-  );
-}
-
-if (typeof window !== "undefined") {
-  window.isCaseReadonlyArchive = isCaseReadonlyArchive;
-}
-
-function getCaseStatus(item) {
-  if (isCaseReadonlyArchive(item)) return "archive";
-  if (item.flags.atelierClosed || item.flags.invoiced) return "cloture_atelier";
-  if (item.flags.workCompleted) return "termine_atelier";
-  if (item.flags.workStarted) return "en_cours";
-
-  const caseBookings = state.bookings.filter((booking) => booking.caseId === item.id && !isObsoleteAnticipatedNewPartBooking(booking));
-  const hasAssignments = caseBookings.length > 0;
-  if (hasAssignments || item.appointment) {
-    const statusOf = typeof getBookingOperationalStatus === "function"
-      ? getBookingOperationalStatus
-      : (booking) => booking?.status || "planned";
-    const paused = caseBookings.some((booking) => statusOf(booking) === "paused");
-    const blocked = caseBookings.some((booking) => statusOf(booking) === "blocked");
-    if (blocked || isCaseBlocked(item)) return "bloque";
-    if (paused) return "en_pause";
-    return "planifie";
-  }
-
-  if (item.flags.chefValidated) return "valide_atelier";
-  if (hasRepairClaims(item) && hasKnownLabor(item)) return "a_valider_chef_atelier";
-  return "devis_importe";
-}
-
-if (typeof window !== "undefined") {
-  window.getCaseStatus = getCaseStatus;
-  window.validateLocalPinStrength = validateLocalPinStrength;
-  window.createLocalPinCredentials = createLocalPinCredentials;
-  window.verifyUserPin = verifyUserPin;
-  window.isLegacyBootstrapPin = isLegacyBootstrapPin;
-  window.normalizeUser = normalizeUser;
-  window.createUserLocal = createUserLocal;
-  window.updateUserLocal = updateUserLocal;
-  window.createFirstAccessRecoveryUser = createFirstAccessRecoveryUser;
-  window.getActiveLocalUsers = getActiveLocalUsers;
-  window.hasActiveLocalUsers = hasActiveLocalUsers;
-  window.getCurrentActor = getCurrentActor;
-  window.addAuditLog = addAuditLog;
-  window.quietNotify = quietNotify;
-}
-
 function getCaseBlockerLabel(item) {
   if (!item) return "";
   const partsLabel = PARTS_STATUS_LABELS[normalizePartsStatus(item.partsStatus)] || "";
@@ -1277,51 +1875,69 @@ function getCaseBlockerLabel(item) {
 function normalizeDurations(durations = {}) {
   const normalized = { ...DEFAULT_DURATIONS };
   DURATIONS.forEach(([key]) => {
-    const legacyValue = key === "finalCheck" ? durations.finalCheck ?? durations.quality : durations[key];
-    const value = parseLocalizedDecimal(legacyValue ?? normalized[key]);
+    const value = parseLocalizedDecimal(durations[key] ?? normalized[key]);
     normalized[key] = Math.min(MAX_STEP_DURATION_HOURS, Math.max(0, roundHours(value)));
   });
-  normalized.quality = 0;
+  const productiveTotal = ESTIMATE_PLANNING_KEYS.reduce((sum, key) => sum + Number(normalized[key] || 0), 0);
+  normalized.quality = productiveTotal > 0 ? 0.25 : 0;
   return normalized;
 }
 
-function normalizePlanningText(value) {
-  return String(value || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
-}
-
-function isObsoleteAnticipatedNewPartBooking(booking) {
-  if (!booking || typeof booking !== "object") return false;
-  const text = normalizePlanningText(`${booking.planningMode || ""} ${booking.title || ""} ${booking.details || ""}`);
-  return (
-    booking.planningMode === "anticipated-new-part"
-    || text.includes("anticipated-new-part")
-    || (text.includes("preparation anticipee") && (text.includes("piece neuve") || text.includes("pieces neuves")))
-  );
-}
-
 function normalizeBookings(bookings, resources) {
+  const resourceIds = new Set((resources || []).map((resource) => resource.id));
   return Array.isArray(bookings)
-    ? bookings
-        .filter((booking) => !isObsoleteAnticipatedNewPartBooking(booking))
-        .map((booking) => normalizeBooking(booking, resources))
-        .filter(Boolean)
+    ? bookings.map((booking) => normalizeBooking(booking, resourceIds)).filter(Boolean)
     : [];
 }
 
-function normalizeBooking(booking, resourceSource) {
+function normalizeBookingStatus(value, temporary = false) {
+  const aliases = {
+    in_progress: "started",
+    done: "completed",
+  };
+  const raw = String(value || "").trim();
+  const normalized = aliases[raw] || raw;
+  return ["planned", "started", "paused", "completed", "temporary"].includes(normalized)
+    ? normalized
+    : (temporary ? "temporary" : "planned");
+}
+
+function normalizeBookingNotes(notes) {
+  return Array.isArray(notes)
+    ? notes
+        .map((note) => ({
+          id: note?.id || uid("task-note"),
+          at: note?.at || note?.createdAt || new Date().toISOString(),
+          by: note?.by || note?.technicianId || "",
+          text: String(note?.text || note?.note || "").trim(),
+        }))
+        .filter((note) => note.text)
+    : [];
+}
+
+function normalizeBookingWorkSessions(sessions) {
+  return Array.isArray(sessions)
+    ? sessions
+        .map((session) => ({
+          startedAt: session?.startedAt || "",
+          startedBy: session?.startedBy || "",
+          pausedAt: session?.pausedAt || "",
+          pausedBy: session?.pausedBy || "",
+          resumedAt: session?.resumedAt || "",
+          resumedBy: session?.resumedBy || "",
+          completedAt: session?.completedAt || "",
+          completedBy: session?.completedBy || "",
+          pauseReason: session?.pauseReason || "",
+        }))
+        .filter((session) => session.startedAt || session.pausedAt || session.completedAt)
+    : [];
+}
+
+function normalizeBooking(booking, resourceIds) {
   if (!booking || typeof booking !== "object") return null;
-  if (isObsoleteAnticipatedNewPartBooking(booking)) return null;
-  const resources = Array.isArray(resourceSource) ? resourceSource : (typeof state !== "undefined" ? state.resources : []);
-  const resourceIds = resourceSource instanceof Set ? resourceSource : new Set((resources || []).map((resource) => resource.id));
-  const sourceIds = [
-    booking.primaryResourceId,
-    ...(Array.isArray(booking.resourceIds) ? booking.resourceIds : []),
-    ...(Array.isArray(booking.equipmentResourceIds) ? booking.equipmentResourceIds : []),
-  ];
-  const ids = sourceIds.filter((id, index, list) => id && list.indexOf(id) === index && (!resourceIds.size || resourceIds.has(id)));
+  const ids = Array.isArray(booking.resourceIds)
+    ? booking.resourceIds.filter((id) => !resourceIds.size || resourceIds.has(id))
+    : [];
   const segments = Array.isArray(booking.segments)
     ? booking.segments
         .map((segment) => ({
@@ -1333,50 +1949,61 @@ function normalizeBooking(booking, resourceSource) {
   const type = booking.type || "work";
   const caseId = booking.caseId || (type === "leave" ? "__leave__" : "");
   if (!caseId || !ids.length || !segments.length) return null;
-  const key = booking.key || (type === "leave" ? "leave" : "body");
-  const template = STEP_TEMPLATES.find((candidate) => candidate.key === key);
-  const assignment = normalizePlanningResourceAssignment(ids, {
-    resources,
-    primaryResourceId: booking.primaryResourceId,
-    equipmentResourceIds: booking.equipmentResourceIds,
-    primaryRole: template?.role,
-    equipmentRole: template?.equipmentRole,
-  });
-  if (!assignment.resourceIds.length) return null;
+  const id = booking.id || uid(type === "leave" ? "leave" : "booking");
+  const parentBookingId = booking.parentBookingId || "";
   return {
-    id: booking.id || uid(type === "leave" ? "leave" : "booking"),
+    id,
     caseId,
     type,
     title: booking.title || (type === "leave" ? "Congé / absence" : "Travail atelier"),
-    key,
+    key: booking.key || (type === "leave" ? "leave" : "body"),
     start: booking.start || segments[0].start,
     end: booking.end || segments.at(-1).end,
     delivery: booking.delivery || "",
-    resourceIds: assignment.resourceIds,
-    primaryResourceId: assignment.primaryResourceId,
-    equipmentResourceIds: assignment.equipmentResourceIds,
+    resourceIds: ids,
+    primaryResourceId: booking.primaryResourceId || ids[0] || null,
+    equipmentResourceIds: Array.isArray(booking.equipmentResourceIds)
+      ? booking.equipmentResourceIds.filter((id) => ids.includes(id))
+      : ids.slice(1),
     segments,
     plannedStart: booking.plannedStart || booking.start || segments[0].start,
     plannedEnd: booking.plannedEnd || booking.end || segments.at(-1).end,
     plannedSegments: Array.isArray(booking.plannedSegments) && booking.plannedSegments.length ? booking.plannedSegments : segments,
     plannedMinutes: Number(booking.plannedMinutes || 0) || segments.reduce((sum, segment) => sum + diffMinutes(new Date(segment.start), new Date(segment.end)), 0),
-    status: ["planned", "started", "paused", "blocked", "completed", "temporary"].includes(booking.status) ? booking.status : (booking.temporary ? "temporary" : "planned"),
+    status: normalizeBookingStatus(booking.status, booking.temporary),
     actualStart: booking.actualStart || booking.startedAt || "",
     actualEnd: booking.actualEnd || booking.completedAt || "",
     startedAt: booking.startedAt || booking.actualStart || "",
+    startedBy: booking.startedBy || "",
     completedAt: booking.completedAt || "",
+    completedBy: booking.completedBy || "",
+    completedByOverride: booking.completedByOverride || "",
     pausedAt: booking.pausedAt || "",
-    blockedAt: booking.blockedAt || "",
-    blockReason: booking.blockReason || booking.pauseReason || "",
+    pausedBy: booking.pausedBy || "",
+    resumedAt: booking.resumedAt || "",
+    resumedBy: booking.resumedBy || "",
     pauseReason: booking.pauseReason || "",
+    blockedAt: booking.blockedAt || "",
+    blockedBy: booking.blockedBy || "",
+    blockReason: booking.blockReason || "",
+    blockDetails: booking.blockDetails || "",
+    notes: normalizeBookingNotes(booking.notes),
+    photoIds: Array.isArray(booking.photoIds) ? booking.photoIds.filter(Boolean).map(String) : [],
+    workSessions: normalizeBookingWorkSessions(booking.workSessions),
+    actualWorkedMinutes: Number(booking.actualWorkedMinutes || 0) || 0,
     remainingMinutes: Number(booking.remainingMinutes || 0) || 0,
-    parentBookingId: booking.parentBookingId || "",
+    parentBookingId,
+    businessTaskId: booking.businessTaskId || parentBookingId || id,
+    supersededBy: booking.supersededBy || "",
     remainingFromPaused: Boolean(booking.remainingFromPaused),
     rescheduledAt: booking.rescheduledAt || "",
     color: booking.color || (type === "leave" ? "#6b7280" : "#11415f"),
     planningMode: booking.planningMode || "standard",
     details: booking.details || "",
     temporary: Boolean(booking.temporary),
+    deletedAt: booking.deletedAt || "",
+    deletedBy: booking.deletedBy || "",
+    deleteReason: booking.deleteReason || "",
   };
 }
 
@@ -1392,13 +2019,57 @@ function normalizeResource(resource) {
     location: resource.location || "",
     active: resource.active !== false,
     fastLane: Boolean(resource.fastLane),
+    userId: resource.userId || "",
+    authUserId: resource.authUserId || "",
   };
 }
 
-function normalizeCase(item) {
+function hasRealBooking(caseId, bookings) {
+  if (!caseId) return false;
+  let list = [];
+  if (Array.isArray(bookings) && bookings.length > 0) {
+    list = bookings;
+  } else {
+    try {
+      if (typeof state !== "undefined" && state && Array.isArray(state.bookings)) {
+        list = state.bookings;
+      }
+    } catch (e) {
+      // state is in Temporal Dead Zone during startup
+    }
+  }
+  return list.some((b) => {
+    if (b.caseId !== caseId) return false;
+    if (b.type === "leave" || b.type === "absence" || b.caseId === "__leave__") return false;
+    if (b.temporary === true) return false;
+    if (b.status === "cancelled" || b.status === "deleted") return false;
+    if (b.deletedAt && b.deletedAt !== "") return false;
+    return true;
+  });
+}
+
+function normalizeCase(item, bookings) {
   item = item && typeof item === "object" ? item : {};
+  const caseId = item.id || "";
+  const normalizedPartsStatus = normalizePartsStatus(item.partsStatus);
+  const normalizedBlockerReason = normalizeBlockerReason(item.blockerReason);
+  const hasLegacyBlocker = BLOCKING_PARTS_STATUSES.has(normalizedPartsStatus) || Boolean(normalizedBlockerReason);
+  const blockerSource = ["manual", "task"].includes(item.blockerSource)
+    ? item.blockerSource
+    : (hasLegacyBlocker ? "manual" : "");
+
+  let appointmentStatus = item.appointmentStatus;
+  const hasBooking = hasRealBooking(caseId, bookings);
+  if (hasBooking) {
+    appointmentStatus = "scheduled";
+  } else {
+    if (appointmentStatus === "scheduled" || !appointmentStatus) {
+      appointmentStatus = "none";
+    }
+  }
+
   return {
-    id: item.id || uid("case"),
+    id: caseId || uid("case"),
     clientName: item.clientName || "Client",
     phone: item.phone || "",
     ownerName: item.ownerName || item.companyName || item.owner || "",
@@ -1412,43 +2083,57 @@ function normalizeCase(item) {
     vin: item.vin || "",
     insurance: item.insurance || "",
     orNavNumber: item.orNavNumber || item.claimNumber || "",
-    partsStatus: normalizePartsStatus(item.partsStatus),
-    blockerReason: normalizeBlockerReason(item.blockerReason),
+    partsStatus: normalizedPartsStatus,
+    blockerReason: normalizedBlockerReason,
     blockerDetails: item.blockerDetails || item.blockerNote || "",
+    blockerSource,
+    blockerSourceBookingIds: Array.isArray(item.blockerSourceBookingIds) ? item.blockerSourceBookingIds.filter(Boolean).map(String) : [],
     damageNotes: item.damageNotes || "",
-    atelierNote: item.atelierNote || item.technicalNote || "",
     arrivalNotes: item.arrivalNotes || item.receptionNotes || "",
     expertName: item.expertName || "",
     expertPhone: item.expertPhone || "",
     expertEmail: item.expertEmail || "",
     expertEstimate: normalizeExpertEstimate(item.expertEstimate),
     createdAt: item.createdAt || new Date().toISOString(),
-    chefValidatedAt: item.chefValidatedAt || "",
-    chefValidatedBy: item.chefValidatedBy || null,
     history: normalizeHistory(item.history, item.createdAt),
     photos: Array.isArray(item.photos) ? item.photos.map(normalizePhotoMeta) : [],
     durations: normalizeDurations(item.durations),
     stepServiceTypes: normalizeStepServiceTypes(item.stepServiceTypes),
     stepPreferredResources: normalizeStepPreferredResources(item.stepPreferredResources),
     flags: {
-      ...(item.flags || {}),
-      chefValidated: Boolean(item.flags?.chefValidated),
       expertApproved: false,
       clientApproved: false,
       received: false,
-      workStarted: Boolean(item.flags?.workStarted),
-      workCompleted: Boolean(item.flags?.workCompleted),
+      workStarted: false,
+      workCompleted: false,
       qualityApproved: false,
       delivered: false,
       invoiced: false,
-      atelierClosed: Boolean(item.flags?.atelierClosed || item.flags?.invoiced),
-      archived: Boolean(item.flags?.archived),
+      ...(item.flags || {}),
     },
-    appointmentStatus: item.appointmentStatus || (item.appointment ? "scheduled" : "none"),
+    appointmentStatus,
     qualityChecklist: normalizeQualityChecklist(item.qualityChecklist),
     appointment: item.appointment || null,
     claims: normalizeRepairClaims(item.claims, item),
+    customerClaims: Array.isArray(item.customerClaims) ? item.customerClaims.map(normalizeCustomerClaim).filter(Boolean) : [],
+    receptionWorkflow: normalizeReceptionWorkflow(item.receptionWorkflow),
     supplements: normalizeRepairSupplements(item.supplements),
+    closedAt: item.closedAt || "",
+    archivedAt: item.archivedAt || "",
+    deletedAt: item.deletedAt || "",
+    deletedBy: item.deletedBy || "",
+    deleteReason: item.deleteReason || "",
+    updatedAt: item.updatedAt || item.createdAt || new Date().toISOString(),
+    updatedBy: item.updatedBy || "",
+    localRevision: Number(item.localRevision || 0),
+    syncRevision: Number(item.syncRevision || 0),
+    // v23.2.5 — Notes par rôle (synchronisées Supabase, visibilité restreinte par getCaseNotesForRole)
+    notes: {
+      reception:  String(item.notes?.reception  ?? item.arrivalNotes ?? ""),
+      technique:  String(item.notes?.technique  ?? ""),
+      qualite:    String(item.notes?.qualite    ?? ""),
+      direction:  String(item.notes?.direction  ?? ""),
+    },
   };
 }
 
@@ -1471,16 +2156,130 @@ function hasRepairClaims(item) {
   return normalizeRepairClaims(item?.claims || [], item).length > 0;
 }
 
+function normalizeReceptionWorkflow(raw) {
+  raw = raw && typeof raw === "object" ? raw : {};
+  return {
+    // Étape 2 — demande planning
+    planningRequestedAt: raw.planningRequestedAt || "",
+    planningRequestedBy: raw.planningRequestedBy || "",
+    planningComment: raw.planningComment || "",
+    planningCycles: Math.min(3, Math.max(0, Number(raw.planningCycles || 0))),
+    // Étape 3 — proposition planning reçue
+    planningReceivedAt: raw.planningReceivedAt || "",
+    planningReceivedBy: raw.planningReceivedBy || "",
+    planningProposal: raw.planningProposal && typeof raw.planningProposal === "object" ? {
+      startDate: raw.planningProposal.startDate || "",
+      deliveryDate: raw.planningProposal.deliveryDate || "",
+      workshopNote: raw.planningProposal.workshopNote || "",
+      proposedBy: raw.planningProposal.proposedBy || "",
+    } : null,
+    planningAcceptedAt: raw.planningAcceptedAt || "",
+    planningRevisionRequestedAt: raw.planningRevisionRequestedAt || "",
+    // Étape 4 — contact client
+    customerContactedAt: raw.customerContactedAt || "",
+    customerContactHistory: Array.isArray(raw.customerContactHistory)
+      ? raw.customerContactHistory.map((entry) => ({
+          at: entry.at || new Date().toISOString(),
+          by: entry.by || "",
+          outcome: entry.outcome || "contacted",
+          note: entry.note || "",
+        }))
+      : [],
+    // Étape 5 — décision client
+    customerDecision: raw.customerDecision || "", // confirmed | new_date | cancelled | pending
+    customerDecisionAt: raw.customerDecisionAt || "",
+    customerNewDateRequest: raw.customerNewDateRequest || "",
+    // Étape 6 — confirmation RDV
+    rdvConfirmedAt: raw.rdvConfirmedAt || "",
+    rdvConfirmedBy: raw.rdvConfirmedBy || "",
+    rdvChannel: raw.rdvChannel || "", // phone | sms | whatsapp | email | other
+    rdvReminderSent: Boolean(raw.rdvReminderSent),
+    rdvNote: raw.rdvNote || "",
+    // Étape 7 — réception physique (liée à flags.received)
+    vehicleReceivedAt: raw.vehicleReceivedAt || "",
+    vehicleReceivedBy: raw.vehicleReceivedBy || "",
+    vehicleMileageEntry: raw.vehicleMileageEntry || "",
+    vehicleAccessories: raw.vehicleAccessories || "",
+    vehicleDocuments: raw.vehicleDocuments || "",
+    vehicleConditionNote: raw.vehicleConditionNote || "",
+    // Étape 8 — envoi atelier
+    sentToWorkshopAt: raw.sentToWorkshopAt || "",
+    sentToWorkshopBy: raw.sentToWorkshopBy || "",
+    // Étape 9 — suivi
+    followupNotes: Array.isArray(raw.followupNotes)
+      ? raw.followupNotes.map((n) => ({ at: n.at || "", by: n.by || "", text: n.text || "" }))
+      : [],
+    // Étape 10 — contrôle qualité
+    qualityStatus: normalizeQualityStatus(raw.qualityStatus),
+    qualityReviewedAt: raw.qualityReviewedAt || "",
+    qualityReturnRequestedAt: raw.qualityReturnRequestedAt || "",
+    qualityReturnReason: raw.qualityReturnReason || "",
+    qualityReworkStartedAt: raw.qualityReworkStartedAt || "",
+    qualityRevalidatedAt: raw.qualityRevalidatedAt || "",
+    qualityReviewHistory: Array.isArray(raw.qualityReviewHistory)
+      ? raw.qualityReviewHistory.map((entry) => ({
+          at: entry.at || "",
+          by: entry.by || "",
+          status: normalizeQualityStatus(entry.status),
+          reason: String(entry.reason || "").trim(),
+        }))
+      : [],
+    readyForDeliveryAt: raw.readyForDeliveryAt || "",
+    // Étape 11 — livraison
+    deliverySheetPrintedAt: raw.deliverySheetPrintedAt || "",
+    deliverySheetSignedByClient: Boolean(raw.deliverySheetSignedByClient),
+    deliverySheetClientName: raw.deliverySheetClientName || "",
+    deliveredAt: raw.deliveredAt || "",
+    deliveredBy: raw.deliveredBy || "",
+    deliveryOverride: Boolean(raw.deliveryOverride),
+    deliveryOverrideReason: raw.deliveryOverrideReason || "",
+  };
+}
+
+function normalizeCustomerClaim(claim) {
+  if (!claim) return null;
+  const validTypes = new Set(["claim", "request"]);
+  const validPriorities = new Set(["low", "normal", "high", "urgent"]);
+  const validStatuses = new Set(["open", "in_progress", "resolved", "unresolved", "explained_to_customer"]);
+  return {
+    id: claim.id || uid("customer-claim"),
+    type: validTypes.has(claim.type) ? claim.type : "claim", // claim | request
+    title: String(claim.title || claim.text || "").trim(),
+    text: String(claim.text || claim.title || "").trim(),
+    description: String(claim.description || "").trim(),
+    priority: validPriorities.has(claim.priority) ? claim.priority : "normal",
+    status: validStatuses.has(claim.status) ? claim.status : "open",
+    createdAt: claim.createdAt || new Date().toISOString(),
+    createdBy: claim.createdBy || "",
+    responsibleRole: claim.responsibleRole || "",
+    responsibleUserId: claim.responsibleUserId || "",
+    comments: Array.isArray(claim.comments) ? claim.comments.map(normalizeClaimComment).filter(Boolean) : [],
+    linkedBookingId: claim.linkedBookingId || "",
+    resolvedAt: claim.resolvedAt || "",
+    resolvedBy: claim.resolvedBy || "",
+    qualityChecked: Boolean(claim.qualityChecked),
+  };
+}
+
+function normalizeClaimComment(comment) {
+  if (!comment) return null;
+  return {
+    id: comment.id || uid("claim-comment"),
+    text: String(comment.text || "").trim(),
+    createdAt: comment.createdAt || new Date().toISOString(),
+    createdBy: comment.createdBy || "",
+  };
+}
+
 
 function isClientOnlyRepairClaim(claim) {
-  return true;
+  return ["client", "vidange", "mechanical_client", "electrical_client", "diagnostic", "garantie"].includes(claim?.type);
 }
 
 function getClaimTypeLabel(type) {
   const labels = {
-    assurance: "Atelier depuis devis PDF",
-    atelier: "Atelier depuis devis PDF",
-    client: "Intervention atelier",
+    assurance: "Assurance / expert",
+    client: "Client direct / intervention SAV",
     vidange: "Service rapide / entretien",
     mechanical_client: "Service mécanique",
     electrical_client: "Service électrique",
@@ -1506,14 +2305,14 @@ function normalizeRepairClaim(claim, index = 0) {
     number: claim.number || `OT-${String(index + 1).padStart(3, "0")}`,
     title: claim.title || claim.label || `Intervention ${index + 1}`,
     vehicleArea: claim.vehicleArea || claim.area || "",
-    type: claim.type || "atelier",
+    type: claim.type || "assurance",
     status: normalizeClaimStatus(claim.status),
     includeInPlanning: claim.includeInPlanning !== false,
     expertApproved: Boolean(claim.expertApproved),
     clientApproved: Boolean(claim.clientApproved),
     estimateNumber: claim.estimateNumber || claim.estimate?.reference || "",
     orNumber: claim.orNumber || "",
-    amount: 0,
+    amount: Math.max(0, parseLocalizedDecimal(claim.amount || 0) || 0),
     estimate: normalizeExpertEstimate(claim.estimate),
     createdAt,
     updatedAt: claim.updatedAt || createdAt,
@@ -1541,9 +2340,15 @@ function recomputeCaseDurationsFromClaims(item) {
       totals[line.phase] = roundHours(Number(totals[line.phase] || 0) + Number(line.laborHours || 0));
     });
   });
-  totals.finish = roundHours(Number(totals.finish || 0));
-  totals.finalCheck = roundHours(Number(totals.finalCheck || 0));
-  totals.quality = 0;
+  const hasInsuranceClaim = includedClaims.some((claim) => isInsuranceRepairClaim(claim));
+  const productiveTotal = ["body", "oilService", "mechanical", "electrical", "prep", "paint", "reassembly"].reduce((sum, key) => sum + Number(totals[key] || 0), 0);
+  if (hasInsuranceClaim) {
+    totals.finish = roundHours(Number(totals.paint || 0) * 0.5);
+    totals.quality = 0.25;
+  } else {
+    totals.finish = 0;
+    totals.quality = productiveTotal > 0 ? 0.25 : 0;
+  }
   DURATIONS.forEach(([key]) => {
     item.durations[key] = roundHours(totals[key] || 0);
   });
@@ -1599,7 +2404,7 @@ function normalizeRepairSupplement(supplement) {
 }
 
 function normalizeSupplementStatus(status) {
-  const allowed = new Set(["draft", "atelier_pending", "atelier_validated", "expert_pending", "client_pending", "approved", "refused", "planned", "done"]);
+  const allowed = new Set(["draft", "expert_pending", "client_pending", "approved", "refused", "planned", "done"]);
   return allowed.has(status) ? status : "draft";
 }
 
@@ -1618,11 +2423,9 @@ function normalizeRepairSupplementLine(line) {
 
 const SUPPLEMENT_STATUS_LABELS = {
   draft: "Brouillon",
-  atelier_pending: "À valider Chef Atelier",
-  atelier_validated: "Validé atelier",
-  expert_pending: "À valider atelier",
-  client_pending: "À valider atelier",
-  approved: "Validé atelier",
+  expert_pending: "En attente expert",
+  client_pending: "En attente client",
+  approved: "Accepté",
   refused: "Refusé",
   planned: "Intégré au planning",
   done: "Terminé",
@@ -1649,6 +2452,8 @@ function normalizeExpertEstimatePart(part) {
     id: part.id || uid("estimate-part"),
     designation,
     quantity: Math.max(0, parseLocalizedDecimal(part.quantity ?? 1) || 0),
+    unitPrice: Math.max(0, parseLocalizedDecimal(part.unitPrice ?? 0) || 0),
+    amount: Math.max(0, parseLocalizedDecimal(part.amount ?? 0) || 0),
     rawText: part.rawText || designation,
   };
 }
@@ -1713,7 +2518,11 @@ function normalizeHistory(history, fallbackDate) {
           type: entry.type || "note",
           label: entry.label || "Action dossier",
           details: entry.details || "",
-          user: entry.user || "Atelier",
+          user: entry.user || entry.userName || "Atelier",
+          userId: entry.userId || "",
+          userName: entry.userName || entry.user || "Atelier",
+          userRole: normalizeUserRole(entry.userRole || "") === "readonly" && !entry.userRole ? "" : normalizeUserRole(entry.userRole),
+          resourceId: entry.resourceId || "",
         }))
         .filter((entry) => entry.label)
     : [];
@@ -1725,22 +2534,571 @@ function normalizeHistory(history, fallbackDate) {
   return normalized.sort((a, b) => new Date(b.at) - new Date(a.at));
 }
 
-function makeHistoryEntry(type, label, at = new Date().toISOString(), details = "") {
+function normalizeAuditLog(entries) {
+  return (Array.isArray(entries) ? entries : [])
+    .map((entry) => ({
+      id: entry.id || uid("audit"),
+      at: entry.at || new Date().toISOString(),
+      type: entry.type || "audit",
+      label: entry.label || "Action atelier",
+      details: entry.details || "",
+      user: entry.user || entry.userName || "Atelier",
+      userId: entry.userId || "",
+      userName: entry.userName || entry.user || "Atelier",
+      userRole: entry.userRole || "",
+      resourceId: entry.resourceId || "",
+      caseId: entry.caseId || "",
+    }))
+    .filter((entry) => entry.label)
+    .sort((a, b) => new Date(b.at) - new Date(a.at))
+    .slice(0, 500);
+}
+
+function normalizeSyncLog(entries) {
+  return (Array.isArray(entries) ? entries : [])
+    .map((entry) => ({
+      id: entry.id || uid("sync-log"),
+      at: entry.at || new Date().toISOString(),
+      source: entry.source || "",
+      reason: entry.reason || "",
+      localVersion: entry.localVersion || "",
+      remoteVersion: entry.remoteVersion || "",
+      remoteUpdatedAt: entry.remoteUpdatedAt || "",
+      casesMerged: Number(entry.casesMerged || 0),
+      bookingsMerged: Number(entry.bookingsMerged || 0),
+      historyMerged: Number(entry.historyMerged || 0),
+      conflicts: Number(entry.conflicts || 0),
+      protectedKept: Number(entry.protectedKept || 0),
+      details: entry.details || "",
+    }))
+    .sort((a, b) => new Date(b.at) - new Date(a.at))
+    .slice(0, 300);
+}
+
+function stableConflictStringify(value) {
+  if (Array.isArray(value)) return `[${value.map(stableConflictStringify).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableConflictStringify(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function makeSyncConflictValueHash(value) {
+  const text = stableConflictStringify(value ?? "");
+  let hash = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    hash = ((hash << 5) - hash + text.charCodeAt(index)) | 0;
+  }
+  return Math.abs(hash).toString(36);
+}
+
+function buildSyncConflictKey(entry = {}) {
+  const field = entry.field || "";
+  if (field) {
+    const entityType = entry.entityType || entry.entity || "case";
+    const entityId = entry.entityId || entry.caseId || "";
+    const localHash = entry.localValueHash || makeSyncConflictValueHash(entry.localValue);
+    const remoteHash = entry.remoteValueHash || makeSyncConflictValueHash(entry.remoteValue);
+    const sorted = [localHash, remoteHash].sort();
+    return [entityType, entityId, field, sorted[0], sorted[1]].map((part) => String(part || "-")).join(":");
+  }
+  if (entry.conflictKey) return String(entry.conflictKey);
+  const entityType = entry.entityType || entry.entity || "case";
+  const entityId = entry.entityId || entry.caseId || "";
+  const localHash = entry.localValueHash || makeSyncConflictValueHash(entry.localValue);
+  const remoteHash = entry.remoteValueHash || makeSyncConflictValueHash(entry.remoteValue);
+  return [entityType, entityId, field, localHash, remoteHash].map((part) => String(part || "-")).join(":");
+}
+
+function isEmptySyncValue(value) {
+  if (value === null || value === undefined || value === "") return true;
+  if (Array.isArray(value) && value.length === 0) return true;
+  if (typeof value === "object" && Object.keys(value).length === 0) return true;
+  return false;
+}
+
+function normalizeSyncComparableValue(value) {
+  if (isEmptySyncValue(value)) return null;
+  if (typeof value === "object") return stableConflictStringify(value);
+  return String(value).trim();
+}
+
+function normalizeSyncConflictEntry(entry = {}) {
+  const createdAt = entry.createdAt || entry.at || new Date().toISOString();
+  const entityType = entry.entityType || entry.entity || (entry.caseId ? "case" : "unknown");
+  const entityId = entry.entityId || entry.caseId || "";
+  const localValueHash = entry.localValueHash || makeSyncConflictValueHash(entry.localValue);
+  const remoteValueHash = entry.remoteValueHash || makeSyncConflictValueHash(entry.remoteValue);
+
+  const localNorm = normalizeSyncComparableValue(entry.localValue);
+  const remoteNorm = normalizeSyncComparableValue(entry.remoteValue);
+
+  let status = ["open", "resolved", "ignored"].includes(entry.status) ? entry.status : "open";
+  let decision = entry.decision || entry.resolution || "kept_local";
+  let resolvedAt = entry.resolvedAt || "";
+  let resolvedBy = entry.resolvedBy || "";
+
+  if (localNorm === remoteNorm) {
+    status = "resolved";
+    decision = "auto_resolved";
+    if (!resolvedAt) {
+      resolvedAt = new Date().toISOString();
+      resolvedBy = "Système (Sync)";
+    }
+  }
+
+  if (entry.field === "appointmentStatus" && status === "open") {
+    const caseId = entry.entityId || entry.caseId || "";
+    const caseItem = typeof state !== "undefined" && state.cases ? state.cases.find(c => c.id === caseId) : null;
+    const hasBooking = caseItem ? hasRealBooking(caseId, state.bookings) : false;
+    const canonicalVal = hasBooking ? "scheduled" : "none";
+    if (localNorm === canonicalVal || remoteNorm === canonicalVal) {
+      status = "resolved";
+      decision = "kept_canonical";
+      if (!resolvedAt) {
+        resolvedAt = new Date().toISOString();
+        resolvedBy = "Système (Sync)";
+      }
+    }
+  }
+
+  let label = entry.label;
+  if (!label) {
+    if (entry.field === "appointmentStatus") {
+      label = "Conflit statut RDV";
+    } else {
+      label = `Conflit ${entityType}`;
+    }
+  }
+
+  let details = entry.details || entry.reason;
+  if (!details) {
+    if (entry.field === "appointmentStatus") {
+      const caseNum = entry.caseNumber || "";
+      details = `Conflit sur le statut RDV pour le dossier ${caseNum || entityId || ""}.`;
+    } else {
+      details = "Conflit de synchronisation détecté.";
+    }
+  }
+
+  const normalized = {
+    id: entry.id || uid("sync-conflict"),
+    at: entry.at || createdAt,
+    createdAt,
+    type: entry.type || "sync_conflict",
+    entityType,
+    entity: entry.entity || entityType,
+    entityId,
+    caseId: entry.caseId || (entityType === "case" ? entityId : ""),
+    caseNumber: entry.caseNumber || "",
+    field: entry.field || "",
+    reason: entry.reason || "",
+    localValue: entry.localValue ?? "",
+    remoteValue: entry.remoteValue ?? "",
+    localValueHash,
+    remoteValueHash,
+    conflictKey: "",
+    decision,
+    status,
+    resolution: entry.resolution || decision,
+    resolvedAt,
+    resolvedBy,
+    lastNotifiedAt: entry.lastNotifiedAt || "",
+    source: entry.source || "supabase",
+    level: entry.level || "warn",
+    actorName: entry.actorName || "Système",
+    label,
+    details,
+  };
+  normalized.conflictKey = buildSyncConflictKey({ ...entry, ...normalized });
+  return normalized;
+}
+
+function resolveKeptConflictsAfterPush() {
+  if (!state.syncConflicts) return;
+  let changed = false;
+  const now = new Date().toISOString();
+
+  const updated = state.syncConflicts.map((entry) => {
+    const normalized = normalizeSyncConflictEntry(entry);
+    if (normalized.status === "open" && ["kept_local", "kept_remote"].includes(normalized.decision)) {
+      normalized.status = "resolved";
+      normalized.resolvedAt = normalized.resolvedAt || now;
+      normalized.resolvedBy = normalized.resolvedBy || "Système (Sync)";
+      changed = true;
+    }
+    return normalized;
+  });
+
+  if (changed) {
+    state.syncConflicts = normalizeSyncConflicts(updated);
+    saveState({ skipCloud: true });
+  }
+}
+
+
+function choosePreferredSyncConflict(current, incoming) {
+  if (!current) return incoming;
+  const currentResolved = current.status === "resolved" || current.status === "ignored";
+  const incomingResolved = incoming.status === "resolved" || incoming.status === "ignored";
+  if (currentResolved && !incomingResolved) return current;
+  if (incomingResolved && !currentResolved) return incoming;
+  if (current.lastNotifiedAt && !incoming.lastNotifiedAt) return current;
+  if (incoming.lastNotifiedAt && !current.lastNotifiedAt) return incoming;
+  return new Date(incoming.at || incoming.createdAt) > new Date(current.at || current.createdAt) ? incoming : current;
+}
+
+function normalizeSyncConflicts(entries) {
+  const byKey = new Map();
+  (Array.isArray(entries) ? entries : []).forEach((entry) => {
+    const normalized = normalizeSyncConflictEntry(entry);
+    const key = normalized.conflictKey || normalized.id;
+    byKey.set(key, choosePreferredSyncConflict(byKey.get(key), normalized));
+  });
+  return Array.from(byKey.values())
+    .sort((a, b) => new Date(b.at || b.createdAt) - new Date(a.at || a.createdAt))
+    .slice(0, 500);
+}
+
+function getOpenSyncConflicts() {
+  return normalizeSyncConflicts(state.syncConflicts).filter((conflict) => conflict.status === "open");
+}
+
+function applySyncConflictRemoteValue(item, field, value) {
+  if (!item || !field) return false;
+  if (field.startsWith("flags.")) {
+    const flag = field.slice("flags.".length);
+    item.flags = item.flags && typeof item.flags === "object" ? item.flags : {};
+    item.flags[flag] = value;
+    return true;
+  }
+  item[field] = value;
+  return true;
+}
+
+function resolveSyncConflict(conflictIdOrKey, action = "mark_resolved") {
+  const conflicts = normalizeSyncConflicts(state.syncConflicts);
+  const index = conflicts.findIndex((conflict) => conflict.id === conflictIdOrKey || conflict.conflictKey === conflictIdOrKey);
+  if (index < 0) return { ok: false, message: "Conflit introuvable." };
+  const conflict = { ...conflicts[index] };
+  const actor = typeof getCurrentActor === "function" ? getCurrentActor() : { userName: "Atelier", userRole: "", resourceId: "" };
+
+  if (conflict.type === "case_conflict") {
+    const caseId = conflict.caseId || conflict.entityId;
+    const localCaseIdx = state.cases.findIndex((c) => c.id === caseId);
+
+    if (action === "accept_cloud") {
+      if (localCaseIdx < 0) return { ok: false, message: "Dossier introuvable localement." };
+      if (!conflict.remoteValue) return { ok: false, message: "Version cloud manquante dans le conflit." };
+
+      const localCase = state.cases[localCaseIdx];
+      const conflictId = conflict.id;
+
+      // Clean up older snapshots for the same caseId first
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith(`nimr-sav-conflict-safety-snapshot:${caseId}:`)) {
+          localStorage.removeItem(key);
+          i--;
+        }
+      }
+
+      // Save a silent local case snapshot
+      const snapshotKey = `nimr-sav-conflict-safety-snapshot:${caseId}:${conflictId}`;
+      const snapshotPayload = {
+        version: "v23.2.6",
+        timestamp: new Date().toISOString(),
+        cases: [JSON.parse(JSON.stringify(localCase))],
+        source: "conflict_safety_snapshot"
+      };
+      localStorage.setItem(snapshotKey, JSON.stringify(snapshotPayload));
+
+      if (typeof addAuditLog === "function") {
+        addAuditLog("conflict.safety_snapshot.created", {
+          type: "case_conflict",
+          caseId: caseId,
+          conflictId: conflictId,
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      const remoteCaseCopy = JSON.parse(JSON.stringify(conflict.remoteValue));
+      remoteCaseCopy.syncRevision = remoteCaseCopy.localRevision;
+
+      state.cases[localCaseIdx] = normalizeCase(remoteCaseCopy);
+      addHistoryWithActor(state.cases[localCaseIdx], "sync.conflict.accept_cloud", "Conflit synchronisation résolu", `Dossier remplacé par la version cloud (révision ${remoteCaseCopy.localRevision}).`, actor);
+
+      conflict.decision = "accepted_cloud";
+      conflict.resolution = "accepted_cloud";
+      conflict.status = "resolved";
+      conflict.resolvedAt = new Date().toISOString();
+      conflict.resolvedBy = actor.userName || actor.name || "Atelier";
+    } else if (action === "keep_local") {
+      if (localCaseIdx < 0) return { ok: false, message: "Dossier introuvable localement." };
+
+      const localCase = state.cases[localCaseIdx];
+      localCase.localRevision = (Number(localCase.localRevision) || 0) + 1;
+      localCase.updatedAt = new Date().toISOString();
+      localCase.updatedBy = actor.userName || "Atelier";
+
+      addHistoryWithActor(localCase, "sync.conflict.keep_local", "Conflit synchronisation résolu", "Version locale conservée et révision incrémentée.", actor);
+
+      conflict.decision = "kept_local";
+      conflict.resolution = "kept_local";
+      conflict.status = "resolved";
+      conflict.resolvedAt = new Date().toISOString();
+      conflict.resolvedBy = actor.userName || actor.name || "Atelier";
+    } else if (action === "defer_manual_merge") {
+      if (localCaseIdx >= 0) {
+        addHistoryWithActor(state.cases[localCaseIdx], "sync.conflict.deferred", "Résolution du conflit reportée", "La résolution du conflit a été reportée par l'utilisateur.", actor);
+      }
+      conflict.decision = "deferred";
+      conflict.resolution = "deferred";
+      conflict.status = "open"; // Garde le conflit ouvert
+      conflict.notes = (conflict.notes || "") + `[${new Date().toLocaleString()}] Résolution reportée par ${actor.userName || "Atelier"}.\n`;
+    } else {
+      return { ok: false, message: "Action non prise en charge pour ce type de conflit." };
+    }
+  } else {
+    // Standard conflict handling (for case_field_conflict etc.)
+    if (action === "accept_cloud") {
+      const item = state.cases.find((caseItem) => caseItem.id === (conflict.caseId || conflict.entityId));
+      if (!item || !conflict.field) return { ok: false, message: "Dossier ou champ introuvable." };
+      applySyncConflictRemoteValue(item, conflict.field, conflict.remoteValue);
+      addHistoryWithActor(item, "sync.conflict.accept_cloud", "Conflit synchronisation résolu", `Champ ${conflict.field} : valeur cloud acceptée.`, actor);
+      conflict.decision = "accepted_cloud";
+      conflict.resolution = "accepted_cloud";
+    } else if (action === "keep_local") {
+      const item = state.cases.find((caseItem) => caseItem.id === (conflict.caseId || conflict.entityId));
+      if (item) addHistoryWithActor(item, "sync.conflict.keep_local", "Conflit synchronisation résolu", `Champ ${conflict.field || "inconnu"} : valeur locale conservée.`, actor);
+      conflict.decision = "kept_local";
+      conflict.resolution = "kept_local";
+    } else {
+      conflict.decision = "marked_resolved";
+      conflict.resolution = "manual";
+    }
+    conflict.status = "resolved";
+    conflict.resolvedAt = new Date().toISOString();
+    conflict.resolvedBy = actor.userName || actor.name || "Atelier";
+  }
+
+  conflicts[index] = conflict;
+  state.syncConflicts = normalizeSyncConflicts(conflicts);
+  if (action === "keep_local" && typeof rememberLocalUserChangeAt === "function") rememberLocalUserChangeAt(new Date());
+  saveState({ flushCloud: action !== "defer_manual_merge" && action !== "mark_resolved" });
+  if (typeof renderSyncStatusStrip === "function") renderSyncStatusStrip();
+  return { ok: true, conflict };
+}
+
+function makeHistoryEntry(type, label, at = new Date().toISOString(), details = "", actor = null) {
+  let resolvedActor = actor;
+  if (!resolvedActor) {
+    try {
+      resolvedActor = getCurrentActor();
+    } catch (error) {
+      resolvedActor = { userId: "", userName: "Atelier", userRole: "", resourceId: "" };
+    }
+  }
   return {
     id: uid("history"),
     at,
     type,
     label,
     details,
-    user: "Atelier",
+    user: resolvedActor.userName || resolvedActor.name || "Atelier",
+    userId: resolvedActor.userId || resolvedActor.id || "",
+    userName: resolvedActor.userName || resolvedActor.name || "Atelier",
+    userRole: resolvedActor.userRole || resolvedActor.role || "",
+    resourceId: resolvedActor.resourceId || "",
   };
 }
 
-function addHistory(item, type, label, details = "") {
+function addAuditLog(type, label, details = "", context = {}) {
+  state.auditLog = normalizeAuditLog(state.auditLog);
+  const entry = {
+    ...makeHistoryEntry(type, label, new Date().toISOString(), details, context.actor || getCurrentActor()),
+    caseId: context.caseId || context.item?.id || "",
+  };
+  state.auditLog.unshift(entry);
+  state.auditLog = state.auditLog.slice(0, 500);
+  return entry;
+}
+
+function addHistoryWithActor(item, type, label, details = "", actor = null) {
   if (!item) return;
   item.history = Array.isArray(item.history) ? item.history : normalizeHistory([], item.createdAt);
-  item.history.unshift(makeHistoryEntry(type, label, new Date().toISOString(), details));
+  item.history.unshift(makeHistoryEntry(type, label, new Date().toISOString(), details, actor || getCurrentActor()));
   item.history = item.history.slice(0, 200);
+}
+
+function addHistory(item, type, label, details = "") {
+  addHistoryWithActor(item, type, label, details, getCurrentActor());
+}
+
+function getAggregatedActivityLog(limit = 200, roleOrUser = null) {
+  let role = "readonly";
+  if (roleOrUser) {
+    if (typeof roleOrUser === "string") role = roleOrUser;
+    else if (roleOrUser.userRole) role = roleOrUser.userRole;
+    else if (roleOrUser.role) role = roleOrUser.role;
+  } else {
+    try {
+      role = getCurrentActor()?.userRole || getCurrentActor()?.role || "readonly";
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  const events = [];
+
+  // 1. Audit Log
+  if (Array.isArray(state.auditLog)) {
+    state.auditLog.forEach(log => {
+      if (role !== "admin") {
+        if (log.type.startsWith("users.") || log.type.startsWith("supabase.") || log.type.startsWith("settings.")) {
+          return;
+        }
+      }
+      events.push({
+        ...log,
+        category: log.type.split(".")[0] || "system",
+        level: log.type.includes("error") || log.type.includes("failed") ? "error" : "info"
+      });
+    });
+  }
+
+  // 2. Case History
+  if (Array.isArray(state.cases)) {
+    state.cases.forEach(item => {
+      if (Array.isArray(item.history)) {
+        item.history.forEach(log => {
+          events.push({
+            ...log,
+            caseId: item.id,
+            caseNumber: item.number,
+            category: log.type.startsWith("planning.") || log.type.startsWith("task.") || log.type.includes("dynamic-reschedule") ? "planning" : "case",
+            level: log.type.includes("deleted") || log.type.includes("error") ? "warn" : "info"
+          });
+        });
+      }
+    });
+  }
+
+  // 3. Sync Log
+  if (Array.isArray(state.syncLog)) {
+    state.syncLog.forEach(log => {
+      events.push({
+        id: "sync-" + new Date(log.at).getTime() + Math.random().toString(36).substring(2, 6),
+        at: log.at,
+        type: log.status === "success" ? "sync.run" : "sync.error",
+        label: "Synchronisation",
+        details: `${log.items ?? "éléments inconnus"}${log.items !== undefined ? " élément(s)" : ""}, ${log.duration ?? "durée inconnue"}${log.duration !== undefined ? "ms" : ""}. ${log.source || "source inconnue"}`,
+        category: "sync",
+        level: log.status === "success" ? "info" : "error",
+        actorName: "Système"
+      });
+    });
+  }
+
+  // 4. Sync Conflicts
+  if (Array.isArray(state.syncConflicts)) {
+    const syncConflicts = typeof normalizeSyncConflicts === "function"
+      ? normalizeSyncConflicts(state.syncConflicts)
+      : state.syncConflicts;
+    syncConflicts.forEach(conf => {
+      const conflictStatus = conf.status || "open";
+      const statusLabel = conflictStatus === "open" ? "à résoudre" : conflictStatus === "ignored" ? "ignoré" : "résolu";
+      const decisionLabel = conf.decision === "needs_review" ? "revue nécessaire" : (conf.decision || conf.resolution || "local conservé");
+      events.push({
+        id: conf.id,
+        at: conf.at || conf.createdAt,
+        type: "sync.conflict",
+        label: "Conflit de synchronisation",
+        details: conf.type === "case_field_conflict"
+          ? `Conflit dossier ${conf.caseNumber || conf.caseId || conf.entityId || "dossier inconnu"} — champ ${conf.field || "inconnu"} : ${statusLabel}, ${decisionLabel}.`
+          : `Conflit ${statusLabel} (${conf.resolution || "manuel"}) pour ${conf.entity || conf.type || "entité inconnue"}`,
+        category: "sync",
+        level: conflictStatus === "open" ? "warn" : "info",
+        actorName: "Système"
+      });
+    });
+  }
+
+  events.sort((a, b) => new Date(b.at) - new Date(a.at));
+
+  return events.slice(0, limit);
+}
+
+if (typeof window !== "undefined") {
+  window.getAggregatedActivityLog = getAggregatedActivityLog;
+  window.getOpenSyncConflicts = getOpenSyncConflicts;
+  window.resolveSyncConflict = resolveSyncConflict;
+  window.resolveKeptConflictsAfterPush = resolveKeptConflictsAfterPush;
+  window.hasRealBooking = hasRealBooking;
+}
+
+function getComparableCaseJSON(caseItem) {
+  const clone = { ...caseItem };
+  delete clone.updatedAt;
+  delete clone.updatedBy;
+  delete clone.localRevision;
+  delete clone.syncRevision;
+  delete clone.history;
+  return JSON.stringify(clone);
+}
+
+function getComparableRuntimeScope() {
+  if (typeof window !== "undefined") return window;
+  if (typeof globalThis !== "undefined") return globalThis;
+  return {};
+}
+
+function initializeLastKnownCasesComparable() {
+  const runtimeScope = getComparableRuntimeScope();
+  runtimeScope.lastKnownCasesComparable = {};
+  if (typeof state !== "undefined" && state && Array.isArray(state.cases)) {
+    state.cases.forEach((caseItem) => {
+      runtimeScope.lastKnownCasesComparable[caseItem.id] = getComparableCaseJSON(caseItem);
+    });
+  }
+}
+
+function detectAndIncrementCaseRevisions() {
+  const runtimeScope = getComparableRuntimeScope();
+  if (!runtimeScope.lastKnownCasesComparable) {
+    initializeLastKnownCasesComparable();
+  }
+  const actor = getCurrentActor();
+  const now = new Date().toISOString();
+  let anyIncremented = false;
+
+  if (typeof state !== "undefined" && state && Array.isArray(state.cases)) {
+    state.cases.forEach((caseItem) => {
+      const currentJSON = getComparableCaseJSON(caseItem);
+      const previousJSON = runtimeScope.lastKnownCasesComparable[caseItem.id];
+
+      if (previousJSON === undefined) {
+        caseItem.localRevision = (Number(caseItem.localRevision) || 0) + 1;
+        caseItem.updatedAt = caseItem.updatedAt || now;
+        caseItem.updatedBy = caseItem.updatedBy || actor.userName || "Atelier";
+        runtimeScope.lastKnownCasesComparable[caseItem.id] = currentJSON;
+        anyIncremented = true;
+      } else if (previousJSON !== currentJSON) {
+        caseItem.localRevision = (Number(caseItem.localRevision) || 0) + 1;
+        caseItem.updatedAt = now;
+        caseItem.updatedBy = actor.userName || "Atelier";
+        runtimeScope.lastKnownCasesComparable[caseItem.id] = currentJSON;
+        anyIncremented = true;
+      }
+    });
+  }
+  return anyIncremented;
+}
+
+if (typeof window !== "undefined") {
+  window.getComparableCaseJSON = getComparableCaseJSON;
+  window.initializeLastKnownCasesComparable = initializeLastKnownCasesComparable;
+  window.detectAndIncrementCaseRevisions = detectAndIncrementCaseRevisions;
 }
 
 function recordFlagHistory(item, flag, checked) {
@@ -1838,6 +3196,12 @@ function clearLocalUserChangeAt() {
 
 function saveState(options = {}) {
   try {
+    const modified = detectAndIncrementCaseRevisions();
+    if (modified && !options.skipCloud && typeof navigator !== "undefined" && navigator.onLine === false) {
+      if (typeof enqueueOfflineAction === "function") {
+        enqueueOfflineAction("sync_push", "Modification locale hors ligne");
+      }
+    }
     const envelope = buildAutosaveEnvelope();
     const stateJson = JSON.stringify(state);
     localStorage.setItem(STORAGE_KEY, stateJson);
@@ -1853,6 +3217,7 @@ function saveState(options = {}) {
       flushSupabaseBackup(options.cloudReason || "local-save-now");
     }
     if (typeof renderSyncStatusStrip === "function") renderSyncStatusStrip();
+    if (typeof updateSaveStatusIndicator === "function") updateSaveStatusIndicator("Sauvegardé", "saved");
   } catch (error) {
     console.error("Impossible d'enregistrer les données locales", error);
     notifyUser("Le stockage local est saturé. Exportez une sauvegarde JSON depuis Atelier > Sauvegarde.", "error");
@@ -1883,6 +3248,9 @@ function normalizePhotoMeta(photo) {
     size: Number(meta.size || 0),
     category: normalizePhotoCategory(meta.category),
     createdAt: meta.createdAt || new Date().toISOString(),
+    deletedAt: meta.deletedAt || "",
+    deletedBy: meta.deletedBy || "",
+    deleteReason: meta.deleteReason || "",
   };
 }
 
@@ -1927,6 +3295,36 @@ function normalizeWorkHours(workHours) {
   return normalized;
 }
 
+function modalMessageToText(message) {
+  return String(message || "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/?strong>/gi, "")
+    .replace(/<[^>]*>/g, "");
+}
+
+function appendSafeModalMessage(target, message) {
+  target.replaceChildren();
+  const fragments = String(message || "").split(/(<br\s*\/?>|<\/?strong>)/gi).filter(Boolean);
+  let strongNode = null;
+  fragments.forEach((fragment) => {
+    if (/^<br\s*\/?>$/i.test(fragment)) {
+      target.appendChild(document.createElement("br"));
+      return;
+    }
+    if (/^<strong>$/i.test(fragment)) {
+      strongNode = document.createElement("strong");
+      target.appendChild(strongNode);
+      return;
+    }
+    if (/^<\/strong>$/i.test(fragment)) {
+      strongNode = null;
+      return;
+    }
+    const text = document.createTextNode(fragment);
+    (strongNode || target).appendChild(text);
+  });
+}
+
 function showConfirmModal(htmlMessage) {
   return new Promise((resolve) => {
     const overlay = document.getElementById("custom-modal-overlay");
@@ -1935,11 +3333,11 @@ function showConfirmModal(htmlMessage) {
     const confirmBtn = document.getElementById("custom-modal-confirm");
 
     if (!overlay || !body || !cancelBtn || !confirmBtn) {
-      resolve(confirm(htmlMessage.replace(/<br>/g, '\n')));
+      resolve(confirm(modalMessageToText(htmlMessage)));
       return;
     }
 
-    body.innerHTML = htmlMessage;
+    appendSafeModalMessage(body, htmlMessage);
     overlay.hidden = false;
 
     const cleanup = () => {
@@ -1971,14 +3369,25 @@ function showPromptModal(htmlMessage, expectedText) {
     const confirmBtn = document.getElementById("custom-modal-confirm");
 
     if (!overlay || !body || !cancelBtn || !confirmBtn) {
-      resolve(prompt(htmlMessage.replace(/<br>/g, '\n')) === expectedText);
+      resolve(prompt(modalMessageToText(htmlMessage)) === expectedText);
       return;
     }
 
-    body.innerHTML = `${htmlMessage}<br><br><input type="text" id="prompt-input" style="width: 100%; padding: 8px; border: 1px solid #cfe0e8; border-radius: 8px;" placeholder="${expectedText}" autocomplete="off" />`;
+    appendSafeModalMessage(body, htmlMessage);
+    body.appendChild(document.createElement("br"));
+    body.appendChild(document.createElement("br"));
+    const input = document.createElement("input");
+    input.type = "text";
+    input.id = "prompt-input";
+    input.style.width = "100%";
+    input.style.padding = "8px";
+    input.style.border = "1px solid #cfe0e8";
+    input.style.borderRadius = "8px";
+    input.placeholder = expectedText;
+    input.autocomplete = "off";
+    body.appendChild(input);
     overlay.hidden = false;
 
-    const input = document.getElementById("prompt-input");
     input.focus();
 
     const cleanup = () => {
@@ -2000,4 +3409,583 @@ function showPromptModal(htmlMessage, expectedText) {
     cancelBtn.addEventListener("click", onCancel);
     confirmBtn.addEventListener("click", onConfirm);
   });
+}
+
+function showInputPromptModal({
+  title = "Saisie",
+  message = "",
+  defaultValue = "",
+  options = null,
+  confirmLabel = "Confirmer",
+  cancelLabel = "Annuler",
+} = {}) {
+  return new Promise((resolve) => {
+    const overlay = document.getElementById("custom-modal-overlay");
+    const titleEl = document.getElementById("custom-modal-title");
+    const body = document.getElementById("custom-modal-body");
+    const cancelBtn = document.getElementById("custom-modal-cancel");
+    const confirmBtn = document.getElementById("custom-modal-confirm");
+
+    if (!overlay || !body || !cancelBtn || !confirmBtn) {
+      if (options && Array.isArray(options)) {
+        const text = options.map(([val, lbl]) => `${val}: ${lbl}`).join("\n");
+        resolve(prompt(`${message}\n\n${text}`, defaultValue));
+      } else {
+        resolve(prompt(message, defaultValue));
+      }
+      return;
+    }
+
+    const previousTitle = titleEl ? titleEl.textContent : "Confirmation";
+    const previousCancelText = cancelBtn.textContent;
+    const previousConfirmText = confirmBtn.textContent;
+
+    if (titleEl) titleEl.textContent = title;
+    cancelBtn.textContent = cancelLabel;
+    confirmBtn.textContent = confirmLabel;
+
+    const messageWrap = document.createElement("div");
+    appendSafeModalMessage(messageWrap, message);
+    messageWrap.className = "custom-modal-message";
+    messageWrap.style.marginBottom = "12px";
+
+    let input = null;
+    if (options && Array.isArray(options)) {
+      input = document.createElement("select");
+      options.forEach(([val, lbl]) => {
+        const option = document.createElement("option");
+        option.value = String(val);
+        option.textContent = String(lbl);
+        option.selected = String(val) === String(defaultValue);
+        input.appendChild(option);
+      });
+    } else {
+      input = document.createElement("input");
+      input.type = "text";
+      input.value = String(defaultValue || "");
+      input.autocomplete = "off";
+    }
+    input.id = "prompt-modal-input";
+    input.className = options && Array.isArray(options) ? "custom-modal-select" : "custom-modal-input";
+    input.style.width = "100%";
+    input.style.padding = "10px";
+    input.style.border = "1px solid #cfe0e8";
+    input.style.borderRadius = "8px";
+    input.style.fontSize = "16px";
+    input.style.minHeight = "48px";
+
+    if (typeof body.replaceChildren === "function") {
+      body.replaceChildren(messageWrap, input);
+    } else {
+      body.textContent = "";
+      body.innerHTML = "";
+      body.appendChild(messageWrap);
+      body.appendChild(input);
+    }
+    overlay.hidden = false;
+
+    if (input) {
+      input.focus();
+      if (input.tagName === "INPUT") {
+        input.select();
+      }
+    }
+
+    const cleanup = () => {
+      overlay.hidden = true;
+      if (titleEl) titleEl.textContent = previousTitle;
+      cancelBtn.textContent = previousCancelText;
+      confirmBtn.textContent = previousConfirmText;
+      cancelBtn.removeEventListener("click", onCancel);
+      confirmBtn.removeEventListener("click", onConfirm);
+      input?.removeEventListener("keydown", onKeyDown);
+    };
+
+    const onCancel = () => {
+      cleanup();
+      resolve(null);
+    };
+
+    const onConfirm = () => {
+      const val = input ? input.value : "";
+      cleanup();
+      resolve(val);
+    };
+
+    const onKeyDown = (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        onConfirm();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        onCancel();
+      }
+    };
+
+    cancelBtn.addEventListener("click", onCancel);
+    confirmBtn.addEventListener("click", onConfirm);
+    input?.addEventListener("keydown", onKeyDown);
+  });
+}
+
+// v23.2.5 — Workspaces par rôle
+// directeur_sav : vision métier (pas admin technique)
+// qualite : vue QC dédiée (qc-workspace) + dossiers
+// readonly : uniquement pilotage (lecture)
+const ROLE_TABS = {
+  admin:         ["reception-workspace", "dossiers", "today", "pilotage", "planning", "technician", "qc-workspace", "atelier"],
+  directeur_sav: ["dossiers", "today", "pilotage", "planning", "qc-workspace", "atelier"],
+  chef_atelier:  ["reception-workspace", "dossiers", "today", "pilotage", "planning", "technician", "atelier"],
+  reception:     ["reception-workspace", "dossiers", "today"],
+  technicien:    ["technician"],
+  qualite:       ["qc-workspace", "dossiers"],
+  readonly:      ["pilotage"],
+};
+
+// Tab par défaut à afficher lors de la connexion selon le rôle
+const ROLE_DEFAULT_TABS = {
+  admin:         "dossiers",
+  directeur_sav: "pilotage",
+  chef_atelier:  "planning",
+  reception:     "reception-workspace",
+  technicien:    "technician",
+  qualite:       "qc-workspace",
+  readonly:      "pilotage",
+};
+
+function getDefaultTabForRole(role) {
+  return ROLE_DEFAULT_TABS[role] || "dossiers";
+}
+
+function getAllowedTabsForRole(role) {
+  return ROLE_TABS[role] || [];
+}
+
+function getAllowedTabsForCurrentUser() {
+  const user = state?.currentUserId ? getUserById(state.currentUserId) : null;
+  if (!user) {
+    const activeUsers = (state?.users || []).filter((u) => u.active !== false);
+    if (activeUsers.length === 0) {
+      return ["reception-workspace", "dossiers", "today", "pilotage", "planning", "technician", "qc-workspace", "atelier"];
+    }
+    return [];
+  }
+  const role = user.role || "readonly";
+  return getAllowedTabsForRole(role);
+}
+
+function canAccessTab(tabId) {
+  return getAllowedTabsForCurrentUser().includes(tabId);
+}
+
+function ensureCurrentTabAllowed() {
+  if (!canAccessTab(activeTab)) {
+    const user = getCurrentUser();
+    const defaultTab = user ? getDefaultTabForRole(user.role) : null;
+    const allowed = getAllowedTabsForCurrentUser();
+    if (allowed.length > 0) {
+      // Privilégier le tab par défaut du rôle s'il est autorisé
+      const target = (defaultTab && allowed.includes(defaultTab)) ? defaultTab : allowed[0];
+      setActiveTab(target);
+      return true;
+    }
+  }
+  return false;
+}
+
+// v23.2.5 — Sécurité changement de session
+// Seul l'admin peut gérer librement les sessions.
+// Tous les autres rôles doivent passer par une déconnexion propre.
+function guardUserSwitch() {
+  const user = state?.currentUserId ? getUserById(state.currentUserId) : null;
+  if (!user) return { ok: true }; // pas de session active
+  if (hasPermission("users.manage")) return { ok: true }; // admin uniquement
+  return {
+    ok: false,
+    message: "Pour changer de session, déconnectez-vous d'abord. Seul l'administrateur technique peut gérer les utilisateurs directement.",
+  };
+}
+
+// v23.2.5 — Visibilité des notes par rôle
+// Les notes direction ne sont JAMAIS exposées aux rôles : reception, technicien, qualite, readonly.
+// L'audit est journalisé sans exposer le contenu pour les rôles non autorisés.
+const NOTES_VISIBILITY = {
+  admin:         ["reception", "technique", "qualite", "direction"],
+  directeur_sav: ["reception", "technique", "qualite", "direction"],
+  chef_atelier:  ["reception", "technique", "qualite"],
+  reception:     ["reception", "technique"],
+  technicien:    ["technique"],
+  qualite:       ["technique", "qualite"],
+  readonly:      [],
+};
+
+function getCaseNotesForRole(caseItem, role) {
+  if (!caseItem || !caseItem.notes) return {};
+  const visibleFields = NOTES_VISIBILITY[role] || [];
+  const result = {};
+  for (const field of visibleFields) {
+    result[field] = caseItem.notes[field] || "";
+  }
+  return result;
+}
+
+function updateCaseNote(caseId, noteType, content) {
+  const validNoteTypes = ["reception", "technique", "qualite", "direction"];
+  if (!validNoteTypes.includes(noteType)) {
+    return { ok: false, message: `Type de note invalide: ${noteType}` };
+  }
+  // Vérifier les permissions
+  const permMap = {
+    reception:  "case.edit",
+    technique:  "case.edit",
+    qualite:    "quality.validate",
+    direction:  "notes.direction",
+  };
+  const requiredPerm = permMap[noteType];
+  const guard = guardAction(requiredPerm);
+  if (!guard.ok) return { ok: false, message: guard.message };
+
+  // Vérifier que le rôle courant peut voir ce type de note
+  const user = getCurrentUser();
+  const role = user ? (user.role || "readonly") : "readonly";
+  const visibleFields = NOTES_VISIBILITY[role] || [];
+  if (!visibleFields.includes(noteType)) {
+    return { ok: false, message: `Note '${noteType}' non accessible pour ce rôle.` };
+  }
+
+  const item = (state?.cases || []).find((c) => c.id === caseId);
+  if (!item) return { ok: false, message: "Dossier introuvable." };
+
+  if (!item.notes || typeof item.notes !== "object") {
+    item.notes = { reception: "", technique: "", qualite: "", direction: "" };
+  }
+  item.notes[noteType] = String(content || "");
+  item.localRevision = (Number(item.localRevision) || 0) + 1;
+  item.updatedAt = new Date().toISOString();
+  item.updatedBy = user ? user.id : "";
+
+  // Audit : journaliser l'action sans exposer le contenu pour les notes direction
+  const auditContent = noteType === "direction" ? "[contenu confidentiel]" : String(content || "").slice(0, 100);
+  if (typeof addAuditLog === "function") {
+    addAuditLog("case.note_updated", `Note ${noteType} mise à jour`, auditContent, { caseId });
+  }
+  if (typeof saveState === "function") saveState({ flushCloud: true, cloudReason: "case-note" });
+  return { ok: true };
+}
+
+// ─── RÉCEPTION WORKFLOW — LOGIQUE MÉTIER v23.1C ────────────────────────────
+
+/**
+ * Retourne le numéro de l'étape active (1–11) pour un dossier.
+ * Basé sur l'état réel des flags et receptionWorkflow.
+ */
+function getReceptionWorkflowStep(caseItem) {
+  if (!caseItem) return 1;
+  const rw = caseItem.receptionWorkflow || {};
+  const f = caseItem.flags || {};
+
+  // Étape 11 — livraison effectuée ou en cours
+  if (f.delivered) return 11;
+  // Étape 11 — prêt pour livraison (QC validé ou override)
+  if (rw.readyForDeliveryAt) return 11;
+  // Étape 10 — suivi qualité
+  if (rw.sentToWorkshopAt && (f.workCompleted || rw.qualityStatus !== "not_started")) return 10;
+  // Étape 9 — suivi atelier
+  if (rw.sentToWorkshopAt) return 9;
+  // Étape 8 — envoi atelier
+  if (f.received && !rw.sentToWorkshopAt) return 8;
+  // Étape 7 — réception physique
+  if (rw.rdvConfirmedAt && !f.received) return 7;
+  // Étape 6 — confirmation RDV
+  if (rw.customerDecision === "confirmed" && !rw.rdvConfirmedAt) return 6;
+  // Étape 5 — réponse client
+  if (rw.customerContactedAt && !rw.customerDecision) return 5;
+  if (rw.customerContactedAt && rw.customerDecision === "pending") return 5;
+  // Étape 4 — contact client
+  if (rw.planningAcceptedAt && !rw.customerContactedAt) return 4;
+  // Étape 3 — réception proposition planning
+  if (rw.planningRequestedAt && !rw.planningAcceptedAt && !rw.planningRevisionRequestedAt) return 3;
+  // Boucle : révision planning demandée et nouveau cycle possible
+  if (rw.planningRevisionRequestedAt && rw.planningCycles < 3) return 2;
+  // Étape 2 — demande planning
+  if (!rw.planningRequestedAt) return 2;
+  // Étape 3 par défaut si planning demandé mais pas encore répondu
+  return 3;
+}
+
+/**
+ * Retourne le statut d'une étape donnée.
+ * stepKey : 1..11
+ */
+function getReceptionStepStatus(caseItem, stepKey) {
+  const activeStep = getReceptionWorkflowStep(caseItem);
+  const step = Number(stepKey);
+  if (step < activeStep) return "completed";
+  if (step === activeStep) return "active";
+  if (step === activeStep + 1) return "pending";
+  return "locked";
+}
+
+/**
+ * Vérifie si l'acteur peut avancer l'étape donnée.
+ * Retourne {ok: boolean, message: string}
+ */
+function canAdvanceReceptionStep(caseItem, stepKey, actor) {
+  const step = Number(stepKey);
+  const rw = caseItem?.receptionWorkflow || {};
+  const f = caseItem?.flags || {};
+  const role = actor?.role || "";
+
+  const unauthorized = { ok: false, message: "Vous n'avez pas les droits pour cette action." };
+  const receptionAllowed = ["admin", "chef_atelier", "directeur_sav", "reception"];
+  if (!receptionAllowed.includes(role)) return unauthorized;
+
+  switch (step) {
+    case 1: return { ok: true, message: "" };
+    case 2: return { ok: !caseItem?.flags?.delivered, message: caseItem?.flags?.delivered ? "Dossier déjà livré." : "" };
+    case 3: return rw.planningRequestedAt ? { ok: true, message: "" } : { ok: false, message: "La demande de planning n'a pas encore été envoyée." };
+    case 4: return rw.planningAcceptedAt ? { ok: true, message: "" } : { ok: false, message: "Le planning n'a pas encore été accepté." };
+    case 5: return rw.customerContactedAt ? { ok: true, message: "" } : { ok: false, message: "Le contact client n'a pas encore été enregistré." };
+    case 6: return rw.customerDecision === "confirmed" ? { ok: true, message: "" } : { ok: false, message: "Le client n'a pas encore confirmé le rendez-vous." };
+    case 7: return rw.rdvConfirmedAt ? { ok: true, message: "" } : { ok: false, message: "Le rendez-vous n'est pas encore confirmé." };
+    case 8: return f.received ? { ok: true, message: "" } : { ok: false, message: "Le véhicule n'est pas encore réceptionné." };
+    case 9: return rw.sentToWorkshopAt ? { ok: true, message: "" } : { ok: false, message: "Le véhicule n'est pas encore envoyé en atelier." };
+    case 10: return rw.sentToWorkshopAt ? { ok: true, message: "" } : { ok: false, message: "Le véhicule n'est pas encore en atelier." };
+    case 11: {
+      const deliveryOverrideRoles = ["admin", "chef_atelier", "directeur_sav"];
+      if (isCaseBlocked(caseItem)) return { ok: false, message: `Résoudre le blocage avant livraison : ${getCaseBlockerLabel(caseItem) || "dossier bloqué"}.` };
+      const qcOk = normalizeQualityStatus(rw.qualityStatus) === "validated" || f.qualityApproved;
+      const noOpenClaims = !(caseItem.customerClaims || []).some((c) => ["open", "in_progress", "unresolved"].includes(c.status));
+      if (!qcOk) return { ok: false, message: "Le contrôle qualité n'est pas encore validé." };
+      if (!noOpenClaims && !deliveryOverrideRoles.includes(role)) return { ok: false, message: "Il reste des réclamations client non résolues." };
+      return { ok: true, message: "" };
+    }
+    default: return { ok: false, message: "Étape inconnue." };
+  }
+}
+
+/**
+ * Applique une transition de workflow réception.
+ * action : string clé de l'action
+ * payload : données supplémentaires
+ * Retourne {ok, message}
+ */
+function advanceReceptionWorkflow(caseId, action, payload = {}) {
+  const item = (typeof state !== "undefined" ? state.cases : []).find((c) => c.id === caseId);
+  if (!item) return { ok: false, message: "Dossier introuvable." };
+  item.receptionWorkflow = normalizeReceptionWorkflow(item.receptionWorkflow);
+  const rw = item.receptionWorkflow;
+  const actor = typeof getCurrentActor === "function" ? getCurrentActor() : { userId: "", userName: "Système", role: "" };
+  const now = new Date().toISOString();
+
+  switch (action) {
+    case "request_planning": {
+      rw.planningRequestedAt = now;
+      rw.planningRequestedBy = actor.userId;
+      rw.planningComment = payload.comment || "";
+      rw.planningCycles = Math.min(3, (rw.planningCycles || 0) + 1);
+      if (typeof addAuditLog === "function") addAuditLog("reception.planning_requested", "Demande de planning", `Demande envoyée (cycle ${rw.planningCycles}/3)`, { caseId });
+      if (typeof addHistory === "function") addHistory(item, "reception.planning_requested", "Demande de planning", payload.comment || "");
+      return { ok: true, message: "" };
+    }
+    case "receive_planning": {
+      rw.planningReceivedAt = now;
+      rw.planningReceivedBy = actor.userId;
+      rw.planningProposal = {
+        startDate: payload.startDate || "",
+        deliveryDate: payload.deliveryDate || "",
+        workshopNote: payload.workshopNote || "",
+        proposedBy: payload.proposedBy || actor.userId,
+      };
+      if (typeof addAuditLog === "function") addAuditLog("reception.planning_received", "Planning reçu", `Proposition reçue — démarrage: ${payload.startDate}, livraison: ${payload.deliveryDate}`, { caseId });
+      if (typeof addHistory === "function") addHistory(item, "reception.planning_received", "Planning reçu", payload.workshopNote || "");
+      return { ok: true, message: "" };
+    }
+    case "accept_planning": {
+      rw.planningAcceptedAt = now;
+      rw.planningRevisionRequestedAt = "";
+      if (typeof addAuditLog === "function") addAuditLog("reception.planning_received", "Planning accepté", "Proposition planning acceptée par la réception", { caseId });
+      return { ok: true, message: "" };
+    }
+    case "request_planning_revision": {
+      if (rw.planningCycles >= 3) return { ok: false, message: "Nombre maximum de cycles planning atteint (3/3)." };
+      rw.planningRevisionRequestedAt = now;
+      rw.planningAcceptedAt = "";
+      rw.planningReceivedAt = "";
+      rw.planningRequestedAt = "";
+      rw.customerDecision = "new_date";
+      rw.customerDecisionAt = now;
+      if (typeof addAuditLog === "function") addAuditLog("reception.planning_revision_requested", "Révision planning demandée", `Cycle ${rw.planningCycles}/3 — nouvelle date souhaitée: ${payload.newDate || ""}`, { caseId });
+      return { ok: true, message: "" };
+    }
+    case "contact_customer": {
+      const entry = { at: now, by: actor.userId, outcome: payload.outcome || "contacted", note: payload.note || "" };
+      rw.customerContactHistory = Array.isArray(rw.customerContactHistory) ? [...rw.customerContactHistory, entry] : [entry];
+      rw.customerContactedAt = now;
+      if (payload.outcome !== "pending") rw.customerDecision = "";
+      if (typeof addAuditLog === "function") {
+        const auditType = payload.outcome === "unreachable" ? "reception.customer_unreachable" : "reception.customer_contacted";
+        addAuditLog(auditType, "Contact client", payload.note || `Client ${payload.outcome || "contacté"}`, { caseId });
+      }
+      if (payload.note && typeof addHistory === "function") addHistory(item, "reception.customer_contacted", "Contact client", payload.note);
+      return { ok: true, message: "" };
+    }
+    case "set_customer_decision": {
+      const validDecisions = ["confirmed", "new_date", "cancelled", "pending"];
+      if (!validDecisions.includes(payload.decision)) return { ok: false, message: "Décision client invalide." };
+      rw.customerDecision = payload.decision;
+      rw.customerDecisionAt = now;
+      if (payload.decision === "new_date") {
+        rw.customerNewDateRequest = payload.newDate || "";
+        if (rw.planningCycles >= 3) return { ok: false, message: "Nombre maximum de cycles planning atteint (3/3). Veuillez contacter le chef d'atelier." };
+        // Réinitialiser le cycle planning pour retour à l'étape 2
+        rw.planningRevisionRequestedAt = now;
+        rw.planningRequestedAt = "";
+        rw.planningReceivedAt = "";
+        rw.planningAcceptedAt = "";
+        rw.customerContactedAt = "";
+        rw.customerDecision = "";
+      }
+      const auditTypes = { confirmed: "reception.customer_confirmed_schedule", new_date: "reception.customer_requested_new_date", cancelled: "reception.customer_cancelled", pending: "reception.customer_pending_response" };
+      if (typeof addAuditLog === "function") addAuditLog(auditTypes[payload.decision] || "reception.customer_decision", `Décision client: ${payload.decision}`, payload.note || "", { caseId });
+      return { ok: true, message: "" };
+    }
+    case "confirm_rdv": {
+      rw.rdvConfirmedAt = now;
+      rw.rdvConfirmedBy = actor.userId;
+      rw.rdvChannel = payload.channel || "phone";
+      rw.rdvReminderSent = Boolean(payload.reminderSent);
+      rw.rdvNote = payload.note || "";
+      if (typeof addAuditLog === "function") addAuditLog("reception.appointment_confirmed", "RDV confirmé", `Canal: ${payload.channel || "téléphone"}. ${payload.note || ""}`, { caseId });
+      if (typeof addHistory === "function") addHistory(item, "reception.appointment_confirmed", "Rendez-vous confirmé", payload.note || "");
+      return { ok: true, message: "" };
+    }
+    case "receive_vehicle": {
+      item.flags.received = true;
+      rw.vehicleReceivedAt = now;
+      rw.vehicleReceivedBy = actor.userId;
+      rw.vehicleMileageEntry = payload.mileage || item.mileage || "";
+      rw.vehicleAccessories = payload.accessories || "";
+      rw.vehicleDocuments = payload.documents || "";
+      rw.vehicleConditionNote = payload.conditionNote || "";
+      if (typeof recordFlagHistory === "function") recordFlagHistory(item, "received", true);
+      if (typeof addAuditLog === "function") addAuditLog("reception.vehicle_received", "Véhicule réceptionné", payload.conditionNote || `KM: ${rw.vehicleMileageEntry}`, { caseId });
+      return { ok: true, message: "" };
+    }
+    case "send_to_workshop": {
+      item.flags.workStarted = true;
+      rw.sentToWorkshopAt = now;
+      rw.sentToWorkshopBy = actor.userId;
+      if (typeof recordFlagHistory === "function") recordFlagHistory(item, "workStarted", true);
+      if (typeof addAuditLog === "function") addAuditLog("reception.sent_to_workshop", "Envoyé en atelier", payload.note || "", { caseId });
+      if (typeof addHistory === "function") addHistory(item, "reception.sent_to_workshop", "Envoyé en atelier", payload.note || "");
+      return { ok: true, message: "" };
+    }
+    case "add_followup_note": {
+      if (!payload.text) return { ok: false, message: "Le texte de la note est obligatoire." };
+      rw.followupNotes = Array.isArray(rw.followupNotes) ? [...rw.followupNotes, { at: now, by: actor.userId, text: payload.text }] : [{ at: now, by: actor.userId, text: payload.text }];
+      if (typeof addAuditLog === "function") addAuditLog("reception.vehicle_status_followed", "Note de suivi", payload.text, { caseId });
+      return { ok: true, message: "" };
+    }
+    case "return_to_workshop": {
+      return advanceReceptionWorkflow(caseId, "update_quality_status", { ...payload, status: "rework" });
+    }
+    case "update_quality_status": {
+      const status = normalizeQualityStatus(payload.status);
+      const previousStatus = normalizeQualityStatus(rw.qualityStatus);
+      const reason = String(payload.reason || "").trim();
+      const statusLabelsMap = {
+        not_started: "QC remis à zéro",
+        in_progress: "QC en cours",
+        validated: previousStatus === "rejected" || previousStatus === "rework" ? "QC revalidé" : "QC validé",
+        rejected: "QC refusé",
+        rework: "Retour atelier / retravail",
+      };
+      if (!QUALITY_STATUS_VALUES.includes(status)) return { ok: false, message: "Statut qualité invalide." };
+      if (status === "rejected" && !reason) return { ok: false, message: "Motif obligatoire pour refuser le contrôle qualité." };
+      const isRevalidation = status === "validated" && (previousStatus === "rejected" || previousStatus === "rework");
+      const requiredPermission =
+        status === "validated" ? (isRevalidation ? "quality.revalidate" : "quality.validate") :
+        (status === "rejected" || status === "rework") ? "quality.reject" :
+        "quality.validate";
+      const qualityGuard = guardAction(requiredPermission, { item });
+      if (!qualityGuard.ok) return { ok: false, message: qualityGuard.message };
+      rw.qualityStatus = status;
+      rw.qualityReviewedAt = now;
+      rw.qualityReviewHistory = Array.isArray(rw.qualityReviewHistory) ? rw.qualityReviewHistory : [];
+      rw.qualityReviewHistory.push({ at: now, by: actor.userId, status, reason });
+      if (status === "validated") {
+        item.flags.qualityApproved = true;
+        rw.readyForDeliveryAt = now;
+        if (previousStatus === "rejected" || previousStatus === "rework") rw.qualityRevalidatedAt = now;
+        if (typeof recordFlagHistory === "function") recordFlagHistory(item, "qualityApproved", true);
+      } else {
+        if (item.flags.qualityApproved && typeof recordFlagHistory === "function") recordFlagHistory(item, "qualityApproved", false);
+        item.flags.qualityApproved = false;
+        item.flags.delivered = false;
+        rw.readyForDeliveryAt = "";
+      }
+      if (status === "rejected") {
+        rw.qualityReturnRequestedAt = now;
+        rw.qualityReturnReason = reason;
+      } else if (status === "rework") {
+        rw.qualityReworkStartedAt = now;
+        rw.qualityReturnReason = reason || rw.qualityReturnReason || "";
+        if (item.flags.workCompleted && typeof recordFlagHistory === "function") recordFlagHistory(item, "workCompleted", false);
+        item.flags.workCompleted = false;
+        item.flags.workStarted = true;
+        if (!rw.sentToWorkshopAt) rw.sentToWorkshopAt = now;
+      }
+      if (typeof addAuditLog === "function") addAuditLog("quality.reception_reviewed", statusLabelsMap[status], reason, { caseId });
+      if (typeof addHistory === "function") addHistory(item, "quality.reception_reviewed", statusLabelsMap[status], reason);
+      return { ok: true, message: "" };
+    }
+    case "mark_delivery_sheet_printed": {
+      rw.deliverySheetPrintedAt = now;
+      if (typeof addAuditLog === "function") addAuditLog("reception.delivery_sheet_printed", "Fiche de livraison imprimée", "", { caseId });
+      return { ok: true, message: "" };
+    }
+    case "mark_sheet_signed": {
+      rw.deliverySheetSignedByClient = true;
+      rw.deliverySheetClientName = payload.clientName || item.clientName || "";
+      if (typeof addAuditLog === "function") addAuditLog("reception.customer_signature_captured", "Fiche signée par le client", `Client: ${rw.deliverySheetClientName}`, { caseId });
+      return { ok: true, message: "" };
+    }
+    case "deliver_vehicle": {
+      if (isCaseBlocked(item)) return { ok: false, message: `Résoudre le blocage avant livraison : ${getCaseBlockerLabel(item) || "dossier bloqué"}.` };
+      const qcOk = item.flags.qualityApproved || normalizeQualityStatus(rw.qualityStatus) === "validated";
+      if (!qcOk) return { ok: false, message: "Le contrôle qualité doit être validé avant livraison." };
+      item.flags.qualityApproved = true;
+      item.flags.delivered = true;
+      rw.deliveredAt = now;
+      rw.deliveredBy = actor.userId;
+      if (typeof recordFlagHistory === "function") recordFlagHistory(item, "delivered", true);
+      if (typeof addAuditLog === "function") addAuditLog("reception.delivery_completed", "Véhicule livré", `Livré par ${actor.userName}`, { caseId });
+      if (typeof addHistory === "function") addHistory(item, "reception.delivery_completed", "Véhicule livré", `Livraison par ${actor.userName}`);
+      return { ok: true, message: "" };
+    }
+    default:
+      return { ok: false, message: `Action inconnue: ${action}` };
+  }
+}
+
+if (typeof window !== "undefined") {
+  window.CASE_STATUS_DEFINITIONS = CASE_STATUS_DEFINITIONS;
+  window.CASE_STATUS_TRANSITIONS = CASE_STATUS_TRANSITIONS;
+  window.getCaseStatus = getCaseStatus;
+  window.getCaseStatusOptions = getCaseStatusOptions;
+  window.getCaseStatusLabel = getCaseStatusLabel;
+  window.normalizeCaseStatus = normalizeCaseStatus;
+  window.normalizeCaseStatusFilter = normalizeCaseStatusFilter;
+  window.isValidCaseStatusTransition = isValidCaseStatusTransition;
+  window.normalizeQualityStatus = normalizeQualityStatus;
+  window.getReceptionWorkflowStep = getReceptionWorkflowStep;
+  window.getReceptionStepStatus = getReceptionStepStatus;
+  window.canAdvanceReceptionStep = canAdvanceReceptionStep;
+  window.advanceReceptionWorkflow = advanceReceptionWorkflow;
+  window.normalizeReceptionWorkflow = normalizeReceptionWorkflow;
+  window.getDefaultTabForRole = getDefaultTabForRole;
+  window.guardUserSwitch = guardUserSwitch;
+  window.getCaseNotesForRole = getCaseNotesForRole;
+  window.updateCaseNote = updateCaseNote;
 }

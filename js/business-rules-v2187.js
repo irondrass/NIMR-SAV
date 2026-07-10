@@ -15,7 +15,7 @@
 
   const PAINTABLE_PHASES = ['prep', 'paint'];
   const PARAM_PHASES = ['body', 'oilService', 'mechanical', 'electrical', 'prep', 'paint', 'reassembly', 'finish'];
-  const FIXED_QUALITY_HOURS = 0;
+  const FIXED_QUALITY_HOURS = 0.25;
 
   function normalizeEstimateLineIdentity(operation) {
     return normalizeEstimateOperationText(operation || '')
@@ -59,8 +59,7 @@
     if (!totals) return totals;
     const paint = Number(totals.paint || 0);
     totals.finish = paint > 0 ? roundPlanningHours(paint * 0.5) : 0;
-    totals.quality = 0;
-    totals.finalCheck = 0.25;
+    totals.quality = FIXED_QUALITY_HOURS;
     return totals;
   }
 
@@ -103,7 +102,6 @@
   }
 
   function shouldKeepOriginalLaborLine(line) {
-    if (line?.source === "pdf_fallback" || line?.toConfirm || String(line?.operation || line?.text || "").includes("Travaux atelier")) return true;
     if (line?.manual) return roundPlanningHours(Number(line?.laborHours ?? line?.hours ?? 0)) > 0;
     const operation = line?.operation || line?.rawText || line?.text || '';
     const normalized = normalizeEstimateOperationText(operation);
@@ -145,7 +143,7 @@
       if (Number(optimized.totals.finish || 0) > 0) {
         lines.push({ id: uid('estimate-line'), phase: 'finish', operation: 'Finition + lavage - 50% du temps peinture', laborHours: roundPlanningHours(optimized.totals.finish) });
       }
-      lines.push({ id: uid('estimate-line'), phase: 'finalCheck', operation: 'Contrôle final forfaitaire', laborHours: 0.25 });
+      lines.push({ id: uid('estimate-line'), phase: 'quality', operation: 'Contrôle qualité forfaitaire', laborHours: FIXED_QUALITY_HOURS });
       claim.estimate.lines = lines;
       claim.estimate.paintOptimization = optimized.paintOptimization;
       claim.estimate.totalOriginalHours = getOriginalLaborTotal(claim.estimate.originalLines);
@@ -298,8 +296,6 @@
       pieceKind: line.pieceKind || inferPieceKind(line.operation || line.text || ''),
       paintFaces: line.paintFaces || inferPaintFaces(line.operation || line.text || '', line.pieceKind || inferPieceKind(line.operation || line.text || '')),
       paintGroup: line.paintGroup || inferPaintGroup(line.operation || line.text || ''),
-      toConfirm: Boolean(line.toConfirm),
-      source: line.source || '',
     })));
   }
 
@@ -397,7 +393,7 @@
       if (Number(optimized.totals.finish || 0) > 0) {
         lines.push({ id: uid('estimate-line'), phase: 'finish', operation: 'Finition + lavage - 50% du temps peinture', laborHours: roundPlanningHours(optimized.totals.finish) });
       }
-      lines.push({ id: uid('estimate-line'), phase: 'finalCheck', operation: 'Contrôle final forfaitaire', laborHours: 0.25 });
+      lines.push({ id: uid('estimate-line'), phase: 'quality', operation: 'Contrôle qualité forfaitaire', laborHours: FIXED_QUALITY_HOURS });
       return lines;
     }
     const fallback = originalBuildAppliedEstimateLines ? originalBuildAppliedEstimateLines(preview) : (preview.distributedLines || []);
@@ -418,8 +414,7 @@
     const result = originalRecompute ? originalRecompute(item) : false;
     if (item?.durations) {
       item.durations.finish = Number(item.durations.paint || 0) > 0 ? roundPlanningHours(Number(item.durations.paint || 0) * 0.5) : 0;
-      item.durations.quality = 0;
-      item.durations.finalCheck = 0.25;
+      item.durations.quality = FIXED_QUALITY_HOURS;
     }
     return result;
   };

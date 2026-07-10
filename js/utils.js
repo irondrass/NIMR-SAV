@@ -93,6 +93,112 @@ function makeGuardResult(ok, message = "") {
   };
 }
 
+function safeQuerySelector(selector, root = undefined) {
+  if (!selector) return null;
+  if (typeof selector !== "string") return selector;
+  const scope = root && typeof root.querySelector === "function"
+    ? root
+    : (typeof document !== "undefined" ? document : null);
+  if (!scope) return null;
+  try {
+    return scope.querySelector(selector);
+  } catch (error) {
+    return null;
+  }
+}
+
+function getEl(selector, root = undefined) {
+  return safeQuerySelector(selector, root);
+}
+
+function setHtmlIfExists(selector, html, root = undefined) {
+  const element = safeQuerySelector(selector, root);
+  if (!element) return false;
+  element.innerHTML = html;
+  return true;
+}
+
+function setTextIfExists(selector, text, root = undefined) {
+  const element = safeQuerySelector(selector, root);
+  if (!element) return false;
+  element.textContent = text;
+  return true;
+}
+
+function bindIfExists(selector, eventName, handler, options = undefined, root = undefined) {
+  const element = safeQuerySelector(selector, root);
+  if (!element || typeof element.addEventListener !== "function") return false;
+  element.addEventListener(eventName, handler, options);
+  return true;
+}
+
+function toggleClassIfExists(selector, className, force, root = undefined) {
+  const element = safeQuerySelector(selector, root);
+  if (!element?.classList) return false;
+  element.classList.toggle(className, force);
+  return true;
+}
+
+function normalizePlanningRole(role) {
+  const normalized = normalizePermissionToken(role).replace(/_/g, "-");
+  const aliases = {
+    body: "tolier",
+    bodywork: "tolier",
+    carrosserie: "tolier",
+    tolerie: "tolier",
+    tolier: "tolier",
+    mechanic: "mecanicien",
+    mechanical: "mecanicien",
+    mecanique: "mecanicien",
+    mecanicien: "mecanicien",
+    electric: "electricien",
+    electrical: "electricien",
+    electricite: "electricien",
+    electricien: "electricien",
+    prep: "zone_preparation",
+    preparation: "zone_preparation",
+    "zone-preparation": "zone_preparation",
+    paint: "peintre",
+    peinture: "peintre",
+    peintre: "peintre",
+    quality: "controle",
+    qc: "controle",
+    controle: "controle",
+    finalcheck: "chef_atelier",
+    "final-check": "chef_atelier",
+    "chef-atelier": "chef_atelier",
+  };
+  return aliases[normalized] || normalized.replace(/-/g, "_");
+}
+
+function normalizePlanningEntryText(entry) {
+  return String(`${entry?.planningMode || ""} ${entry?.mode || ""} ${entry?.type || ""} ${entry?.title || ""} ${entry?.details || ""}`)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+function isAnticipatedPartsPreparation(entry) {
+  if (!entry || typeof entry !== "object") return false;
+  const text = normalizePlanningEntryText(entry);
+  return (
+    entry.planningMode === "anticipated-new-part"
+    || text.includes("anticipated-new-part")
+    || (text.includes("preparation anticipee") && (text.includes("piece neuve") || text.includes("pieces neuves")))
+  );
+}
+
+function isLegacyPlanningEntry(entry) {
+  if (!entry || typeof entry !== "object") return false;
+  const text = normalizePlanningEntryText(entry);
+  return Boolean(
+    entry.legacy === true
+    || entry.isLegacy === true
+    || text.includes("legacy")
+    || text.includes("ancien planning")
+  );
+}
+
 function getUserById(userId) {
   const currentState = typeof state !== "undefined" ? state : null;
   const users = Array.isArray(currentState?.users) ? currentState.users : [];
@@ -254,6 +360,15 @@ if (typeof window !== "undefined") {
   window.guardAction = guardAction;
   window.canRenderAction = canRenderAction;
   window.getPermissionDeniedMessage = getPermissionDeniedMessage;
+  window.safeQuerySelector = safeQuerySelector;
+  window.getEl = getEl;
+  window.setHtmlIfExists = setHtmlIfExists;
+  window.setTextIfExists = setTextIfExists;
+  window.bindIfExists = bindIfExists;
+  window.toggleClassIfExists = toggleClassIfExists;
+  window.normalizePlanningRole = normalizePlanningRole;
+  window.isLegacyPlanningEntry = isLegacyPlanningEntry;
+  window.isAnticipatedPartsPreparation = isAnticipatedPartsPreparation;
   window.guardSensitiveAction = guardSensitiveAction;
   window.guardCaseCreate = guardCaseCreate;
   window.guardCaseEdit = guardCaseEdit;

@@ -1007,6 +1007,10 @@ function getCaseStatus(item) {
   return "devis_importe";
 }
 
+if (typeof window !== "undefined") {
+  window.getCaseStatus = getCaseStatus;
+}
+
 function getCaseBlockerLabel(item) {
   if (!item) return "";
   const partsLabel = PARTS_STATUS_LABELS[normalizePartsStatus(item.partsStatus)] || "";

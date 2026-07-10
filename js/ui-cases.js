@@ -19,9 +19,9 @@ function renderMetrics() {
   const active = state.cases.filter((item) => !item.flags.atelierClosed && !item.flags.archived).length;
   const waiting = state.cases.filter((item) => getNextWorkflowAction(item) && getBusinessRuleIssues(item, getNextWorkflowAction(item)).length).length;
   const planned = state.cases.filter((item) => item.appointment && !item.flags.atelierClosed && !item.flags.archived).length;
-  $("#metric-active").textContent = active;
-  $("#metric-waiting").textContent = waiting;
-  $("#metric-deliveries").textContent = planned;
+  setTextIfExists("#metric-active", active);
+  setTextIfExists("#metric-waiting", waiting);
+  setTextIfExists("#metric-deliveries", planned);
   const today = new Date();
   const loadMetrics = [
     ["#metric-load-body-human", categoryHumanDayLoad(today, "body")],
@@ -493,7 +493,8 @@ function getNextBookingTimeLabel(bookings, now = new Date()) {
 
 function renderCases() {
   const list = $("#case-list");
-  const search = $("#case-search").value.trim().toLowerCase();
+  if (!list) return;
+  const search = ($("#case-search")?.value || "").trim().toLowerCase();
   const statusFilter = state.ui?.caseStatusFilter || "all";
   const typeFilter = state.ui?.caseTypeFilter || "all";
   const cases = state.cases
@@ -507,9 +508,12 @@ function renderCases() {
     })
     .sort(compareCasesForList);
   const suffix = state.cases.length > 1 ? "s" : "";
-  $("#case-count").textContent = cases.length === state.cases.length
-    ? `${state.cases.length} dossier${suffix}`
-    : `${cases.length}/${state.cases.length} dossier${suffix}`;
+  setTextIfExists(
+    "#case-count",
+    cases.length === state.cases.length
+      ? `${state.cases.length} dossier${suffix}`
+      : `${cases.length}/${state.cases.length} dossier${suffix}`,
+  );
   list.innerHTML = cases.length
     ? cases
         .map((item) => {
@@ -1239,28 +1243,40 @@ function renderKanban() {
 function renderCaseDetail() {
   const detail = $("#case-detail");
   const item = getActiveCase();
+  if (!detail) return;
   if (!item) {
-    detail.innerHTML = `
+    setHtmlIfExists(detail, `
       <div class="empty-state">
         <div>
           <strong>Aucun dossier sélectionné</strong>
           <span>Créez ou choisissez un dossier pour commencer.</span>
         </div>
       </div>
-    `;
+    `);
     return;
   }
 
   const template = $("#case-detail-template");
+  if (!template?.content) {
+    setHtmlIfExists(detail, `
+      <div class="empty-state">
+        <div>
+          <strong>Détail dossier indisponible</strong>
+          <span>Le gabarit de détail n'est pas chargé. Rechargez l'application.</span>
+        </div>
+      </div>
+    `);
+    return;
+  }
   detail.replaceChildren(template.content.cloneNode(true));
   updateVehicleImportStatus(vehicleRecords.length ? `${vehicleRecords.length} véhicules chargés` : "Importez la base véhicules pour chercher par VIN");
   setupCaseDetailTabs(detail, item);
   updateCaseHeader(detail, item);
-  $("[data-field='status']", detail).textContent = statusLabels[getCaseStatus(item)];
-  $("[data-field='created']", detail).textContent = `Créé le ${formatDate(item.createdAt)}`;
-  $("[data-field='chef-state']", detail).innerHTML = item.flags.chefValidated
+  setTextIfExists("[data-field='status']", statusLabels[getCaseStatus(item)], detail);
+  setTextIfExists("[data-field='created']", `Créé le ${formatDate(item.createdAt)}`, detail);
+  setHtmlIfExists("[data-field='chef-state']", item.flags.chefValidated
     ? `<span class="tag ok">Validé</span>`
-    : `<span class="tag warn">À valider</span>`;
+    : `<span class="tag warn">À valider</span>`, detail);
 
   $$("[data-input]", detail).forEach((input) => {
     const field = input.dataset.input;
@@ -1367,7 +1383,7 @@ function renderCaseDetail() {
   renderHistory(detail, item);
   renderCaseSummary(detail, item);
 
-  $("#photo-input", detail).addEventListener("change", (event) => handlePhotos(event, item, $("#photo-category", detail)?.value));
+  bindIfExists("#photo-input", "change", (event) => handlePhotos(event, item, $("#photo-category", detail)?.value), undefined, detail);
   $("#claim-form", detail)?.addEventListener("submit", (event) => handleClaimSubmit(event, item));
   $("#supplement-form", detail)?.addEventListener("submit", (event) => handleSupplementSubmit(event, item));
   $("#print-supplement-orders", detail)?.addEventListener("click", () => printSupplementWorkOrders(item));
@@ -1377,7 +1393,7 @@ function renderCaseDetail() {
     });
   });
   const proposalButton = $("#generate-proposals", detail);
-  proposalButton.addEventListener("click", () => {
+  proposalButton?.addEventListener("click", () => {
     const issues = getBusinessRuleIssues(item, "appointment");
     if (issues.length) {
       notifyUser(issues.join("\n"));
@@ -1404,7 +1420,7 @@ function renderCaseDetail() {
       render();
     });
   });
-  $("#print-repair-order", detail).addEventListener("click", () => printRepairOrder(item));
+  $("#print-repair-order", detail)?.addEventListener("click", () => printRepairOrder(item));
   $("#print-technician-work-orders", detail)?.addEventListener("click", () => printTechnicianWorkOrders(item));
   $("#export-case-folder", detail)?.addEventListener("click", () => exportCaseFolder(item));
   $("#export-client-folder", detail)?.addEventListener("click", () => exportClientFolder(item));
@@ -1658,8 +1674,8 @@ function renderVehicleIdentityCard(root, item) {
 }
 
 function updateCaseHeader(root, item) {
-  $("[data-field='title']", root).textContent = item.clientName;
-  $("[data-field='subtitle']", root).textContent = `${item.vehicle || "Véhicule non renseigné"} · ${item.plate || item.vin || "Sans immatriculation"} · ${item.phone || "Téléphone client non renseigné"}${item.driverName ? ` · Déposant: ${item.driverName}` : ""}`;
+  setTextIfExists("[data-field='title']", item.clientName, root);
+  setTextIfExists("[data-field='subtitle']", `${item.vehicle || "Véhicule non renseigné"} · ${item.plate || item.vin || "Sans immatriculation"} · ${item.phone || "Téléphone client non renseigné"}${item.driverName ? ` · Déposant: ${item.driverName}` : ""}`, root);
 }
 
 function getWorkflowStepsForCase(item) {
@@ -2051,6 +2067,7 @@ function missingSchedulingRoles(item) {
 
 function renderPhotos(root, item) {
   const photos = $("[data-field='photos']", root);
+  if (!photos) return;
   photos.innerHTML = item.photos.length
     ? item.photos
         .map(
@@ -2541,7 +2558,7 @@ function renderDurations(root, item) {
     `;
   }).join("")}
   `;
-  $("[data-field='total-duration']", root).textContent = `${sumDurations(item)} h`;
+  setTextIfExists("[data-field='total-duration']", `${sumDurations(item)} h`, root);
   $$("[data-duration]", durationGrid).forEach((input) => {
     input.dataset.previousDuration = String(item.durations[input.dataset.duration] || 0);
     input.addEventListener("input", () => {
@@ -2549,7 +2566,7 @@ function renderDurations(root, item) {
       item.durations[input.dataset.duration] = parsed || 0;
       generatedProposals[item.id] = null;
       saveState();
-      $("[data-field='total-duration']", root).textContent = `${sumDurations(item)} h`;
+      setTextIfExists("[data-field='total-duration']", `${sumDurations(item)} h`, root);
       refreshCaseActionAvailability(root, item);
     });
     input.addEventListener("blur", () => {

@@ -53,9 +53,6 @@ function render() {
     renderCases();
     renderCaseDetail();
   }
-  if (typeof canAccessTab !== "function" || canAccessTab("reception-workspace")) {
-    if (typeof renderReceptionWorkspace === "function") renderReceptionWorkspace();
-  }
   if (typeof canAccessTab !== "function" || canAccessTab("today")) {
     renderTodayWorkshop();
   }
@@ -720,6 +717,14 @@ function getCaseNextAction(item) {
       reason: getCaseBlockerLabel(item) || "Le dossier est marqué comme bloqué.",
     };
   }
+  if (item.source === "pdf_estimate" && item.pdfImportStatus === "chief_validation_pending") {
+    return {
+      code: "validate_pdf_work",
+      label: "Valider les travaux et préparer le planning",
+      priority: "attention",
+      reason: "Le devis PDF et les tâches générées attendent la validation du Chef Atelier.",
+    };
+  }
   const workflowClaims = getWorkflowClaims(item);
   if (!hasVehicleIdentity(item)) {
     return {
@@ -810,6 +815,7 @@ function getCaseNextAction(item) {
 
 function getCaseNextActionTab(actionCode) {
   const mapping = {
+    validate_pdf_work: "planning",
     complete_vehicle_identity: "claims",
     add_labor: "claims",
     schedule_appointment: "planning",
@@ -1774,6 +1780,10 @@ function renderClaims(root, item) {
 
       const changesPlanningInput = shouldClearPlanningAfterClaimFieldChange(field, nextValue);
       if (field === 'includeInPlanning') recomputeCaseDurationsFromClaims(item);
+      if (field === 'includeInPlanning') {
+        generatedProposals[item.id] = null;
+        invalidatePdfChiefValidationAfterLaborChange(item, "Le périmètre des ordres inclus au planning a été modifié.");
+      }
       if (changesPlanningInput) clearPlanningIfNeeded(item, 'Planning annulé après modification des ordres de réparation ou accords. Recalculez un RDV.');
 
       refreshCaseApprovalFlagsFromClaims(item);
@@ -1831,6 +1841,39 @@ function clearPlanningIfNeeded(item, reason) {
   quietNotify('Le planning a été annulé car une donnée utilisée pour le calcul a changé.', 'info');
 }
 
+function markPdfLaborLineReadyForValidation(line = {}) {
+  const updated = { ...line, status: "ready_for_validation" };
+  if (Array.isArray(line.allocations)) {
+    updated.allocations = line.allocations.map((allocation) => ({
+      ...allocation,
+      status: "ready_for_validation",
+    }));
+  }
+  return updated;
+}
+
+function invalidatePdfChiefValidationAfterLaborChange(item, reason = "Les travaux ou durées importés ont été modifiés.") {
+  if (!item || item.source !== "pdf_estimate") return false;
+  const wasValidated = item.pdfImportStatus === "ready_for_planning" || Boolean(item.pdfValidatedAt || item.pdfValidatedBy);
+  item.pdfImportStatus = "chief_validation_pending";
+  item.pdfValidatedAt = "";
+  item.pdfValidatedBy = "";
+  (item.claims || []).forEach((claim) => {
+    if (!claim.estimate) return;
+    claim.estimate.lines = (claim.estimate.lines || []).map(markPdfLaborLineReadyForValidation);
+    claim.estimate.originalLines = (claim.estimate.originalLines || []).map(markPdfLaborLineReadyForValidation);
+  });
+  if (item.expertEstimate) {
+    item.expertEstimate.lines = (item.expertEstimate.lines || []).map(markPdfLaborLineReadyForValidation);
+    item.expertEstimate.originalLines = (item.expertEstimate.originalLines || []).map(markPdfLaborLineReadyForValidation);
+  }
+  generatedProposals[item.id] = null;
+  if (wasValidated) {
+    addHistory(item, "pdf.estimate.chief_validation_invalidated", "Validation Chef Atelier à refaire", reason);
+  }
+  return wasValidated;
+}
+
 function getWorkflowClaims(item) {
   const claims = normalizeRepairClaims(item?.claims || [], item || {});
   const included = claims.filter((claim) => claim.includeInPlanning !== false && claim.status !== 'refused');
@@ -1861,6 +1904,18 @@ function refreshCaseApprovalFlagsFromClaims(item) {
   item.flags.clientApproved = claims.every((claim) => Boolean(claim.clientApproved));
 }
 
+function getImportedLaborTaskMeta(line) {
+  const phases = Array.isArray(line?.allocations) && line.allocations.length
+    ? line.allocations.map((allocation) => allocation.phase)
+    : [line?.phase || line?.selectedPhases?.[0] || "body"];
+  const uniquePhases = [...new Set(phases.filter(Boolean))];
+  const categories = uniquePhases.map((phase) => getDurationLabel(phase) || phase);
+  const roles = uniquePhases.map((phase) => typeof getPdfTaskRoleLabel === "function" ? getPdfTaskRoleLabel(phase) : phase);
+  const source = line?.source === "pdf_estimate" ? "Source PDF" : "Saisie atelier";
+  const status = line?.status === "validated" ? "Validé Chef Atelier" : "Prêt pour validation";
+  return [...new Set([...categories, ...roles, source, status])].join(" · ");
+}
+
 function renderClaimCard(claim, index) {
   if (typeof cleanClaimEstimateForPlanning === 'function') cleanClaimEstimateForPlanning(claim);
   const estimateLines = claim.estimate?.lines || [];
@@ -1872,7 +1927,7 @@ function renderClaimCard(claim, index) {
   const defaultPhase = getDefaultClaimLaborPhase(claim.type);
   const lineRows = totalSourceLines.length ? totalSourceLines.map((line) => `
     <li>
-      <strong>${escapeHtml(line.operation || line.rawText || 'Ligne main-d’œuvre')}</strong>
+      <span><strong>${escapeHtml(line.operation || line.rawText || 'Ligne main-d’œuvre')}</strong><small>${escapeHtml(getImportedLaborTaskMeta(line))}</small></span>
       <span>${formatLocalizedDecimal(line.laborHours || 0)} h</span>
       ${line.id ? `<button class="icon-button claim-line-action" type="button" title="Supprimer cette ligne MO" aria-label="Supprimer cette ligne MO" data-claim-id="${escapeAttr(claim.id)}" data-remove-claim-labor-line="${escapeAttr(line.id)}">×</button>` : ''}
     </li>
@@ -2006,6 +2061,8 @@ function handleClaimLaborSubmit(event, item) {
   claim.updatedAt = new Date().toISOString();
   refreshClaimEstimateFromManualLines(claim);
   recomputeCaseDurationsFromClaims(item);
+  generatedProposals[item.id] = null;
+  invalidatePdfChiefValidationAfterLaborChange(item, "Une ligne de main-d’œuvre a été ajoutée après la validation Chef Atelier.");
   clearPlanningIfNeeded(item, "Planning annulé après ajout manuel de main-d'œuvre. Recalculez un RDV.");
   refreshCaseApprovalFlagsFromClaims(item);
   addHistory(item, "claim.labor.added", "Main-d'œuvre ajoutée à l'ordre", `${getClaimLabel(claim)} - ${operation}: ${formatLocalizedDecimal(laborHours)} h`);
@@ -2028,6 +2085,8 @@ async function removeClaimLaborLine(item, claimId, lineId) {
   claim.updatedAt = new Date().toISOString();
   if (claim.estimate.originalLines.length) refreshClaimEstimateFromManualLines(claim);
   recomputeCaseDurationsFromClaims(item);
+  generatedProposals[item.id] = null;
+  invalidatePdfChiefValidationAfterLaborChange(item, "Une ligne de main-d’œuvre a été supprimée après la validation Chef Atelier.");
   clearPlanningIfNeeded(item, "Planning annulé après suppression de main-d'œuvre. Recalculez un RDV.");
   refreshCaseApprovalFlagsFromClaims(item);
   addHistory(item, "claim.labor.removed", "Main-d'œuvre supprimée de l'ordre", getClaimLabel(claim));
@@ -2120,8 +2179,14 @@ async function deleteClaim(item, claimId) {
   if (!claim) return;
   const confirmed = await showConfirmModal(`Supprimer ${claim.number || claim.title} ?`);
   if (!confirmed) return;
+  const removedLabor = claimHasLaborEstimate(claim);
   item.claims = item.claims.filter((candidate) => candidate.id !== claimId);
   recomputeCaseDurationsFromClaims(item);
+  if (removedLabor) {
+    generatedProposals[item.id] = null;
+    invalidatePdfChiefValidationAfterLaborChange(item, "Un ordre contenant de la main-d’œuvre a été supprimé après la validation Chef Atelier.");
+    clearPlanningIfNeeded(item, "Planning annulé après suppression d'un ordre avec main-d'œuvre. Recalculez un RDV.");
+  }
   addHistory(item, 'claim.deleted', 'Ordre de réparation supprimé', getClaimLabel(claim));
   saveState();
   renderCaseDetail();
@@ -2305,6 +2370,9 @@ async function integrateSupplementDurations(item, supplementId) {
   supplement.status = supplement.status === 'done' ? 'done' : 'planned';
   supplement.updatedAt = supplement.integratedAt;
   addHistory(item, 'supplement.integrated', 'Complément intégré au planning', `${supplement.number || supplement.title}: +${formatLocalizedDecimal(total)} h`);
+  if (total > 0) {
+    invalidatePdfChiefValidationAfterLaborChange(item, "Les durées d'un complément ont été intégrées après la validation Chef Atelier.");
+  }
   saveState();
   generatedProposals[item.id] = null;
   render();
@@ -2332,6 +2400,7 @@ function renderKanban() {
     return;
   }
   const columns = [
+    { key: "pdf-chief-validation", label: "À valider Chef", statuses: ["pdfChiefValidation"] },
     { key: "reception", label: "Réception", statuses: ["receptionDraft", "awaitingVehicle", "vehicleReceived"] },
     { key: "approvals", label: "Accords", statuses: ["approvals"] },
     { key: "appointment", label: "RDV", statuses: ["appointment", "appointmentScheduled", "workScheduled", "noShow"] },
@@ -2518,6 +2587,7 @@ function renderCaseDetail() {
   renderVehicleIdentityCard(detail, item);
   renderPhotos(detail, item);
   renderDurations(detail, item);
+  renderPdfImportValidation(detail, item);
   renderExpertEstimate(detail, item);
   renderEstimateImportPreview(detail, item);
   renderClaims(detail, item);
@@ -2661,6 +2731,7 @@ function setupCaseDetailTabs(root, item) {
     // Scroll vers l'élément d'action correspondant (même si l'onglet était déjà actif)
     if (action) {
       const targetEl =
+        (nextAction.code === "validate_pdf_work" ? root.querySelector("#validate-pdf-import-work") : null) ||
         root.querySelector(`[data-action-flag="${action}"]`) ||
         root.querySelector(`[data-toggle="${action}"]`) ||
         (action === "labor" ? root.querySelector("[data-manual-labor-entry]") : null) ||
@@ -3346,6 +3417,9 @@ function getBusinessRuleIssues(item, action) {
   }
 
   if (action === "appointment") {
+    if (item.source === "pdf_estimate" && item.pdfImportStatus === "chief_validation_pending") {
+      issues.push("Valider les travaux du devis PDF avec le rôle Chef Atelier avant de confirmer le planning.");
+    }
     if (workflowClaims.some((claim) => !claimHasLaborEstimate(claim))) issues.push("Importer ou saisir la main-d’œuvre sur chaque ordre inclus.");
     if (!hasVehicleIdentity(item)) issues.push("Renseigner une immatriculation ou un VIN.");
     if (totalDurationHours(item) <= 0) issues.push("Renseigner au moins une durée atelier.");
@@ -3595,22 +3669,24 @@ function getImportedLaborReviewRows(item) {
     const claimLabel = `${claim.number || ''} ${claim.title || 'Ordre'}`.trim();
     const sourceLines = (claim.estimate?.originalLines || []).length ? claim.estimate.originalLines : (claim.estimate?.lines || []);
     sourceLines.forEach((line) => {
+      const operation = line.operation || line.rawText || 'Opération devis';
+      const isFallback = item.source === "pdf_estimate" && operation.trim() === "Travaux atelier à préciser";
       const allocations = Array.isArray(line.allocations) && line.allocations.length
         ? line.allocations
         : (line.phase ? [{ phase: line.phase, operation: line.operation || line.rawText || '', laborHours: line.laborHours || 0 }] : []);
-      const nonZeroAllocations = allocations
+      const visibleAllocations = allocations
         .map((allocation) => ({
           phase: allocation.phase,
           laborHours: Number(allocation.laborHours || 0),
         }))
-        .filter((allocation) => allocation.phase && allocation.laborHours > 0);
-      const laborHours = Number(line.laborHours || nonZeroAllocations.reduce((sum, allocation) => sum + allocation.laborHours, 0) || 0);
-      if (!laborHours && !nonZeroAllocations.length) return;
+        .filter((allocation) => allocation.phase && (allocation.laborHours > 0 || isFallback));
+      const laborHours = Number(line.laborHours || visibleAllocations.reduce((sum, allocation) => sum + allocation.laborHours, 0) || 0);
+      if (!laborHours && !visibleAllocations.length && !isFallback) return;
       rows.push({
         claimLabel,
-        operation: line.operation || line.rawText || 'Opération devis',
+        operation,
         laborHours,
-        allocations: nonZeroAllocations,
+        allocations: visibleAllocations,
       });
     });
   });
@@ -4046,12 +4122,81 @@ function renderImportedLaborReview(root, item) {
   `;
 }
 
+function renderPdfImportValidation(root, item) {
+  const target = $("[data-field='pdf-chief-validation']", root);
+  if (!target) return;
+  const isPdfImport = item?.source === "pdf_estimate";
+  target.hidden = !isPdfImport;
+  if (!isPdfImport) {
+    target.innerHTML = "";
+    return;
+  }
+
+  const pending = item.pdfImportStatus === "chief_validation_pending";
+  const planningInputsReady = hasVehicleIdentity(item) && hasKnownLabor(item);
+  const permission = guardAction("planning.edit", { item }, { notify: false });
+  target.classList.toggle("is-validated", !pending);
+  target.innerHTML = `
+    <div class="pdf-chief-validation-card">
+      <div>
+        <span class="eyebrow">Import devis PDF</span>
+        <strong>${pending ? "À valider Chef Atelier" : planningInputsReady ? "Travaux validés — planning prêt" : "Validation terminée — informations à compléter"}</strong>
+        <p>${pending ? "Vérifiez les lignes MO, les durées et les métiers requis avant de préparer le planning." : planningInputsReady ? "Les tâches du devis ont été validées. Vous pouvez ajuster les ressources puis calculer le planning." : "Complétez l’identité véhicule et au moins une durée de main-d’œuvre avant de calculer le planning."}</p>
+        ${item.pdfImportWarning ? `<p class="validation-alert">${escapeHtml(item.pdfImportWarning)}</p>` : ""}
+      </div>
+      ${pending ? `<button class="primary-button" type="button" id="validate-pdf-import-work" ${permission.ok ? "" : `disabled title="${escapeAttr(permission.message)}"`}>Valider les travaux et préparer le planning</button>` : `<span class="tag ok">Validé Chef Atelier</span>`}
+    </div>
+  `;
+
+  $("#validate-pdf-import-work", target)?.addEventListener("click", () => {
+    const validationGuard = guardAction("planning.edit", { item });
+    if (!validationGuard.ok) return;
+    item.pdfImportStatus = "ready_for_planning";
+    item.pdfValidatedAt = new Date().toISOString();
+    item.pdfValidatedBy = getCurrentActor().userName || "Chef Atelier";
+    const markValidated = (line) => ({
+      ...line,
+      status: "validated",
+      ...(Array.isArray(line.allocations)
+        ? { allocations: line.allocations.map((allocation) => ({ ...allocation, status: "validated" })) }
+        : {}),
+    });
+    (item.claims || []).forEach((claim) => {
+      if (!claim.estimate) return;
+      claim.status = "approved";
+      claim.estimate.lines = (claim.estimate.lines || []).map(markValidated);
+      claim.estimate.originalLines = (claim.estimate.originalLines || []).map(markValidated);
+    });
+    if (item.expertEstimate) {
+      item.expertEstimate.lines = (item.expertEstimate.lines || []).map(markValidated);
+      item.expertEstimate.originalLines = (item.expertEstimate.originalLines || []).map(markValidated);
+    }
+    addHistory(item, "pdf.estimate.chief_validated", "Travaux du devis validés par le Chef Atelier", "Tâches et durées prêtes pour préparation planning.");
+    let planningPreparation = null;
+    if (hasVehicleIdentity(item) && hasKnownLabor(item)) {
+      planningPreparation = generateAppointmentOptions(item);
+      generatedProposals[item.id] = planningPreparation;
+    }
+    saveState();
+    activeCaseDetailTab = "planning";
+    render();
+    const planningReady = Boolean(planningPreparation?.proposal?.steps?.length);
+    notifyUser(
+      planningReady
+        ? "Travaux validés. Le planning est prêt à être ajusté."
+        : "Travaux validés. Complétez les informations manquantes avant de calculer le planning.",
+      planningReady ? "success" : "info",
+    );
+  });
+}
+
 function renderDurations(root, item) {
   renderImportedLaborReview(root, item);
   renderValidatedAppointmentPlan(root, item);
   const durationGrid = $("[data-field='durations']", root);
   item.stepServiceTypes = normalizeStepServiceTypes(item.stepServiceTypes);
   item.stepPreferredResources = normalizeStepPreferredResources(item.stepPreferredResources);
+  item.stepAssignmentLocks = normalizeStepAssignmentLocks(item.stepAssignmentLocks);
   const canEditPlanning = canRenderAction("planning.edit", { item }) && !isCaseReadonlyArchive(item);
   const planningEditTitle = canEditPlanning ? "" : (getArchivedCaseMessage(item) || getPermissionDeniedMessage("planning.edit", { item }));
   const activeCount = DURATIONS.filter(([key]) => Number(item.durations[key] ?? DEFAULT_DURATIONS[key]) > 0).length;
@@ -4073,12 +4218,28 @@ function renderDurations(root, item) {
     const technicianOptions = getSelectableTechniciansForStep(key, item);
     const preferredTechnicianId = getPreferredTechnicianForStep(item, key);
     const isActive = value > 0;
+    const assignmentAlternatives = isActive && typeof getResourceAssignmentAlternatives === "function"
+      ? getResourceAssignmentAlternatives(item, key, new Date())
+      : [];
+    const alternativesByResourceId = new Map(assignmentAlternatives.map((alternative) => [alternative.resourceId, alternative]));
+    const recommendedAssignment = assignmentAlternatives[0] || null;
+    const assignmentRecommendation = recommendedAssignment
+      ? `<div class="assignment-recommendation">
+          <strong>Ressource recommandée : ${escapeHtml(recommendedAssignment.resourceName)}</strong>
+          <span>Début ${escapeHtml(formatDateTime(recommendedAssignment.start))} · fin ${escapeHtml(formatDateTime(recommendedAssignment.end))} · charge ${formatLocalizedDecimal(recommendedAssignment.dailyLoadMinutes / 60)} h${recommendedAssignment.equipmentNames.length ? ` · ${escapeHtml(recommendedAssignment.equipmentNames.join(", "))}` : ""}</span>
+          ${assignmentAlternatives.length > 1 ? `<details><summary>Ressources alternatives (${assignmentAlternatives.length - 1})</summary><ul>${assignmentAlternatives.slice(1).map((alternative) => `<li><strong>${escapeHtml(alternative.resourceName)}</strong> · début ${escapeHtml(formatDateTime(alternative.start))} · charge ${formatLocalizedDecimal(alternative.dailyLoadMinutes / 60)} h · impact livraison estimé ${alternative.deliveryImpactMinutes > 0 ? `+${formatLocalizedDecimal(alternative.deliveryImpactMinutes / 60)} h` : "identique"}${alternative.equipmentNames.length ? ` · ${escapeHtml(alternative.equipmentNames.join(", "))}` : ""}</li>`).join("")}</ul></details>` : ""}
+        </div>`
+      : "";
     const activeClass = isActive ? "has-duration" : "is-empty";
     const statusLabel = isActive ? "Étape active" : "Non utilisé";
     const technicianControl = !isActive
       ? ""
       : technicianOptions.length
-        ? `<label class="technician-override-field"><span>Technicien à réserver</span><small>${canEditPlanning ? "Choisissez avant de calculer le RDV. Vérifiez aussi l'état des pièces ci-dessus : neuve/remplacée ou réparée." : planningEditTitle}</small><select data-preferred-technician="${key}" ${canEditPlanning ? "" : `disabled title="${escapeAttr(planningEditTitle)}"`}><option value="">Auto - meilleur disponible</option>${technicianOptions.map((resource) => `<option value="${resource.id}" ${resource.id === preferredTechnicianId ? "selected" : ""}>${escapeHtml(resource.name)}${resource.location ? ` - ${escapeHtml(resource.location)}` : ""}</option>`).join("")}</select></label>`
+        ? `<label class="technician-override-field"><span>Technicien à réserver</span><small>${canEditPlanning ? "Choisissez avant de calculer le RDV. Vérifiez aussi l'état des pièces ci-dessus : neuve/remplacée ou réparée." : planningEditTitle}</small><select data-preferred-technician="${key}" ${canEditPlanning ? "" : `disabled title="${escapeAttr(planningEditTitle)}"`}><option value="">Auto - meilleur disponible</option>${technicianOptions.map((resource) => {
+            const alternative = alternativesByResourceId.get(resource.id);
+            const availability = alternative ? ` · début ${formatDateTime(alternative.start)} · charge ${formatLocalizedDecimal(alternative.dailyLoadMinutes / 60)} h` : "";
+            return `<option value="${resource.id}" ${resource.id === preferredTechnicianId ? "selected" : ""}>${escapeHtml(resource.name)}${resource.location ? ` - ${escapeHtml(resource.location)}` : ""}${escapeHtml(availability)}</option>`;
+          }).join("")}</select></label>${assignmentRecommendation}`
         : `<div class="service-inactive-note">Aucun technicien actif disponible pour ce métier.</div>`;
     const serviceControl = !isActive
       ? `<div class="service-inactive-note">Ajoutez un temps atelier pour activer cette étape.</div>`
@@ -4126,7 +4287,9 @@ function renderDurations(root, item) {
       const parsed = parseLocalizedDecimal(input.value);
       item.durations[input.dataset.duration] = parsed || 0;
       generatedProposals[item.id] = null;
+      invalidatePdfChiefValidationAfterLaborChange(item, "Une durée atelier a été modifiée après la validation Chef Atelier.");
       saveState();
+      if (item.source === "pdf_estimate") renderPdfImportValidation(root, item);
       $("[data-field='total-duration']", root).textContent = `${sumDurations(item)} h`;
       refreshCaseActionAvailability(root, item);
     });
@@ -4146,7 +4309,7 @@ function renderDurations(root, item) {
   });
   $$('[data-preferred-technician]', durationGrid).forEach((select) => {
     select.dataset.previousPreferredTechnician = getPreferredTechnicianForStep(item, select.dataset.preferredTechnician);
-    select.addEventListener('change', () => {
+    select.addEventListener('change', async () => {
       const permission = guardAction("planning.edit", { item }, { notify: false });
       if (!permission.ok) {
         notifyUser(permission.message, "error");
@@ -4157,8 +4320,44 @@ function renderDurations(root, item) {
       const previous = select.dataset.previousPreferredTechnician || '';
       const next = select.value || '';
       if (previous === next) return;
+      item.stepAssignmentLocks = normalizeStepAssignmentLocks(item.stepAssignmentLocks);
+      const existingLock = item.stepAssignmentLocks[key] || null;
+      let reason = "Affectation manuelle initiale";
+      if (existingLock?.resourceId || previous) {
+        reason = await showInputPromptModal({
+          title: next ? "Réaffecter la tâche" : "Déverrouiller l’affectation",
+          message: "Motif obligatoire de la modification d’affectation :",
+          defaultValue: "",
+          confirmLabel: "Enregistrer la modification",
+        });
+        if (!String(reason || "").trim()) {
+          select.value = previous;
+          notifyUser("La réaffectation exige un motif.", "error");
+          return;
+        }
+      }
       item.stepPreferredResources = normalizeStepPreferredResources(item.stepPreferredResources);
       item.stepPreferredResources[key] = next;
+      const actor = getCurrentActor();
+      if (next) {
+        item.stepAssignmentLocks[key] = {
+          resourceId: next,
+          lockedAt: new Date().toISOString(),
+          lockedBy: actor.userName || actor.userId || "Atelier",
+          reason: String(reason || "Affectation manuelle initiale").trim(),
+        };
+      } else {
+        delete item.stepAssignmentLocks[key];
+      }
+      const previousName = getResource(previous)?.name || previous || "Auto";
+      const nextName = getResource(next)?.name || next || "Auto - meilleur disponible";
+      addHistory(
+        item,
+        existingLock?.resourceId || previous ? "planning.assignment.reassigned" : "planning.assignment.locked",
+        next ? "Affectation manuelle verrouillée" : "Affectation automatique réactivée",
+        `${getDurationLabel(key) || key}: ${previousName} → ${nextName} · ${String(reason || "Affectation manuelle initiale").trim()}`,
+      );
+      select.dataset.previousPreferredTechnician = next;
       generatedProposals[item.id] = null;
       clearPlanningIfNeeded(item, 'Planning annulé après changement de technicien. Recalculez un RDV.');
       saveState();
@@ -4281,6 +4480,7 @@ function renderExpertEstimate(root, item) {
     estimate.confirmed = false;
     estimate.confirmedAt = "";
     generatedProposals[item.id] = null;
+    invalidatePdfChiefValidationAfterLaborChange(item, "Une ligne de main-d’œuvre a été ajoutée au devis après la validation Chef Atelier.");
     addHistory(item, "expert.estimate.line_added", "Ligne MO devis importé ajoutée", `${getDurationLabel(phase)}: ${formatLocalizedDecimal(laborHours)} h`);
     saveState();
     renderCaseDetail();
@@ -4293,6 +4493,7 @@ function renderExpertEstimate(root, item) {
       estimate.confirmed = false;
       estimate.confirmedAt = "";
       generatedProposals[item.id] = null;
+      invalidatePdfChiefValidationAfterLaborChange(item, "Une ligne de main-d’œuvre a été supprimée du devis après la validation Chef Atelier.");
       if (line) addHistory(item, "expert.estimate.line_removed", "Ligne MO devis importé supprimée", line.operation || getDurationLabel(line.phase));
       saveState();
       renderCaseDetail();
@@ -4310,6 +4511,7 @@ function renderExpertEstimate(root, item) {
 
   $("[data-apply-expert-estimate]", target).addEventListener("click", () => {
     applyExpertEstimateToDurations(item);
+    invalidatePdfChiefValidationAfterLaborChange(item, "Les quantités de main-d’œuvre du devis ont été réappliquées après la validation Chef Atelier.");
     saveState();
     renderCaseDetail();
   });

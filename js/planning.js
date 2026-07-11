@@ -12,7 +12,21 @@ function generateAppointmentOptions(item) {
 
 function generateSingleProposal(item, startAfter) {
   const bookings = state.bookings.filter((booking) => booking.caseId !== item.id).map(cloneBooking);
+  bookings.push(...getPendingProposalBookings(item.id));
   return schedulePipeline(item, startAfter, bookings);
+}
+
+function getPendingProposalBookings(excludedCaseId = "") {
+  if (typeof generatedProposals === "undefined" || !generatedProposals) return [];
+  const acceptedCaseIds = new Set((state.bookings || []).map((booking) => booking.caseId).filter(Boolean));
+  return Object.entries(generatedProposals).flatMap(([caseId, value]) => {
+    if (!caseId || caseId === excludedCaseId || acceptedCaseIds.has(caseId)) return [];
+    const item = (state.cases || []).find((candidate) => candidate.id === caseId);
+    if (!item || (typeof isCaseOperationallyClosed === "function" && isCaseOperationallyClosed(item))) return [];
+    const proposal = Array.isArray(value) ? value[0] : (value?.proposal || null);
+    if (!proposal?.steps?.length) return [];
+    return proposalToBookings(item, proposal, true);
+  });
 }
 
 function buildAvailableAppointmentDates(item, fromDate, horizonDays = 60, limit = 14) {
@@ -95,9 +109,11 @@ function makePlanningStep(item, template, match, options = {}) {
 function scheduleSingleStep(item, template, cursor, duration, tempBookings, assignment, fastJob, title, details, planningMode = "standard") {
   if (duration <= 0) return null;
   const preferredPrimaryId = getPreferredPrimaryResourceId(template, assignment, item);
-  const match = findBestResourceSlot(template, cursor, duration, tempBookings, fastJob, preferredPrimaryId);
+  const preferredEquipmentId = getPreferredEquipmentResourceId(template, assignment);
+  const rotationKey = `${item.id || "case"}:${template.key}`;
+  const match = findBestResourceSlot(template, cursor, duration, tempBookings, fastJob, preferredPrimaryId, preferredEquipmentId, rotationKey);
   if (!match) throw new Error(`Aucune disponibilité pour ${title || template.title}.`);
-  rememberPrimaryAssignment(template, assignment, match.primary.id);
+  rememberPlanningAssignment(template, assignment, match.primary.id, match.equipment?.id || null);
   const step = makePlanningStep(item, template, match, { title: title || template.title, details, planningMode });
   tempBookings.push(stepToBooking(item, step, true));
   return step;
@@ -236,11 +252,12 @@ function schedulePipelineWithAnticipatedNewParts(item, startAfter, bookings, spl
 }
 
 function createPlanningAssignmentContext() {
-  return { tolierId: null, painterId: null };
+  return { tolierId: null, painterId: null, equipmentByRole: {} };
 }
 
 function getPreferredPrimaryResourceId(template, assignment, item = null) {
-  const manual = item?.stepPreferredResources?.[template.key] || "";
+  const locked = item?.stepAssignmentLocks?.[template.key]?.resourceId || "";
+  const manual = locked || item?.stepPreferredResources?.[template.key] || "";
   if (manual && state.resources.some((resource) => resource.id === manual && resource.role === template.role && resource.active !== false)) {
     return manual;
   }
@@ -249,13 +266,51 @@ function getPreferredPrimaryResourceId(template, assignment, item = null) {
   return null;
 }
 
-function rememberPrimaryAssignment(template, assignment, primaryResourceId) {
-  if (!primaryResourceId) return;
-  if (template.key === "body") assignment.tolierId = primaryResourceId;
-  if (template.key === "prep") assignment.painterId = primaryResourceId;
+function getPreferredEquipmentResourceId(template, assignment) {
+  return template.equipmentRole ? assignment.equipmentByRole?.[template.equipmentRole] || null : null;
 }
 
-function findBestResourceSlot(template, startAfter, duration, bookings, fastJob, preferredPrimaryId = null) {
+function rememberPlanningAssignment(template, assignment, primaryResourceId, equipmentResourceId = null) {
+  if (!primaryResourceId) return;
+  if (template.key === "body") assignment.tolierId = primaryResourceId;
+  if (["prep", "paint"].includes(template.key) && !assignment.painterId) assignment.painterId = primaryResourceId;
+  if (template.equipmentRole && equipmentResourceId) assignment.equipmentByRole[template.equipmentRole] = equipmentResourceId;
+}
+
+function buildResourceSlotCandidate({
+  primary,
+  equipment,
+  primaryIndex,
+  equipmentIndex,
+  startAfter,
+  duration,
+  bookings,
+  preferredPrimaryId = null,
+  preferredEquipmentId = null,
+  rotationKey = "",
+}) {
+  const resourceIds = equipment ? [primary.id, equipment.id] : [primary.id];
+  const slot = findEarliestSlot(resourceIds, startAfter, duration, bookings);
+  if (!slot) return null;
+  return {
+    slot,
+    resourceIds,
+    primary,
+    equipment,
+    primaryIndex,
+    equipmentIndex,
+    primaryPreferred: Boolean(preferredPrimaryId && primary.id === preferredPrimaryId),
+    equipmentPreferred: Boolean(preferredEquipmentId && equipment?.id === preferredEquipmentId),
+    conflictCount: 0,
+    dailyLoadMinutes: resourceIds.reduce((sum, resourceId) => sum + getResourceDailyLoadMinutes(resourceId, bookings, startAfter), 0),
+    loadMinutes: resourceIds.reduce((sum, resourceId) => sum + getResourceLoadMinutes(resourceId, bookings, startAfter), 0),
+    activeCaseCount: getResourceActiveCaseCount(resourceIds, bookings, startAfter),
+    rotationRank: getStableResourceRotationRank(rotationKey, resourceIds),
+    stableResourceKey: resourceIds.slice().sort().join("|"),
+  };
+}
+
+function findBestResourceSlot(template, startAfter, duration, bookings, fastJob, preferredPrimaryId = null, preferredEquipmentId = null, rotationKey = "") {
   const primaryResources = orderPrimaryResourcesForStep(template.role, fastJob, bookings, startAfter, preferredPrimaryId);
   const equipmentResources = template.equipmentRole
     ? getAssignableResources(template.equipmentRole, fastJob)
@@ -263,23 +318,55 @@ function findBestResourceSlot(template, startAfter, duration, bookings, fastJob,
   let best = null;
   primaryResources.forEach((primary, primaryIndex) => {
     equipmentResources.forEach((equipment, equipmentIndex) => {
-      const resourceIds = equipment ? [primary.id, equipment.id] : [primary.id];
-      const slot = findEarliestSlot(resourceIds, startAfter, duration, bookings);
-      if (!slot) return;
-      const candidate = {
-        slot,
-        resourceIds,
-        primary,
-        equipment,
-        primaryIndex,
-        equipmentIndex,
-        preferred: preferredPrimaryId && primary.id === preferredPrimaryId,
-        loadMinutes: getResourceLoadMinutes(primary.id, bookings, startAfter),
-      };
+      const candidate = buildResourceSlotCandidate({ primary, equipment, primaryIndex, equipmentIndex, startAfter, duration, bookings, preferredPrimaryId, preferredEquipmentId, rotationKey });
+      if (!candidate) return;
       if (!best || compareSlots(candidate, best) < 0) best = candidate;
     });
   });
   return best;
+}
+
+function getResourceAssignmentAlternatives(item, stepKey, startAfter = new Date()) {
+  const baseTemplate = STEP_TEMPLATES.find((template) => template.key === stepKey);
+  if (!item || !baseTemplate) return [];
+  const template = getPlanningTemplateForItem(item, baseTemplate);
+  const duration = Math.max(0, Math.round(Number(item.durations?.[template.key] || 0) * 60));
+  if (!duration) return [];
+  const fastJob = isFastLaneJob(item);
+  const bookings = state.bookings.filter((booking) => booking.caseId !== item.id).map(cloneBooking);
+  bookings.push(...getPendingProposalBookings(item.id));
+  const primaryResources = getAssignableResources(template.role, fastJob);
+  const equipmentResources = template.equipmentRole ? getAssignableResources(template.equipmentRole, fastJob) : [null];
+  const candidates = primaryResources.map((primary, primaryIndex) => {
+    let bestForPrimary = null;
+    equipmentResources.forEach((equipment, equipmentIndex) => {
+      const candidate = buildResourceSlotCandidate({
+        primary,
+        equipment,
+        primaryIndex,
+        equipmentIndex,
+        startAfter,
+        duration,
+        bookings,
+        rotationKey: `${item.id || "case"}:${template.key}`,
+      });
+      if (candidate && (!bestForPrimary || compareSlots(candidate, bestForPrimary) < 0)) bestForPrimary = candidate;
+    });
+    return bestForPrimary;
+  }).filter(Boolean).sort(compareSlots);
+  const bestEnd = candidates[0] ? new Date(candidates[0].slot.end) : null;
+  return candidates.map((candidate, index) => ({
+    resourceId: candidate.primary.id,
+    resourceName: candidate.primary.name || candidate.primary.id,
+    equipmentResourceIds: candidate.equipment ? [candidate.equipment.id] : [],
+    equipmentNames: candidate.equipment ? [candidate.equipment.name || candidate.equipment.id] : [],
+    start: candidate.slot.start.toISOString(),
+    end: candidate.slot.end.toISOString(),
+    dailyLoadMinutes: candidate.dailyLoadMinutes,
+    activeCaseCount: candidate.activeCaseCount,
+    deliveryImpactMinutes: bestEnd ? Math.max(0, diffMinutes(bestEnd, candidate.slot.end)) : 0,
+    recommended: index === 0,
+  }));
 }
 
 function getAssignableResources(role, fastJob) {
@@ -313,15 +400,47 @@ function orderPrimaryResourcesForStep(role, fastJob, bookings, startAfter, prefe
 function getResourceLoadMinutes(resourceId, bookings, fromDate) {
   const from = startOfDay(fromDate || new Date());
   const until = addDays(from, 14);
+  return getResourceLoadMinutesInRange(resourceId, bookings, from, until);
+}
+
+function getResourceDailyLoadMinutes(resourceId, bookings, fromDate) {
+  const from = startOfDay(fromDate || new Date());
+  return getResourceLoadMinutesInRange(resourceId, bookings, from, addDays(from, 1));
+}
+
+function getResourceLoadMinutesInRange(resourceId, bookings, from, until) {
   return bookings.reduce((sum, booking) => {
     if (!isPlanningBlockingBooking(booking)) return sum;
-    if (!isPrimaryResourceBooking(booking, resourceId)) return sum;
+    if (!(booking.resourceIds || []).includes(resourceId)) return sum;
     return sum + booking.segments.reduce((segmentSum, segment) => {
       const start = maxDate(new Date(segment.start), from);
       const end = minDate(new Date(segment.end), until);
       return end > start ? segmentSum + diffMinutes(start, end) : segmentSum;
     }, 0);
   }, 0);
+}
+
+function getResourceActiveCaseCount(resourceIds, bookings, fromDate) {
+  const from = startOfDay(fromDate || new Date());
+  const until = addDays(from, 14);
+  const caseIds = new Set();
+  bookings.forEach((booking) => {
+    if (!isPlanningBlockingBooking(booking)) return;
+    if (!(booking.resourceIds || []).some((resourceId) => resourceIds.includes(resourceId))) return;
+    const overlaps = (booking.segments || []).some((segment) => new Date(segment.start) < until && new Date(segment.end) > from);
+    if (overlaps) caseIds.add(booking.caseId || booking.id);
+  });
+  return caseIds.size;
+}
+
+function getStableResourceRotationRank(rotationKey, resourceIds) {
+  const text = `${rotationKey || "planning"}:${resourceIds.slice().sort().join("|")}`;
+  let hash = 2166136261;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
 }
 
 function isFastLaneJob(item) {
@@ -334,15 +453,23 @@ function repairDurationHours(item) {
 }
 
 function compareSlots(a, b) {
-  if (a.preferred !== b.preferred) return a.preferred ? -1 : 1;
+  if (a.primaryPreferred !== b.primaryPreferred) return a.primaryPreferred ? -1 : 1;
+  if (a.equipmentPreferred !== b.equipmentPreferred) return a.equipmentPreferred ? -1 : 1;
   const startDiff = new Date(a.slot.start) - new Date(b.slot.start);
   if (startDiff !== 0) return startDiff;
   const endDiff = new Date(a.slot.end) - new Date(b.slot.end);
   if (endDiff !== 0) return endDiff;
+  const conflictDiff = (a.conflictCount || 0) - (b.conflictCount || 0);
+  if (conflictDiff !== 0) return conflictDiff;
+  const dailyLoadDiff = (a.dailyLoadMinutes || 0) - (b.dailyLoadMinutes || 0);
+  if (dailyLoadDiff !== 0) return dailyLoadDiff;
+  const activeCaseDiff = (a.activeCaseCount || 0) - (b.activeCaseCount || 0);
+  if (activeCaseDiff !== 0) return activeCaseDiff;
   const loadDiff = (a.loadMinutes || 0) - (b.loadMinutes || 0);
   if (loadDiff !== 0) return loadDiff;
-  if (a.primaryIndex !== b.primaryIndex) return a.primaryIndex - b.primaryIndex;
-  return a.equipmentIndex - b.equipmentIndex;
+  const rotationDiff = (a.rotationRank || 0) - (b.rotationRank || 0);
+  if (rotationDiff !== 0) return rotationDiff;
+  return String(a.stableResourceKey || "").localeCompare(String(b.stableResourceKey || ""));
 }
 
 function findEarliestSlot(resourceIds, startAfter, duration, bookings) {
@@ -354,7 +481,7 @@ function findEarliestSlot(resourceIds, startAfter, duration, bookings) {
     const slot = buildWorkingSlot(cursor, duration);
     const conflict = findConflict(slot, resourceIds, bookings);
     if (!conflict) return slot;
-    cursor = nextWorkingTime(addMinutes(new Date(conflict.end), STEP_MINUTES));
+    cursor = nextWorkingTime(new Date(conflict.end));
   }
   console.warn("Aucun créneau disponible dans l'horizon de recherche.");
   return null;
@@ -417,6 +544,12 @@ function findConflict(slot, resourceIds, bookings) {
   return conflict;
 }
 
+function recalculateProposalForAcceptance(item, proposal) {
+  if (!item || !proposal || proposal.error) throw new Error("Proposition planning invalide.");
+  const requestedStart = new Date(proposal.start || Date.now());
+  return generateSingleProposal(item, Number.isNaN(requestedStart.getTime()) ? new Date() : requestedStart);
+}
+
 function acceptProposal(item, proposal) {
   if (!proposal || proposal.error) return;
   if (isCaseReadonlyArchive(item)) {
@@ -428,13 +561,24 @@ function acceptProposal(item, proposal) {
     notifyUser(issues.join("\n"));
     return;
   }
+  let acceptedProposal;
+  try {
+    acceptedProposal = recalculateProposalForAcceptance(item, proposal);
+  } catch (error) {
+    generatedProposals[item.id] = null;
+    notifyUser(error.message || "Le planning a changé. Recalculez la proposition avant de la valider.", "error");
+    renderCaseDetail();
+    return;
+  }
+  const previousSignature = (proposal.steps || []).map((step) => `${step.start}:${(step.resourceIds || []).join(",")}`).join("|");
+  const acceptedSignature = (acceptedProposal.steps || []).map((step) => `${step.start}:${(step.resourceIds || []).join(",")}`).join("|");
   state.bookings = state.bookings.filter((booking) => booking.caseId !== item.id);
-  state.bookings.push(...proposalToBookings(item, proposal, false));
+  state.bookings.push(...proposalToBookings(item, acceptedProposal, false));
   item.appointment = {
-    start: proposal.start,
-    end: proposal.end,
-    delivery: proposal.delivery,
-    marginMinutes: proposal.marginMinutes,
+    start: acceptedProposal.start,
+    end: acceptedProposal.end,
+    delivery: acceptedProposal.delivery,
+    marginMinutes: acceptedProposal.marginMinutes,
   };
   item.flags.received = false;
   item.flags.workStarted = false;
@@ -443,9 +587,14 @@ function acceptProposal(item, proposal) {
   item.flags.delivered = false;
   item.appointmentStatus = "scheduled";
   item.qualityChecklist = createEmptyQualityChecklist();
-  addHistory(item, "appointment.accepted", `RDV choisi: ${formatDateTime(proposal.start)}`, `Livraison estimée ${formatDateTime(proposal.delivery)}`);
+  addHistory(
+    item,
+    "appointment.accepted",
+    `RDV choisi: ${formatDateTime(acceptedProposal.start)}`,
+    `Livraison estimée ${formatDateTime(acceptedProposal.delivery)}${previousSignature !== acceptedSignature ? " · Ressources recalculées selon les disponibilités courantes" : ""}`,
+  );
   generatedProposals[item.id] = [];
-  state.planningDate = todayKey(new Date(proposal.start));
+  state.planningDate = todayKey(new Date(acceptedProposal.start));
   saveState({ flushCloud: true, cloudReason: "appointment-accepted" });
   activeTab = "planning";
   setActiveTab("planning");
@@ -522,8 +671,22 @@ function getBookingDurationMinutes(booking) {
   return Math.max(0, sumBookingSegmentsMinutes(booking?.segments || []));
 }
 
+let planningCaseIndexSource = null;
+let planningCaseIndexLength = -1;
+let planningCaseIndex = new Map();
+
+function getPlanningCaseIndex() {
+  const cases = Array.isArray(state?.cases) ? state.cases : [];
+  if (planningCaseIndexSource !== cases || planningCaseIndexLength !== cases.length) {
+    planningCaseIndexSource = cases;
+    planningCaseIndexLength = cases.length;
+    planningCaseIndex = new Map(cases.filter((item) => item?.id).map((item) => [item.id, item]));
+  }
+  return planningCaseIndex;
+}
+
 function getBookingCase(booking) {
-  return booking?.caseId ? state.cases.find((item) => item.id === booking.caseId) || null : null;
+  return booking?.caseId ? getPlanningCaseIndex().get(booking.caseId) || null : null;
 }
 
 function isBookingLinkedToClosedCase(booking) {

@@ -135,8 +135,8 @@ vm.runInContext(`
 // GÉNÉRATION ET AUDIT DE 100+ SCÉNARIOS
 // ==========================================
 
-// SCÉNARIO 1 : RDV confirmable sans accords valides
-audit("Un RDV ne doit pas être confirmé si les accords nécessaires ne sont pas validés", () => {
+// SCÉNARIO 1 : Le workflow atelier simplifié ne réactive pas l'accord expert
+audit("Le RDV atelier simplifié ne doit pas dépendre de l'accord expert", () => {
   const dossier = context.normalizeCase({
     id: "case-rdv-no-approvals",
     clientName: "Client RDV",
@@ -153,10 +153,7 @@ audit("Un RDV ne doit pas être confirmé si les accords nécessaires ne sont pa
   });
   
   const warnings = context.getBusinessRuleWarnings(dossier, "appointment");
-  assert.ok(
-    warnings.some(i => i.includes("Accord expert manquant")),
-    "Devrait avertir pour la prise de RDV si l'accord expert est manquant (RDV prévisionnel)."
-  );
+  assert.equal(warnings.some(i => i.includes("Accord expert manquant")), false, "Le P0 ne doit pas réactiver l'accord expert dans le planning atelier.");
 });
 
 // SCÉNARIO 2 : Réception sans dossier complet
@@ -191,17 +188,14 @@ audit("Un véhicule ne doit pas être livré avant contrôle qualité", () => {
   );
 });
 
-// SCÉNARIO 4 : Clôture avant livraison
-audit("Un dossier ne doit pas être clôturé avant livraison", () => {
+// SCÉNARIO 4 : La clôture atelier simplifiée ne réactive pas livraison/facturation
+audit("La clôture atelier ne doit pas réactiver la livraison ou la facturation", () => {
   const dossier = context.normalizeCase({
     id: "case-invoice-no-delivery",
     flags: { delivered: false }
   });
   const issues = context.getBusinessRuleIssues(dossier, "invoiced");
-  assert.ok(
-    issues.some(i => i.includes("Livrer le véhicule avant de facturer")),
-    "Devrait bloquer la facturation si le véhicule n'est pas livré."
-  );
+  assert.equal(issues.some(i => i.includes("Livrer le véhicule avant de facturer")), false, "Le P0 ne doit pas réactiver livraison/facturation.");
 });
 
 // SCÉNARIO 5 : Livraison d'un dossier assurance sans photo après réparation
@@ -248,30 +242,12 @@ audit("Progression logique de 5 dossiers dans tous les états possibles", () => 
       }]
     });
 
-    // 1. Ajouter photo avant (requis pour expertApproved assurance)
-    if (!isClient) dossier.photos.push({ id: `p-b-${i}`, category: "before" });
-
-    // 2. Accord expert
-    if (!isClient) {
-      assert.equal(context.getNextWorkflowAction(dossier), "expertApproved", "L'action suivante doit être l'accord expert");
-      const issues = context.getBusinessRuleIssues(dossier, "expertApproved");
-      assert.equal(issues.length, 0, "L'accord expert devrait être possible");
-      context.applyWorkflowAction(dossier, "expertApproved");
-    }
-
-    // 3. RDV prévisionnel possible avant validation client/interne
-    assert.equal(context.getNextWorkflowAction(dossier), "appointment", "L'action suivante doit permettre un RDV prévisionnel");
-    const issuesRdvPrevisionnel = context.getBusinessRuleIssues(dossier, "appointment");
-    assert.equal(issuesRdvPrevisionnel.length, 0, "Le RDV prévisionnel devrait être possible");
-    assert.ok(context.getBusinessRuleWarnings(dossier, "appointment").some((warning) => warning.includes("client/interne")), "Le RDV prévisionnel doit avertir sur la validation client/interne manquante");
-
-    // 4. Validation client/interne
-    const issuesClient = context.getBusinessRuleIssues(dossier, "clientApproved");
-    assert.equal(issuesClient.length, 0, "La validation client/interne devrait être possible");
-    context.applyWorkflowAction(dossier, "clientApproved");
-
-    // 5. RDV
+    // 1. RDV atelier direct, sans réactiver accords expert/client.
     assert.equal(context.getNextWorkflowAction(dossier), "appointment", "L'action suivante doit être le RDV");
+    const issuesRdv = context.getBusinessRuleIssues(dossier, "appointment");
+    assert.equal(issuesRdv.length, 0, "Le RDV atelier direct devrait être possible");
+    const warningsRdv = context.getBusinessRuleWarnings(dossier, "appointment");
+    assert.equal(warningsRdv.some((warning) => /expert|client\/interne/i.test(warning)), false, "Le P0 ne doit pas réactiver les accords expert/client");
     dossier.appointment = { start: "2026-05-18T08:00:00" };
     // Le RDV n'est pas une "action" via applyWorkflowAction mais un champ. 
     // L'UI fixe le RDV puis recharge.
@@ -306,18 +282,8 @@ audit("Progression logique de 5 dossiers dans tous les états possibles", () => 
       keepEmptyBookings: true,
     });
 
-    // 7. Qualité
-    dossier.qualityChecklist = Object.fromEntries(vm.runInContext('DEFAULT_QUALITY_CHECKS', context).map(l => [l, true]));
-    assert.equal(context.getNextWorkflowAction(dossier), "qualityApproved", "L'action suivante doit être la qualité");
-    context.applyWorkflowAction(dossier, "qualityApproved");
-
-    // 8. Livraison
-    if (!isClient) dossier.photos.push({ id: `p-a-${i}`, category: "after" });
-    assert.equal(context.getNextWorkflowAction(dossier), "delivered", "L'action suivante doit être la livraison");
-    context.applyWorkflowAction(dossier, "delivered");
-
-    // 9. Facturation
-    assert.equal(context.getNextWorkflowAction(dossier), "invoiced", "L'action suivante doit être la facturation");
+    // 7. Clôture atelier simplifiée, sans réactiver QC/livraison/facturation dans l'UI.
+    assert.equal(context.getNextWorkflowAction(dossier), "invoiced", "L'action suivante doit être la clôture atelier simplifiée");
     context.applyWorkflowAction(dossier, "invoiced");
 
     // FIN

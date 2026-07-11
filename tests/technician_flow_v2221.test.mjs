@@ -82,12 +82,15 @@ const appSource = fs.readFileSync('app.js', 'utf8');
 const swSource = fs.readFileSync('sw.js', 'utf8');
 const versionSource = fs.readFileSync('js/version.js', 'utf8');
 const indexSource = fs.readFileSync('index.html', 'utf8');
-assert.match(stateSource, /APP_VERSION\s*=\s*"v23\.2\.6"/, 'APP_VERSION doit être en v23.2.6');
-assert.match(appSource, /serviceWorker\.register\("sw\.js\?v=23\.2\.6"/, 'le service worker doit pointer vers sw.js?v=23.2.6');
-assert.match(swSource, /nimr-sav-v23\.2\.6-reception-qc-field-usability/, 'le cache PWA doit être en v23.2.6');
-assert.match(versionSource, /NIMR_BUILD\s*=\s*"v23\.2\.6"/, 'js/version.js doit exposer v23.2.6');
+const declaredVersion = versionSource.match(/APP_VERSION\s*=\s*"v(\d+\.\d+(?:\.\d+)?)"/)?.[1];
+assert.ok(declaredVersion, 'js/version.js doit exposer APP_VERSION');
+const escapedVersion = declaredVersion.replace(/\./g, '\\.') ;
+assert.match(stateSource, new RegExp(`APP_VERSION\\s*=\\s*"v${escapedVersion}"`), 'APP_VERSION doit être cohérente avec js/version.js');
+assert.match(appSource, new RegExp(`serviceWorker\\.register\\("sw\\.js\\?v=${escapedVersion}"`), 'le service worker doit utiliser la version déclarée');
+assert.match(swSource, new RegExp(`nimr-sav-v${escapedVersion}-`), 'le cache PWA doit utiliser la version déclarée');
+assert.match(versionSource, new RegExp(`NIMR_BUILD\\s*=\\s*"v${escapedVersion}(?:-|\")`), 'NIMR_BUILD doit utiliser la version déclarée');
 [...indexSource.matchAll(/\?v=(\d+\.\d+(?:\.\d+)?)/g)].forEach((match) => {
-  assert.equal(match[1], '23.2.6', `référence index.html incohérente: ?v=${match[1]}`);
+  assert.equal(match[1], declaredVersion, `référence index.html incohérente: ?v=${match[1]}`);
 });
 
 function setupSafetyState(extraBookings = '') {

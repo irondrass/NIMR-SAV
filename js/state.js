@@ -390,6 +390,7 @@ const ESTIMATE_ALLOWED_KEYS = [...ESTIMATE_PLANNING_KEYS, "quality"];
 const CASE_STATUS_DEFINITIONS = Object.freeze([
   ["receptionDraft", "Réception à compléter"],
   ["approvals", "Dossier à compléter"],
+  ["pdfChiefValidation", "À valider Chef Atelier"],
   ["appointment", "RDV à fixer"],
   ["appointmentScheduled", "RDV fixé"],
   ["noShow", "Client absent"],
@@ -407,8 +408,9 @@ const CASE_STATUS_LABELS = Object.freeze(Object.fromEntries(CASE_STATUS_DEFINITI
 const CASE_STATUS_KEYS = Object.freeze(CASE_STATUS_DEFINITIONS.map(([key]) => key));
 const CASE_STATUS_ALIASES = Object.freeze({ estimate: "receptionDraft" });
 const CASE_STATUS_TRANSITIONS = Object.freeze({
-  receptionDraft: ["approvals", "appointment", "appointmentScheduled"],
-  approvals: ["appointment", "appointmentScheduled", "receptionDraft"],
+  receptionDraft: ["approvals", "pdfChiefValidation", "appointment", "appointmentScheduled"],
+  approvals: ["pdfChiefValidation", "appointment", "appointmentScheduled", "receptionDraft"],
+  pdfChiefValidation: ["appointment", "appointmentScheduled"],
   appointment: ["appointmentScheduled", "approvals"],
   appointmentScheduled: ["awaitingVehicle", "noShow", "vehicleReceived"],
   noShow: ["appointment"],
@@ -480,6 +482,7 @@ function getCaseStatus(item) {
   if (flags.qualityApproved || qualityStatus === "validated") return "quality";
   if (flags.workCompleted || (rw.sentToWorkshopAt && qualityStatus === "in_progress")) return "quality";
   if (flags.workStarted) return "work";
+  if (item.pdfImportStatus === "chief_validation_pending") return "pdfChiefValidation";
 
   const bookings = Array.isArray(state?.bookings) ? state.bookings : [];
   const hasAssignments = bookings.some((booking) => booking.caseId === item.id && booking.type !== "leave");
@@ -1065,51 +1068,8 @@ function uid(prefix) {
 function createDefaultState() {
   const today = new Date();
   const tomorrow = addDays(today, 1);
-  const demoCaseId = uid("case");
   const stateSeed = {
-    cases: [
-      {
-        id: demoCaseId,
-        clientName: "Client démonstration",
-        phone: "+216 00 000 000",
-        vehicle: "Peugeot 208",
-        plate: "123 TU 4567",
-        color: "Blanc",
-        vin: "VF3DEMO2026",
-        insurance: "Assurance exemple",
-        orNavNumber: "OR-2026-001",
-        partsStatus: "unchecked",
-        blockerReason: "",
-        blockerDetails: "",
-        damageNotes: "Aile avant droite, pare-chocs et peinture.",
-        expertName: "Expert assigné",
-        expertPhone: "+216 00 111 222",
-        expertEmail: "expert@example.com",
-        expertEstimate: {
-          reference: "",
-          confirmed: false,
-          confirmedAt: "",
-          lines: [],
-        },
-        claims: [],
-        createdAt: today.toISOString(),
-        history: [makeHistoryEntry("case.created", "Dossier de démonstration créé", today.toISOString())],
-        photos: [],
-        durations: { ...DEFAULT_DURATIONS },
-        flags: {
-          expertApproved: false,
-          clientApproved: false,
-          received: false,
-          workStarted: false,
-          workCompleted: false,
-          qualityApproved: false,
-          delivered: false,
-        },
-        appointmentStatus: "none",
-        qualityChecklist: createEmptyQualityChecklist(),
-        appointment: null,
-      },
-    ],
+    cases: [],
     resources: [
       { id: "tolier-1", name: "Tôlier 1", role: "tolier", location: "Poste tôlerie A", active: true },
       { id: "tolier-2", name: "Tôlier 2", role: "tolier", location: "Poste tôlerie B", active: true, fastLane: true },
@@ -1117,8 +1077,10 @@ function createDefaultState() {
       { id: "electricien-1", name: "Électricien 1", role: "electricien", location: "Poste électrique", active: true },
       { id: "peintre-1", name: "Peintre 1", role: "peintre", location: "Zone peinture", active: true },
       { id: "peintre-2", name: "Peintre 2", role: "peintre", location: "Préparation", active: true, fastLane: true },
-      { id: "zone-preparation-1", name: "Zone de préparation", role: "zone_preparation", location: "Zone préparation 1", active: true },
-      { id: "cabine-1", name: "Cabine peinture", role: "cabine", location: "Cabine 1", active: true },
+      { id: "zone-preparation-1", name: "Zone de préparation 1", role: "zone_preparation", location: "Zone préparation 1", active: true },
+      { id: "zone-preparation-2", name: "Zone de préparation 2", role: "zone_preparation", location: "Zone préparation 2", active: true },
+      { id: "cabine-1", name: "Cabine peinture 1", role: "cabine", location: "Cabine 1", active: true },
+      { id: "cabine-2", name: "Cabine peinture 2", role: "cabine", location: "Cabine 2", active: true },
       { id: "controle-1", name: "Chef atelier", role: "controle", location: "Contrôle final", active: true },
       { id: "pont-vidange-1", name: "Pont vidange 1", role: "pont_vidange", location: "Service rapide", active: true },
       { id: "pont-vidange-2", name: "Pont vidange 2", role: "pont_vidange", location: "Service rapide", active: true },
@@ -1203,7 +1165,7 @@ function getLocalStateCandidates() {
 }
 
 function scoreStoredStateCandidate(candidate) {
-  const nonDemoCases = (candidate.state?.cases || []).filter((item) => item.clientName !== "Client démonstration").length;
+  const nonDemoCases = (candidate.state?.cases || []).length;
   const bookings = Array.isArray(candidate.state?.bookings) ? candidate.state.bookings.length : 0;
   const resources = Array.isArray(candidate.state?.resources) ? candidate.state.resources.length : 0;
   const timestamp = candidate.updatedAt ? new Date(candidate.updatedAt).getTime() || 0 : 0;
@@ -1759,6 +1721,16 @@ function syncCurrentUserWithSupabaseAuth(authUser) {
   return true;
 }
 
+function isLegacyDemoSeedCase(item) {
+  return Boolean(
+    item
+    && item.clientName === ["Client", "démonstration"].join(" ")
+    && item.phone === "+216 00 000 000"
+    && item.plate === "123 TU 4567"
+    && item.orNavNumber === "OR-2026-001"
+  );
+}
+
 function normalizeState(raw) {
   raw = raw && typeof raw === "object" ? raw : {};
   const seed = createDefaultState();
@@ -1774,7 +1746,9 @@ function normalizeState(raw) {
   const currentUserId = resolveCurrentUserId(raw.currentUserId, users);
   linkResourcesToUsers(resources, users);
   return {
-    cases: Array.isArray(raw.cases) ? raw.cases.map((c) => normalizeCase(c, raw.bookings)) : seed.cases,
+    cases: Array.isArray(raw.cases)
+      ? raw.cases.filter((item) => !isLegacyDemoSeedCase(item)).map((c) => normalizeCase(c, raw.bookings))
+      : seed.cases,
     resources,
     users,
     currentUserId,
@@ -1838,6 +1812,21 @@ function normalizeStepPreferredResources(value = {}) {
   DURATIONS.forEach(([key]) => {
     const raw = value?.[key] || "";
     normalized[key] = typeof raw === "string" ? raw : "";
+  });
+  return normalized;
+}
+
+function normalizeStepAssignmentLocks(value = {}) {
+  const normalized = {};
+  DURATIONS.forEach(([key]) => {
+    const raw = value?.[key];
+    if (!raw || typeof raw !== "object" || !String(raw.resourceId || "").trim()) return;
+    normalized[key] = {
+      resourceId: String(raw.resourceId).trim(),
+      lockedAt: raw.lockedAt || "",
+      lockedBy: raw.lockedBy || "",
+      reason: String(raw.reason || "").trim(),
+    };
   });
   return normalized;
 }
@@ -2078,6 +2067,14 @@ function normalizeCase(item, bookings) {
     vin: item.vin || "",
     insurance: item.insurance || "",
     orNavNumber: item.orNavNumber || item.claimNumber || "",
+    source: item.source === "pdf_estimate" ? "pdf_estimate" : (item.source || ""),
+    importedAt: item.importedAt || item.importDate || "",
+    pdfImportStatus: ["chief_validation_pending", "ready_for_planning"].includes(item.pdfImportStatus) ? item.pdfImportStatus : "",
+    pdfValidatedAt: item.pdfValidatedAt || "",
+    pdfValidatedBy: item.pdfValidatedBy || "",
+    pdfEstimateFileName: item.pdfEstimateFileName || "",
+    pdfImportWarning: item.pdfImportWarning || "",
+    pdfImportTaskCount: Math.max(0, Number(item.pdfImportTaskCount || 0)),
     partsStatus: normalizedPartsStatus,
     blockerReason: normalizedBlockerReason,
     blockerDetails: item.blockerDetails || item.blockerNote || "",
@@ -2095,6 +2092,7 @@ function normalizeCase(item, bookings) {
     durations: normalizeDurations(item.durations),
     stepServiceTypes: normalizeStepServiceTypes(item.stepServiceTypes),
     stepPreferredResources: normalizeStepPreferredResources(item.stepPreferredResources),
+    stepAssignmentLocks: normalizeStepAssignmentLocks(item.stepAssignmentLocks),
     flags: {
       expertApproved: false,
       clientApproved: false,
@@ -2339,10 +2337,10 @@ function recomputeCaseDurationsFromClaims(item) {
   const productiveTotal = ["body", "oilService", "mechanical", "electrical", "prep", "paint", "reassembly"].reduce((sum, key) => sum + Number(totals[key] || 0), 0);
   if (hasInsuranceClaim) {
     totals.finish = roundHours(Number(totals.paint || 0) * 0.5);
-    totals.quality = 0.25;
+    totals.quality = Math.max(0.25, roundHours(Number(totals.quality || 0)));
   } else {
     totals.finish = 0;
-    totals.quality = productiveTotal > 0 ? 0.25 : 0;
+    totals.quality = Math.max(roundHours(Number(totals.quality || 0)), productiveTotal > 0 ? 0.25 : 0);
   }
   DURATIONS.forEach(([key]) => {
     item.durations[key] = roundHours(totals[key] || 0);
@@ -2474,18 +2472,26 @@ function normalizeExpertEstimateLine(line) {
     phase,
     operation: line.operation || "",
     laborHours: roundHours(laborHours),
+    requiredRole: line.requiredRole || "",
+    source: line.source === "pdf_estimate" ? "pdf_estimate" : (line.source || ""),
+    status: ["ready_for_validation", "validated"].includes(line.status) ? line.status : "",
   };
 }
 
 function normalizeExpertEstimateOriginalLine(line) {
   line = line && typeof line === "object" ? line : {};
   const laborHours = parseLocalizedDecimal(line.laborHours ?? line.hours ?? line.quantity ?? 0);
+  const operation = line.operation || line.text || "";
+  const keepPdfFallbackAllocation = line.source === "pdf_estimate" && operation.trim() === "Travaux atelier à préciser";
   const allocations = Array.isArray(line.allocations)
     ? line.allocations.map((allocation) => ({
         phase: DURATIONS.some(([key]) => key === allocation.phase) ? allocation.phase : "body",
         operation: allocation.operation || line.operation || "",
         laborHours: roundHours(parseLocalizedDecimal(allocation.laborHours ?? allocation.hours ?? 0)),
-      })).filter((allocation) => allocation.laborHours > 0)
+        requiredRole: allocation.requiredRole || "",
+        source: allocation.source === "pdf_estimate" ? "pdf_estimate" : (allocation.source || ""),
+        status: ["ready_for_validation", "validated"].includes(allocation.status) ? allocation.status : "",
+      })).filter((allocation) => allocation.laborHours > 0 || keepPdfFallbackAllocation)
     : [];
   const normalizedPieceKind = ["new", "repair"].includes(line.pieceKind) ? line.pieceKind : "";
   const normalizedPaintFaces = ["outside", "two_sides"].includes(line.paintFaces) ? line.paintFaces : "";
@@ -2493,7 +2499,7 @@ function normalizeExpertEstimateOriginalLine(line) {
     id: line.id || uid("estimate-original-line"),
     code: line.code || "",
     manual: Boolean(line.manual),
-    operation: line.operation || line.text || "",
+    operation,
     laborHours: roundHours(laborHours),
     rawText: line.rawText || line.text || line.operation || "",
     allocations,
@@ -2501,6 +2507,9 @@ function normalizeExpertEstimateOriginalLine(line) {
     pieceKind: normalizedPieceKind,
     paintFaces: normalizedPaintFaces,
     paintGroup: line.paintGroup || "",
+    requiredRole: line.requiredRole || "",
+    source: line.source === "pdf_estimate" ? "pdf_estimate" : (line.source || ""),
+    status: ["ready_for_validation", "validated"].includes(line.status) ? line.status : "",
   };
 }
 
@@ -3529,7 +3538,7 @@ function showInputPromptModal({
 // readonly : uniquement pilotage (lecture)
 const ROLE_TABS = {
   admin:         ["reception-workspace", "dossiers", "today", "pilotage", "planning", "technician", "atelier"],
-  directeur_sav: ["dossiers", "today", "pilotage", "planning", "atelier"],
+  directeur_sav: ["reception-workspace", "dossiers", "today", "pilotage", "planning", "atelier"],
   chef_atelier:  ["reception-workspace", "dossiers", "today", "pilotage", "planning", "technician", "atelier"],
   reception:     ["reception-workspace", "dossiers", "today"],
   technicien:    ["technician"],
@@ -3539,9 +3548,9 @@ const ROLE_TABS = {
 
 // Tab par défaut à afficher lors de la connexion selon le rôle
 const ROLE_DEFAULT_TABS = {
-  admin:         "dossiers",
-  directeur_sav: "pilotage",
-  chef_atelier:  "planning",
+  admin:         "reception-workspace",
+  directeur_sav: "reception-workspace",
+  chef_atelier:  "reception-workspace",
   reception:     "reception-workspace",
   technicien:    "technician",
   qualite:       "dossiers",

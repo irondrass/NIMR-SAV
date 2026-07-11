@@ -149,16 +149,17 @@ async function main() {
       returnByValue: true,
       expression: `Promise.all([
         navigator.serviceWorker?.getRegistration?.().then(Boolean).catch(() => false),
-        caches?.keys?.().then((keys) => keys.some((key) => key.includes('v23.2.7-simplified-startup'))).catch(() => false),
+        caches?.keys?.().then((keys) => keys.some((key) => key.includes('nimr-sav-v23.2.7-pdf-first-intake'))).catch(() => false),
       ]).then(([hasServiceWorker, hasExpectedCache]) => ({ hasServiceWorker, hasExpectedCache }))`,
     }, sessionId);
 
-    const critical = findings.filter((item) => /ReferenceError|Content Security Policy|violates.*connect-src|bindLocalSecurityControls|initLocalSecurityGate/i.test(item.text));
+    const errors = findings.filter((item) => item.level === "error" && String(item.text || "").trim());
+    const warnings = findings.filter((item) => item.level === "warning" && String(item.text || "").trim());
     const manifest = manifestCheck.result?.value || {};
     const pwa = pwaCheck.result?.value || {};
-    console.log(JSON.stringify({ targetUrl, manifest, pwa, critical, findingsCount: findings.length }, null, 2));
+    console.log(JSON.stringify({ targetUrl, manifest, pwa, errors, warnings, findingsCount: findings.length }, null, 2));
 
-    if (critical.length || !manifest.has192 || !manifest.has512 || !manifest.hasStandalone) {
+    if (errors.length || !manifest.has192 || !manifest.has512 || !manifest.hasStandalone) {
       throw new Error("Browser console/PWA smoke failed.");
     }
     await send("Target.closeTarget", { targetId }).catch(() => null);

@@ -202,7 +202,10 @@ function prepareEstimateImportPreview(parsed, item) {
   });
   applyPaintPreparationRatio(durations);
   durations.finish = roundPlanningHours(durations.finish || 0);
-  durations.quality = roundPlanningHours(Number(item.durations?.quality ?? DEFAULT_DURATIONS.quality));
+  const detectedQualityHours = roundPlanningHours(parsed.allocations.quality || 0);
+  durations.quality = detectedQualityHours > 0
+    ? detectedQualityHours
+    : roundPlanningHours(Number(item.durations?.quality ?? DEFAULT_DURATIONS.quality));
   return { ...parsed, durations };
 }
 
@@ -225,7 +228,7 @@ function normalizeEstimatePreviewDurations(durations, item) {
     normalized[key] = roundPlanningHours(durations?.[key] || 0);
   });
   normalized.finish = roundPlanningHours(Number(normalized.paint || 0) * 0.5);
-  normalized.quality = 0.25;
+  normalized.quality = roundPlanningHours(Number(durations?.quality ?? 0.25));
   return normalized;
 }
 
@@ -351,6 +354,9 @@ function dedupeEstimatePartLines(parts) {
 function distributeLaborHours(operation, hours, options = {}) {
   const normalized = normalizeEstimateOperationText(operation);
   const cleanDetail = removeKnownOperationPrefix(operation);
+  if (/\b(CONTROLE\s+FINAL|ESSAI|VERIFICATION\s+FINALE)\b/.test(normalized)) {
+    return [makeDistribution("quality", operation, hours)];
+  }
   if (/\bD\s*\/\s*P\s+ET\s+PREPARAT(?:ION|IN)\b/.test(normalized)) {
     const [body, reassembly] = splitPlanningHours(hours, [0.5, 0.5]);
     return [
@@ -525,6 +531,9 @@ async function applyEstimateImportToClaim(item, claim, preview, options = {}) {
     }
   }
   recomputeCaseDurationsFromClaims(item);
+  if (typeof invalidatePdfChiefValidationAfterLaborChange === "function") {
+    invalidatePdfChiefValidationAfterLaborChange(item, "Un nouveau devis a modifié les travaux après la validation Chef Atelier.");
+  }
   if (typeof refreshCaseApprovalFlagsFromClaims === "function") refreshCaseApprovalFlagsFromClaims(item);
   if (typeof clearPlanningIfNeeded === "function") clearPlanningIfNeeded(item, "Planning annulé après import d'un devis modifiant les durées. Recalculez un RDV.");
   generatedProposals[item.id] = null;
@@ -578,13 +587,13 @@ function buildOriginalEstimateLines(preview) {
 }
 
 function buildAppliedEstimateLines(preview) {
-  const currentTotals = Object.fromEntries(ESTIMATE_PLANNING_KEYS.map((key) => [key, 0]));
+  const currentTotals = Object.fromEntries(ESTIMATE_ALLOWED_KEYS.map((key) => [key, 0]));
   preview.distributedLines.forEach((line) => {
     if (line.phase in currentTotals) currentTotals[line.phase] = roundPlanningHours(currentTotals[line.phase] + Number(line.laborHours || 0));
   });
-  const edited = ESTIMATE_PLANNING_KEYS.some((key) => Math.abs((preview.durations[key] || 0) - (currentTotals[key] || 0)) > 0.01);
+  const edited = ESTIMATE_ALLOWED_KEYS.some((key) => Math.abs((preview.durations[key] || 0) - (currentTotals[key] || 0)) > 0.01);
   if (!edited) return preview.distributedLines;
-  return ESTIMATE_PLANNING_KEYS
+  return ESTIMATE_ALLOWED_KEYS
     .filter((key) => Number(preview.durations[key] || 0) > 0)
     .map((key) => ({
       id: uid("estimate-line"),

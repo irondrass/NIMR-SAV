@@ -67,6 +67,19 @@
     return (typeof getDurationLabel === 'function' && getDurationLabel(key)) || (DURATIONS || []).find(([value]) => value === key)?.[1] || key;
   }
 
+  const REQUIRED_ROLE_BY_PHASE = {
+    oilService: 'mecanicien',
+    mechanical: 'mecanicien',
+    electrical: 'electricien',
+    body: 'tolier',
+    reassembly: 'tolier',
+    prep: 'peintre',
+    paint: 'peintre',
+    finish: 'peintre',
+    quality: 'controle',
+    finalCheck: 'controle',
+  };
+
   function lineCode(text) {
     const source = String(text || '').trim();
     const direct = source.match(/^([A-Z]{2,4}(?:[-/][A-Z0-9]+)+)/i);
@@ -102,9 +115,11 @@
   }
 
   function shouldKeepOriginalLaborLine(line) {
-    if (line?.manual) return roundPlanningHours(Number(line?.laborHours ?? line?.hours ?? 0)) > 0;
     const operation = line?.operation || line?.rawText || line?.text || '';
     const normalized = normalizeEstimateOperationText(operation);
+    const isPdfFallback = line?.source === 'pdf_estimate' && normalized === normalizeEstimateOperationText('Travaux atelier à préciser');
+    if (isPdfFallback) return true;
+    if (line?.manual) return roundPlanningHours(Number(line?.laborHours ?? line?.hours ?? 0)) > 0;
     const code = String(line?.code || lineCode(line?.rawText || line?.text || operation) || '').trim().toUpperCase();
     const hours = roundPlanningHours(Number(line?.laborHours ?? line?.hours ?? 0));
     if (hours <= 0) return false;
@@ -134,16 +149,45 @@
         operation: line.operation || 'Opération devis',
         rawText: line.rawText || line.operation || '',
         laborHours: Number(line.laborHours || 0),
-        allocations: [{ phase: line.phase, operation: line.operation || '', laborHours: Number(line.laborHours || 0) }],
+        requiredRole: line.requiredRole || '',
+        source: line.source || '',
+        status: line.status || '',
+        allocations: [{
+          phase: line.phase,
+          operation: line.operation || '',
+          laborHours: Number(line.laborHours || 0),
+          requiredRole: line.requiredRole || '',
+          source: line.source || '',
+          status: line.status || '',
+        }],
       })));
     }
     if (claim.estimate.originalLines.length) {
+      const fallbackOnly = claim.estimate.originalLines.every((line) => {
+        const operation = line?.operation || line?.rawText || line?.text || '';
+        return line?.source === 'pdf_estimate'
+          && normalizeEstimateOperationText(operation) === normalizeEstimateOperationText('Travaux atelier à préciser');
+      });
+      if (fallbackOnly && getOriginalLaborTotal(claim.estimate.originalLines) <= 0) {
+        claim.estimate.lines = claim.estimate.originalLines.map((line) => ({
+          id: line.id || uid('estimate-line'),
+          phase: line.allocations?.[0]?.phase || line.selectedPhases?.[0] || line.phase || 'body',
+          operation: line.operation || line.rawText || 'Travaux atelier à préciser',
+          laborHours: 0,
+          requiredRole: line.requiredRole || 'tolier',
+          source: 'pdf_estimate',
+          status: line.status || 'ready_for_validation',
+        }));
+        claim.estimate.paintOptimization = [];
+        claim.estimate.totalOriginalHours = 0;
+        return claim;
+      }
       const optimized = optimizeEstimateAllocationsFromOriginalLines(claim.estimate.originalLines);
       const lines = optimized.lines.slice();
       if (Number(optimized.totals.finish || 0) > 0) {
-        lines.push({ id: uid('estimate-line'), phase: 'finish', operation: 'Finition + lavage - 50% du temps peinture', laborHours: roundPlanningHours(optimized.totals.finish) });
+        lines.push(buildSyntheticEstimateLine(claim.estimate.originalLines, 'finish', 'Finition + lavage - 50% du temps peinture', optimized.totals.finish));
       }
-      lines.push({ id: uid('estimate-line'), phase: 'quality', operation: 'Contrôle qualité forfaitaire', laborHours: FIXED_QUALITY_HOURS });
+      lines.push(buildSyntheticEstimateLine(claim.estimate.originalLines, 'quality', 'Contrôle qualité forfaitaire', FIXED_QUALITY_HOURS));
       claim.estimate.lines = lines;
       claim.estimate.paintOptimization = optimized.paintOptimization;
       claim.estimate.totalOriginalHours = getOriginalLaborTotal(claim.estimate.originalLines);
@@ -210,6 +254,55 @@
     return [...new Set(source.filter(Boolean))];
   }
 
+  function getPlanningTaskMetadata(line, allocation, phase) {
+    const linePhases = getSelectedPhasesFromLine(line);
+    const lineRoleMatchesPhase = linePhases.length <= 1 || line?.phase === phase;
+    return {
+      requiredRole: allocation?.requiredRole
+        || (lineRoleMatchesPhase ? line?.requiredRole : '')
+        || REQUIRED_ROLE_BY_PHASE[phase]
+        || line?.requiredRole
+        || '',
+      source: allocation?.source || line?.source || '',
+      status: allocation?.status || line?.status || '',
+    };
+  }
+
+  function getSyntheticTaskMetadata(lines, phase) {
+    let exactLine = null;
+    let exactAllocation = null;
+    let metadataLine = null;
+    let metadataAllocation = null;
+    (lines || []).some((line) => {
+      const allocation = (line?.allocations || []).find((candidate) => candidate?.phase === phase);
+      if (!metadataLine && (line?.requiredRole || line?.source || line?.status)) metadataLine = line;
+      if (!metadataAllocation) {
+        metadataAllocation = (line?.allocations || []).find((candidate) => candidate?.requiredRole || candidate?.source || candidate?.status) || null;
+      }
+      if (!allocation) return false;
+      exactLine = line;
+      exactAllocation = allocation;
+      return true;
+    });
+    const sourceLine = exactLine || metadataLine || null;
+    const sourceAllocation = exactAllocation || metadataAllocation || null;
+    const metadata = getPlanningTaskMetadata(sourceLine, sourceAllocation, phase);
+    return {
+      ...metadata,
+      requiredRole: exactAllocation?.requiredRole || REQUIRED_ROLE_BY_PHASE[phase] || metadata.requiredRole,
+    };
+  }
+
+  function buildSyntheticEstimateLine(originalLines, phase, operation, laborHours) {
+    return {
+      id: uid('estimate-line'),
+      phase,
+      operation,
+      laborHours: roundPlanningHours(laborHours),
+      ...getSyntheticTaskMetadata(originalLines, phase),
+    };
+  }
+
   function normalizeOriginalLineForPlanning(line) {
     const operation = line?.operation || line?.rawText || 'Opération devis';
     const pieceKind = line?.pieceKind || inferPieceKind(operation);
@@ -220,7 +313,26 @@
     // Toujours recalculer la répartition à partir des étapes cochées.
     // Cela évite l'ancien 50/50 préparation/peinture qui restait affiché après import
     // jusqu'au décocher/recocher manuel. La règle atelier est 2/3 préparation, 1/3 peinture.
-    const allocations = makeWeightedAllocations(operation, laborHours, selectedPhases);
+    let allocations = makeWeightedAllocations(operation, laborHours, selectedPhases).map((allocation) => {
+      const originalAllocation = (line?.allocations || []).find((candidate) => candidate?.phase === allocation.phase);
+      return {
+        ...allocation,
+        ...getPlanningTaskMetadata(line, originalAllocation, allocation.phase),
+      };
+    });
+    const isZeroHourPdfFallback = laborHours <= 0
+      && (line?.source === 'pdf_estimate' || (line?.allocations || []).some((allocation) => allocation?.source === 'pdf_estimate'))
+      && normalizeEstimateOperationText(operation) === normalizeEstimateOperationText('Travaux atelier à préciser');
+    if (isZeroHourPdfFallback) {
+      const originalBodyAllocation = (line?.allocations || []).find((allocation) => allocation?.phase === 'body');
+      allocations = [{
+        ...(originalBodyAllocation || {}),
+        phase: 'body',
+        operation: originalBodyAllocation?.operation || operation,
+        laborHours: 0,
+        ...getPlanningTaskMetadata(line, originalBodyAllocation, 'body'),
+      }];
+    }
     return {
       ...line,
       operation,
@@ -325,8 +437,9 @@
     const totals = Object.fromEntries(ESTIMATE_PLANNING_KEYS.map((key) => [key, 0]));
     const appliedLines = [];
     const paintGroups = new Map();
+    const normalizedLines = (originalLines || []).map(normalizeOriginalLineForPlanning);
 
-    (originalLines || []).map(normalizeOriginalLineForPlanning).forEach((line) => {
+    normalizedLines.forEach((line) => {
       (line.allocations || []).forEach((allocation) => {
         if (!allocation.phase || !(allocation.phase in totals)) return;
         const laborHours = roundPlanningHours(Number(allocation.laborHours || 0));
@@ -348,6 +461,7 @@
           phase: allocation.phase,
           operation: allocation.operation || line.operation || phaseLabel(allocation.phase),
           laborHours,
+          ...getPlanningTaskMetadata(line, allocation, allocation.phase),
         });
       });
     });
@@ -371,6 +485,7 @@
         phase: 'paint',
         operation: 'Peinture mutualisée par zone/côté cabine',
         laborHours: paintTotal,
+        ...getSyntheticTaskMetadata(normalizedLines, 'paint'),
         paintOptimized: true,
         paintOptimization: groupResults,
       });
@@ -391,9 +506,9 @@
     if (optimized.lines.length) {
       const lines = optimized.lines.slice();
       if (Number(optimized.totals.finish || 0) > 0) {
-        lines.push({ id: uid('estimate-line'), phase: 'finish', operation: 'Finition + lavage - 50% du temps peinture', laborHours: roundPlanningHours(optimized.totals.finish) });
+        lines.push(buildSyntheticEstimateLine(originalLines, 'finish', 'Finition + lavage - 50% du temps peinture', optimized.totals.finish));
       }
-      lines.push({ id: uid('estimate-line'), phase: 'quality', operation: 'Contrôle qualité forfaitaire', laborHours: FIXED_QUALITY_HOURS });
+      lines.push(buildSyntheticEstimateLine(originalLines, 'quality', 'Contrôle qualité forfaitaire', FIXED_QUALITY_HOURS));
       return lines;
     }
     const fallback = originalBuildAppliedEstimateLines ? originalBuildAppliedEstimateLines(preview) : (preview.distributedLines || []);
@@ -414,7 +529,12 @@
     const result = originalRecompute ? originalRecompute(item) : false;
     if (item?.durations) {
       item.durations.finish = Number(item.durations.paint || 0) > 0 ? roundPlanningHours(Number(item.durations.paint || 0) * 0.5) : 0;
-      item.durations.quality = FIXED_QUALITY_HOURS;
+      const hasProductivePdfLabor = (item.claims || []).some((claim) => {
+        const originalLines = claim.estimate?.originalLines || [];
+        const appliedLines = claim.estimate?.lines || [];
+        return [...originalLines, ...appliedLines].some((line) => Number(line?.laborHours || 0) > 0 && line?.phase !== 'quality');
+      });
+      item.durations.quality = item.source === 'pdf_estimate' && !hasProductivePdfLabor ? 0 : FIXED_QUALITY_HOURS;
     }
     return result;
   };
@@ -423,6 +543,9 @@
     if (!item) return;
     (item.claims || []).forEach(syncClaimEstimateLinesFromOriginal);
     if (typeof recomputeCaseDurationsFromClaims === 'function') recomputeCaseDurationsFromClaims(item);
+    if (typeof invalidatePdfChiefValidationAfterLaborChange === 'function') {
+      invalidatePdfChiefValidationAfterLaborChange(item, 'La répartition des tâches importées a été modifiée après la validation Chef Atelier.');
+    }
     if (typeof clearPlanningIfNeeded === 'function') clearPlanningIfNeeded(item, 'Planning annulé après modification du paramétrage main-d’œuvre. Recalculez un RDV.');
     generatedProposals[item.id] = null;
     saveState();
@@ -501,16 +624,21 @@
       }
       (claim.estimate?.originalLines || []).forEach((line) => {
         ensureLaborLineDefaults(line);
-        const allocations = Array.isArray(line.allocations) ? line.allocations.filter((a) => a.phase && Number(a.laborHours || 0) > 0) : [];
+        const operation = line.operation || line.rawText || 'Opération devis';
+        const isFallback = item.source === 'pdf_estimate'
+          && normalizeEstimateOperationText(operation) === normalizeEstimateOperationText('Travaux atelier à préciser');
+        const allocations = Array.isArray(line.allocations)
+          ? line.allocations.filter((a) => a.phase && (Number(a.laborHours || 0) > 0 || isFallback))
+          : [];
         const selectedPhases = [...new Set(allocations.map((allocation) => allocation.phase))];
         const laborHours = Number(line.laborHours || allocations.reduce((sum, allocation) => sum + Number(allocation.laborHours || 0), 0));
-        if (!laborHours) return;
+        if (!laborHours && !isFallback) return;
         rows.push({
           claim,
           claimLabel: `${claim.number || ''} ${claim.title || 'Ordre'}`.trim(),
           line,
           selectedPhases,
-          operation: line.operation || line.rawText || 'Opération devis',
+          operation,
           laborHours,
           allocations,
         });

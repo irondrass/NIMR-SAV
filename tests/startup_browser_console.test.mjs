@@ -147,44 +147,96 @@ async function evaluate(send, sessionId, expression) {
   return result.result?.value;
 }
 
-async function exerciseApplication(send, sessionId, label) {
+async function exercisePdfFirstStartup(send, sessionId, label) {
   return evaluate(send, sessionId, `
     (async () => {
       await new Promise((resolve) => setTimeout(resolve, 250));
-      if (typeof getCaseStatus !== "function") throw new Error("getCaseStatus is not defined");
-      if (typeof normalizeCaseStatusFilter !== "function") throw new Error("normalizeCaseStatusFilter is not defined");
-      if (typeof guardSensitiveAction !== "function") throw new Error("guardSensitiveAction is not defined");
-      if (typeof renderCaseDetail !== "function") throw new Error("renderCaseDetail is not defined");
-      if (typeof setActiveTab === "function") setActiveTab("dossiers");
-      if (typeof renderCases === "function") renderCases();
-      const firstCase = document.querySelector("[data-case]");
-      if (firstCase) firstCase.click();
-      renderCaseDetail();
+      const waitUntil = async (predicate, message) => {
+        for (let attempt = 0; attempt < 60; attempt += 1) {
+          if (predicate()) return;
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        throw new Error(message);
+      };
+
+      const bootstrapAdmin = state.users?.find((user) => user?.active !== false && user?.role === "admin");
+      if (!bootstrapAdmin) throw new Error("Admin bootstrap actif introuvable");
+      if (sessionStorage.getItem("nimr-user-pin-unlocked") !== bootstrapAdmin.id) {
+        const loginForm = document.getElementById("user-login-form");
+        if (!loginForm) throw new Error("Formulaire de connexion admin introuvable");
+        loginForm.elements.userId.value = bootstrapAdmin.id;
+        loginForm.elements.pin.value = "";
+        loginForm.requestSubmit();
+        await waitUntil(
+          () => document.getElementById("user-pin-change-overlay")?.hidden === false,
+          "La création du PIN admin n'a pas été proposée",
+        );
+        const pinForm = document.getElementById("user-pin-change-form");
+        pinForm.elements.newPin.value = "739251";
+        pinForm.elements.confirmNewPin.value = "739251";
+        pinForm.requestSubmit();
+        await waitUntil(
+          () => sessionStorage.getItem("nimr-user-pin-unlocked") === bootstrapAdmin.id
+            && document.getElementById("user-login-overlay")?.hidden !== false
+            && document.getElementById("user-pin-change-overlay")?.hidden !== false,
+          "La connexion admin avec PIN robuste n'a pas abouti",
+        );
+      }
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-      const caseStatus = typeof state !== "undefined" && state.cases?.[0] ? getCaseStatus(state.cases[0]) : "unknown";
-      const visibleText = document.body.innerText || "";
-      const removedVisible = [
-        "Contrôle Qualité",
-        "Contrôle qualité, livraison",
-        "Livraison & Clôture",
-        "Accord expert",
-        "Validation client/interne",
-        "Dossier Facturé",
-        "PV DE RESTITUTION",
-        "Paiement",
-        "Montant",
-        " PU "
-      ].filter((text) => visibleText.includes(text));
-      const qcButton = document.querySelector('[data-tab="qc-workspace"]');
-      const livraisonTab = document.querySelector('[data-case-tab="livraison"]');
-      if (removedVisible.length) throw new Error("Legacy UI visible: " + removedVisible.join(", "));
-      if (qcButton && qcButton.offsetParent !== null) throw new Error("QC workspace tab is visible");
-      if (livraisonTab && livraisonTab.offsetParent !== null) throw new Error("Legacy livraison case tab is visible");
+
+      if (typeof state === "undefined") throw new Error("state is not defined");
+      if (!Array.isArray(state.cases)) throw new Error("state.cases doit être un tableau");
+      if (!Array.isArray(state.users)) throw new Error("state.users doit être un tableau");
+      if (state.cases.length !== 0) {
+        throw new Error("Le démarrage avec stockage vide doit contenir 0 dossier, reçu : " + state.cases.length);
+      }
+
+      const activeAdmins = state.users.filter((user) => user?.active !== false && user?.role === "admin");
+      if (!activeAdmins.length) throw new Error("Admin bootstrap actif introuvable");
+      const currentUser = state.users.find((user) => user?.id === state.currentUserId);
+      if (!currentUser || currentUser.active === false || currentUser.role !== "admin") {
+        throw new Error("La session bootstrap doit être portée par un admin actif");
+      }
+
+      const importView = document.getElementById("view-reception-workspace");
+      const activeView = document.querySelector(".view:not([hidden])");
+      if (!importView) throw new Error("Vue PDF-first #view-reception-workspace introuvable");
+      if (importView.hidden || activeView !== importView) {
+        throw new Error("La vue PDF-first reception-workspace doit être la vue active");
+      }
+
+      const normalizeText = (value) => String(value || "").replace(/\\s+/g, " ").trim();
+      const applicationText = normalizeText(document.body.textContent);
+      const requiredTexts = [
+        "Import devis PDF",
+        "Importer un devis PDF",
+        "Créer dossier depuis devis PDF"
+      ];
+      const missingTexts = requiredTexts.filter((text) => !applicationText.includes(text));
+      if (missingTexts.length) {
+        throw new Error("Textes PDF-first manquants : " + missingTexts.join(", "));
+      }
+
+      const forbiddenTexts = [
+        "Réception guidée",
+        "Créer un nouveau dossier",
+        "Motifs fréquents",
+        "Réclamations client",
+        "Demandes client",
+        "Client démonstration"
+      ];
+      const legacyTexts = forbiddenTexts.filter((text) => applicationText.includes(text));
+      if (legacyTexts.length) {
+        throw new Error("Ancienne Réception guidée encore présente : " + legacyTexts.join(", "));
+      }
+
       return {
         label: ${JSON.stringify(label)},
-        caseStatus,
-        activeView: document.querySelector(".view:not([hidden])")?.id || "",
-        visibleLength: visibleText.length
+        activeAdminCount: activeAdmins.length,
+        activeView: activeView?.id || "",
+        caseCount: state.cases.length,
+        currentUserRole: currentUser.role,
+        requiredTexts
       };
     })()
   `);
@@ -248,7 +300,7 @@ async function main() {
     await clearBrowserData(send, sessionId);
 
     await navigateAndWait(send, sessionId, `${baseUrl}?startup-empty=${Date.now()}`);
-    const emptyRun = await exerciseApplication(send, sessionId, "empty-storage");
+    const emptyRun = await exercisePdfFirstStartup(send, sessionId, "empty-storage");
 
     await evaluate(send, sessionId, `
       (() => {
@@ -259,12 +311,11 @@ async function main() {
     `);
 
     await navigateAndWait(send, sessionId, `${baseUrl}?startup-existing=${Date.now()}`);
-    const existingRun = await exerciseApplication(send, sessionId, "existing-storage");
+    const existingRun = await exercisePdfFirstStartup(send, sessionId, "existing-storage");
 
-    const realErrors = findings.filter((finding) => String(finding.text || "").trim());
-    const forbidden = realErrors.filter((finding) => /ReferenceError|TypeError|Cannot set properties of null|is not defined|./i.test(finding.text));
-    if (forbidden.length) {
-      throw new Error(`Startup browser console errors: ${JSON.stringify(forbidden, null, 2)}`);
+    const consoleErrors = findings.filter((finding) => String(finding.text || "").trim());
+    if (consoleErrors.length) {
+      throw new Error(`Startup browser console errors: ${JSON.stringify(consoleErrors, null, 2)}`);
     }
 
     console.log(`OK / errors: 0`);

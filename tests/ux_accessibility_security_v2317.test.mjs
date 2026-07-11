@@ -67,8 +67,8 @@ const sidebarSvgs = [...sidebarNav.matchAll(/<svg\b[^>]*>/g)].map((match) => mat
 assert.ok(sidebarSvgs.length >= 7, "la navigation principale doit contenir les SVG attendus");
 sidebarSvgs.forEach((svg) => assert.ok(svg.includes('aria-hidden="true"'), `SVG decoratif sans aria-hidden: ${svg}`));
 
-assert.ok(indexSource.includes("Réception guidée"), "libelle Reception guidee attendu");
-assert.ok(indexSource.includes("Dossier complet"), "libelle Dossier complet attendu");
+assert.ok(indexSource.includes("Import devis PDF"), "libelle Import devis PDF attendu");
+assert.ok(indexSource.includes("Dossiers atelier"), "libelle Dossiers atelier attendu");
 assert.ok(indexSource.includes("Le PIN protège l’interface locale, mais ne chiffre pas les données locales."), "avertissement PIN attendu");
 assert.ok(
   stateSource.includes("Le PIN protège l’interface locale, mais ne chiffre pas les données locales et ne remplace pas une authentification serveur."),

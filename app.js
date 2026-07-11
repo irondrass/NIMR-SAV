@@ -23,8 +23,6 @@ function initApp() {
     bindAutoSaveSafety();
     if (typeof migratePlanningLogicV28 === "function") migratePlanningLogicV28();
     if (typeof migratePlanningLogicV36 === "function") migratePlanningLogicV36();
-    if (typeof initReceptionWorkspace === "function") initReceptionWorkspace();
-
     setActiveTab(activeTab || "dossiers");
     render();
     if (typeof initLocalSecurityGate === "function") initLocalSecurityGate();
@@ -109,9 +107,7 @@ function bindMainNavigation() {
       const tab = button.dataset.tab;
       if (!tab) return;
       setActiveTab(tab);
-      if (tab === "reception-workspace") {
-        if (typeof renderReceptionWorkspace === "function") renderReceptionWorkspace();
-      }
+      if (tab === "reception-workspace") focusPdfEstimateImport();
       if (tab === "today") renderTodayWorkshop();
       if (tab === "planning") renderPlanning();
       if (tab === "technician") renderTechnicianDashboard();
@@ -165,129 +161,86 @@ function bindCaseList() {
 function bindCaseCreation() {
   const form = $("#case-form");
   if (!form) return;
+  const fileInput = $("#quick-estimate-file-input", form);
+  const status = $("#quick-estimate-import-status");
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const createGuard = guardCaseCreate();
     if (!createGuard.ok) return;
-    const data = new FormData(form);
-    const estimateFile = data.get("estimateFile");
-    const hasEstimateFile = estimateFile && estimateFile.name;
-    const orderType = data.get("orderType") || "vidange";
-    const orderTitle = normalizeTextInputValue(data.get("orderTitle")) || getClaimTypeLabel(orderType);
-    let candidate = {
-      clientName: normalizeTextInputValue(data.get("clientName")),
-      phone: normalizeTextInputValue(data.get("phone")),
-      ownerName: normalizeTextInputValue(data.get("ownerName")),
-      driverName: normalizeTextInputValue(data.get("driverName")),
-      driverPhone: normalizeTextInputValue(data.get("driverPhone")),
-      vehicle: normalizeTextInputValue(data.get("vehicle")),
-      plate: normalizeIdentifierValue(data.get("plate")),
-      color: normalizeTextInputValue(data.get("color")),
-      mileage: normalizeIdentifierValue(data.get("mileage")),
-      vin: normalizeIdentifierValue(data.get("vin")),
-      orNavNumber: normalizeIdentifierValue(data.get("orNavNumber")),
-    };
-    const validation = validateReceptionCaseCandidate(candidate);
-    candidate = validation.normalized;
-    if (!validation.ok) {
-      renderFormValidationErrors(form, validation, "case-form-errors");
-      notifyUser(validation.messages.join("\n"), "error");
+    const submitButton = $("#create-case-from-pdf", form);
+    if (submitButton?.dataset.busy === "true") return;
+    const estimateFile = fileInput?.files?.[0];
+    if (!estimateFile) {
+      notifyUser("Importez d’abord un devis PDF.", "error");
+      fileInput?.focus();
       return;
     }
-    renderFormValidationErrors(form, validation, "case-form-errors");
-    if (!candidate.vehicle) {
-      candidate.vehicle = "Véhicule à compléter";
+
+    const signature = getQuickEstimateFileSignature(estimateFile);
+    if (!quickEstimateCreationDraft || quickEstimateCreationDraft.signature !== signature) {
+      notifyUser("Attendez la fin de l’analyse du devis PDF.", "error");
+      return;
     }
-    const duplicate = findDuplicateCase(candidate);
+
+    const overrides = getPdfEstimateFormOverrides(form);
+    const duplicateCandidate = {
+      clientName: overrides.clientName,
+      plate: overrides.plate,
+      vin: overrides.vin,
+    };
+    const duplicate = (duplicateCandidate.clientName || duplicateCandidate.plate || duplicateCandidate.vin)
+      ? findDuplicateCase(duplicateCandidate)
+      : null;
     if (duplicate) {
-      const isStrictDuplicate = duplicate.clientName === candidate.clientName && (duplicate.plate === candidate.plate || duplicate.vin === candidate.vin) && !duplicate.flags?.delivered;
-      if (isStrictDuplicate) {
-        notifyUser("Un dossier strictement identique et non livré existe déjà pour ce client et ce véhicule.", "error");
+      const confirmed = await showConfirmModal(`Un dossier similaire existe déjà (${escapeHtml(duplicate.clientName || duplicate.plate || duplicate.vin)}).<br><br>Créer quand même un dossier depuis ce devis PDF ?`);
+      if (!confirmed) {
+        activeCaseId = duplicate.id;
+        activeCaseDetailTab = "claims";
+        setActiveTab("dossiers");
+        render();
         return;
-      } else {
-        const confirmed = await showConfirmModal(`Un dossier similaire existe déjà pour ce véhicule ou ce client (${duplicate.clientName}). Vérifiez le dossier existant avant de continuer.<br><br>Créer quand même un nouveau dossier ?`);
-        if (!confirmed) {
-          activeCaseId = duplicate.id;
-          setActiveTab("dossiers");
-          render();
-          return;
-        }
       }
     }
 
-    const item = normalizeCase({
-      ...candidate,
-      clientName: candidate.clientName || "Client devis",
-      id: uid("case"),
-      createdAt: new Date().toISOString(),
-      durations: Object.fromEntries(DURATIONS.map(([key]) => [key, 0])),
-      history: [makeHistoryEntry("case.created", "Dossier créé", new Date().toISOString())],
-    });
-
-    const firstClaim = normalizeRepairClaim({
-      id: uid("claim"),
-      number: "OT-001",
-      title: orderTitle,
-      type: orderType,
-      status: isClientOnlyRepairClaim({ type: orderType }) ? "client_pending" : "expert_pending",
-      includeInPlanning: true,
-      expertApproved: isClientOnlyRepairClaim({ type: orderType }),
-      clientApproved: false,
-      orNumber: item.orNavNumber || "",
-    }, 0);
-    item.claims = [firstClaim];
-    addHistory(item, "claim.created", "Premier ordre de réparation créé", getClaimLabel(firstClaim));
-
-    state.cases.unshift(item);
-    activeCaseId = item.id;
-    activeCaseDetailTab = "infos";
-
-    if (hasEstimateFile) {
-      const quickStatus = $("#quick-estimate-import-status");
-      const validationError = validateEstimateImportFile(estimateFile);
-      if (validationError) {
-        notifyUser(validationError, "error");
-      } else {
-        try {
-          if (quickStatus) quickStatus.textContent = "Analyse du devis...";
-          const draft = quickEstimateCreationDraft?.signature === getQuickEstimateFileSignature(estimateFile)
-            ? quickEstimateCreationDraft
-            : await buildQuickEstimateCreationDraft(estimateFile, form);
-          const parsed = enrichParsedEstimateInfo(draft.parsed, draft.metadata);
-          const preview = prepareEstimateImportPreview(parsed, item);
-          preview.sourceFile = makeQuickEstimateSourceFile(estimateFile);
-          await applyEstimateImportToClaim(item, firstClaim, preview, { silent: true });
-          if (!candidate.clientName && parsed.info?.clientName) item.clientName = parsed.info.clientName;
-          addHistory(item, "claim.estimate.imported", "Devis importé à la création", `${formatLocalizedDecimal(preview.detectedHours)} h MO détectées.`);
-          if (quickStatus) quickStatus.textContent = "Devis importé dans le premier OR.";
-        } catch (error) {
-          console.error("Import devis à la création impossible", error);
-          if (quickStatus) quickStatus.textContent = "Import devis impossible.";
-          notifyUser(error.message || "Dossier créé, mais import devis impossible.", "error");
-        }
+    if (submitButton) {
+      submitButton.dataset.busy = "true";
+      submitButton.disabled = true;
+    }
+    try {
+      const result = await createCaseFromPdfEstimate(quickEstimateCreationDraft, estimateFile, overrides);
+      saveState();
+      activeCaseId = result.item.id;
+      activeCaseDetailTab = "planning";
+      resetPdfEstimateCreation(form);
+      setActiveTab("dossiers");
+      render();
+      notifyUser("Dossier créé depuis le devis PDF. Validez les travaux et préparez le planning.", "success");
+    } catch (error) {
+      console.error("Création dossier depuis devis PDF impossible", error);
+      if (status) status.textContent = "Création impossible. Corrigez l’aperçu ou réimportez le PDF.";
+      notifyUser(error.message || "Impossible de créer le dossier depuis ce devis PDF.", "error");
+    } finally {
+      if (submitButton) {
+        delete submitButton.dataset.busy;
+        if (quickEstimateCreationDraft) submitButton.disabled = false;
       }
     }
-
-    refreshCaseApprovalFlagsFromClaims(item);
-    saveState();
-    form.reset();
-    render();
-    notifyUser(hasEstimateFile ? "Dossier créé avec devis importé." : "Dossier créé avec premier ordre de réparation.", "success");
   });
 
-
-  form.elements?.orderType?.addEventListener("change", () => {
-    form.elements.orderType.dataset.userSelected = "true";
-  });
-
-  const quickEstimateInput = $("#quick-estimate-file-input", form);
-  quickEstimateInput?.addEventListener("change", async () => {
-    const file = quickEstimateInput.files?.[0];
-    const status = $("#quick-estimate-import-status");
+  fileInput?.addEventListener("change", async () => {
+    const file = fileInput.files?.[0];
     quickEstimateCreationDraft = null;
+    hidePdfEstimateCreationPreview();
+    clearPdfEstimateMetadataFields(form);
     if (!file) {
-      if (status) status.textContent = "Optionnel : le devis remplit client, véhicule, OR et main-d'œuvre.";
+      if (status) status.textContent = "Sélectionnez un PDF texte pour afficher l’aperçu avant création.";
+      return;
+    }
+    if (getFileExtension(file.name) !== "pdf" && file.type !== "application/pdf") {
+      const message = "Format non supporté. Importez un devis PDF.";
+      if (status) status.textContent = message;
+      notifyUser(message, "error");
       return;
     }
     const validationError = validateEstimateImportFile(file);
@@ -296,16 +249,16 @@ function bindCaseCreation() {
       notifyUser(validationError, "error");
       return;
     }
+    const requestedSignature = getQuickEstimateFileSignature(file);
     try {
       if (status) status.textContent = "Lecture du devis en cours...";
-      quickEstimateCreationDraft = await buildQuickEstimateCreationDraft(file, form);
-      applyQuickEstimateCreationDraftToForm(form, quickEstimateCreationDraft);
-      if (status) {
-        const info = quickEstimateCreationDraft.parsed.info || {};
-        const reference = cleanParsedEstimateNumber(info.estimateNumber) || info.orNumber || file.name;
-        status.textContent = `Devis lu : ${reference} - ${formatLocalizedDecimal(quickEstimateCreationDraft.parsed.detectedHours)} h MO détectées. Cliquez sur Créer dossier pour valider.`;
-      }
+      const draft = await buildQuickEstimateCreationDraft(file);
+      if (getQuickEstimateFileSignature(fileInput.files?.[0]) !== requestedSignature) return;
+      quickEstimateCreationDraft = draft;
+      renderPdfEstimateCreationPreview(form, quickEstimateCreationDraft, file);
+      if (status) status.textContent = "Devis analysé. Vérifiez l’aperçu avant de créer le dossier.";
     } catch (error) {
+      if (getQuickEstimateFileSignature(fileInput.files?.[0]) !== requestedSignature) return;
       console.error("Pré-import devis création impossible", error);
       quickEstimateCreationDraft = null;
       if (status) status.textContent = "Import devis impossible.";
@@ -313,20 +266,211 @@ function bindCaseCreation() {
     }
   });
 
-  $("#new-case-shortcut")?.addEventListener("click", () => {
-    if (typeof startReceptionCaseCreation === "function") startReceptionCaseCreation();
-    else {
-      setActiveTab("dossiers");
-      form.reset();
-      form.elements.clientName.focus();
-      renderQuickVinResults();
-    }
+  $("#open-pdf-import-from-dossiers")?.addEventListener("click", () => {
+    startReceptionCaseCreation();
+  });
+}
+
+function focusPdfEstimateImport() {
+  window.setTimeout(() => $("#quick-estimate-file-input")?.focus(), 40);
+}
+
+function startReceptionCaseCreation() {
+  resetPdfEstimateCreation();
+  setActiveTab("reception-workspace");
+  focusPdfEstimateImport();
+}
+
+function hidePdfEstimateCreationPreview() {
+  const preview = $("#pdf-estimate-creation-preview");
+  if (preview) preview.hidden = true;
+  const button = $("#create-case-from-pdf");
+  if (button) button.disabled = true;
+}
+
+function resetPdfEstimateCreation(form = $("#case-form")) {
+  quickEstimateCreationDraft = null;
+  form?.reset();
+  hidePdfEstimateCreationPreview();
+  const status = $("#quick-estimate-import-status");
+  if (status) status.textContent = "Sélectionnez un PDF texte pour afficher l’aperçu avant création.";
+}
+
+function clearPdfEstimateMetadataFields(form) {
+  ["clientName", "phone", "vehicle", "plate", "vin", "mileage", "orNavNumber", "estimateNumber"].forEach((name) => {
+    if (form?.elements?.[name]) form.elements[name].value = "";
+  });
+}
+
+function getPdfEstimateFormOverrides(form) {
+  const data = new FormData(form);
+  return {
+    clientName: normalizeTextInputValue(data.get("clientName")),
+    phone: normalizeTextInputValue(data.get("phone")),
+    vehicle: normalizeTextInputValue(data.get("vehicle")),
+    plate: normalizeIdentifierValue(data.get("plate")),
+    vin: normalizeIdentifierValue(data.get("vin")),
+    mileage: normalizeIdentifierValue(data.get("mileage")),
+    orNavNumber: normalizeIdentifierValue(data.get("orNavNumber")),
+    estimateNumber: normalizeIdentifierValue(data.get("estimateNumber")),
+  };
+}
+
+function getPdfTaskRequiredRole(phase) {
+  const roles = {
+    oilService: "mecanicien",
+    mechanical: "mecanicien",
+    electrical: "electricien",
+    body: "tolier",
+    reassembly: "tolier",
+    prep: "peintre",
+    paint: "peintre",
+    finish: "peintre",
+    quality: "controle",
+    finalCheck: "controle",
+  };
+  return roles[phase] || "tolier";
+}
+
+function getPdfTaskRoleLabel(phase) {
+  const role = getPdfTaskRequiredRole(phase);
+  return ROLE_LABELS?.[role] || ({ mecanicien: "Mécanicien", electricien: "Électricien", tolier: "Tôlier", peintre: "Peintre", controle: "Chef Atelier / contrôle final" }[role] || role);
+}
+
+function getPdfEstimateTaskRows(parsed) {
+  return (parsed?.distributedLines || []).map((line) => ({
+    id: line.id || uid("estimate-line"),
+    phase: line.phase || "body",
+    operation: line.operation || "Travaux atelier à préciser",
+    laborHours: roundPlanningHours(line.laborHours || 0),
+    requiredRole: getPdfTaskRequiredRole(line.phase),
+    roleLabel: getPdfTaskRoleLabel(line.phase),
+    source: "pdf_estimate",
+    status: "ready_for_validation",
+  }));
+}
+
+function renderPdfEstimateCreationPreview(form, draft, file) {
+  const preview = $("#pdf-estimate-creation-preview");
+  if (!preview || !draft?.parsed) return;
+  applyQuickEstimateCreationDraftToForm(form, draft);
+  const info = draft.parsed.info || {};
+  const taskRows = getPdfEstimateTaskRows(draft.parsed);
+  const setValue = (selector, value) => {
+    const target = $(selector);
+    if (target) target.textContent = value;
+  };
+  setValue("#pdf-estimate-file-name", file?.name || draft.parsed.fileName || "devis.pdf");
+  setValue("#pdf-estimate-labor-count", String(draft.hasDetailedLabor ? draft.parsed.laborLines.length : 0));
+  setValue("#pdf-estimate-total-hours", `${formatLocalizedDecimal(draft.parsed.detectedHours || 0)} h`);
+  setValue("#pdf-estimate-task-count", String(taskRows.length));
+
+  const warning = $("#pdf-estimate-import-warning");
+  if (warning) {
+    warning.hidden = draft.hasDetailedLabor;
+    warning.textContent = draft.hasDetailedLabor ? "" : "Aucune main-d’œuvre détaillée détectée dans le devis.";
+  }
+
+  const list = $("#pdf-estimate-labor-preview");
+  if (list) {
+    list.innerHTML = `<div class="pdf-import-task-list">${taskRows.map((task) => `
+      <article class="pdf-import-task-row">
+        <div><strong>${escapeHtml(task.operation)}</strong><small>Source PDF · Prêt pour validation</small></div>
+        <div><span>${escapeHtml(getDurationLabel(task.phase) || task.phase)}</span><strong>${escapeHtml(task.roleLabel)}</strong></div>
+        <b>${formatLocalizedDecimal(task.laborHours)} h</b>
+      </article>
+    `).join("")}</div>`;
+  }
+
+  const estimateNumber = cleanParsedEstimateNumber(info.estimateNumber);
+  if (form.elements?.estimateNumber && !form.elements.estimateNumber.value) form.elements.estimateNumber.value = estimateNumber || "";
+  preview.hidden = false;
+  const button = $("#create-case-from-pdf");
+  if (button) button.disabled = false;
+}
+
+async function createCaseFromPdfEstimate(draft, estimateFile = null, overrides = {}) {
+  if (!draft?.parsed) throw new Error("Aucun aperçu PDF valide n’est disponible.");
+  const createGuard = guardCaseCreate();
+  if (!createGuard.ok) throw new Error(createGuard.message);
+
+  const parsed = enrichParsedEstimateInfo(draft.parsed, draft.metadata);
+  const info = parsed.info || {};
+  const overrideOrDetected = (field, detectedField = field) => Object.prototype.hasOwnProperty.call(overrides, field)
+    ? overrides[field]
+    : (info[detectedField] || "");
+  const importedAt = new Date().toISOString();
+  const orderType = inferOrderTypeFromEstimate(parsed) || "client";
+  const estimateNumber = cleanParsedEstimateNumber(overrideOrDetected("estimateNumber", "estimateNumber"));
+  const item = normalizeCase({
+    id: uid("case"),
+    clientName: overrideOrDetected("clientName", "clientName") || "À compléter",
+    phone: overrideOrDetected("phone", "phone"),
+    vehicle: overrideOrDetected("vehicle", "vehicle") || "À compléter",
+    plate: overrideOrDetected("plate", "plate"),
+    vin: overrideOrDetected("vin", "vin"),
+    mileage: overrideOrDetected("mileage", "mileage"),
+    orNavNumber: overrideOrDetected("orNavNumber", "orNumber"),
+    source: "pdf_estimate",
+    importedAt,
+    pdfImportStatus: "chief_validation_pending",
+    pdfEstimateFileName: estimateFile?.name || parsed.fileName || "devis.pdf",
+    pdfImportWarning: draft.hasDetailedLabor ? "" : "Aucune main-d’œuvre détaillée détectée dans le devis.",
+    createdAt: importedAt,
+    durations: Object.fromEntries(DURATIONS.map(([key]) => [key, 0])),
+    history: [makeHistoryEntry("case.created.pdf", "Dossier créé depuis devis PDF", importedAt, "Import automatique atelier")],
   });
 
-  $("#open-reception-workspace-from-dossiers")?.addEventListener("click", () => {
-    if (typeof startReceptionCaseCreation === "function") startReceptionCaseCreation();
-    else setActiveTab("reception-workspace");
-  });
+  const firstClaim = normalizeRepairClaim({
+    id: uid("claim"),
+    number: "OT-001",
+    title: draft.hasDetailedLabor ? inferOrderTitleFromEstimate(parsed) : "Travaux atelier à préciser",
+    type: orderType,
+    status: "approved",
+    includeInPlanning: true,
+    estimateNumber,
+    orNumber: item.orNavNumber || "",
+  }, 0);
+  item.claims = [firstClaim];
+
+  const importGuard = guardEstimateImport(item, { silent: true });
+  if (!importGuard.ok) throw new Error(importGuard.message);
+  const preview = prepareEstimateImportPreview(parsed, item);
+  if (estimateFile?.slice) preview.sourceFile = makeQuickEstimateSourceFile(estimateFile);
+  await applyEstimateImportToClaim(item, firstClaim, preview, { silent: true });
+
+  const appliedClaim = item.claims.find((claim) => claim.id === firstClaim.id) || item.claims[0];
+  appliedClaim.status = "approved";
+  appliedClaim.estimateNumber = estimateNumber;
+  const taskRows = getPdfEstimateTaskRows(parsed);
+  appliedClaim.estimate.lines = (appliedClaim.estimate.lines || []).map((line) => ({
+    ...line,
+    requiredRole: getPdfTaskRequiredRole(line.phase),
+    source: "pdf_estimate",
+    status: "ready_for_validation",
+  }));
+  appliedClaim.estimate.originalLines = (appliedClaim.estimate.originalLines || []).map((line) => ({
+    ...line,
+    requiredRole: getPdfTaskRequiredRole(line.allocations?.[0]?.phase || line.phase || "body"),
+    source: "pdf_estimate",
+    status: "ready_for_validation",
+    allocations: (line.allocations || []).map((allocation) => ({
+      ...allocation,
+      requiredRole: getPdfTaskRequiredRole(allocation.phase),
+      source: "pdf_estimate",
+      status: "ready_for_validation",
+    })),
+  }));
+  item.pdfImportTaskCount = taskRows.length;
+  addHistory(item, "claim.estimate.imported", "Devis PDF importé automatiquement", `${formatLocalizedDecimal(preview.detectedHours)} h MO · ${item.pdfImportTaskCount} tâche(s) prête(s) pour validation.`);
+
+  state.cases.unshift(item);
+  let planningPreparation = null;
+  if (draft.hasDetailedLabor && hasVehicleIdentity(item)) {
+    planningPreparation = generateAppointmentOptions(item);
+    generatedProposals[item.id] = planningPreparation;
+  }
+  return { item, claim: appliedClaim, preview, planningPreparation };
 }
 
 
@@ -373,24 +517,52 @@ function populateCaseStatusFilters() {
   });
 }
 
-async function buildQuickEstimateCreationDraft(file, form) {
+async function buildQuickEstimateCreationDraft(file) {
   const extracted = await extractEstimateTextFromFile(file);
-  const claimType = form?.elements?.orderType?.value || "assurance";
   const parsedBase = parseEstimateText(extracted.text, {
     fileName: file.name,
     sourceType: extracted.sourceType,
     rows: extracted.rows,
     lines: extracted.lines,
-    claimType,
+    claimType: "assurance",
   });
-  if (!parsedBase.laborLines.length) {
-    throw new Error("Aucune ligne de main-d'œuvre détectée dans le devis importé.");
+  const hasDetailedLabor = parsedBase.laborLines.length > 0;
+  if (!hasDetailedLabor) {
+    const fallbackOperation = "Travaux atelier à préciser";
+    parsedBase.laborLines.push({
+      type: "labor",
+      text: fallbackOperation,
+      operation: fallbackOperation,
+      hours: 0,
+      source: "pdf_estimate",
+      status: "ready_for_validation",
+      distributions: [{
+        phase: "body",
+        operation: fallbackOperation,
+        laborHours: 0,
+        requiredRole: "tolier",
+        source: "pdf_estimate",
+        status: "ready_for_validation",
+      }],
+    });
+    parsedBase.distributedLines.push({
+      id: uid("estimate-line"),
+      phase: "body",
+      operation: fallbackOperation,
+      laborHours: 0,
+      requiredRole: "tolier",
+      source: "pdf_estimate",
+      status: "ready_for_validation",
+    });
   }
   const metadata = inferEstimateCreationMetadata(parsedBase, extracted);
   return {
     signature: getQuickEstimateFileSignature(file),
     parsed: enrichParsedEstimateInfo(parsedBase, metadata),
     metadata,
+    extracted,
+    hasDetailedLabor,
+    warning: hasDetailedLabor ? "" : "Aucune main-d’œuvre détaillée détectée dans le devis.",
   };
 }
 
@@ -406,7 +578,6 @@ function cleanupEstimateVehicleDescription(value) {
   const text = String(value || "").replace(/\s+/g, " ").trim();
   if (!text) return "";
   return text
-    .replace(/^(DFM|DONGFENG|CHERY|HYUNDAI|KIA|TOYOTA|PEUGEOT|RENAULT|NISSAN|VOLKSWAGEN|MG|HAVAL|FIAT|CITROEN|MITSUBISHI|ISUZU)\s+/i, "")
     .replace(/\s+\d{1,3}(?:\s?\d{3})?\s*$/i, "")
     .trim();
 }
@@ -435,6 +606,7 @@ function applyQuickEstimateCreationDraftToForm(form, draft) {
   setWhenEmpty("mileage", info.mileage);
   setWhenEmpty("vin", info.vin);
   setWhenEmpty("orNavNumber", info.orNumber);
+  setWhenEmpty("estimateNumber", cleanParsedEstimateNumber(info.estimateNumber));
   const orderTypeField = form.elements?.orderType;
   if (orderTypeField && (!orderTypeField.dataset.userSelected || orderTypeField.value === "assurance")) {
     const inferredType = inferOrderTypeFromEstimate(draft.parsed);
@@ -832,9 +1004,16 @@ function registerServiceWorker() {
   window.addEventListener("load", async () => {
     try {
       const registration = await navigator.serviceWorker.register("sw.js?v=23.2.7", { updateViaCache: "none" });
-      registration.update?.();
+      const refreshRegistration = async () => {
+        try {
+          await registration.update?.();
+        } catch (error) {
+          console.warn("Mise à jour du service worker impossible", error);
+        }
+      };
+      await refreshRegistration();
       if (registration.waiting) showUpdateAvailable(registration);
-      window.setInterval(() => registration.update?.(), 10 * 60 * 1000);
+      window.setInterval(refreshRegistration, 10 * 60 * 1000);
       setupServiceWorkerUpdates(registration);
     } catch (error) {
       console.warn("Service worker non enregistré", error);
@@ -1347,8 +1526,10 @@ function updateLoginPinRequirement() {
 
   if (pinInput) {
     if (pinRequired) {
-      pinInput.required = true;
-      pinInput.placeholder = "PIN requis pour ce compte";
+      pinInput.required = hasPin;
+      pinInput.placeholder = hasPin
+        ? "PIN requis pour ce compte"
+        : "Un PIN sera créé à l'étape suivante";
       if (pinContainer) {
         pinContainer.style.opacity = "1";
         pinContainer.style.pointerEvents = "auto";

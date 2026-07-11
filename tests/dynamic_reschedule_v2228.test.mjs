@@ -51,6 +51,7 @@ const context = {
   localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
   sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} },
   document: {
+    getElementById: () => stubElement(),
     querySelector: () => stubElement(),
     querySelectorAll: () => [],
     addEventListener() {},

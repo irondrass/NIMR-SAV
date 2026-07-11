@@ -1,4 +1,4 @@
-const CACHE_NAME = "nimr-sav-v23.2.7-simplified-startup";
+const CACHE_NAME = "nimr-sav-v23.2.7-pdf-first-intake";
 const ASSETS = [
   "./",
   "./index.html",

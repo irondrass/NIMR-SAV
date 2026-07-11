@@ -306,6 +306,8 @@ function buildRepairStatus(item) {
   if (flags.workCompleted) return "work_completed";
   if (flags.workStarted) return "in_progress";
   if (flags.received) return "received";
+  if (item.source === "pdf_estimate" && item.pdfImportStatus === "chief_validation_pending") return "pdf_chief_validation_pending";
+  if (item.source === "pdf_estimate" && item.pdfImportStatus === "ready_for_planning") return "pdf_ready_for_planning";
   if (flags.clientApproved) return "client_approved";
   if (flags.expertApproved) return "expert_approved";
   if (item.appointmentStatus === "scheduled") return "appointment_scheduled";
@@ -352,6 +354,10 @@ function buildRepairOrderNotesForSync(item) {
     roleNotes.technique ? `Note technique: ${roleNotes.technique}` : "",
     roleNotes.qualite ? `Note qualité: ${roleNotes.qualite}` : "",
     roleNotes.direction ? `Note direction: ${roleNotes.direction}` : "",
+    item.source === "pdf_estimate" ? "Source dossier: pdf_estimate" : "",
+    item.importedAt ? `Date import PDF: ${item.importedAt}` : "",
+    item.pdfImportStatus ? `État import PDF: ${item.pdfImportStatus}` : "",
+    item.pdfValidatedAt ? `Validation Chef Atelier PDF: ${item.pdfValidatedAt}${item.pdfValidatedBy ? ` par ${item.pdfValidatedBy}` : ""}` : "",
   ].filter(Boolean).join("\n");
 }
 
@@ -1088,6 +1094,9 @@ const CRITICAL_CASE_SYNC_FIELDS = [
   "expertName", "expertPhone", "expertEmail", "damageNotes", "arrivalNotes", "receptionNotes",
   "appointment", "appointmentStatus", "partsStatus",
   "blockerReason", "blockerDetails", "orNavNumber", "planningColor",
+  "durations", "stepServiceTypes", "stepPreferredResources", "stepAssignmentLocks",
+  "source", "importedAt", "pdfImportStatus", "pdfValidatedAt", "pdfValidatedBy",
+  "pdfEstimateFileName", "pdfImportWarning", "pdfImportTaskCount",
   "closedAt", "archivedAt"
 ];
 

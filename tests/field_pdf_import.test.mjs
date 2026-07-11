@@ -213,9 +213,9 @@ function browserFieldPdfImport(fileName) {
         return text;
       };
 
-      let extracted;
+      let draft;
       try {
-        extracted = await extractEstimateTextFromFile(file);
+        draft = await buildQuickEstimateCreationDraft(file);
       } finally {
         extractPdfTextWithPdfJs = originalPdfJsExtractor;
       }
@@ -225,48 +225,34 @@ function browserFieldPdfImport(fileName) {
         error.name = "PdfJsExtractionError";
         throw error;
       }
+      const extracted = draft.extracted;
       metrics.textExtracted = Boolean(String(extracted?.text || "").trim());
 
       stage = "analyse";
-      const parsed = parseEstimateText(extracted.text, {
-        fileName,
-        sourceType: extracted.sourceType,
-        rows: extracted.rows,
-        lines: extracted.lines,
-        claimType: "assurance",
-      });
-      metrics.laborLineCount = parsed.laborLines.length;
+      const parsed = draft.parsed;
+      metrics.laborLineCount = draft.hasDetailedLabor ? parsed.laborLines.length : 0;
       metrics.totalDurationHours = Number(parsed.detectedHours || 0);
 
       state = normalizeState({
         users: [{ id: "chief-field-pdf", name: "Chef Atelier terrain", role: "chef_atelier", active: true }],
         currentUserId: "chief-field-pdf",
         bookings: [],
-        cases: [{
-          id: "case-field-pdf",
-          clientName: "Client terrain PDF",
-          plate: "3527TU259",
-          claims: [{
-            id: "claim-field-pdf",
-            type: "assurance",
-            includeInPlanning: true,
-          }],
-        }],
+        cases: [],
       });
-      const item = state.cases[0];
-      const preview = prepareEstimateImportPreview(parsed, item);
+      const created = await createCaseFromPdfEstimate(draft, file, { plate: parsed.info?.plate || "3527TU259" });
+      const item = created.item;
 
       stage = "validation-chef-atelier";
-      metrics.chiefValidationPossible = Boolean(guardEstimateImport(item, { silent: true }).ok);
+      metrics.chiefValidationPossible = Boolean(
+        item.pdfImportStatus === "chief_validation_pending"
+        && guardAction("planning.edit", { item }, { notify: false }).ok
+      );
       if (!metrics.chiefValidationPossible) {
         throw new Error("Le rôle Chef Atelier ne peut pas valider l'import du devis.");
       }
-      await applyEstimateImportToClaim(item, item.claims[0], preview, { silent: true });
 
       stage = "planning";
-      const planningIssues = getBusinessRuleIssues(item, "appointment");
-      if (planningIssues.length) throw new Error(planningIssues.join(" "));
-      const proposal = generateSingleProposal(item, new Date());
+      const proposal = created.planningPreparation?.proposal || generateSingleProposal(item, new Date());
       metrics.tasksGenerated = Array.isArray(proposal?.steps) ? proposal.steps.length : 0;
       metrics.planningPossible = metrics.tasksGenerated > 0;
 
@@ -278,7 +264,10 @@ function browserFieldPdfImport(fileName) {
       if (metrics.totalDurationHours <= 0) failures.push("aucune durée atelier détectée");
       if (!metrics.tasksGenerated) failures.push("aucune tâche de planning générée");
       if (!metrics.planningPossible) failures.push("planning impossible");
-      if (getNextWorkflowAction(item) !== "appointment") failures.push("le flux ne peut pas passer au RDV");
+      if (item.source !== "pdf_estimate") failures.push("la source du dossier n'est pas pdf_estimate");
+      if (!item.importedAt) failures.push("la date d'import PDF est absente");
+      if (getCaseStatus(item) !== "pdfChiefValidation") failures.push("le statut Chef Atelier n'est pas prêt");
+      if (getCaseNextAction(item).code !== "validate_pdf_work") failures.push("la prochaine action Chef Atelier est absente");
       if (failures.length) throw new Error(failures.join("; "));
 
       return { ok: true, metrics };
@@ -307,6 +296,8 @@ async function waitForApplication(send, sessionId) {
     && typeof extractEstimateTextFromFile === "function"
     && typeof extractPdfTextWithPdfJs === "function"
     && typeof parseEstimateText === "function"
+    && typeof buildQuickEstimateCreationDraft === "function"
+    && typeof createCaseFromPdfEstimate === "function"
     && typeof generateSingleProposal === "function"
   )`;
   for (let attempt = 0; attempt < 80; attempt += 1) {

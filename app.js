@@ -8,6 +8,9 @@ async function initApp() {
     if (typeof loadDurableOutboxOperations === "function") {
       await loadDurableOutboxOperations().catch(() => []);
     }
+    if (typeof initSyncV2ShadowMode === "function") {
+      await initSyncV2ShadowMode(() => state);
+    }
     configurePdfWorker();
     bindMainNavigation();
     bindCaseList();

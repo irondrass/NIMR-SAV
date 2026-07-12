@@ -58,7 +58,7 @@ async function handleEstimateImportFile(event, item, root) {
     notifyUser("Devis analysé. Vérifiez la répartition avant application.");
     renderEstimateImportPreview(root, item);
   } catch (error) {
-    console.error("Import devis impossible", error);
+    console.warn("Import devis impossible", error?.name || "Error", String(error?.message || "Erreur inconnue").replace(/\s+/g, " ").slice(0, 300));
     delete estimateImportPreviews[item.id];
     if (status) status.textContent = "Import devis impossible.";
     renderEstimateImportPreview(root, item);
@@ -111,7 +111,7 @@ async function handleClaimEstimateImportFile(event, item, claimId, root) {
     notifyUser(`Devis importé dans ${claim.number || claim.title}. Planning global recalculé.`, "success");
     renderCaseDetail();
   } catch (error) {
-    console.error("Import devis ordre impossible", error);
+    console.warn("Import devis ordre impossible", error?.name || "Error", String(error?.message || "Erreur inconnue").replace(/\s+/g, " ").slice(0, 300));
     notifyUser(error.message || "Import devis ordre impossible.", "error");
   }
 }
@@ -158,9 +158,10 @@ function parseEstimateText(text, options = {}) {
   const allocations = Object.fromEntries(ESTIMATE_PLANNING_KEYS.map((key) => [key, 0]));
   let detectedHours = 0;
 
-  sourceLines.forEach((line) => {
+  sourceLines.forEach((line, sourceIndex) => {
     const result = classifyLaborLine(line, options);
     if (result?.type === "labor") {
+      result.id = result.id || `estimate-source-line-${sourceIndex + 1}`;
       laborLines.push(result);
       detectedHours += result.hours;
       result.distributions.forEach((distribution) => {
@@ -170,6 +171,9 @@ function parseEstimateText(text, options = {}) {
           phase: distribution.phase,
           operation: distribution.operation,
           laborHours: distribution.laborHours,
+          sourceLineId: result.id,
+          sourceOperation: result.operation,
+          sourceLaborHours: result.hours,
         });
       });
     } else {
@@ -228,7 +232,7 @@ function normalizeEstimatePreviewDurations(durations, item) {
     normalized[key] = roundPlanningHours(durations?.[key] || 0);
   });
   normalized.finish = roundPlanningHours(Number(normalized.paint || 0) * 0.5);
-  normalized.quality = roundPlanningHours(Number(durations?.quality ?? 0.25));
+  normalized.quality = roundPlanningHours(Number(durations?.quality ?? item?.durations?.quality ?? DEFAULT_DURATIONS.quality ?? 0));
   return normalized;
 }
 
@@ -574,19 +578,42 @@ function buildEstimatePartLines(preview) {
 
 function buildOriginalEstimateLines(preview) {
   return (preview.laborLines || []).map((line) => ({
-    id: uid("estimate-original-line"),
+    id: line.id || uid("estimate-original-line"),
     operation: line.operation || line.text || "Opération devis",
     laborHours: roundPlanningHours(line.hours || 0),
     rawText: line.text || line.operation || "",
+    source: preview.sourceType === "pdf" ? "pdf_estimate" : "",
     allocations: (line.distributions || []).map((distribution) => ({
       phase: distribution.phase,
       operation: distribution.operation || line.operation || "",
       laborHours: roundPlanningHours(distribution.laborHours || 0),
+      sourceLineId: line.id || "",
+      source: preview.sourceType === "pdf" ? "pdf_estimate" : "",
     })),
   }));
 }
 
 function buildAppliedEstimateLines(preview) {
+  if (preview.sourceType === "pdf") {
+    const byPhase = new Map();
+    (preview.distributedLines || []).forEach((line) => {
+      const phase = line.phase || "body";
+      const current = byPhase.get(phase) || {
+        id: `pdf-task-${phase}`,
+        phase,
+        operation: `Import devis - ${getDurationLabel(phase) || phase}`,
+        laborHours: 0,
+        sourceLineIds: [],
+        sourceOperations: [],
+        source: "pdf_estimate",
+      };
+      current.laborHours = roundPlanningHours(current.laborHours + Number(line.laborHours || 0));
+      if (line.sourceLineId && !current.sourceLineIds.includes(line.sourceLineId)) current.sourceLineIds.push(line.sourceLineId);
+      if (line.sourceOperation && !current.sourceOperations.includes(line.sourceOperation)) current.sourceOperations.push(line.sourceOperation);
+      byPhase.set(phase, current);
+    });
+    return [...byPhase.values()];
+  }
   const currentTotals = Object.fromEntries(ESTIMATE_ALLOWED_KEYS.map((key) => [key, 0]));
   preview.distributedLines.forEach((line) => {
     if (line.phase in currentTotals) currentTotals[line.phase] = roundPlanningHours(currentTotals[line.phase] + Number(line.laborHours || 0));
@@ -981,7 +1008,7 @@ async function extractPdfTextWithPdfJs(buffer) {
   if (!window.pdfjsLib?.getDocument) return "";
   try {
     window.pdfjsLib.GlobalWorkerOptions = window.pdfjsLib.GlobalWorkerOptions || {};
-    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js";
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.2.8-full-audit";
     const pdf = await window.pdfjsLib.getDocument({ data: buffer }).promise;
     const pages = [];
     for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {

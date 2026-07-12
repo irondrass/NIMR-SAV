@@ -8,8 +8,14 @@ import { spawn } from "node:child_process";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const pdfArgument = process.argv[2] || process.env.NIMR_FIELD_PDF || "";
+const runArchiveE2e = process.env.NIMR_PDF_TO_ARCHIVE === "1";
 const MAX_PDF_SIZE = 10 * 1024 * 1024;
 const CDP_TIMEOUT_MS = 15_000;
+const FIELD_EXPECTATIONS = {
+  laborLineCount: Number(process.env.NIMR_EXPECTED_PDF_LABOR_LINES || 10),
+  tasksGenerated: Number(process.env.NIMR_EXPECTED_PDF_TASKS || 4),
+  totalDurationHours: Number(process.env.NIMR_EXPECTED_PDF_HOURS || 35.8),
+};
 
 const chromePath = process.env.CHROME_PATH || [
   "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
@@ -36,6 +42,10 @@ function emptySummary() {
     laborLineCount: 0,
     totalDurationHours: 0,
     tasksGenerated: 0,
+    taskDurationHours: 0,
+    lostLaborLines: 0,
+    durationConserved: false,
+    sourceTraceability: false,
     chiefValidationPossible: false,
     planningPossible: false,
   };
@@ -173,15 +183,20 @@ function createCdpClient(socket) {
   };
 }
 
-function browserFieldPdfImport(fileName) {
+function browserFieldPdfImport(fileName, archiveE2e = false, expectations = {}) {
   const metrics = {
     pdfRead: true,
     textExtracted: false,
     laborLineCount: 0,
     totalDurationHours: 0,
     tasksGenerated: 0,
+    taskDurationHours: 0,
+    lostLaborLines: 0,
+    durationConserved: false,
+    sourceTraceability: false,
     chiefValidationPossible: false,
     planningPossible: false,
+    archiveCompleted: false,
   };
   let stage = "initialisation";
 
@@ -253,7 +268,27 @@ function browserFieldPdfImport(fileName) {
 
       stage = "planning";
       const proposal = created.planningPreparation?.proposal || generateSingleProposal(item, new Date());
-      metrics.tasksGenerated = Array.isArray(proposal?.steps) ? proposal.steps.length : 0;
+      const sourceLines = (item.claims || []).flatMap((claim) => claim?.estimate?.originalLines || []);
+      const planningTasks = Array.isArray(item.planningTasks) ? item.planningTasks : [];
+      const sourceIds = new Set(sourceLines.map((line) => String(line.id || "")).filter(Boolean));
+      const referencedIds = new Set(planningTasks.flatMap((task) => task.sourceLineIds || []).map(String).filter(Boolean));
+      metrics.tasksGenerated = planningTasks.length;
+      metrics.taskDurationHours = Number((planningTasks.reduce((sum, task) => (
+        sum + Number(task.laborHours || Number(task.durationMinutes || 0) / 60)
+      ), 0)).toFixed(2));
+      metrics.lostLaborLines = [...sourceIds].filter((id) => !referencedIds.has(id)).length;
+      metrics.durationConserved = Math.abs(metrics.taskDurationHours - metrics.totalDurationHours) < 0.01;
+      metrics.sourceTraceability = Boolean(
+        sourceIds.size === metrics.laborLineCount
+        && metrics.lostLaborLines === 0
+        && planningTasks.every((task) => Array.isArray(task.sourceLineIds) && task.sourceLineIds.length > 0)
+        && [...referencedIds].every((id) => sourceIds.has(id))
+        && (proposal?.steps || []).every((step) => (
+          Array.isArray(step.sourceLineIds)
+          && step.sourceLineIds.length > 0
+          && step.sourceLineIds.every((id) => sourceIds.has(String(id)))
+        ))
+      );
       metrics.planningPossible = metrics.tasksGenerated > 0;
 
       stage = "validation";
@@ -263,12 +298,73 @@ function browserFieldPdfImport(fileName) {
       if (metrics.laborLineCount <= 0) failures.push("aucune ligne de main-d'œuvre détectée");
       if (metrics.totalDurationHours <= 0) failures.push("aucune durée atelier détectée");
       if (!metrics.tasksGenerated) failures.push("aucune tâche de planning générée");
+      if (metrics.laborLineCount !== Number(expectations.laborLineCount)) failures.push(`${metrics.laborLineCount} lignes MO détectées au lieu de ${expectations.laborLineCount}`);
+      if (metrics.tasksGenerated !== Number(expectations.tasksGenerated)) failures.push(`${metrics.tasksGenerated} tâches agrégées au lieu de ${expectations.tasksGenerated}`);
+      if (Math.abs(metrics.totalDurationHours - Number(expectations.totalDurationHours)) >= 0.01) failures.push(`${metrics.totalDurationHours} h source au lieu de ${expectations.totalDurationHours} h`);
+      if (!metrics.durationConserved) failures.push(`${metrics.totalDurationHours} h source != ${metrics.taskDurationHours} h tâches`);
+      if (metrics.lostLaborLines !== 0) failures.push(`${metrics.lostLaborLines} ligne(s) MO perdue(s)`);
+      if (!metrics.sourceTraceability) failures.push("traçabilité lignes source vers tâches incomplète");
       if (!metrics.planningPossible) failures.push("planning impossible");
       if (item.source !== "pdf_estimate") failures.push("la source du dossier n'est pas pdf_estimate");
       if (!item.importedAt) failures.push("la date d'import PDF est absente");
-      if (getCaseStatus(item) !== "pdfChiefValidation") failures.push("le statut Chef Atelier n'est pas prêt");
+      if (getCaseStatus(item) !== "chief_validation") failures.push("le statut Chef Atelier n'est pas prêt");
       if (getCaseNextAction(item).code !== "validate_pdf_work") failures.push("la prochaine action Chef Atelier est absente");
       if (failures.length) throw new Error(failures.join("; "));
+
+      if (archiveE2e) {
+        stage = "validation-chef-atelier";
+        item.pdfImportStatus = "ready_for_planning";
+        item.pdfValidatedAt = new Date().toISOString();
+        item.pdfValidatedBy = getCurrentActor().userName || "Chef Atelier";
+        const markValidated = (line) => ({
+          ...line,
+          status: "validated",
+          ...(Array.isArray(line.allocations)
+            ? { allocations: line.allocations.map((allocation) => ({ ...allocation, status: "validated" })) }
+            : {}),
+        });
+        (item.claims || []).forEach((claim) => {
+          claim.status = "approved";
+          if (!claim.estimate) return;
+          claim.estimate.lines = (claim.estimate.lines || []).map(markValidated);
+          claim.estimate.originalLines = (claim.estimate.originalLines || []).map(markValidated);
+        });
+
+        stage = "acceptation-planning";
+        const acceptedProposal = generateSingleProposal(item, new Date());
+        acceptProposal(item, acceptedProposal);
+        if (!item.appointment || !state.bookings.some((booking) => booking.caseId === item.id)) {
+          throw new Error("Le planning PDF validé n'a pas été réservé.");
+        }
+
+        stage = "production-atelier";
+        for (const action of ["received", "workStarted"]) {
+          const actionResult = applyWorkflowAction(item, action);
+          if (!actionResult.ok) throw new Error(actionResult.message || `Action ${action} refusée.`);
+        }
+        const caseBookings = state.bookings.filter((booking) => booking.caseId === item.id);
+        const completionAt = new Date(Math.max(...caseBookings.map((booking) => new Date(booking.end).getTime())));
+        completeCaseWorkBookingsNow(item, completionAt, {
+          completedBy: state.currentUserId,
+          actorLabel: "Chef Atelier E2E",
+          keepEmptyBookings: true,
+        });
+
+        stage = "cloture-atelier";
+        const closed = applyWorkflowAction(item, "close");
+        if (!closed.ok || getCaseStatus(item) !== "closed") {
+          throw new Error(closed.message || "Le dossier PDF n'a pas été clôturé côté atelier.");
+        }
+        stage = "archivage";
+        const archived = applyWorkflowAction(item, "archive");
+        metrics.archiveCompleted = Boolean(
+          archived.ok
+          && item.archivedAt
+          && isCaseReadonlyArchive(item)
+          && getCaseNextAction(item).code === "done"
+        );
+        if (!metrics.archiveCompleted) throw new Error(archived.message || "Le dossier PDF n'a pas été archivé en lecture seule.");
+      }
 
       return { ok: true, metrics };
     } catch (error) {
@@ -344,7 +440,7 @@ async function runInBrowser(pdfBytes, fileName) {
     }, sessionId);
     await waitForApplication(send, sessionId);
 
-    const expression = `(${browserFieldPdfImport.toString()})(${JSON.stringify(fileName)})`;
+    const expression = `(${browserFieldPdfImport.toString()})(${JSON.stringify(fileName)}, ${JSON.stringify(runArchiveE2e)}, ${JSON.stringify(FIELD_EXPECTATIONS)})`;
     return await evaluate(send, sessionId, expression);
   } finally {
     if (send && targetId) await send("Target.closeTarget", { targetId }).catch(() => null);
@@ -378,9 +474,13 @@ function displayNumber(value) {
 function printSummary(summary) {
   console.log(`PDF lu : ${summary.pdfRead ? "oui" : "non"}`);
   console.log(`texte extrait : ${summary.textExtracted ? "oui" : "non"}`);
-  console.log(`nombre de lignes MO : ${summary.laborLineCount}`);
-  console.log(`durée totale : ${displayNumber(summary.totalDurationHours)} h`);
-  console.log(`tâches générées : ${summary.tasksGenerated}`);
+  console.log(`Lignes MO sources : ${summary.laborLineCount}`);
+  console.log(`Durée MO source : ${displayNumber(summary.totalDurationHours)} h`);
+  console.log(`Tâches agrégées : ${summary.tasksGenerated}`);
+  console.log(`Durée totale des tâches : ${displayNumber(summary.taskDurationHours)} h`);
+  console.log(`durées conservées : ${summary.durationConserved ? "oui" : "non"}`);
+  console.log(`Lignes MO perdues : ${summary.lostLaborLines}`);
+  console.log(`Traçabilité des lignes sources : ${summary.sourceTraceability ? "OK" : "ÉCHEC"}`);
   console.log(`validation Chef Atelier possible : ${summary.chiefValidationPossible ? "oui" : "non"}`);
   console.log(`planning possible : ${summary.planningPossible ? "oui" : "non"}`);
 }
@@ -441,8 +541,9 @@ async function main() {
     const result = await runInBrowser(pdfBytes, basename(pdfPath));
     Object.assign(summary, result?.metrics || {});
     if (!result?.ok) {
-      const error = new Error(result?.error?.message || "Échec du test navigateur.");
-      error.name = result?.error?.name || "FieldPdfImportError";
+      const pdfJsFailure = result?.stage === "pdfjs";
+      const error = new Error(pdfJsFailure ? "Échec extraction PDF.js" : (result?.error?.message || "Échec du test navigateur."));
+      error.name = pdfJsFailure ? "PdfJsExtractionError" : (result?.error?.name || "FieldPdfImportError");
       error.stack = result?.error?.stack || error.stack;
       error.stage = result?.stage || "navigateur";
       throw error;
@@ -450,6 +551,7 @@ async function main() {
 
     printSummary(summary);
     console.log("FIELD PDF IMPORT OK");
+    if (runArchiveE2e && summary.archiveCompleted) console.log("PDF TO ARCHIVE E2E OK");
   } catch (error) {
     printFailure(summary, error);
     process.exitCode = 1;

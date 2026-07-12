@@ -21,7 +21,9 @@ function decodeSupabaseJwtPayload(key = "") {
 }
 
 function looksLikeSupabaseServiceRoleKey(key = "") {
-  const payload = decodeSupabaseJwtPayload(key);
+  const raw = String(key || "").trim();
+  if (/^sb_secret_/i.test(raw) || /service[_-]?role/i.test(raw)) return true;
+  const payload = decodeSupabaseJwtPayload(raw);
   return String(payload?.role || "").toLowerCase() === "service_role";
 }
 
@@ -31,7 +33,7 @@ function resetSupabaseClient() {
 
 function isSupabaseConfigured() {
   const config = getSupabaseConfig();
-  return Boolean(config.enabled && config.url && config.anonKey);
+  return Boolean(config.enabled && config.url && config.anonKey && !looksLikeSupabaseServiceRoleKey(config.anonKey));
 }
 
 function getSupabaseClient() {
@@ -72,6 +74,7 @@ async function getSupabaseUser() {
 }
 
 async function refreshSupabasePanel() {
+  if (typeof renderSupabaseSyncHealth === "function") renderSupabaseSyncHealth().catch(() => null);
   const safetyContainer = $("#supabase-safety-download-container");
   if (safetyContainer) {
     const hasSnapshot = localStorage.getItem("nimr-sav-restore-safety-snapshot:last");
@@ -123,7 +126,7 @@ function saveSupabaseRuntimeConfigFromForm(event) {
   if (looksLikeSupabaseServiceRoleKey(publicKey)) {
     addAuditLog("supabase.config.rejected", "Clé Supabase refusée", "Une clé service_role ne doit jamais être utilisée côté navigateur.");
     saveState({ skipCloud: true, skipSnapshot: true });
-    notifyUser("Clé Supabase refusée : utilisez la publishable key / clé publique Supabase, jamais service_role côté navigateur.", "error");
+    notifyUser("Clé Supabase refusée : utilisez uniquement une publishable key publique ; sb_secret_ et service_role sont interdits côté navigateur.", "error");
     return;
   }
   const nextConfig = {

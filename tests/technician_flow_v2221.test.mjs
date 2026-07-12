@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
+import { currentBuild, getVersionedAssetQueries } from './helpers/build_version.mjs';
 
 const scriptFiles = [
   'js/utils.js',
@@ -50,6 +51,7 @@ const context = {
   localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
   sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} },
   document: {
+    getElementById: () => stubElement(),
     querySelector: () => stubElement(),
     querySelectorAll: () => [],
     addEventListener() {},
@@ -82,15 +84,13 @@ const appSource = fs.readFileSync('app.js', 'utf8');
 const swSource = fs.readFileSync('sw.js', 'utf8');
 const versionSource = fs.readFileSync('js/version.js', 'utf8');
 const indexSource = fs.readFileSync('index.html', 'utf8');
-const declaredVersion = versionSource.match(/APP_VERSION\s*=\s*"v(\d+\.\d+(?:\.\d+)?)"/)?.[1];
-assert.ok(declaredVersion, 'js/version.js doit exposer APP_VERSION');
-const escapedVersion = declaredVersion.replace(/\./g, '\\.') ;
-assert.match(stateSource, new RegExp(`APP_VERSION\\s*=\\s*"v${escapedVersion}"`), 'APP_VERSION doit être cohérente avec js/version.js');
-assert.match(appSource, new RegExp(`serviceWorker\\.register\\("sw\\.js\\?v=${escapedVersion}"`), 'le service worker doit utiliser la version déclarée');
-assert.match(swSource, new RegExp(`nimr-sav-v${escapedVersion}-`), 'le cache PWA doit utiliser la version déclarée');
-assert.match(versionSource, new RegExp(`NIMR_BUILD\\s*=\\s*"v${escapedVersion}(?:-|\")`), 'NIMR_BUILD doit utiliser la version déclarée');
-[...indexSource.matchAll(/\?v=(\d+\.\d+(?:\.\d+)?)/g)].forEach((match) => {
-  assert.equal(match[1], declaredVersion, `référence index.html incohérente: ?v=${match[1]}`);
+assert.ok(currentBuild.appVersion, 'js/version.js doit exposer APP_VERSION');
+assert.ok(stateSource.includes(`const APP_VERSION = "${currentBuild.appVersion}"`), 'APP_VERSION doit être cohérente avec js/version.js');
+assert.ok(appSource.includes(`serviceWorker.register("sw.js?v=${currentBuild.queryVersion}"`), 'le service worker doit utiliser la version déclarée');
+assert.ok(swSource.includes(`const CACHE_NAME = "${currentBuild.cacheName}"`), 'le cache PWA doit utiliser la version déclarée');
+assert.ok(versionSource.includes(`window.NIMR_BUILD = "${currentBuild.buildVersion}"`), 'NIMR_BUILD doit utiliser la version déclarée');
+getVersionedAssetQueries(indexSource).forEach((queryVersion) => {
+  assert.equal(queryVersion, currentBuild.queryVersion, `référence index.html incohérente: ?v=${queryVersion}`);
 });
 
 function setupSafetyState(extraBookings = '') {
@@ -101,6 +101,11 @@ function setupSafetyState(extraBookings = '') {
         { id: 'tech-2', name: 'Technicien 2', role: 'mecanicien', active: true },
         { id: 'pont-1', name: 'Pont 1', role: 'pont_mecanique', active: true }
       ],
+      users: [
+        { id: 'user-tech-1', name: 'Technicien 1', role: 'technicien', resourceId: 'tech-1', active: true },
+        { id: 'user-chef', name: 'Chef atelier', role: 'chef_atelier', active: true }
+      ],
+      currentUserId: 'user-tech-1',
       cases: [{
         id: 'case-safety',
         clientName: 'Client Sécurité',
@@ -274,6 +279,7 @@ assert.equal(resumeRemainderResult.ok, true, 'un reliquat hors congé doit pouvo
 assert.equal(app(`state.bookings.find((booking) => booking.id === 'booking-remainder').status`), 'started');
 
 setupSafetyState();
+app(`state.currentUserId = 'user-chef'`);
 let blockedGlobalResult = await app(`completeCaseWorkWithChiefOverride(state.cases[0], { allowOverride: false })`);
 assert.equal(blockedGlobalResult.ok, false, 'la clôture globale ne doit pas terminer silencieusement les tâches affectées');
 assert.equal(app(`state.bookings.find((booking) => booking.id === 'booking-main').status`), 'planned');
@@ -296,6 +302,7 @@ assert.match(precedenceResult.message, /tâche précédente obligatoire/i);
 setupSafetyState();
 app(`state.bookings.find((booking) => booking.id === 'booking-prep').planningMode = 'anticipated-new-part'`);
 let anticipatedPrepResult = app(`startTechnicianTask(state.cases[0], 'booking-prep', 'tech-1')`);
-assert.equal(anticipatedPrepResult.ok, true, 'la préparation anticipée pièces neuves doit rester autorisée en parallèle');
+assert.equal(anticipatedPrepResult.ok, false, 'un ancien marqueur de préparation anticipée ne doit plus contourner les dépendances');
+assert.match(anticipatedPrepResult.message, /tâche précédente obligatoire/i);
 
 console.log('Technician flow v22.21 safety OK');

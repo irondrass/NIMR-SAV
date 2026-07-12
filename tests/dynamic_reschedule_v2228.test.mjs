@@ -360,15 +360,16 @@ const predecessorsOfC = app(`getPreviousRequiredBookings(state.cases[0], state.b
 assert.ok(predecessorsOfC.includes('booking-b-prep'), 'Peinture doit dépendre de Préparation');
 
 // ----------------------------------------------------
-// Assertion 11: Préparation anticipée pièces neuves reste parallèle.
+// Assertion 11: un ancien marqueur de planning ne contourne plus les dépendances.
 // ----------------------------------------------------
 setupPlanningRescheduleState();
-// Set B (prep) as an anticipated new part preparation
+// Un marqueur historique ne doit plus rendre la préparation parallèle.
 vm.runInContext(`
   state.bookings.find(b => b.id === 'booking-b-prep').planningMode = 'anticipated-new-part';
 `, context);
 const predecessorsOfAnticipated = app(`getPreviousRequiredBookings(state.cases[0], state.bookings.find(b => b.id === 'booking-b-prep'))`);
-assert.equal(predecessorsOfAnticipated.length, 0, 'La préparation anticipée ne doit dépendre d’aucune étape précédente');
+assert.equal(predecessorsOfAnticipated.length, 1, 'La préparation doit conserver sa dépendance à la tôlerie');
+assert.equal(predecessorsOfAnticipated[0].id, 'booking-a-body');
 
 // ----------------------------------------------------
 // Assertion 12: Dossier clôturé/facturé/archive non recalé.

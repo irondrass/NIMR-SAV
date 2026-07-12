@@ -1,3 +1,111 @@
+const CASE_LIST_PAGE_SIZE = 50;
+let caseListPage = 1;
+let caseListFilterSignature = "";
+let savPerformanceDashboardCache = null;
+let uiRuntimeIndexes = {
+  casesSource: null,
+  casesLength: -1,
+  bookingsSource: null,
+  bookingsLength: -1,
+  caseById: new Map(),
+  bookingsByCaseId: new Map(),
+  bookingsByResourceId: new Map(),
+  bookingsByDayKey: new Map(),
+};
+
+function invalidateUiRuntimeIndexes() {
+  uiRuntimeIndexes.casesSource = null;
+  uiRuntimeIndexes.casesLength = -1;
+  uiRuntimeIndexes.bookingsSource = null;
+  uiRuntimeIndexes.bookingsLength = -1;
+  savPerformanceDashboardCache = null;
+}
+
+function rebuildUiRuntimeIndexes() {
+  const cases = Array.isArray(state?.cases) ? state.cases : [];
+  const bookings = Array.isArray(state?.bookings) ? state.bookings : [];
+  const caseById = new Map();
+  const bookingsByCaseId = new Map();
+  const bookingsByResourceId = new Map();
+  const bookingsByDayKeySets = new Map();
+
+  cases.forEach((item) => {
+    if (item?.id) caseById.set(item.id, item);
+  });
+  bookings.forEach((booking) => {
+    if (!booking) return;
+    if (booking.caseId) {
+      const rows = bookingsByCaseId.get(booking.caseId) || [];
+      rows.push(booking);
+      bookingsByCaseId.set(booking.caseId, rows);
+    }
+    (booking.resourceIds || []).forEach((resourceId) => {
+      if (!resourceId) return;
+      const rows = bookingsByResourceId.get(resourceId) || [];
+      rows.push(booking);
+      bookingsByResourceId.set(resourceId, rows);
+    });
+    const segments = booking.segments?.length
+      ? booking.segments
+      : (booking.start && booking.end ? [{ start: booking.start, end: booking.end }] : []);
+    segments.forEach((segment) => {
+      [segment.start, segment.end].filter(Boolean).forEach((value) => {
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return;
+        const key = todayKey(date);
+        const rows = bookingsByDayKeySets.get(key) || new Set();
+        rows.add(booking);
+        bookingsByDayKeySets.set(key, rows);
+      });
+    });
+  });
+
+  uiRuntimeIndexes = {
+    casesSource: cases,
+    casesLength: cases.length,
+    bookingsSource: bookings,
+    bookingsLength: bookings.length,
+    caseById,
+    bookingsByCaseId,
+    bookingsByResourceId,
+    bookingsByDayKey: new Map([...bookingsByDayKeySets].map(([key, rows]) => [key, [...rows]])),
+  };
+  return uiRuntimeIndexes;
+}
+
+function getUiRuntimeIndexes(options = {}) {
+  const cases = Array.isArray(state?.cases) ? state.cases : [];
+  const bookings = Array.isArray(state?.bookings) ? state.bookings : [];
+  if (options.force) savPerformanceDashboardCache = null;
+  const stale = options.force
+    || uiRuntimeIndexes.casesSource !== cases
+    || uiRuntimeIndexes.casesLength !== cases.length
+    || uiRuntimeIndexes.bookingsSource !== bookings
+    || uiRuntimeIndexes.bookingsLength !== bookings.length;
+  return stale ? rebuildUiRuntimeIndexes() : uiRuntimeIndexes;
+}
+
+function getIndexedCaseById(caseId) {
+  return caseId ? getUiRuntimeIndexes().caseById.get(caseId) || null : null;
+}
+
+function getIndexedCaseBookings(caseId) {
+  return caseId ? getUiRuntimeIndexes().bookingsByCaseId.get(caseId) || [] : [];
+}
+
+function getIndexedResourceBookings(resourceId) {
+  return resourceId ? getUiRuntimeIndexes().bookingsByResourceId.get(resourceId) || [] : [];
+}
+
+function getIndexedDayBookings(value) {
+  const key = value instanceof Date ? todayKey(value) : String(value || "");
+  return key ? getUiRuntimeIndexes().bookingsByDayKey.get(key) || [] : [];
+}
+
+function resetCaseListPagination() {
+  caseListPage = 1;
+}
+
 function render() {
   if (typeof ensureCurrentTabAllowed === "function") {
     ensureCurrentTabAllowed();
@@ -7,7 +115,7 @@ function render() {
   }
 
   // Block unauthorized view content from rendering to prevent leaks in DOM
-  const tabs = ["dossiers", "today", "pilotage", "planning", "technician", "atelier", "reception-workspace", "qc-workspace"];
+  const tabs = ["dossiers", "today", "pilotage", "planning", "technician", "atelier", "reception-workspace"];
   tabs.forEach((tab) => {
     const view = document.getElementById(`view-${tab}`);
     if (!view) return;
@@ -48,31 +156,32 @@ function render() {
     }
   });
 
-  // Call the sub-renderers only if their corresponding tabs are allowed
-  if (typeof canAccessTab !== "function" || canAccessTab("dossiers")) {
-    renderCases();
+  getUiRuntimeIndexes({ force: true });
+
+  // La liste reste prête pour l'ouverture de l'onglet Dossiers, mais elle est
+  // bornée à 50 cartes. Les vues lourdes cachées sont rendues à la demande.
+  if (typeof canAccessTab !== "function" || canAccessTab("dossiers")) renderCases();
+
+  if (activeTab === "dossiers" && (typeof canAccessTab !== "function" || canAccessTab("dossiers"))) {
     renderCaseDetail();
   }
-  if (typeof canAccessTab !== "function" || canAccessTab("today")) {
+  if (activeTab === "today" && (typeof canAccessTab !== "function" || canAccessTab("today"))) {
     renderTodayWorkshop();
   }
-  if (typeof canAccessTab !== "function" || canAccessTab("pilotage")) {
+  if (activeTab === "pilotage" && (typeof canAccessTab !== "function" || canAccessTab("pilotage"))) {
     bindSavDashboardFilters();
     renderSavKpis();
     renderSavDashboardLoads();
     renderPilotageAlerts();
     renderKanban();
   }
-  if (typeof canAccessTab !== "function" || canAccessTab("planning")) {
+  if (activeTab === "planning" && (typeof canAccessTab !== "function" || canAccessTab("planning"))) {
     renderPlanning();
   }
-  if (typeof canAccessTab !== "function" || canAccessTab("technician")) {
+  if (activeTab === "technician" && (typeof canAccessTab !== "function" || canAccessTab("technician"))) {
     renderTechnicianDashboard();
   }
-  if (typeof canAccessTab !== "function" || canAccessTab("qc-workspace")) {
-    if (typeof renderQcWorkspace === "function") renderQcWorkspace();
-  }
-  if (typeof canAccessTab !== "function" || canAccessTab("atelier")) {
+  if (activeTab === "atelier" && (typeof canAccessTab !== "function" || canAccessTab("atelier"))) {
     renderResources();
     renderHolidays();
     renderResourceLeaves();
@@ -101,7 +210,6 @@ const UNAUTHORIZED_VIEW_SCRUB_SELECTORS = {
     "#resource-leave-list",
     "#activity-log-table-body",
   ],
-  "qc-workspace": [".qc-workspace-inner"],
 };
 
 function renderNavigationVisibility() {
@@ -162,7 +270,7 @@ function scrubUnauthorizedViewContent(tab, view) {
 
 function renderMetrics() {
   const dashboard = typeof buildSavPerformanceDashboard === "function" ? buildSavPerformanceDashboard() : null;
-  const active = dashboard ? dashboard.metrics.activeCases : state.cases.filter((item) => !item.flags.delivered).length;
+  const active = dashboard ? dashboard.metrics.activeCases : state.cases.filter((item) => !isCaseOperationallyClosed(item)).length;
   const waiting = dashboard ? dashboard.metrics.withoutNextAction : state.cases.filter((item) => getNextWorkflowAction(item) && getBusinessRuleIssues(item, getNextWorkflowAction(item)).length).length;
   const deliveries = dashboard ? dashboard.metrics.scheduledAppointments : state.cases.filter((item) => item.appointment && !isCaseOperationallyClosed(item)).length;
   $("#metric-active").textContent = active;
@@ -206,7 +314,6 @@ function renderSavKpis() {
     `)
     .join("");
 }
-
 function buildSavKpis(now = new Date()) {
   const dashboard = buildSavPerformanceDashboard(now);
   const { metrics, range } = dashboard;
@@ -252,7 +359,7 @@ function buildSavKpis(now = new Date()) {
     {
       label: "Dossiers ouverts",
       value: String(metrics.openCases),
-      detail: "Non livrés sur le périmètre",
+      detail: "Non clôturés sur le périmètre",
       level: metrics.openCases ? "info" : "neutral",
     },
     {
@@ -269,9 +376,9 @@ function buildSavKpis(now = new Date()) {
     },
     {
       label: "Actions à traiter",
-      value: String(metrics.pendingAgreements),
+      value: String(metrics.pendingActions),
       detail: "Dossiers sans prochaine étape claire",
-      level: metrics.pendingAgreements ? "warn" : "success",
+      level: metrics.pendingActions ? "warn" : "success",
     },
     {
       label: "Travaux terminés",
@@ -382,6 +489,25 @@ const SAV_DASHBOARD_SERVICE_LOADS = [
 
 function buildSavPerformanceDashboard(now = new Date()) {
   const range = getSavDashboardRange(now);
+  const filters = getSavDashboardFilters();
+  const indexes = getUiRuntimeIndexes();
+  const cacheKey = [
+    range.key,
+    range.start.toISOString(),
+    range.end.toISOString(),
+    filters.status,
+    filters.type,
+    Math.floor(new Date(now).getTime() / 60000),
+    indexes.casesLength,
+    indexes.bookingsLength,
+  ].join("|");
+  if (
+    savPerformanceDashboardCache?.key === cacheKey
+    && savPerformanceDashboardCache.casesSource === indexes.casesSource
+    && savPerformanceDashboardCache.bookingsSource === indexes.bookingsSource
+  ) {
+    return savPerformanceDashboardCache.value;
+  }
   const cases = getSavDashboardCases(range);
   const activeCases = cases.periodCases.filter(isSavDashboardActiveCase);
   const openCases = activeCases.length;
@@ -418,7 +544,7 @@ function buildSavPerformanceDashboard(now = new Date()) {
   const equipmentLoadPercent = averageLoadPercentForRange(range, equipmentDayLoad);
   const liftLoadPercent = averageLoadPercentForRange(range, (day) => dayLoadForResources(day, (resource) => resource.active !== false && ["pont_vidange", "pont_mecanique"].includes(resource.role)));
   const boothLoadPercent = averageLoadPercentForRange(range, (day) => dayLoadForResources(day, (resource) => resource.active !== false && resource.role === "cabine"));
-  return {
+  const dashboard = {
     range,
     cases,
     serviceLoads,
@@ -432,14 +558,10 @@ function buildSavPerformanceDashboard(now = new Date()) {
       blockedCases,
       blockedOver48h,
       blockedOver7d,
-      pendingAgreements: 0,
-      pendingQualityControls: 0,
-      qcRejectedCases: 0,
-      deliverableToday: 0,
+      pendingActions: withoutNextAction,
       completedWorkCases,
       receptionLoad,
       workshopLoad,
-      qcLoad: 0,
       humanLoadPercent,
       equipmentLoadPercent,
       liftLoadPercent,
@@ -449,6 +571,13 @@ function buildSavPerformanceDashboard(now = new Date()) {
       directorAlerts,
     },
   };
+  savPerformanceDashboardCache = {
+    key: cacheKey,
+    casesSource: indexes.casesSource,
+    bookingsSource: indexes.bookingsSource,
+    value: dashboard,
+  };
+  return dashboard;
 }
 
 function getSavDashboardFilters() {
@@ -501,13 +630,13 @@ function getCaseDashboardDates(item) {
     item?.appointment?.end,
     item?.appointment?.delivery,
     item?.receptionWorkflow?.vehicleReceivedAt,
-    item?.receptionWorkflow?.qualityReviewedAt,
-    item?.receptionWorkflow?.readyForDeliveryAt,
-    getCaseDeliveredAt(item),
+    item?.deliveryEstimate?.current,
+    item?.closedAt,
+    item?.archivedAt,
   ];
   (item?.history || []).forEach((entry) => dates.push(entry?.at || entry?.createdAt));
-  state.bookings
-    .filter((booking) => booking.caseId === item?.id && booking.type !== "leave")
+  getIndexedCaseBookings(item?.id)
+    .filter((booking) => booking.type !== "leave")
     .forEach((booking) => {
       dates.push(booking.start, booking.end, booking.actualStart, booking.actualEnd);
       (booking.segments || []).forEach((segment) => dates.push(segment.start, segment.end));
@@ -533,21 +662,13 @@ function isSavDashboardActiveCase(item) {
 
 function isDeliveryOverdue(item, now = new Date()) {
   const delivery = item?.appointment?.delivery ? new Date(item.appointment.delivery) : null;
-  return Boolean(delivery && !Number.isNaN(delivery.getTime()) && delivery < now && !item.flags?.delivered);
-}
-
-function caseHasPendingAgreement(item) {
-  return false;
-}
-
-function isDashboardQualityPending(item) {
-  return false;
+  return Boolean(delivery && !Number.isNaN(delivery.getTime()) && delivery < now && !isCaseOperationallyClosed(item));
 }
 
 function caseWithoutScheduledNextAction(item, now = new Date()) {
   if (!item || isCaseBlocked(item) || isCaseOperationallyClosed(item)) return false;
-  const hasFutureBooking = state.bookings.some((booking) => {
-    if (booking.caseId !== item.id || booking.type === "leave") return false;
+  const hasFutureBooking = getIndexedCaseBookings(item.id).some((booking) => {
+    if (booking.type === "leave") return false;
     return (booking.segments || []).some((segment) => isValidDateValue(segment.end) && new Date(segment.end) >= now);
   });
   const hasFutureAppointment = ["start", "end"].some((field) => isValidDateValue(item.appointment?.[field]) && new Date(item.appointment[field]) >= now);
@@ -561,18 +682,18 @@ function getCaseVehicleReceivedAt(item) {
   return historyEntry?.at || "";
 }
 
-function getCaseDeliveredAt(item) {
-  if (!item?.flags?.delivered) return "";
-  if (isValidDateValue(item.deliveredAt)) return item.deliveredAt;
-  if (isValidDateValue(item.receptionWorkflow?.deliveredAt)) return item.receptionWorkflow.deliveredAt;
-  const historyEntry = (item.history || []).find((entry) => ["vehicle.delivered", "reception.vehicle_delivered"].includes(entry.type));
-  return historyEntry?.at || item.appointment?.delivery || "";
+function getCaseClosedAt(item) {
+  if (!isCaseOperationallyClosed(item)) return "";
+  if (isValidDateValue(item.closedAt)) return item.closedAt;
+  if (isValidDateValue(item.archivedAt)) return item.archivedAt;
+  const historyEntry = (item.history || []).find((entry) => ["case.invoiced", "case.archived"].includes(entry.type));
+  return historyEntry?.at || "";
 }
 
 function getCaseCycleHours(item, range) {
-  const deliveredAt = getCaseDeliveredAt(item);
-  if (!dateInRange(deliveredAt, range) || !isValidDateValue(item?.createdAt)) return 0;
-  return diffMinutes(new Date(item.createdAt), new Date(deliveredAt)) / 60;
+  const closedAt = getCaseClosedAt(item);
+  if (!dateInRange(closedAt, range) || !isValidDateValue(item?.createdAt)) return 0;
+  return diffMinutes(new Date(item.createdAt), new Date(closedAt)) / 60;
 }
 
 function getDashboardRangeDays(range) {
@@ -637,8 +758,13 @@ function normalizeCaseSearchIdentifier(value) {
 }
 
 function getCaseSearchTokens(item) {
-  const claims = normalizeRepairClaims(item?.claims || [], item);
+  // L'état est normalisé à l'entrée de l'application. Re-normaliser chaque
+  // intervention à chaque frappe multipliait fortement le coût sur 4000 dossiers.
+  const claims = Array.isArray(item?.claims) ? item.claims : [];
   const customerClaims = Array.isArray(item?.customerClaims) ? item.customerClaims : [];
+  const typeSummary = claims.length
+    ? [...new Set(claims.map((claim) => claim?.type || "assurance"))].map(getClaimTypeLabel).join(" + ")
+    : getClaimTypeLabel("assurance");
   return [
     item?.clientName,
     item?.ownerName,
@@ -650,7 +776,7 @@ function getCaseSearchTokens(item) {
     item?.vin,
     item?.color,
     item?.orNavNumber,
-    getCaseTypeSummary(item),
+    typeSummary,
     statusLabels[getCaseStatus(item)],
     ...claims.flatMap((claim) => [
       claim.number,
@@ -678,7 +804,7 @@ function caseMatchesGlobalSearch(item, query) {
 }
 
 function getCaseBookings(item) {
-  return state.bookings.filter((booking) => booking.caseId === item?.id && booking.type !== "leave");
+  return getIndexedCaseBookings(item?.id).filter((booking) => booking.type !== "leave");
 }
 
 function hasCaseBookings(item) {
@@ -707,7 +833,7 @@ function getCaseNextAction(item) {
     return { code: "done", label: "Terminé", priority: "normal", reason: "Aucun dossier actif." };
   }
   if (isCaseReadonlyArchive(item)) {
-    return { code: "done", label: "Dossier clôturé — aucune action requise", priority: "normal", reason: getArchivedCaseMessage(item) };
+    return { code: "done", label: "Dossier archivé", priority: "normal", reason: getArchivedCaseMessage(item) };
   }
   if (isCaseBlocked(item)) {
     return {
@@ -802,7 +928,7 @@ function getCaseNextAction(item) {
       reason: "Les travaux sont en cours.",
     };
   }
-  if (!item.flags.invoiced) {
+  if (!item.closedAt && !item.flags.invoiced && item.status !== "closed") {
     return {
       code: "close_workshop",
       label: "Clôturer atelier",
@@ -810,7 +936,12 @@ function getCaseNextAction(item) {
       reason: "Les travaux sont terminés. Clôturez le dossier atelier.",
     };
   }
-  return { code: "done", label: "Clôturé atelier", priority: "normal", reason: "Le dossier atelier est clôturé." };
+  return {
+    code: "archive_case",
+    label: "Archiver le dossier",
+    priority: "normal",
+    reason: "L’atelier est clôturé. Archivez le dossier pour le figer en consultation.",
+  };
 }
 
 function getCaseNextActionTab(actionCode) {
@@ -825,6 +956,7 @@ function getCaseNextActionTab(actionCode) {
     resume_or_replan_work: "atelier",
     finish_work: "atelier",
     close_workshop: "atelier",
+    archive_case: "atelier",
     resolve_blocker: "claims",
     done: "atelier",
   };
@@ -836,7 +968,7 @@ function renderSyncStatusStrip() {
   if (!target) return;
   const fallbackHealth = { principal: true, mirror: true, snapshots: 0, lastSavedAt: "", errors: [] };
   const health = typeof getAutosaveHealth === "function" ? getAutosaveHealth() : fallbackHealth;
-  const localOk = Boolean(health.principal && health.mirror && !health.errors?.length);
+  const localOk = Boolean(health.principal && (health.indexedDb || health.mirror) && !health.errors?.length);
   const cloudOk = safeLocalStorageGet(`${STORAGE_KEY}:last-cloud-autosave`);
   const cloudError = safeLocalStorageGet(`${STORAGE_KEY}:last-cloud-autosave-error`);
   const configured = typeof isSupabaseConfigured === "function" ? isSupabaseConfigured() : false;
@@ -848,22 +980,18 @@ function renderSyncStatusStrip() {
     pendingCasesCount = state.cases.filter(c => Number(c.localRevision || 0) > Number(c.syncRevision || 0)).length;
   }
 
-  let pendingOfflineCount = 0;
-  try {
-    const rawQueue = localStorage.getItem("nimr-sav-offline-queue");
-    const queue = rawQueue ? JSON.parse(rawQueue) : [];
-    pendingOfflineCount = queue.filter(action => action.status === "pending" || action.status === "failed" || action.status === "processing").length;
-  } catch (e) {
-    pendingOfflineCount = 0;
-  }
+  const durableOutbox = typeof readDurableOutboxMirror === "function" ? readDurableOutboxMirror() : [];
+  const pendingOfflineCount = durableOutbox.filter((action) => ["pending", "failed", "processing", "conflict"].includes(action.syncStatus)).length;
+  const outboxConflictCount = durableOutbox.filter((action) => action.syncStatus === "conflict").length;
 
   let cloudLabel = "Prêt";
   let cloudState = "ok";
   if (!configured) {
     cloudLabel = "Non configuré";
     cloudState = "muted";
-  } else if (openConflicts > 0) {
-    cloudLabel = openConflicts === 1 ? "— 1 conflit détecté — Résoudre" : `— ${openConflicts} conflits détectés — Résoudre`;
+  } else if (openConflicts + outboxConflictCount > 0) {
+    const totalConflicts = openConflicts + outboxConflictCount;
+    cloudLabel = totalConflicts === 1 ? "— 1 conflit détecté — Résoudre" : `— ${totalConflicts} conflits détectés — Résoudre`;
     cloudState = "warn";
   } else if (cloudError) {
     cloudLabel = "Échec sync";
@@ -871,7 +999,7 @@ function renderSyncStatusStrip() {
   } else if (pendingCasesCount > 0 || pendingOfflineCount > 0) {
     cloudLabel = "Sync en attente";
     cloudState = "warn";
-  } else if (cloudOk) {
+  } else if (cloudOk && pendingOfflineCount === 0 && pendingCasesCount === 0) {
     cloudLabel = "Sync réussie";
     cloudState = "ok";
   }
@@ -889,7 +1017,7 @@ function renderSyncStatusStrip() {
 
   const cloudEl = target.querySelector("[data-sync-cloud]");
   if (cloudEl) {
-    if (openConflicts > 0) {
+    if (openConflicts + outboxConflictCount > 0) {
       cloudEl.style.cursor = "pointer";
       cloudEl.style.textDecoration = "underline";
       cloudEl.removeAttribute("disabled");
@@ -924,7 +1052,7 @@ function renderSyncStatusStrip() {
   // Handle fallback button visibility
   const fallbackBtn = document.getElementById("fallback-resolve-conflict-btn");
   if (fallbackBtn) {
-    fallbackBtn.hidden = openConflicts === 0;
+    fallbackBtn.hidden = openConflicts + outboxConflictCount === 0;
   }
 }
 
@@ -992,6 +1120,202 @@ function getTechnicianDashboardResources() {
     .sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "fr", { sensitivity: "base" }));
 }
 
+const TECHNICIAN_FIELD_STATUS_PRIORITY = Object.freeze({
+  in_progress: 0,
+  paused: 1,
+  blocked: 2,
+  ready: 3,
+  planned: 4,
+  done: 5,
+});
+
+let technicianElapsedTicker = null;
+
+function orderTechnicianRowsForField(rows = []) {
+  return [...rows].sort((left, right) => {
+    const leftPriority = TECHNICIAN_FIELD_STATUS_PRIORITY[left?.status] ?? 99;
+    const rightPriority = TECHNICIAN_FIELD_STATUS_PRIORITY[right?.status] ?? 99;
+    if (leftPriority !== rightPriority) return leftPriority - rightPriority;
+    return new Date(left?.displayBooking?.start || left?.booking?.start || 0) - new Date(right?.displayBooking?.start || right?.booking?.start || 0);
+  });
+}
+
+function getTechnicianBookingFamilyById(bookingId) {
+  const booking = state.bookings.find((candidate) => candidate.id === bookingId);
+  if (!booking) return [];
+  const taskId = typeof getBookingBusinessTaskId === "function" ? getBookingBusinessTaskId(booking) : (booking.businessTaskId || booking.id);
+  return state.bookings.filter((candidate) => {
+    if (!candidate || candidate.caseId !== booking.caseId || candidate.type === "leave" || candidate.temporary === true) return false;
+    const candidateTaskId = typeof getBookingBusinessTaskId === "function" ? getBookingBusinessTaskId(candidate) : (candidate.businessTaskId || candidate.id);
+    return candidateTaskId === taskId;
+  });
+}
+
+function getTechnicianBookingElapsedMilliseconds(booking, now = new Date()) {
+  if (!booking) return 0;
+  const nowTime = now instanceof Date ? now.getTime() : new Date(now).getTime();
+  const sessions = Array.isArray(booking.workSessions) ? booking.workSessions : [];
+  if (sessions.length) {
+    return sessions.reduce((total, session) => {
+      const startedAt = new Date(session?.startedAt || 0).getTime();
+      if (!Number.isFinite(startedAt) || startedAt <= 0) return total;
+      const closedAt = session.completedAt || session.pausedAt;
+      const endTime = closedAt ? new Date(closedAt).getTime() : nowTime;
+      return total + (Number.isFinite(endTime) && endTime > startedAt ? endTime - startedAt : 0);
+    }, 0);
+  }
+  const persistedMinutes = Number(booking.actualWorkedMinutes || 0) || 0;
+  if (persistedMinutes > 0) return persistedMinutes * 60000;
+  if (["started", "in_progress"].includes(String(booking.status || ""))) {
+    const startedAt = new Date(booking.actualStart || booking.startedAt || 0).getTime();
+    return Number.isFinite(startedAt) && nowTime > startedAt ? nowTime - startedAt : 0;
+  }
+  return 0;
+}
+
+function getTechnicianFamilyElapsedMilliseconds(bookingId, now = new Date()) {
+  return getTechnicianBookingFamilyById(bookingId)
+    .reduce((total, booking) => total + getTechnicianBookingElapsedMilliseconds(booking, now), 0);
+}
+
+function formatTechnicianElapsedTime(milliseconds) {
+  const totalSeconds = Math.max(0, Math.floor(Number(milliseconds || 0) / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function refreshTechnicianElapsedTimers(now = new Date()) {
+  $$('[data-technician-elapsed-booking]').forEach((target) => {
+    const bookingId = target.dataset.technicianElapsedBooking;
+    target.textContent = formatTechnicianElapsedTime(getTechnicianFamilyElapsedMilliseconds(bookingId, now));
+  });
+}
+
+function ensureTechnicianElapsedTicker() {
+  refreshTechnicianElapsedTimers();
+  if (technicianElapsedTicker !== null) return;
+  technicianElapsedTicker = window.setInterval(() => {
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+    if (typeof activeTab !== "undefined" && activeTab !== "technician") return;
+    refreshTechnicianElapsedTimers();
+  }, 1000);
+  technicianElapsedTicker?.unref?.();
+}
+
+function isTechnicianZoneResource(resource) {
+  const role = String(resource?.role || "").toLowerCase();
+  return Boolean(resource && (/zone|cabine|poste|pont|séchage|sechage|controle/.test(role) || resource.resourceType === "zone"));
+}
+
+function getTechnicianFieldResourceSummary(row) {
+  const booking = row?.actionBooking || row?.displayBooking || row?.booking;
+  const resources = (booking?.resourceIds || []).map((id) => getResource(id)).filter(Boolean);
+  const zones = resources.filter(isTechnicianZoneResource);
+  const equipment = resources.filter((resource) => {
+    if (zones.includes(resource)) return false;
+    return typeof isEquipmentResource === "function" ? isEquipmentResource(resource) : resource.id !== row?.technicianId;
+  });
+  return {
+    technician: row?.technician?.name || "À affecter",
+    equipment: equipment.map((resource) => resource.name).join(", ") || "Aucune",
+    zone: zones.map((resource) => resource.name).join(", ") || "À affecter",
+  };
+}
+
+function getTechnicianFieldActualStart(row) {
+  const starts = (row?.family || [])
+    .map((booking) => booking.actualStart || booking.startedAt || "")
+    .filter(Boolean)
+    .map((value) => new Date(value))
+    .filter((date) => !Number.isNaN(date.getTime()));
+  return starts.length ? new Date(Math.min(...starts.map((date) => date.getTime()))) : null;
+}
+
+function getTechnicianFieldEstimatedEnd(row, now = new Date()) {
+  const booking = row?.actionBooking || row?.displayBooking || row?.booking;
+  if (!booking) return null;
+  if (row.status === "done") {
+    const actualEnd = booking.actualEnd || booking.completedAt;
+    return actualEnd ? new Date(actualEnd) : null;
+  }
+  if (["in_progress", "paused", "blocked"].includes(row.status)) {
+    const elapsedMinutes = getTechnicianFamilyElapsedMilliseconds(booking.id, now) / 60000;
+    const remainingMinutes = Math.max(0, Number(row.plannedMinutes || 0) - elapsedMinutes);
+    return new Date(now.getTime() + remainingMinutes * 60000);
+  }
+  const plannedEnd = booking.plannedEnd || booking.end;
+  return plannedEnd ? new Date(plannedEnd) : null;
+}
+
+function getTechnicianFieldNextAction(row) {
+  if (!row) return "Consulter le planning";
+  if (row.status === "in_progress") return "Mettre en pause, bloquer ou terminer";
+  if (row.status === "paused") return "Reprendre la tâche";
+  if (row.status === "blocked") return "Traiter le blocage puis reprendre";
+  if (row.status === "done") return "Passer à la prochaine tâche";
+  return "Démarrer la tâche";
+}
+
+function getTechnicianPendingActionCount() {
+  if (typeof getPendingOutboxCount === "function") {
+    const count = Number(getPendingOutboxCount());
+    if (Number.isFinite(count)) return Math.max(0, count);
+  }
+  try {
+    const queue = JSON.parse(localStorage.getItem("nimr-sav-offline-queue") || "[]");
+    return Array.isArray(queue) ? queue.filter((entry) => !["success", "synced"].includes(entry?.status)).length : 0;
+  } catch (error) {
+    return 0;
+  }
+}
+
+function renderTechnicianFieldFocus(currentRow, nextRow) {
+  if (!currentRow) return "";
+  const item = currentRow.item;
+  const booking = currentRow.actionBooking || currentRow.displayBooking || currentRow.booking;
+  const resourceSummary = getTechnicianFieldResourceSummary(currentRow);
+  const actualStart = getTechnicianFieldActualStart(currentRow);
+  const estimatedEnd = getTechnicianFieldEstimatedEnd(currentRow);
+  const pendingCount = getTechnicianPendingActionCount();
+  const online = typeof navigator === "undefined" || navigator.onLine !== false;
+  const syncLabel = online
+    ? (pendingCount ? `En ligne · ${pendingCount} action${pendingCount > 1 ? "s" : ""} en attente de confirmation` : "En ligne · aucune action locale en attente")
+    : `Hors ligne · ${pendingCount} action${pendingCount > 1 ? "s" : ""} en attente locale`;
+  const nextBooking = nextRow?.actionBooking || nextRow?.displayBooking || nextRow?.booking;
+  const nextItem = nextRow?.item;
+  return `
+    <article class="technician-current-task" data-technician-current-task data-current-booking-id="${escapeAttr(booking.id)}">
+      <div class="technician-field-head">
+        <div><span class="eyebrow">${currentRow.status === "in_progress" ? "Tâche actuelle" : "Tâche prioritaire"}</span><h2>${escapeHtml(getDurationLabel(booking.key) || booking.title || "Opération atelier")}</h2></div>
+        <span class="status-pill">${escapeHtml(currentRow.statusLabel || currentRow.status)}</span>
+      </div>
+      <div class="technician-field-identity">
+        <strong>${escapeHtml(item.vehicle || "Véhicule à compléter")}</strong>
+        <span>${escapeHtml(item.plate || item.vin || "Sans immatriculation")} · ${escapeHtml(getPrintOrderReference(item))}</span>
+      </div>
+      <dl class="technician-field-grid">
+        <div><dt>Durée prévue</dt><dd>${formatLocalizedDecimal(Number(currentRow.plannedMinutes || 0) / 60)} h</dd></div>
+        <div><dt>Temps écoulé</dt><dd class="technician-live-timer" data-technician-elapsed-booking="${escapeAttr(booking.id)}">${formatTechnicianElapsedTime(getTechnicianFamilyElapsedMilliseconds(booking.id))}</dd></div>
+        <div><dt>Début réel</dt><dd>${actualStart ? formatTime(actualStart) : "Pas encore démarrée"}</dd></div>
+        <div><dt>Fin estimée</dt><dd>${estimatedEnd && !Number.isNaN(estimatedEnd.getTime()) ? formatTime(estimatedEnd) : "À recalculer"}</dd></div>
+        <div><dt>Technicien</dt><dd>${escapeHtml(resourceSummary.technician)}</dd></div>
+        <div><dt>Ressource</dt><dd>${escapeHtml(resourceSummary.equipment)}</dd></div>
+        <div><dt>Zone</dt><dd>${escapeHtml(resourceSummary.zone)}</dd></div>
+        <div><dt>Prochaine action</dt><dd>${escapeHtml(getTechnicianFieldNextAction(currentRow))}</dd></div>
+      </dl>
+      <p class="technician-field-sync ${online ? "status-ok" : "status-error"}" data-technician-sync-state>${escapeHtml(syncLabel)}</p>
+    </article>
+    ${nextRow ? `
+      <article class="technician-next-task" data-technician-next-task>
+        <div><span class="eyebrow">Tâche suivante</span><h3>${escapeHtml(getDurationLabel(nextBooking.key) || nextBooking.title || "Opération atelier")}</h3></div>
+        <p><strong>${escapeHtml(nextItem.vehicle || "Véhicule à compléter")}</strong> · ${escapeHtml(nextItem.plate || nextItem.vin || "Sans immatriculation")} · ${formatTime(new Date(nextBooking.start))}</p>
+      </article>
+    ` : ""}
+  `;
+}
+
 function renderTechnicianDashboard() {
   const view = $("#view-technician");
   if (!view) return;
@@ -999,7 +1323,9 @@ function renderTechnicianDashboard() {
   const dateInput = $("#technician-date", view);
   const list = $("#technician-task-list", view);
   const manager = $("#technician-manager-board", view);
-  if (!select || !dateInput || !list || !manager) return;
+  const fieldFocus = $("#technician-field-focus", view);
+  const actionDock = $("#technician-field-action-dock", view);
+  if (!select || !dateInput || !list || !manager || !fieldFocus || !actionDock) return;
 
   const currentUser = typeof getCurrentUser === "function" ? getCurrentUser() : null;
   const allTechnicians = getTechnicianDashboardResources();
@@ -1021,11 +1347,19 @@ function renderTechnicianDashboard() {
   const rows = typeof getTechnicianTaskRows === "function" && selectedTechnicianId !== "__no_resource__"
     ? getTechnicianTaskRows(selectedTechnicianId, dateInput.value)
     : [];
+  const orderedRows = orderTechnicianRowsForField(rows);
+  const currentRow = orderedRows.find((row) => row.status !== "done") || orderedRows[0] || null;
+  const nextRow = orderedRows.find((row) => row !== currentRow && row.status !== "done") || null;
+  fieldFocus.innerHTML = renderTechnicianFieldFocus(currentRow, nextRow);
+  actionDock.innerHTML = currentRow && currentRow.status !== "done" ? renderTechnicianTaskActions(currentRow) : "";
+  actionDock.hidden = !actionDock.innerHTML.trim();
   list.innerHTML = rows.length
-    ? rows.map(renderTechnicianTaskCard).join("")
+    ? orderedRows.map((row) => renderTechnicianTaskCard(row, { isCurrent: row === currentRow })).join("")
     : `<div class="empty-state compact-empty"><strong>Aucune tâche pour ce technicien.</strong><span>${currentUser?.role === "technicien" && !currentUser.resourceId ? "Aucune ressource technicien n'est liée à votre utilisateur." : "Les tâches apparaissent ici dès qu'elles sont planifiées et affectées."}</span></div>`;
 
   manager.innerHTML = currentUser?.role === "technicien" ? "" : renderWorkshopChiefSummary(dateInput.value);
+  const managerPanel = manager.closest(".technician-manager-panel");
+  if (managerPanel) managerPanel.hidden = currentUser?.role === "technicien";
 
   if (select.dataset.bound !== "true") {
     select.dataset.bound = "true";
@@ -1070,9 +1404,10 @@ function renderTechnicianDashboard() {
       renderCaseDetail();
     });
   });
+  ensureTechnicianElapsedTicker();
 }
 
-function renderTechnicianTaskCard(row) {
+function renderTechnicianTaskCard(row, options = {}) {
   const item = row.item;
   const booking = row.displayBooking || row.booking;
   const start = new Date(booking.start);
@@ -1086,7 +1421,7 @@ function renderTechnicianTaskCard(row) {
   const orderRef = getPrintOrderReference(item);
   const note = row.latestNote ? `<p class="technician-note">Note : ${escapeHtml(row.latestNote)}</p>` : "";
   return `
-    <article class="technician-task-card task-status-${escapeAttr(row.status)} ${row.late ? "is-late" : ""}">
+    <article class="technician-task-card task-status-${escapeAttr(row.status)} ${row.late ? "is-late" : ""} ${options.isCurrent ? "is-current-field-task" : ""}">
       <div class="technician-task-main">
         <button type="button" class="technician-task-title" data-tech-open-case="${escapeAttr(item.id)}">
           <strong>${escapeHtml(item.vehicle || "Véhicule non renseigné")}</strong>
@@ -1110,9 +1445,7 @@ function renderTechnicianTaskCard(row) {
       ${row.pauseRemainder ? '<p class="technician-note">Reprise planifiée après pause.</p>' : ""}
       ${booking.blockDetails ? `<p class="technician-note danger-text">Blocage : ${escapeHtml(booking.blockDetails)}</p>` : ""}
       ${note}
-      <div class="technician-task-actions">
-        ${renderTechnicianTaskActions(row)}
-      </div>
+      ${options.isCurrent ? "" : `<div class="technician-task-actions">${renderTechnicianTaskActions(row)}</div>`}
     </article>
   `;
 }
@@ -1279,6 +1612,14 @@ function renderWorkshopChiefSummary(dateKey) {
   `;
 }
 
+const TECHNICIAN_NOTE_TEMPLATES = Object.freeze([
+  ["__custom__", "Observation libre"],
+  ["Opération réalisée conformément à l'ordre de travail.", "Opération réalisée conformément à l'ordre"],
+  ["Contrôle visuel effectué, aucune anomalie supplémentaire constatée.", "Contrôle visuel sans anomalie"],
+  ["Anomalie complémentaire signalée au Chef Atelier.", "Anomalie signalée au Chef Atelier"],
+  ["Essai et vérification fonctionnelle effectués.", "Essai et vérification effectués"],
+]);
+
 let isTechnicianActionProcessing = false;
 
 async function handleTechnicianTaskAction(action, bookingId, technicianId) {
@@ -1293,7 +1634,7 @@ async function handleTechnicianTaskAction(action, bookingId, technicianId) {
 
   try {
     const booking = state.bookings.find((candidate) => candidate.id === bookingId);
-    const item = state.cases.find((caseItem) => caseItem.id === booking?.caseId);
+    const item = getIndexedCaseById(booking?.caseId);
     if (!item || !booking) {
       notifyUser("Tâche introuvable.", "error");
       return;
@@ -1305,7 +1646,7 @@ async function handleTechnicianTaskAction(action, bookingId, technicianId) {
       const reason = await showInputPromptModal({
         title: "Pause de la tâche",
         message: "Motif de pause obligatoire :",
-        defaultValue: booking.pauseReason || "attente pièces",
+        defaultValue: booking.pauseReason || "attente pièce",
         options: TECHNICIAN_PAUSE_REASONS.map((r) => [r, r]),
       });
       if (reason === null) return;
@@ -1316,12 +1657,14 @@ async function handleTechnicianTaskAction(action, bookingId, technicianId) {
       const reason = await showInputPromptModal({
         title: "Bloquer la tâche",
         message: "Sélectionnez le motif de blocage :",
-        defaultValue: booking.blockReason || "attente pièces",
+        defaultValue: booking.blockReason || "attente pièce",
         options: [
-          ["attente pièces", "Attente pièces"],
-          ["attente accord", "Attente accord"],
-          ["attente chef atelier", "Attente chef atelier"],
-          ["panne outil / ressource", "Panne outil / ressource"],
+          ["attente pièce", "Attente pièce"],
+          ["attente validation", "Attente validation"],
+          ["panne outillage", "Panne outillage"],
+          ["ressource indisponible", "Ressource indisponible"],
+          ["véhicule non disponible", "Véhicule non disponible"],
+          ["difficulté technique", "Difficulté technique"],
           ["autre", "Autre"]
         ]
       });
@@ -1334,11 +1677,20 @@ async function handleTechnicianTaskAction(action, bookingId, technicianId) {
       if (details === null) return;
       result = blockTechnicianTask(item, bookingId, technicianId, reason, details);
     } else if (action === "note") {
-      const note = await showInputPromptModal({
-        title: "Ajouter une note",
-        message: "Note technicien à ajouter à cette tâche :",
-        defaultValue: ""
+      const template = await showInputPromptModal({
+        title: "Ajouter une observation",
+        message: "Choisissez un modèle ou une observation libre :",
+        defaultValue: "__custom__",
+        options: TECHNICIAN_NOTE_TEMPLATES,
       });
+      if (template === null) return;
+      const note = template === "__custom__"
+        ? await showInputPromptModal({
+            title: "Observation libre",
+            message: "Observation technicien courte :",
+            defaultValue: "",
+          })
+        : template;
       if (note === null) return;
       result = addTechnicianTaskNote(item, bookingId, technicianId, note);
     } else if (action === "photo") {
@@ -1544,23 +1896,37 @@ function getNextBookingTimeLabel(bookings, now = new Date()) {
 
 function renderCases() {
   const list = $("#case-list");
+  if (!list) return;
   const search = $("#case-search").value.trim();
   const statusFilter = normalizeCaseStatusFilter(state.ui?.caseStatusFilter);
   const typeFilter = state.ui?.caseTypeFilter || "all";
+  const sort = state.ui?.caseSort || "recent";
+  const signature = [search, statusFilter, typeFilter, sort].join("|");
+  if (caseListFilterSignature !== signature) {
+    caseListFilterSignature = signature;
+    caseListPage = 1;
+  }
   const cases = state.cases
     .filter((item) => {
       const matchesText = caseMatchesGlobalSearch(item, search);
       const matchesStatus = statusFilter === "all" || getCaseStatus(item) === statusFilter;
       const matchesType = caseMatchesTypeFilter(item, typeFilter);
       return matchesText && matchesStatus && matchesType;
-    })
-    .sort(compareCasesForList);
+    });
+  cases.sort(compareCasesForList);
+  const pageCount = Math.max(1, Math.ceil(cases.length / CASE_LIST_PAGE_SIZE));
+  caseListPage = Math.min(Math.max(1, caseListPage), pageCount);
+  const pageStart = (caseListPage - 1) * CASE_LIST_PAGE_SIZE;
+  const pageCases = cases.slice(pageStart, pageStart + CASE_LIST_PAGE_SIZE);
   const suffix = state.cases.length > 1 ? "s" : "";
   $("#case-count").textContent = cases.length === state.cases.length
-    ? `${state.cases.length} dossier${suffix}`
-    : `${cases.length}/${state.cases.length} dossier${suffix}`;
+    ? `${state.cases.length} dossier${suffix} · page ${caseListPage}/${pageCount}`
+    : `${cases.length}/${state.cases.length} dossier${suffix} · page ${caseListPage}/${pageCount}`;
+  list.dataset.caseListPage = String(caseListPage);
+  list.dataset.caseListPageCount = String(pageCount);
+  list.dataset.caseListFilteredCount = String(cases.length);
   list.innerHTML = cases.length
-    ? cases
+    ? `${pageCases
         .map((item) => {
           const active = item.id === activeCaseId ? " active" : "";
           const status = getCaseStatus(item);
@@ -1578,8 +1944,31 @@ function renderCases() {
             </button>
           `;
         })
-        .join("")
+        .join("")}
+        <nav class="case-pagination" aria-label="Pagination des dossiers">
+          <button class="ghost-button" type="button" data-case-page="previous" ${caseListPage <= 1 ? "disabled" : ""}>Page précédente</button>
+          <span data-case-page-status>Page ${caseListPage} sur ${pageCount} · dossiers ${pageStart + 1}-${Math.min(pageStart + pageCases.length, cases.length)} sur ${cases.length}</span>
+          <button class="ghost-button" type="button" data-case-page="next" ${caseListPage >= pageCount ? "disabled" : ""}>Page suivante</button>
+        </nav>`
     : `<div class="empty-inline">Aucun dossier trouvé.</div>`;
+
+  $$('[data-case-page]', list).forEach((button) => {
+    button.addEventListener("click", () => {
+      if (button.disabled) return;
+      caseListPage += button.dataset.casePage === "previous" ? -1 : 1;
+      caseListPage = Math.min(Math.max(1, caseListPage), pageCount);
+      renderCases();
+      list.querySelector("[data-case-page-status]")?.focus?.();
+    });
+  });
+}
+
+function getCaseListPaginationState() {
+  return {
+    page: caseListPage,
+    pageSize: CASE_LIST_PAGE_SIZE,
+    signature: caseListFilterSignature,
+  };
 }
 
 function compareCasesForList(a, b) {
@@ -1728,16 +2117,6 @@ function getCaseBlockedHours(item, now = new Date()) {
   return Math.max(0, diffMinutes(start, now) / 60);
 }
 
-function isCaseDeliverableToday(item, now = new Date()) {
-  if (!item || item.flags?.delivered) return false;
-  const qualityStatus = normalizeQualityStatus(item.receptionWorkflow?.qualityStatus);
-  const qcOk = item.flags?.qualityApproved || qualityStatus === "validated";
-  if (!qcOk || isCaseBlocked(item)) return false;
-  return item.appointment?.delivery ? isSameBusinessDay(item.appointment.delivery, now) : false;
-}
-
-
-
 function renderClaims(root, item) {
   const target = $(`[data-field='claims']`, root);
   if (!target) return;
@@ -1835,7 +2214,7 @@ function synchronizeClaimStatus(claim, changedField = '') {
 }
 
 function clearPlanningIfNeeded(item, reason) {
-  const hasPlanning = Boolean(item?.appointment) || state.bookings.some((booking) => booking.caseId === item?.id);
+  const hasPlanning = Boolean(item?.appointment) || getIndexedCaseBookings(item?.id).length > 0;
   if (!hasPlanning) return;
   clearCasePlanning(item, reason);
   quietNotify('Le planning a été annulé car une donnée utilisée pour le calcul a changé.', 'info');
@@ -2400,13 +2779,12 @@ function renderKanban() {
     return;
   }
   const columns = [
-    { key: "pdf-chief-validation", label: "À valider Chef", statuses: ["pdfChiefValidation"] },
-    { key: "reception", label: "Réception", statuses: ["receptionDraft", "awaitingVehicle", "vehicleReceived"] },
-    { key: "approvals", label: "Accords", statuses: ["approvals"] },
-    { key: "appointment", label: "RDV", statuses: ["appointment", "appointmentScheduled", "workScheduled", "noShow"] },
-    { key: "work", label: "En travaux", statuses: ["work"] },
-    { key: "quality", label: "Travaux terminés", statuses: ["quality", "qualityRejected", "qualityRework"] },
-    { key: "delivered", label: "Clôturé atelier", statuses: ["delivered", "invoiced"] },
+    { key: "chief-validation", label: "À valider Chef", statuses: ["chief_validation"] },
+    { key: "planning", label: "À planifier", statuses: ["planning"] },
+    { key: "work", label: "En travaux", statuses: ["in_progress"] },
+    { key: "completed", label: "Travaux terminés", statuses: ["completed"] },
+    { key: "closed", label: "Atelier clôturé", statuses: ["closed"] },
+    { key: "archived", label: "Archivé", statuses: ["archived"] },
   ];
   const dashboardCases = getSavDashboardCases(getSavDashboardRange()).periodCases;
   board.innerHTML = columns
@@ -2467,9 +2845,6 @@ function renderCaseDetail() {
   updateCaseHeader(detail, item);
   $("[data-field='status']", detail).textContent = statusLabels[getCaseStatus(item)];
   $("[data-field='created']", detail).textContent = `Créé le ${formatDate(item.createdAt)}`;
-  $("[data-field='expert-state']", detail).innerHTML = item.expertName
-    ? `<span class="tag ok">Expert renseigné</span>`
-    : `<span class="tag warn">À compléter</span>`;
   const canEditCase = canRenderAction("case.edit", { item }) && !isCaseReadonlyArchive(item);
 
   $$("[data-input]", detail).forEach((input) => {
@@ -2535,7 +2910,7 @@ function renderCaseDetail() {
         }
       }
 
-      if (field === "clientApproved" && !checked && (item.appointment || state.bookings.some((booking) => booking.caseId === item.id))) {
+      if (field === "clientApproved" && !checked && (item.appointment || getIndexedCaseBookings(item.id).length > 0)) {
         input.checked = true;
         const confirmed = await showConfirmModal("Retirer la validation client/interne supprimera le RDV et les affectations atelier de ce dossier.");
         if (!confirmed) {
@@ -2593,7 +2968,6 @@ function renderCaseDetail() {
   renderClaims(detail, item);
   renderSupplements(detail, item);
   renderProposals(detail, item);
-  renderQualityChecklist(detail, item);
   renderAssignments(detail, item);
   renderDossierExport(detail, item);
   renderHistory(detail, item);
@@ -2626,12 +3000,6 @@ function renderCaseDetail() {
     button.addEventListener("click", async () => {
       const permissionGuard = guardWorkflowAction(flag, item, true);
       if (!permissionGuard.ok) return;
-      if (flag === "delivered") {
-        if (typeof verifyDeliveryClaimsBlock === "function") {
-          const allowed = await verifyDeliveryClaimsBlock(item);
-          if (!allowed) return;
-        }
-      }
       const issues = getBusinessRuleIssues(item, flag);
       if (issues.length) {
         notifyUser(issues.join("\n"));
@@ -2756,7 +3124,7 @@ function getTabForAction(action) {
   if (action === "claim") return "claims";
   if (action === "labor") return "claims";
   if (action === "appointment") return "planning";
-  if (action === "received" || action === "workStarted" || action === "workCompleted" || action === "invoiced") return "atelier";
+  if (["received", "workStarted", "workCompleted", "close", "archive", "invoiced"].includes(action)) return "atelier";
   return "claims";
 }
 
@@ -2782,6 +3150,21 @@ function applyWorkflowAction(item, action) {
   const workflowClaimIds = new Set(getWorkflowClaims(item).map((claim) => claim.id));
   const claims = Array.isArray(item.claims) ? item.claims : [];
   const now = new Date().toISOString();
+
+  if (["close", "invoiced"].includes(action)) {
+    item.closedAt = item.closedAt || now;
+    item.status = "closed";
+    if (action === "invoiced") item.flags.invoiced = true;
+    addHistory(item, "case.closed", "Atelier clôturé", "Toutes les tâches atelier sont terminées.");
+    return { ok: true };
+  }
+
+  if (action === "archive") {
+    item.archivedAt = item.archivedAt || now;
+    item.status = "archived";
+    addHistory(item, "case.archived", "Dossier archivé", "Dossier figé en consultation après clôture atelier.");
+    return { ok: true };
+  }
 
   if (action === "expertApproved") {
     claims.forEach((claim) => {
@@ -2840,7 +3223,7 @@ function renderCaseSummary(root, item) {
   const action = getNextWorkflowAction(item);
   const nextAction = getCaseNextAction(item);
   const issues = action ? getBusinessRuleIssues(item, action) : [];
-  const assignments = state.bookings.filter((booking) => booking.caseId === item.id);
+  const assignments = getIndexedCaseBookings(item.id);
   const nextTitle = nextAction.label || (action ? ACTION_LABELS[action] || "Continuer" : "Dossier terminé");
   const nextDescription = isCaseBlocked(item)
     ? nextAction.reason
@@ -2879,7 +3262,7 @@ function renderCaseSummary(root, item) {
 
   setText(root, "summary-photos", `${item.photos.length} photo${item.photos.length > 1 ? "s" : ""}`);
   setText(root, "summary-expert", `${workflowClaims.length} intervention${workflowClaims.length > 1 ? "s" : ""}`);
-  setText(root, "summary-quality", `${assignments.length} affectation${assignments.length > 1 ? "s" : ""}`);
+  setText(root, "summary-assignments", `${assignments.length} affectation${assignments.length > 1 ? "s" : ""}`);
 
   const nextButton = $(`[data-next-action-tab]`, root);
   if (nextButton) {
@@ -2951,7 +3334,6 @@ function renderRoleBasedCaseNotes(root, item) {
   const noteDefs = [
     ["reception", "Note réception", "case.edit"],
     ["technique", "Note technique", "case.edit"],
-    ["qualite", "Note qualité", "quality.validate"],
     ["direction", "Note direction", "notes.direction"],
   ].filter(([key]) => Object.prototype.hasOwnProperty.call(visibleNotes, key));
   if (!noteDefs.length) return;
@@ -3194,6 +3576,15 @@ function renderValidationAlert(root, item) {
   `;
 }
 
+function isWorkflowActionCompleted(item, action) {
+  if (!item) return false;
+  if (action === "close" || action === "invoiced") {
+    return Boolean(item.closedAt || item.flags?.invoiced || ["closed", "archived"].includes(item.status));
+  }
+  if (action === "archive") return Boolean(item.archivedAt || item.status === "archived");
+  return Boolean(item.flags?.[action]);
+}
+
 function refreshCaseActionAvailability(root, item) {
   renderValidationAlert(root, item);
   const archiveMessage = getArchivedCaseMessage(item);
@@ -3208,10 +3599,11 @@ function refreshCaseActionAvailability(root, item) {
 
   $$("[data-action-flag]", root).forEach((button) => {
     const flag = button.dataset.actionFlag;
-    const issues = item.flags[flag] ? [] : getBusinessRuleIssues(item, flag);
+    const completed = isWorkflowActionCompleted(item, flag);
+    const issues = completed ? [] : getBusinessRuleIssues(item, flag);
     const permissionGuard = guardWorkflowAction(flag, item, true, { notify: false });
-    button.disabled = Boolean(item.flags[flag]) || issues.length > 0 || !permissionGuard.ok;
-    button.classList.toggle("validated", Boolean(item.flags[flag]));
+    button.disabled = completed || issues.length > 0 || !permissionGuard.ok;
+    button.classList.toggle("validated", completed);
     button.title = issues.length ? issues.join("\n") : permissionGuard.message;
   });
 
@@ -3234,7 +3626,7 @@ function refreshCaseActionAvailability(root, item) {
 
 
 function isProductionLocked(item) {
-  return Boolean(item?.flags?.workStarted || item?.flags?.workCompleted || item?.flags?.qualityApproved || item?.flags?.delivered || item?.flags?.invoiced);
+  return Boolean(item?.flags?.workStarted || item?.flags?.workCompleted || item?.closedAt || item?.flags?.invoiced);
 }
 
 function applyProductionLock(root, item) {
@@ -3242,8 +3634,8 @@ function applyProductionLock(root, item) {
 
   if (isCaseReadonlyArchive(item)) return;
 
-  const isInvoiced = Boolean(item?.flags?.invoiced);
-  const lockedPanels = isInvoiced
+  const isClosed = Boolean(item?.closedAt || item?.flags?.invoiced || item?.status === "closed");
+  const lockedPanels = isClosed
     ? ["claims", "photos", "planning", "atelier"]
     : ["claims", "planning"];
 
@@ -3252,7 +3644,7 @@ function applyProductionLock(root, item) {
     if (!panel) return;
     panel.classList.add("production-locked-panel");
     disablePanelControls(panel);
-    prependLockNotice(panel, isInvoiced ? "Dossier atelier clôturé : cette section est figée en lecture seule." : "Dossier en travaux : les données de base sont figées. Utilisez les actions de tâche du planning pour démarrer, terminer, mettre en pause ou reporter un reliquat.");
+    prependLockNotice(panel, isClosed ? "Dossier atelier clôturé : archivez-le après vérification finale." : "Dossier en travaux : les données de base sont figées. Utilisez les actions de tâche du planning pour démarrer, terminer, mettre en pause ou reporter un reliquat.");
   });
 
   const planningPanel = root.querySelector(`[data-case-panel='planning']`);
@@ -3375,7 +3767,8 @@ function getNextWorkflowAction(item) {
   if (!item.flags.received) return "received";
   if (!item.flags.workStarted) return "workStarted";
   if (!item.flags.workCompleted) return "workCompleted";
-  if (!item.flags.invoiced) return "invoiced";
+  if (!item.closedAt && !item.flags.invoiced && item.status !== "closed") return "close";
+  if (!item.archivedAt && item.status !== "archived") return "archive";
   return null;
 }
 
@@ -3386,7 +3779,7 @@ function appointmentNeedsReschedule(item) {
 function getBusinessRuleIssues(item, action) {
   if (!item) return ["Aucun dossier sélectionné."];
   const issues = [];
-  const hasAssignments = state.bookings.some((booking) => booking.caseId === item.id);
+  const hasAssignments = getIndexedCaseBookings(item.id).length > 0;
   const workflowClaims = getWorkflowClaims(item);
 
   if (isCaseReadonlyArchive(item)) {
@@ -3441,25 +3834,7 @@ function getBusinessRuleIssues(item, action) {
     if (!hasAssignments) issues.push("Aucune affectation atelier n'est planifiée pour ce dossier.");
   }
 
-  if (action === "qualityApproved") {
-    if (!item.flags.received) issues.push("Confirmer la réception du véhicule avant le contrôle qualité.");
-    if (!item.flags.workStarted) issues.push("Démarrer les travaux avant le contrôle qualité.");
-    if (!item.flags.workCompleted) issues.push("Marquer les travaux terminés avant le contrôle qualité.");
-    if (!hasAssignments) issues.push("Aucune affectation atelier n'est planifiée pour ce dossier.");
-    if (!isCaseQualityChecklistComplete(item)) issues.push("Compléter toute la checklist qualité.");
-  }
-
-  if (action === "delivered") {
-    if (!item.appointment) issues.push("Choisir un RDV avant livraison.");
-    if (!item.flags.received) issues.push("Confirmer la réception physique du véhicule avant livraison.");
-    if (!item.flags.workStarted) issues.push("Démarrer les travaux avant livraison.");
-    if (!item.flags.workCompleted) issues.push("Marquer les travaux terminés avant livraison.");
-    if (!hasAssignments) issues.push("Aucune affectation atelier n'est planifiée pour ce dossier.");
-    if (!item.flags.qualityApproved) issues.push("Valider le contrôle qualité avant livraison.");
-    if (workflowClaims.some((claim) => !isClientOnlyRepairClaim(claim)) && !hasAfterRepairPhoto(item)) issues.push("Ajouter au moins une photo Après réparation avant livraison assurance.");
-  }
-
-  if (action === "invoiced") {
+  if (["close", "invoiced"].includes(action)) {
     if (!item.flags.workStarted) issues.push("Démarrer les travaux avant de clôturer le dossier atelier.");
     if (!item.flags.workCompleted) issues.push("Terminer les travaux avant de clôturer le dossier atelier.");
     if (isCaseBlocked(item)) {
@@ -3468,6 +3843,12 @@ function getBusinessRuleIssues(item, action) {
     const technicianBookings = getCaseIncompleteTechnicianBookings(item);
     if (technicianBookings.length > 0) {
       issues.push("Toutes les tâches atelier et reliquats doivent être terminés.");
+    }
+  }
+
+  if (action === "archive") {
+    if (!item.closedAt && !item.flags.invoiced && item.status !== "closed") {
+      issues.push("Clôturer l’atelier avant d’archiver le dossier.");
     }
   }
 
@@ -3657,7 +4038,7 @@ function getStepPlanningHint(key) {
     paint: "Peinture et vernis : peintre + cabine peinture.",
     reassembly: "Remontage après peinture : tôlier par défaut, modifiable selon l’opération.",
     finish: "Finition/lavage : uniquement quand le flux SAV l’exige.",
-    quality: "Contrôle final : chef atelier / contrôle qualité.",
+    quality: "Contrôle final : Chef Atelier ou ressource de contrôle final.",
   };
   return hints[key] || "Étape atelier";
 }
@@ -3719,7 +4100,7 @@ function getValidatedAppointmentRows(item) {
       return {
         id: booking.id,
         key: booking.key,
-        title: booking.planningMode === "anticipated-new-part" ? (booking.title || "Préparation anticipée pièces neuves") : (getDurationLabel(booking.key) || booking.title || "Étape planning"),
+        title: getDurationLabel(booking.key) || booking.title || "Étape planning",
         planningMode: booking.planningMode || "standard",
         details: booking.details || "",
         start: booking.start,
@@ -3798,10 +4179,9 @@ function renderValidatedAppointmentPlan(root, item) {
           const start = new Date(row.start);
           const end = new Date(row.end);
           return `
-          <div class="validated-plan-row ${row.planningMode === "anticipated-new-part" ? "anticipated-new-part-row" : ""} task-status-${escapeAttr(row.status)}">
+          <div class="validated-plan-row task-status-${escapeAttr(row.status)}">
             <strong>
               ${escapeHtml(row.title)}
-              ${row.planningMode === "anticipated-new-part" ? '<small class="anticipated-new-part-badge">Pièce neuve préparée en parallèle</small>' : ''}
               ${row.remainingFromPaused ? '<small class="task-remainder-badge">Reliquat</small>' : ''}
               <small class="task-status-pill">${escapeHtml(row.statusLabel)}</small>
               ${row.details ? `<em>${escapeHtml(row.details)}</em>` : ''}
@@ -3864,7 +4244,7 @@ const BOOKING_ACTION_OVERRIDE_LABELS = {
 
 function getCaseIncompleteTechnicianBookings(item) {
   if (typeof getCaseBusinessTaskRows === "function" && typeof isBusinessTaskFamilyCompleted === "function") {
-    return getCaseBusinessTaskRows(item, { includeQuality: false })
+    return getCaseBusinessTaskRows(item)
       .filter((row) => !isBusinessTaskFamilyCompleted(row.bookings || row.family || []))
       .filter((row) => getBookingHumanResourceIds(row.actionBooking || row.displayBooking).length > 0)
       .map((row) => row.actionBooking || row.displayBooking)
@@ -4196,10 +4576,13 @@ function renderDurations(root, item) {
   const durationGrid = $("[data-field='durations']", root);
   item.stepServiceTypes = normalizeStepServiceTypes(item.stepServiceTypes);
   item.stepPreferredResources = normalizeStepPreferredResources(item.stepPreferredResources);
+  item.stepExecutionModes = normalizeStepExecutionModes(item.stepExecutionModes);
+  item.stepSubcontractorIds = normalizeStepSubcontractorIds(item.stepSubcontractorIds);
   item.stepAssignmentLocks = normalizeStepAssignmentLocks(item.stepAssignmentLocks);
   const canEditPlanning = canRenderAction("planning.edit", { item }) && !isCaseReadonlyArchive(item);
   const planningEditTitle = canEditPlanning ? "" : (getArchivedCaseMessage(item) || getPermissionDeniedMessage("planning.edit", { item }));
-  const activeCount = DURATIONS.filter(([key]) => Number(item.durations[key] ?? DEFAULT_DURATIONS[key]) > 0).length;
+  const visibleDurations = DURATIONS.filter(([key]) => key !== "quality");
+  const activeCount = visibleDurations.filter(([key]) => Number(item.durations[key] ?? DEFAULT_DURATIONS[key]) > 0).length;
   durationGrid.innerHTML = `
     <div class="duration-edit-guide">
       <div>
@@ -4208,7 +4591,7 @@ function renderDurations(root, item) {
       </div>
       <span>${activeCount} étape${activeCount > 1 ? "s" : ""} active${activeCount > 1 ? "s" : ""}</span>
     </div>
-    ${DURATIONS.map(([key, label], index) => {
+    ${visibleDurations.map(([key, label], index) => {
     const value = Number(item.durations[key] ?? DEFAULT_DURATIONS[key]);
     const assignedNames = getAssignedResourceNamesForStep(item, key);
     const currentType = getStepServiceTypeValue(item, key);
@@ -4218,7 +4601,13 @@ function renderDurations(root, item) {
     const technicianOptions = getSelectableTechniciansForStep(key, item);
     const preferredTechnicianId = getPreferredTechnicianForStep(item, key);
     const isActive = value > 0;
-    const assignmentAlternatives = isActive && typeof getResourceAssignmentAlternatives === "function"
+    const executionMode = item.stepExecutionModes[key] === "external" ? "external" : "internal";
+    const planningTemplate = getPlanningTemplateForItem(item, STEP_TEMPLATES.find((template) => template.key === key) || { key, role: "" });
+    const externalProviders = isActive && typeof getExternalProviderCandidates === "function"
+      ? getExternalProviderCandidates({ requiredRole: planningTemplate.role, requiredCategory: "" })
+      : [];
+    const selectedSubcontractorId = item.stepSubcontractorIds[key] || externalProviders[0]?.id || "";
+    const assignmentAlternatives = isActive && executionMode === "internal" && typeof getResourceAssignmentAlternatives === "function"
       ? getResourceAssignmentAlternatives(item, key, new Date())
       : [];
     const alternativesByResourceId = new Map(assignmentAlternatives.map((alternative) => [alternative.resourceId, alternative]));
@@ -4232,7 +4621,9 @@ function renderDurations(root, item) {
       : "";
     const activeClass = isActive ? "has-duration" : "is-empty";
     const statusLabel = isActive ? "Étape active" : "Non utilisé";
-    const technicianControl = !isActive
+    const technicianControl = executionMode === "external"
+      ? ""
+      : !isActive
       ? ""
       : technicianOptions.length
         ? `<label class="technician-override-field"><span>Technicien à réserver</span><small>${canEditPlanning ? "Choisissez avant de calculer le RDV. Vérifiez aussi l'état des pièces ci-dessus : neuve/remplacée ou réparée." : planningEditTitle}</small><select data-preferred-technician="${key}" ${canEditPlanning ? "" : `disabled title="${escapeAttr(planningEditTitle)}"`}><option value="">Auto - meilleur disponible</option>${technicianOptions.map((resource) => {
@@ -4249,6 +4640,17 @@ function renderDurations(root, item) {
             return `<option value="${type}" ${type === currentType ? "selected" : ""}>${helper}</option>`;
           }).join("")}</select></label>`
         : `<div class="service-locked-note">Service fixe : <strong>${effectiveHelp}</strong></div>`;
+    const executionControl = !isActive
+      ? ""
+      : `<div class="execution-mode-fields">
+          <label class="service-override-field"><span>Exécution</span><select data-execution-mode="${key}" ${canEditPlanning ? "" : `disabled title="${escapeAttr(planningEditTitle)}"`}>
+            <option value="internal" ${executionMode === "internal" ? "selected" : ""}>Interne atelier</option>
+            <option value="external" ${executionMode === "external" ? "selected" : ""} ${externalProviders.length ? "" : "disabled"}>Sous-traitant externe</option>
+          </select></label>
+          ${executionMode === "external" ? `<label class="service-override-field"><span>Sous-traitant réservé</span><select data-subcontractor-step="${key}" ${canEditPlanning ? "" : `disabled title="${escapeAttr(planningEditTitle)}"`}>
+            ${externalProviders.map((provider) => `<option value="${escapeAttr(provider.id)}" ${provider.id === selectedSubcontractorId ? "selected" : ""}>${escapeHtml(provider.name || provider.id)} · capacité ${Math.max(1, Number(provider.capacity || 1))}</option>`).join("")}
+          </select></label>` : ""}
+        </div>`;
     return `
       <article class="duration-assignment-card ${activeClass}">
         <div class="duration-card-head">
@@ -4269,6 +4671,7 @@ function renderDurations(root, item) {
           </div>
           ${technicianControl}
           ${serviceControl}
+          ${executionControl}
         </div>
       </article>
     `;
@@ -4360,6 +4763,50 @@ function renderDurations(root, item) {
       select.dataset.previousPreferredTechnician = next;
       generatedProposals[item.id] = null;
       clearPlanningIfNeeded(item, 'Planning annulé après changement de technicien. Recalculez un RDV.');
+      saveState();
+      renderCases();
+      renderPlanning();
+      renderMetrics();
+    });
+  });
+  $$('[data-execution-mode]', durationGrid).forEach((select) => {
+    select.addEventListener('change', () => {
+      const permission = guardAction("subcontractor.manage", { item }, { notify: false });
+      if (!permission.ok) {
+        notifyUser(permission.message, "error");
+        renderCaseDetail();
+        return;
+      }
+      const key = select.dataset.executionMode;
+      const next = select.value === "external" ? "external" : "internal";
+      item.stepExecutionModes = normalizeStepExecutionModes(item.stepExecutionModes);
+      item.stepSubcontractorIds = normalizeStepSubcontractorIds(item.stepSubcontractorIds);
+      item.stepExecutionModes[key] = next;
+      if (next === "external" && !item.stepSubcontractorIds[key]) {
+        const template = getPlanningTemplateForItem(item, STEP_TEMPLATES.find((candidate) => candidate.key === key) || { key, role: "" });
+        item.stepSubcontractorIds[key] = getExternalProviderCandidates({ requiredRole: template.role })[0]?.id || "";
+      }
+      generatedProposals[item.id] = null;
+      clearPlanningIfNeeded(item, 'Planning annulé après changement du mode interne/externe. Recalculez un RDV.');
+      addHistory(item, "planning.execution_mode.changed", "Mode d'exécution modifié", `${getDurationLabel(key)} : ${next === "external" ? "sous-traitant externe" : "interne atelier"}.`);
+      saveState();
+      render();
+    });
+  });
+  $$('[data-subcontractor-step]', durationGrid).forEach((select) => {
+    select.addEventListener('change', () => {
+      const permission = guardAction("subcontractor.manage", { item }, { notify: false });
+      if (!permission.ok) {
+        notifyUser(permission.message, "error");
+        renderCaseDetail();
+        return;
+      }
+      const key = select.dataset.subcontractorStep;
+      item.stepSubcontractorIds = normalizeStepSubcontractorIds(item.stepSubcontractorIds);
+      item.stepSubcontractorIds[key] = select.value || "";
+      generatedProposals[item.id] = null;
+      clearPlanningIfNeeded(item, 'Planning annulé après changement de sous-traitant. Recalculez un RDV.');
+      addHistory(item, "planning.subcontractor.changed", "Sous-traitant modifié", `${getDurationLabel(key)} : ${getResource(select.value)?.name || select.value}.`);
       saveState();
       renderCases();
       renderPlanning();
@@ -4545,7 +4992,7 @@ function renderEstimateImportPreview(root, item) {
   ].filter(([, value]) => value);
   const detectedRows = preview.laborLines.slice(0, 30);
   const ignoredRows = preview.ignoredLines.slice(0, 20);
-  const totalWithQuality = ESTIMATE_ALLOWED_KEYS.reduce((sum, key) => sum + Number(preview.durations[key] || 0), 0);
+  const totalPlanningHours = ESTIMATE_PLANNING_KEYS.reduce((sum, key) => sum + Number(preview.durations[key] || 0), 0);
 
   if (status) {
     status.textContent = `Devis analysé. Vérifiez la répartition avant application.`;
@@ -4576,7 +5023,7 @@ function renderEstimateImportPreview(root, item) {
             `,
           ).join("")}
         </div>
-        <p class="muted">Total atelier proposé : <strong data-field="estimate-import-total">${formatLocalizedDecimal(totalWithQuality)} h</strong></p>
+        <p class="muted">Total atelier proposé : <strong data-field="estimate-import-total">${formatLocalizedDecimal(totalPlanningHours)} h</strong></p>
       </section>
       <section>
         <h3>Lignes main-d'œuvre détectées</h3>
@@ -4692,12 +5139,22 @@ function renderProposals(root, item) {
     </section>
   `;
 
-  $("[data-accept-main-proposal]", target).addEventListener("click", () => {
-    acceptProposal(item, proposal);
+  $("[data-accept-main-proposal]", target).addEventListener("click", async (event) => {
+    event.currentTarget.disabled = true;
+    try {
+      await acceptProposalAtomically(item, proposal);
+    } finally {
+      if (event.currentTarget?.isConnected) event.currentTarget.disabled = false;
+    }
   });
   $$("[data-accept-date-proposal]", target).forEach((button) => {
-    button.addEventListener("click", () => {
-      acceptProposal(item, availableDates[Number(button.dataset.acceptDateProposal)].proposal);
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      try {
+        await acceptProposalAtomically(item, availableDates[Number(button.dataset.acceptDateProposal)].proposal);
+      } finally {
+        if (button.isConnected) button.disabled = false;
+      }
     });
   });
 }
@@ -4760,270 +5217,4 @@ function renderAssignments(root, item) {
       `;
     })
     .join("");
-}
-
-function renderQualityChecklist(root, item) {
-  const target = $("[data-field='quality-checklist']", root);
-  if (!target) return;
-  target.innerHTML = `
-    <div class="section-heading compact-heading">
-      <h2>Checklist qualité</h2>
-      <span>${qualityChecklistCount(item)}/${DEFAULT_QUALITY_CHECKS.length}</span>
-    </div>
-    <div class="quality-grid">
-      ${DEFAULT_QUALITY_CHECKS.map(
-        (label) => `
-          <label class="check-card">
-            <input type="checkbox" data-quality-check="${escapeAttr(label)}" ${item.qualityChecklist[label] ? "checked" : ""} />
-            <span>${escapeHtml(label)}</span>
-          </label>
-        `,
-      ).join("")}
-    </div>
-  `;
-  $$("[data-quality-check]", target).forEach((input) => {
-    const permissionGuard = guardQualityValidate(item, { notify: false });
-    input.disabled = !permissionGuard.ok;
-    input.title = permissionGuard.message;
-    input.addEventListener("change", () => {
-      const guard = input.checked ? guardQualityValidate(item) : guardAction("quality.reject", { item });
-      if (!guard.ok) {
-        input.checked = !input.checked;
-        return;
-      }
-      item.qualityChecklist[input.dataset.qualityCheck] = input.checked;
-      if (!isCaseQualityChecklistComplete(item)) {
-        item.flags.qualityApproved = false;
-        item.flags.delivered = false;
-      }
-      saveState();
-      render();
-    });
-  });
-}
-
-
-function isCaseQualityChecklistComplete(item) {
-  if (!item || !item.qualityChecklist || typeof item.qualityChecklist !== "object") return false;
-  if (typeof DEFAULT_QUALITY_CHECKS === "undefined" || !Array.isArray(DEFAULT_QUALITY_CHECKS)) return false;
-  return DEFAULT_QUALITY_CHECKS.every((label) => Boolean(item.qualityChecklist[label]));
-}
-
-function qualityChecklistCount(item) {
-  if (!item || !item.qualityChecklist || typeof item.qualityChecklist !== "object") return 0;
-  return DEFAULT_QUALITY_CHECKS.filter((label) => Boolean(item.qualityChecklist[label])).length;
-}
-
-const QC_PRESET_REASONS = [
-  "Défaut peinture",
-  "Jeu / alignement à reprendre",
-  "Pièce manquante ou non conforme",
-  "Essai route non concluant",
-  "Nettoyage ou finition insuffisant",
-  "Réclamation client non traitée",
-];
-
-function renderQcPresetReasonButtons(caseId) {
-  return `
-    <div class="qc-preset-row" aria-label="Motifs QC prédéfinis">
-      ${QC_PRESET_REASONS.map((reason) => `
-        <button class="quick-chip qc-preset-reason" type="button"
-          data-case-id="${escapeAttr(caseId)}"
-          data-reason="${escapeAttr(reason)}">
-          ${escapeHtml(reason)}
-        </button>
-      `).join("")}
-    </div>
-  `;
-}
-
-function readQcQuickNote(card) {
-  return String(card?.querySelector(".qc-quality-note")?.value || "").trim();
-}
-
-function saveQcQuickNote(caseId, note) {
-  if (!note || typeof updateCaseNote !== "function") return;
-  updateCaseNote(caseId, "qualite", note);
-}
-
-// ─── v23.2.5 — Vue Contrôle Qualité dédiée ────────────────────────────────
-function renderQcWorkspace() {
-  const container = document.getElementById("view-qc-workspace");
-  if (!container) return;
-
-  // Vérification d'accès
-  if (typeof canAccessTab === "function" && !canAccessTab("qc-workspace")) return;
-
-  const cases = (typeof state !== "undefined" ? state.cases : []).filter(
-    (c) => !c.deletedAt && !c.archivedAt
-  );
-
-  // Catégories QC
-  const pending = cases.filter((c) => {
-    const rw = c.receptionWorkflow || {};
-    const qStatus = typeof normalizeQualityStatus === "function" ? normalizeQualityStatus(rw.qualityStatus) : rw.qualityStatus;
-    // En attente : travaux terminés, pas livré, pas encore pris en QC (not_started) ou en cours
-    return c.flags?.workCompleted && !c.flags?.delivered &&
-      (!qStatus || qStatus === "not_started" || qStatus === "in_progress" || qStatus === "pending" || qStatus === "");
-  });
-
-  const rejected = cases.filter((c) => {
-    const rw = c.receptionWorkflow || {};
-    const qStatus = typeof normalizeQualityStatus === "function" ? normalizeQualityStatus(rw.qualityStatus) : rw.qualityStatus;
-    return qStatus === "rejected" && !c.flags?.delivered;
-  });
-
-  const reworkDone = cases.filter((c) => {
-    const rw = c.receptionWorkflow || {};
-    const qStatus = typeof normalizeQualityStatus === "function" ? normalizeQualityStatus(rw.qualityStatus) : rw.qualityStatus;
-    return qStatus === "rework" && c.flags?.workCompleted && !c.flags?.delivered;
-  });
-
-  const canValidate = typeof hasPermission === "function" && hasPermission("quality.validate");
-  const canRevalidate = typeof hasPermission === "function" && hasPermission("quality.revalidate");
-  const canReject   = typeof hasPermission === "function" && hasPermission("quality.reject");
-
-  function qcCard(c, actionSet) {
-    const checklist = c.qualityChecklist || {};
-    const total = typeof DEFAULT_QUALITY_CHECKS !== "undefined" ? DEFAULT_QUALITY_CHECKS.length : 0;
-    const done  = total ? DEFAULT_QUALITY_CHECKS.filter((k) => checklist[k]).length : 0;
-    const rw = c.receptionWorkflow || {};
-    const returnReason = rw.qualityReturnReason || "";
-    return `
-      <article class="qc-card" data-qc-case="${escapeAttr(c.id)}">
-        <div class="qc-card-header">
-          <span class="qc-plate">${escapeHtml(c.plate || "—")}</span>
-          <span class="qc-vehicle">${escapeHtml(c.vehicle || "")}</span>
-          <span class="qc-client">${escapeHtml(c.clientName || "")}</span>
-        </div>
-        <div class="qc-card-meta">
-          ${total ? `<span class="qc-checklist-count">Checklist : ${done}/${total}</span>` : ""}
-          ${returnReason ? `<span class="qc-return-reason">Motif retour : ${escapeHtml(returnReason)}</span>` : ""}
-        </div>
-        <div class="qc-card-actions">
-          ${actionSet === "pending" || actionSet === "rework" ? `
-            <label class="qc-quick-note">
-              <span>Note qualité rapide</span>
-              <input type="text" class="qc-quality-note" placeholder="Note courte visible au dossier..." />
-            </label>
-            ${actionSet === "rework"
-              ? (canRevalidate ? `<button type="button" class="primary-button qc-action-revalidate" data-case-id="${escapeAttr(c.id)}">✅ Revalider QC</button>` : "")
-              : (canValidate ? `<button type="button" class="primary-button qc-action-validate" data-case-id="${escapeAttr(c.id)}">✅ Valider QC en 1 clic</button>` : "")}
-            ${canReject ? `
-              <span class="qc-reject-wrap">
-                ${renderQcPresetReasonButtons(c.id)}
-                <input type="text" class="qc-reject-reason" placeholder="Motif refus..." aria-label="Motif de refus QC" style="font-size:0.85rem; padding:4px 8px;" />
-                <button type="button" class="ghost-button qc-action-reject" data-case-id="${escapeAttr(c.id)}">❌ Refuser</button>
-              </span>
-            ` : ""}
-          ` : ""}
-          ${actionSet === "rejected" ? `
-            <label class="qc-quick-note">
-              <span>Note qualité rapide</span>
-              <input type="text" class="qc-quality-note" placeholder="Note de reprise ou revalidation..." />
-            </label>
-            ${canReject ? `<button type="button" class="ghost-button qc-action-return" data-case-id="${escapeAttr(c.id)}">🔧 Retour atelier clair</button>` : ""}
-            ${canRevalidate ? `<button type="button" class="primary-button qc-action-revalidate" data-case-id="${escapeAttr(c.id)}">✅ Revalider après correction</button>` : ""}
-          ` : ""}
-        </div>
-      </article>`;
-  }
-
-  function sectionHtml(title, icon, items, actionSet, emptyMsg) {
-    return `
-      <section class="qc-section">
-        <h2 class="qc-section-title">${escapeHtml(icon)} ${escapeHtml(title)} <span class="status-pill">${items.length}</span></h2>
-        ${items.length === 0
-          ? `<p class="empty-inline">${escapeHtml(emptyMsg)}</p>`
-          : items.map((c) => qcCard(c, actionSet)).join("")}
-      </section>`;
-  }
-
-  container.innerHTML = `
-    <div class="qc-workspace-inner" style="padding: 20px; max-width: 1100px; margin: 0 auto;">
-      <div class="panel-heading">
-        <div>
-          <h1>Contrôle Qualité</h1>
-          <p>Validez, refusez ou renvoyez en atelier les véhicules prêts pour contrôle.</p>
-        </div>
-        <button type="button" class="ghost-button" id="qc-refresh-btn" aria-label="Rafraîchir">↻ Rafraîchir</button>
-      </div>
-      ${sectionHtml("En attente de QC", "🔍", pending, "pending", "Aucun véhicule en attente de contrôle qualité.")}
-      ${sectionHtml("Retravail terminé — à revalider", "🔄", reworkDone, "rework", "Aucun retravail terminé à revalider.")}
-      ${sectionHtml("QC refusé — retour atelier demandé", "❌", rejected, "rejected", "Aucun dossier en état refusé.")}
-    </div>`;
-
-  // Liaison des actions
-  container.querySelectorAll(".qc-preset-reason").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const wrap = btn.closest(".qc-reject-wrap");
-      const reasonInput = wrap ? wrap.querySelector(".qc-reject-reason") : null;
-      if (reasonInput) {
-        reasonInput.value = btn.dataset.reason || "";
-        reasonInput.focus();
-      }
-    });
-  });
-
-  container.querySelectorAll(".qc-action-validate, .qc-action-revalidate").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const caseId = btn.dataset.caseId;
-      const card = btn.closest(".qc-card");
-      const note = readQcQuickNote(card);
-      if (typeof advanceReceptionWorkflow !== "function") return;
-      const res = advanceReceptionWorkflow(caseId, "update_quality_status", { status: "validated" });
-      if (res.ok) {
-        saveQcQuickNote(caseId, note);
-        if (typeof saveState === "function") saveState({ flushCloud: true, cloudReason: "qc-field-validation" });
-        renderQcWorkspace();
-      } else {
-        if (typeof notifyUser === "function") notifyUser(res.message, "error");
-      }
-    });
-  });
-
-  container.querySelectorAll(".qc-action-reject").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const caseId = btn.dataset.caseId;
-      const card = btn.closest(".qc-card");
-      const wrap = btn.closest(".qc-reject-wrap");
-      const reasonInput = wrap ? wrap.querySelector(".qc-reject-reason") : null;
-      const reason = reasonInput ? reasonInput.value.trim() : "";
-      const note = readQcQuickNote(card);
-      if (typeof advanceReceptionWorkflow !== "function") return;
-      const res = advanceReceptionWorkflow(caseId, "update_quality_status", { status: "rejected", reason });
-      if (res.ok) {
-        saveQcQuickNote(caseId, note);
-        if (typeof saveState === "function") saveState({ flushCloud: true, cloudReason: "qc-field-rejection" });
-        renderQcWorkspace();
-      } else {
-        if (typeof notifyUser === "function") notifyUser(res.message, "error");
-      }
-    });
-  });
-
-  container.querySelectorAll(".qc-action-return").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const caseId = btn.dataset.caseId;
-      const card = btn.closest(".qc-card");
-      const reasonInput = card ? card.querySelector(".qc-reject-reason") : null;
-      const reason = reasonInput ? reasonInput.value.trim() : (card?.querySelector(".qc-return-reason")?.textContent || "").replace(/^Motif retour\s*:\s*/i, "").trim();
-      const note = readQcQuickNote(card);
-      if (typeof advanceReceptionWorkflow !== "function") return;
-      const res = advanceReceptionWorkflow(caseId, "return_to_workshop", { reason });
-      if (res.ok) {
-        saveQcQuickNote(caseId, note);
-        if (typeof saveState === "function") saveState({ flushCloud: true, cloudReason: "qc-return-workshop" });
-        renderQcWorkspace();
-      } else {
-        if (typeof notifyUser === "function") notifyUser(res.message, "error");
-      }
-    });
-  });
-
-  document.getElementById("qc-refresh-btn")?.addEventListener("click", renderQcWorkspace);
-}
-
-if (typeof window !== "undefined") {
-  window.renderQcWorkspace = renderQcWorkspace;
 }

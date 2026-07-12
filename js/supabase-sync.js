@@ -1,8 +1,10 @@
 const SUPABASE_SCHEMA_HINT =
-  "Exécutez le dernier supabase-schema.sql fourni avec cette version si le test indique que cloud_backups, Realtime, app_settings ou les politiques atelier manquent.";
+  "Exécutez en priorité supabase_nimr_sav_v23_2_8_full_audit.sql dans SQL Editor. supabase-schema.sql reste le schéma de compatibilité historique.";
 
 async function signInSupabaseFromForm(event) {
   event.preventDefault();
+  const permissionGuard = guardSensitiveAction("supabase.access");
+  if (!permissionGuard.ok) return;
   const client = getSupabaseClient();
   if (!client) {
     refreshSupabasePanel();
@@ -24,23 +26,44 @@ async function signInSupabaseFromForm(event) {
     return;
   }
   form.elements.password.value = "";
+  if (typeof hydrateLargeStateIfAvailable === "function") await hydrateLargeStateIfAvailable();
+  if (typeof loadDurableOutboxOperations === "function") await loadDurableOutboxOperations();
   await refreshSupabasePanel();
   startSupabaseLiveSync();
   await pullLatestSupabaseBackup("connexion");
-  scheduleAutoSupabaseBackup("connexion");
+  await processOfflineQueue();
+  await pullLatestSupabaseBackup("convergence-apres-outbox");
+  scheduleAutoSupabaseBackup("connexion-convergee");
   quietNotify("Connexion Supabase réussie. Synchronisation atelier multi-PC activée.", "success");
 }
 
 async function signOutSupabase() {
+  const permissionGuard = guardSensitiveAction("supabase.access");
+  if (!permissionGuard.ok) return;
   const client = getSupabaseClient();
   if (!client) return;
+  setSupabaseStatus("Synchronisation avant déconnexion...");
+  if (typeof persistLargeStateSnapshot === "function") {
+    await persistLargeStateSnapshot(state, { appVersion: APP_VERSION, reason: "supabase-signout" });
+  }
+  if (navigator.onLine !== false) {
+    await processOfflineQueue().catch((error) => {
+      console.warn("Outbox conservée avant déconnexion", error?.message || error);
+    });
+  }
   stopSupabaseLiveSync();
-  await client.auth.signOut();
+  const { error } = await client.auth.signOut();
+  if (error) {
+    setSupabaseStatus(`Déconnexion Supabase impossible : ${error.message}`, "error");
+    return;
+  }
   await refreshSupabasePanel();
   quietNotify("Déconnecté de Supabase.", "success");
 }
 
 async function testSupabaseConnection() {
+  const permissionGuard = guardSensitiveAction("supabase.access");
+  if (!permissionGuard.ok) return;
   const client = getSupabaseClient();
   if (!client) {
     refreshSupabasePanel();
@@ -59,7 +82,7 @@ async function testSupabaseConnection() {
   if (backupCheck.error) {
     console.error("Test Supabase impossible", backupCheck.error);
     setSupabaseStatus(`Erreur Supabase : ${backupCheck.error.message}`, "error");
-    setSupabaseDetails("Exécutez le nouveau supabase-schema.sql dans SQL Editor, puis réessayez.");
+    setSupabaseDetails(`${SUPABASE_SCHEMA_HINT} Puis réessayez.`);
     return;
   }
 
@@ -101,27 +124,22 @@ async function buildCloudBackupPayload() {
 
 async function upsertCloudBackupRow(client, tableName, row) {
   const scopedRow = withWorkshopId(row);
-  let { error } = await client.from(tableName).upsert(scopedRow, { onConflict: "workshop_id,backup_key" });
+  const { error } = await client.from(tableName).upsert(scopedRow, { onConflict: "workshop_id,backup_key" });
   if (error && isWorkshopSchemaUnavailable(error)) {
-    const { workshop_id, ...legacyRow } = scopedRow;
-    ({ error } = await client.from(tableName).upsert(legacyRow, { onConflict: "backup_key" }));
+    throwWorkshopIsolationRequired(tableName, error);
   }
   if (error) throw error;
 }
 
 async function selectCloudBackupRow(client, tableName, backupKey, columns) {
-  let { data, error } = await client
+  const { data, error } = await client
     .from(tableName)
     .select(columns)
     .eq("workshop_id", getSupabaseWorkshopId())
     .eq("backup_key", backupKey)
     .maybeSingle();
   if (error && isWorkshopSchemaUnavailable(error)) {
-    ({ data, error } = await client
-      .from(tableName)
-      .select(columns)
-      .eq("backup_key", backupKey)
-      .maybeSingle());
+    throwWorkshopIsolationRequired(tableName, error);
   }
   if (error) throw error;
   return data || null;
@@ -198,10 +216,9 @@ async function syncWorkshopSettingsToSupabase(client, localState, user) {
     updated_by: user?.id || null,
     updated_at: now,
   });
-  let { error } = await client.from("app_settings").upsert(row, { onConflict: "workshop_id,setting_key" });
+  const { error } = await client.from("app_settings").upsert(row, { onConflict: "workshop_id,setting_key" });
   if (error && isWorkshopSchemaUnavailable(error)) {
-    const { workshop_id, ...legacyRow } = row;
-    ({ error } = await client.from("app_settings").upsert(legacyRow, { onConflict: "setting_key" }));
+    throwWorkshopIsolationRequired("app_settings", error);
   }
   if (error) throw new Error(`app_settings: ${error.message}`);
   return {
@@ -235,18 +252,14 @@ function applyWorkshopSettingsToState(settingsPayload) {
 }
 
 async function restoreWorkshopSettingsFromSupabase(client) {
-  let { data, error } = await client
+  const { data, error } = await client
     .from("app_settings")
     .select("value, updated_at")
     .eq("workshop_id", getSupabaseWorkshopId())
     .eq("setting_key", "workshop_settings")
     .maybeSingle();
   if (error && isWorkshopSchemaUnavailable(error)) {
-    ({ data, error } = await client
-      .from("app_settings")
-      .select("value, updated_at")
-      .eq("setting_key", "workshop_settings")
-      .maybeSingle());
+    throwWorkshopIsolationRequired("app_settings", error);
   }
   if (error) throw new Error(`app_settings: ${error.message}`);
   if (!data?.value) return null;
@@ -261,6 +274,10 @@ function isSchemaCacheTableError(error) {
 function isWorkshopSchemaUnavailable(error) {
   const message = String(error?.message || error || "");
   return /workshop_id|workshop_id,local_id|workshop_id,backup_key|workshop_id,setting_key|no unique or exclusion constraint|column .* does not exist/i.test(message);
+}
+
+function throwWorkshopIsolationRequired(scope, error) {
+  throw new Error(`${scope}: isolation atelier indisponible. ${SUPABASE_SCHEMA_HINT} ${error?.message || ""}`.trim());
 }
 
 function withWorkshopId(row) {
@@ -282,12 +299,12 @@ async function safeBusinessSyncStep(label, callback) {
 async function upsertAndMap(client, table, rows) {
   const cleanRows = uniqueByLocalId(rows).filter((row) => row.local_id);
   if (!cleanRows.length) return new Map();
-  let { data, error } = await client
+  const { data, error } = await client
     .from(table)
     .upsert(cleanRows.map(withWorkshopId), { onConflict: "workshop_id,local_id" })
     .select("id, local_id");
   if (error && isWorkshopSchemaUnavailable(error)) {
-    ({ data, error } = await client.from(table).upsert(cleanRows, { onConflict: "local_id" }).select("id, local_id"));
+    throwWorkshopIsolationRequired(table, error);
   }
   if (error) {
     const duplicateOrderNumber = table === "repair_orders" && String(error.message || "").includes("repair_orders_order_number_key");
@@ -397,7 +414,14 @@ async function syncBusinessTablesToSupabase(payload, user) {
     local_id: resource.id,
     name: resource.name || "Ressource",
     type: resource.role || "atelier",
-    capacity: 1,
+    category: resource.category || resource.role || "atelier",
+    kind: resource.kind || (resource.external ? "external" : "internal"),
+    site: resource.site || (resource.external ? "external" : "internal"),
+    capacity: Math.max(1, Number(resource.capacity || 1) || 1),
+    simultaneous_capacity: Math.max(1, Number(resource.simultaneousCapacity || resource.capacity || 1) || 1),
+    daily_capacity_minutes: Number(resource.dailyCapacityMinutes || 0) || null,
+    calendar: resource.calendar || {},
+    compatible_roles: Array.isArray(resource.compatibleRoles) ? resource.compatibleRoles : [],
     active: resource.active !== false,
   }));
   const resourceMap = await upsertAndMap(client, "planning_resources", resourceRows);
@@ -413,8 +437,8 @@ async function syncBusinessTablesToSupabase(payload, user) {
     client_agreement: Boolean(item.flags?.clientApproved),
     reception_planned_at: getAppointmentIso(item),
     reception_done_at: getHistoryIso(item, "vehicle.received"),
-    delivery_planned_at: null,
-    delivery_done_at: getHistoryIso(item, "vehicle.delivered"),
+    delivery_planned_at: safeIso(item.revisedEstimatedDelivery || item.deliveryEstimate?.current || item.appointment?.delivery),
+    delivery_done_at: safeIso(item.closedAt) || getHistoryIso(item, "case.invoiced") || getHistoryIso(item, "vehicle.delivered"),
     estimated_amount: null,
     customer_balance: null,
     notes: buildRepairOrderNotesForSync(item),
@@ -422,11 +446,22 @@ async function syncBusinessTablesToSupabase(payload, user) {
   }));
   const orderMap = await upsertAndMap(client, "repair_orders", orderRows);
 
+  const bookingStatsByCaseAndKey = new Map();
+  localState.bookings.forEach((booking) => {
+    if (!booking?.caseId || !booking?.key || booking.type === "leave" || booking.temporary === true) return;
+    const key = `${booking.caseId}:${booking.key}`;
+    const stats = bookingStatsByCaseAndKey.get(key) || { actualMinutes: 0, startedAt: [], completedAt: [] };
+    stats.actualMinutes += Math.max(0, Number(booking.actualWorkedMinutes || 0) || 0);
+    if (booking.actualStart || booking.startedAt) stats.startedAt.push(booking.actualStart || booking.startedAt);
+    if (booking.actualEnd || booking.completedAt) stats.completedAt.push(booking.actualEnd || booking.completedAt);
+    bookingStatsByCaseAndKey.set(key, stats);
+  });
   const stepRows = [];
   localState.cases.forEach((item) => {
     const orderId = orderMap.get(caseSyncLocalId(item));
     if (!orderId) return;
     DURATIONS.forEach(([key, label]) => {
+      const actual = bookingStatsByCaseAndKey.get(`${item.id}:${key}`) || { actualMinutes: 0, startedAt: [], completedAt: [] };
       stepRows.push({
         local_id: `${caseSyncLocalId(item)}:${key}`,
         repair_order_id: orderId,
@@ -434,9 +469,9 @@ async function syncBusinessTablesToSupabase(payload, user) {
         label,
         status: stepStatus(item, key),
         planned_hours: Number(item.durations?.[key] || 0),
-        actual_hours: 0,
-        started_at: item.flags?.workStarted ? getHistoryIso(item, "work.started") : null,
-        completed_at: key === "quality" && item.flags?.qualityApproved ? getHistoryIso(item, "quality.approved") : item.flags?.workCompleted ? getHistoryIso(item, "work.completed") : null,
+        actual_hours: Math.round((actual.actualMinutes / 60) * 100) / 100,
+        started_at: safeIso(actual.startedAt.sort()[0]) || (item.flags?.workStarted ? getHistoryIso(item, "work.started") : null),
+        completed_at: safeIso(actual.completedAt.sort().at(-1)) || (item.flags?.workCompleted ? getHistoryIso(item, "work.completed") : null),
         updated_at: now,
       });
     });
@@ -453,19 +488,37 @@ async function syncBusinessTablesToSupabase(payload, user) {
       const endAt = safeIso(segment.end);
       if (!startAt || !endAt) return;
       const firstResourceId = booking.resourceIds?.[0];
+      const mappedResourceIds = (booking.resourceIds || []).map((resourceId) => resourceMap.get(resourceId)).filter(Boolean);
+      const mappedEquipmentIds = (booking.equipmentResourceIds || []).map((resourceId) => resourceMap.get(resourceId)).filter(Boolean);
       bookingRows.push({
         local_id: `${booking.caseId || booking.id}:${booking.key || "step"}:${index}:${startAt}`,
         repair_order_id: orderId,
         resource_id: firstResourceId ? resourceMap.get(firstResourceId) || null : null,
+        resource_ids: mappedResourceIds,
+        primary_resource_id: booking.primaryResourceId ? resourceMap.get(booking.primaryResourceId) || null : mappedResourceIds[0] || null,
+        equipment_resource_ids: mappedEquipmentIds,
+        task_id: booking.taskId || booking.businessTaskId || booking.id,
+        step_key: booking.key || null,
+        dependencies: Array.isArray(booking.dependencies) ? booking.dependencies : [],
         title: booking.title || getDurationLabel(booking.key),
         start_at: startAt,
         end_at: endAt,
-        status: booking.temporary ? "temporary" : "planned",
+        status: typeof getBookingOperationalStatus === "function" ? getBookingOperationalStatus(booking) : (booking.status || "planned"),
+        planned_minutes: Math.max(0, Number(booking.plannedMinutes || 0) || 0),
+        actual_worked_minutes: Math.max(0, Number(booking.actualWorkedMinutes || 0) || 0),
+        actual_start_at: safeIso(booking.actualStart || booking.startedAt),
+        actual_end_at: safeIso(booking.actualEnd || booking.completedAt),
+        vehicle_location: booking.vehicleLocation || "internal",
+        service_mode: booking.serviceMode || "internal",
+        subcontract_id: booking.subcontractId || null,
+        temporary: booking.temporary === true,
         updated_at: now,
       });
     });
   });
-  await upsertAndMap(client, "planning_slots", bookingRows);
+  // Les créneaux sont créés/modifiés exclusivement par
+  // nimr_reserve_planning_atomic. Une écriture REST directe contournerait les
+  // verrous, l'idempotence et le contrôle de capacité du RPC.
 
 
   const claimRows = [];
@@ -616,9 +669,9 @@ async function syncBusinessTablesToSupabase(payload, user) {
     // v21.11: audit_logs peut provenir d'anciennes bases sans contrainte unique utilisable.
     // On tente d'abord l'upsert; si Supabase refuse ON CONFLICT, on insere uniquement les lignes manquantes.
     const uniqueAuditRows = uniqueByLocalId(auditRows);
-    let { error } = await client.from("audit_logs").upsert(uniqueAuditRows.map(withWorkshopId), { onConflict: "workshop_id,local_id" });
+    const { error } = await client.from("audit_logs").upsert(uniqueAuditRows.map(withWorkshopId), { onConflict: "workshop_id,local_id" });
     if (error && isWorkshopSchemaUnavailable(error)) {
-      ({ error } = await client.from("audit_logs").upsert(uniqueAuditRows, { onConflict: "local_id" }));
+      throwWorkshopIsolationRequired("audit_logs", error);
     }
     if (error) {
       if (!/ON CONFLICT|unique or exclusion constraint/i.test(error.message || "")) {
@@ -630,10 +683,7 @@ async function syncBusinessTablesToSupabase(payload, user) {
         .eq("workshop_id", getSupabaseWorkshopId())
         .in("local_id", uniqueAuditRows.map((row) => row.local_id).filter(Boolean));
       if (readError && isWorkshopSchemaUnavailable(readError)) {
-        ({ data: existing, error: readError } = await client
-          .from("audit_logs")
-          .select("local_id")
-          .in("local_id", uniqueAuditRows.map((row) => row.local_id).filter(Boolean)));
+        throwWorkshopIsolationRequired("audit_logs", readError);
       }
       if (readError) throw new Error(`audit_logs: ${readError.message}`);
       const existingIds = new Set((existing || []).map((row) => row.local_id));
@@ -641,7 +691,7 @@ async function syncBusinessTablesToSupabase(payload, user) {
       if (missingRows.length) {
         let { error: insertError } = await client.from("audit_logs").insert(missingRows.map(withWorkshopId));
         if (insertError && isWorkshopSchemaUnavailable(insertError)) {
-          ({ error: insertError } = await client.from("audit_logs").insert(missingRows));
+          throwWorkshopIsolationRequired("audit_logs", insertError);
         }
         if (insertError) throw new Error(`audit_logs: ${insertError.message}`);
       }
@@ -657,7 +707,8 @@ async function syncBusinessTablesToSupabase(payload, user) {
     settings: settingsStats.settings,
     workHoursDays: settingsStats.workHoursDays,
     holidays: settingsStats.holidays,
-    planningSlots: bookingRows.length,
+    planningSlots: 0,
+    planningSlotsManagedByRpc: bookingRows.length,
     claims: claimRows.length,
     claimLines: claimLineRows.length,
     supplements: supplementRows.length,
@@ -721,7 +772,7 @@ async function saveLocalToSupabase() {
     markLocalCasesAsSynced();
 
     setSupabaseStatus("Sauvegarde Supabase terminée.", "ok");
-    setSupabaseDetails(`${stats.repairOrders} dossier(s), ${stats.clients} client(s), ${stats.vehicles} véhicule(s), ${stats.repairSteps} étape(s), ${stats.resources} ressource(s), ${stats.holidays} jour(s) férié(s), ${stats.workHoursDays} jour(s) horaire(s), ${stats.planningSlots} créneau(x), ${stats.claims || 0} ordre(s), ${stats.supplements || 0} complément(s), ${stats.photos} photo(s) synchronisé(s). Réglages enregistrés dans app_settings.`);
+    setSupabaseDetails(`${stats.repairOrders} dossier(s), ${stats.clients} client(s), ${stats.vehicles} véhicule(s), ${stats.repairSteps} étape(s), ${stats.resources} ressource(s), ${stats.holidays} jour(s) férié(s), ${stats.workHoursDays} jour(s) horaire(s), ${stats.planningSlotsManagedByRpc ?? stats.planningSlots ?? 0} créneau(x) protégé(s) par RPC atomique, ${stats.claims || 0} ordre(s), ${stats.supplements || 0} complément(s), ${stats.photos} photo(s) synchronisé(s). Réglages enregistrés dans app_settings.`);
     quietNotify("Sauvegarde envoyée vers Supabase, réglages atelier inclus.", "success");
   } catch (error) {
     console.error("Sauvegarde Supabase impossible", error);
@@ -837,6 +888,7 @@ let supabaseLiveSyncChannel = null;
 let supabaseLivePullTimer = null;
 let applyingRemoteSupabaseState = false;
 let remoteConflictMutedUntil = 0;
+const processedRealtimeEventIds = new Set();
 const SUPABASE_LIVE_PULL_INTERVAL_MS = 3000;
 const SUPABASE_AUTO_BACKUP_MIN_INTERVAL_MS = 1200;
 
@@ -860,9 +912,13 @@ async function flushSupabaseBackup(reason = "manual") {
 async function autoBackupToSupabase(reason = "autosave", options = {}) {
   if (autoSupabaseBackupRunning) {
     pendingAutoSupabaseBackupReason = reason;
-    return;
+    if (options.requireAck) throw new Error("Une synchronisation est déjà en cours ; l'opération reste dans l'outbox.");
+    return { acknowledged: false, reason: "already-running" };
   }
-  if (!shouldAutoBackupToSupabase()) return;
+  if (!shouldAutoBackupToSupabase()) {
+    if (options.requireAck) throw new Error("Synchronisation serveur indisponible ; l'opération reste dans l'outbox.");
+    return { acknowledged: false, reason: "unavailable" };
+  }
   const now = Date.now();
   if (!options.force && now - lastAutoSupabaseBackupAt < SUPABASE_AUTO_BACKUP_MIN_INTERVAL_MS) {
     window.clearTimeout(autoSupabaseBackupTimer);
@@ -876,7 +932,10 @@ async function autoBackupToSupabase(reason = "autosave", options = {}) {
   try {
     const client = getSupabaseClient();
     const user = await getSupabaseUser();
-    if (!client || !user) return;
+    if (!client || !user) {
+      if (options.requireAck) throw new Error("Session Supabase requise ; l'opération reste dans l'outbox.");
+      return { acknowledged: false, reason: "authentication-required" };
+    }
     const payload = await buildCloudBackupPayload();
     const tableName = getSupabaseConfig().backupTable || "cloud_backups";
     const backupKey = getSupabaseConfig().backupKey || "nimr-carrosserie-main";
@@ -907,13 +966,16 @@ async function autoBackupToSupabase(reason = "autosave", options = {}) {
       const partial = stats.claimsSkipped || stats.supplementsSkipped ? " · tables récemment créées: cache Supabase en rafraîchissement, données JSON cloud OK" : "";
       setSupabaseDetails(`Sauvegarde automatique cloud OK (${reason}) : ${new Date().toLocaleTimeString()}${partial}`);
     }
+    return { acknowledged: true, updatedAt, workshopId: getSupabaseWorkshopId(), userId: user.id };
   } catch (error) {
     console.warn("Sauvegarde automatique Supabase impossible", error);
     localStorage.setItem(`${STORAGE_KEY}:last-cloud-autosave-error`, String(error.message || error));
-    if (typeof enqueueOfflineAction === "function") {
+    if (!options.requireAck && typeof enqueueOfflineAction === "function") {
       enqueueOfflineAction("sync_push", "Sauvegarde automatique échouée");
     }
     if (typeof renderSyncStatusStrip === "function") renderSyncStatusStrip();
+    if (options.requireAck) throw error;
+    return { acknowledged: false, reason: "error", error: String(error?.message || error) };
   } finally {
     autoSupabaseBackupRunning = false;
     if (pendingAutoSupabaseBackupReason) {
@@ -1808,6 +1870,10 @@ async function applyRemoteSupabaseBackup(data, reason = "cloud") {
 }
 
 async function pullLatestSupabaseBackup(reason = "poll") {
+  const permissionGuard = typeof guardSensitiveAction === "function"
+    ? guardSensitiveAction("supabase.access", {}, { notify: false })
+    : { ok: false };
+  if (!permissionGuard.ok) return false;
   const client = getSupabaseClient();
   const user = await getSupabaseUser();
   if (!client || !user || navigator.onLine === false) return false;
@@ -1821,22 +1887,44 @@ async function pullLatestSupabaseBackup(reason = "poll") {
 }
 
 function startSupabaseLiveSync() {
+  const permissionGuard = typeof guardSensitiveAction === "function"
+    ? guardSensitiveAction("supabase.access", {}, { notify: false })
+    : { ok: false };
+  if (!permissionGuard.ok) return;
   const client = getSupabaseClient();
   if (!client || supabaseLiveSyncChannel) return;
   const tableName = getSupabaseConfig().backupTable || "cloud_backups";
   const backupKey = getSupabaseConfig().backupKey || "nimr-carrosserie-main";
+  const workshopId = getSupabaseWorkshopId();
+  const handleRealtimeChange = (payload = {}) => {
+    const row = payload.new || payload.old || {};
+    if (row.workshop_id && row.workshop_id !== workshopId) return;
+    if (payload.table === tableName && row.backup_key && row.backup_key !== backupKey) return;
+    const eventId = [payload.table || tableName, row.id || row.local_id || row.backup_key || "change", payload.commit_timestamp || row.updated_at || row.version || "event"].join(":");
+    if (processedRealtimeEventIds.has(eventId)) return;
+    processedRealtimeEventIds.add(eventId);
+    if (processedRealtimeEventIds.size > 500) processedRealtimeEventIds.delete(processedRealtimeEventIds.values().next().value);
+    window.NIMR_REALTIME_STATUS = { connected: true, workshopId, lastEventAt: new Date().toISOString(), lastEventId: eventId };
+    window.setTimeout(async () => {
+      await pullLatestSupabaseBackup(`realtime:${payload.table || tableName}`);
+      await processOfflineQueue();
+    }, 200);
+  };
   try {
     supabaseLiveSyncChannel = client
-      .channel(`nimr-sav-live-${backupKey}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: tableName, filter: `backup_key=eq.${backupKey}` }, () => {
-        window.setTimeout(() => pullLatestSupabaseBackup("realtime"), 200);
-      })
+      .channel(`nimr-sav-live-${workshopId}-${backupKey}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: tableName, filter: `workshop_id=eq.${workshopId}` }, handleRealtimeChange)
+      .on("postgres_changes", { event: "*", schema: "public", table: "repair_orders", filter: `workshop_id=eq.${workshopId}` }, handleRealtimeChange)
+      .on("postgres_changes", { event: "*", schema: "public", table: "planning_slots", filter: `workshop_id=eq.${workshopId}` }, handleRealtimeChange)
+      .on("postgres_changes", { event: "*", schema: "public", table: "planning_resources", filter: `workshop_id=eq.${workshopId}` }, handleRealtimeChange)
       .subscribe((status) => {
         if (status === "SUBSCRIBED") {
+          window.NIMR_REALTIME_STATUS = { connected: true, workshopId, subscribedAt: new Date().toISOString(), lastEventAt: "" };
           setSupabaseDetails("Synchronisation temps réel active. Polling de secours toutes les 3 s.");
           pullLatestSupabaseBackup("realtime-connect");
         }
         if (["CHANNEL_ERROR", "TIMED_OUT", "CLOSED"].includes(status)) {
+          window.NIMR_REALTIME_STATUS = { connected: false, workshopId, status, updatedAt: new Date().toISOString() };
           setSupabaseDetails("Realtime indisponible temporairement : polling de secours actif toutes les 3 s.");
         }
       });
@@ -1859,8 +1947,206 @@ function stopSupabaseLiveSync() {
     try { client.removeChannel(supabaseLiveSyncChannel); } catch (error) { console.warn("Arrêt realtime Supabase impossible", error); }
   }
   supabaseLiveSyncChannel = null;
+  window.NIMR_REALTIME_STATUS = { connected: false, workshopId: typeof getSupabaseWorkshopId === "function" ? getSupabaseWorkshopId() : "", stoppedAt: new Date().toISOString() };
   window.clearInterval(supabaseLivePullTimer);
   supabaseLivePullTimer = null;
+}
+
+function setSyncHealthValue(key, value, stateName = "") {
+  const element = document.querySelector(`[data-sync-health="${key}"]`);
+  if (!element) return;
+  element.textContent = String(value ?? "—");
+  element.dataset.state = stateName;
+}
+
+async function getSupabaseServerCounts(client, user) {
+  if (!client || !user || navigator.onLine === false) return { cases: null, resources: null, error: "" };
+  try {
+    const [casesResult, resourcesResult] = await Promise.all([
+      client.from("repair_orders").select("id", { count: "exact", head: true }).eq("workshop_id", getSupabaseWorkshopId()),
+      client.from("planning_resources").select("id", { count: "exact", head: true }).eq("workshop_id", getSupabaseWorkshopId()),
+    ]);
+    const error = casesResult.error || resourcesResult.error;
+    return {
+      cases: Number.isFinite(casesResult.count) ? casesResult.count : null,
+      resources: Number.isFinite(resourcesResult.count) ? resourcesResult.count : null,
+      error: error ? String(error.message || error) : "",
+    };
+  } catch (error) {
+    return { cases: null, resources: null, error: String(error?.message || error) };
+  }
+}
+
+async function resolveAtomicPlanningResourceIds(client, requestedIds = []) {
+  const localIds = [...new Set(requestedIds.map((value) => String(value || "").trim()).filter(Boolean))];
+  if (!localIds.length) return new Map();
+
+  const { data, error } = await client
+    .from("planning_resources")
+    .select("id,local_id")
+    .eq("workshop_id", getSupabaseWorkshopId());
+  if (error) {
+    throw new Error(`Résolution des ressources Supabase impossible : ${error.message || error}`);
+  }
+
+  const resourceMap = new Map();
+  (Array.isArray(data) ? data : []).forEach((row) => {
+    if (!row?.id) return;
+    resourceMap.set(String(row.id), String(row.id));
+    if (row.local_id) resourceMap.set(String(row.local_id), String(row.id));
+  });
+  const missing = localIds.filter((resourceId) => !resourceMap.has(resourceId));
+  if (missing.length) {
+    throw new Error(`Ressources planning absentes de Supabase : ${missing.join(", ")}. Synchronisez les ressources puis réessayez.`);
+  }
+  return resourceMap;
+}
+
+async function reservePlanningProposalAtomically(item, proposal) {
+  if (!isSupabaseConfigured()) return { skipped: true, reason: "supabase-not-configured" };
+  if (navigator.onLine === false) throw new Error("Réservation serveur impossible hors ligne. La proposition reste non validée.");
+  const client = getSupabaseClient();
+  const user = await getSupabaseUser();
+  if (!client || !user) throw new Error("Connexion Supabase requise pour réserver ce planning.");
+  const steps = Array.isArray(proposal.steps) ? proposal.steps : [];
+  const requestedResourceIds = steps.flatMap((step) => [
+    ...(Array.isArray(step.resourceIds) ? step.resourceIds : []),
+    ...(Array.isArray(step.equipmentResourceIds) ? step.equipmentResourceIds : []),
+  ]);
+  const resourceMap = await resolveAtomicPlanningResourceIds(client, requestedResourceIds);
+  const idempotencyKey = `planning:${getSupabaseWorkshopId()}:${item.id}:${Number(item.localRevision || 0)}:${makeSupabaseConflictHash({ start: proposal.start, steps })}`;
+  const bookings = steps.flatMap((step) => {
+    const taskId = step.taskId || step.key || "";
+    const resourceIds = [...new Set((step.resourceIds || []).map((resourceId) => resourceMap.get(String(resourceId))).filter(Boolean))];
+    const equipmentResourceIds = [...new Set((step.equipmentResourceIds || []).map((resourceId) => resourceMap.get(String(resourceId))).filter(Boolean))];
+    const segments = Array.isArray(step.segments) && step.segments.length
+      ? step.segments
+      : [{ start: step.start, end: step.end }];
+    return segments.map((segment, segmentIndex) => ({
+      localId: `${item.id}:${taskId}:${segmentIndex}:${segment.start}`,
+      taskId,
+      stepKey: step.key || taskId,
+      title: step.title || "Tâche atelier",
+      startAt: segment.start,
+      endAt: segment.end,
+      resourceIds,
+      primaryResourceId: resourceMap.get(String(step.primaryResourceId || "")) || resourceIds[0] || null,
+      equipmentResourceIds,
+      status: "planned",
+      vehicleExclusive: step.vehicleExclusive !== false,
+      vehicleLocation: step.vehicleLocation || "internal",
+      serviceMode: step.serviceMode || "internal",
+      plannedMinutes: Math.max(0, Math.round((new Date(segment.end) - new Date(segment.start)) / 60000)),
+      expectedVersion: Number(step.serverVersion ?? step.version ?? 0),
+    }));
+  });
+  const { data, error } = await client.rpc("nimr_reserve_planning_atomic", {
+    p_workshop_id: getSupabaseWorkshopId(),
+    p_case_id: item.id,
+    p_expected_version: Number(item.serverPlanningVersion ?? item.serverVersion ?? 0),
+    p_idempotency_key: idempotencyKey,
+    p_bookings: bookings,
+  });
+  if (error) {
+    const conflict = /conflict|overlap|version|23P01|409/i.test(String(error.message || error));
+    const wrapped = new Error(conflict
+      ? "Conflit de réservation : un autre poste a pris ce créneau. Recalculez le planning."
+      : `Réservation atomique Supabase impossible : ${error.message || error}`);
+    wrapped.name = conflict ? "PlanningConflictError" : "SupabaseAtomicBookingError";
+    throw wrapped;
+  }
+  if (!data || data.ok === false) {
+    const wrapped = new Error(data?.message || "La réservation atomique n'a pas été confirmée par le serveur.");
+    wrapped.name = data?.conflict || data?.status === "conflict" || /conflict|overlap|version/i.test(String(data?.code || ""))
+      ? "PlanningConflictError"
+      : "SupabaseAtomicBookingError";
+    throw wrapped;
+  }
+  item.serverPlanningVersion = Number(data.planningVersion ?? data.version ?? data.new_version ?? item.serverPlanningVersion ?? item.serverVersion ?? 0);
+  item.serverVersion = item.serverPlanningVersion;
+  return { ...data, acknowledged: true, idempotencyKey };
+}
+
+if (typeof window !== "undefined") window.reservePlanningProposalAtomically = reservePlanningProposalAtomically;
+
+async function renderSupabaseSyncHealth() {
+  if (typeof document === "undefined" || typeof document.getElementById !== "function" || !document.getElementById("supabase-sync-health")) return;
+  const configured = isSupabaseConfigured();
+  const online = navigator.onLine !== false;
+  const client = getSupabaseClient();
+  const user = client ? await getSupabaseUser() : null;
+  const operations = typeof loadDurableOutboxOperations === "function" ? await loadDurableOutboxOperations() : [];
+  const pending = operations.filter((entry) => ["pending", "processing", "failed", "conflict"].includes(entry.syncStatus)).length;
+  const outboxConflicts = operations.filter((entry) => entry.syncStatus === "conflict").length;
+  const stateConflicts = typeof getOpenSyncConflicts === "function" ? getOpenSyncConflicts().length : 0;
+  const actor = typeof getCurrentActor === "function" ? getCurrentActor() : {};
+  const realtime = window.NIMR_REALTIME_STATUS || { connected: false };
+  const lastSync = localStorage.getItem(`${STORAGE_KEY}:last-cloud-autosave`) || "";
+  const cloudError = localStorage.getItem(`${STORAGE_KEY}:last-cloud-autosave-error`) || "";
+  const lastOutboxError = operations.findLast?.((entry) => entry.lastError)?.lastError
+    || operations.slice().reverse().find((entry) => entry.lastError)?.lastError
+    || "";
+  const server = await getSupabaseServerCounts(client, user);
+  const connectionOk = Boolean(configured && online && client && user);
+
+  setSyncHealthValue("connection", !configured ? "Non configurée" : !online ? "Hors ligne" : user ? "Connectée et authentifiée" : "Authentification requise", connectionOk ? "ok" : "warn");
+  setSyncHealthValue("identity", `${user?.email || actor.userName || "Non connecté"} / ${getSupabaseWorkshopId()} / ${actor.userRole || actor.role || "inconnu"}`, user ? "ok" : "warn");
+  setSyncHealthValue("versions", `schéma ${typeof CURRENT_DATA_SCHEMA_VERSION === "number" ? CURRENT_DATA_SCHEMA_VERSION : state?.dataSchemaVersion || "—"} / ${APP_VERSION}`);
+  setSyncHealthValue("realtime", realtime.connected ? `Actif · atelier ${realtime.workshopId || getSupabaseWorkshopId()}` : "Inactif · polling de secours", realtime.connected ? "ok" : "warn");
+  setSyncHealthValue("last-sync", lastSync ? new Date(lastSync).toLocaleString("fr-FR") : "Jamais confirmé", lastSync && pending === 0 ? "ok" : "warn");
+  setSyncHealthValue("cases", `${Number(state?.cases?.length || 0)} / ${server.cases ?? "—"}`, server.cases === null ? "warn" : "ok");
+  setSyncHealthValue("resources", `${Number(state?.resources?.length || 0)} / ${server.resources ?? "—"}`, server.resources === null ? "warn" : "ok");
+  setSyncHealthValue("pending", pending, pending ? "warn" : "ok");
+  setSyncHealthValue("conflicts", outboxConflicts + stateConflicts, outboxConflicts + stateConflicts ? "error" : "ok");
+  setSyncHealthValue("error", lastOutboxError || cloudError || server.error || "Aucune", lastOutboxError || cloudError || server.error ? "error" : "ok");
+}
+
+async function exportSupabaseSyncDiagnostic() {
+  const operations = typeof loadDurableOutboxOperations === "function" ? await loadDurableOutboxOperations() : [];
+  const diagnostic = {
+    generatedAt: new Date().toISOString(),
+    appVersion: APP_VERSION,
+    schemaVersion: typeof CURRENT_DATA_SCHEMA_VERSION === "number" ? CURRENT_DATA_SCHEMA_VERSION : state?.dataSchemaVersion,
+    configured: isSupabaseConfigured(),
+    online: navigator.onLine !== false,
+    workshopId: getSupabaseWorkshopId(),
+    realtime: window.NIMR_REALTIME_STATUS || { connected: false },
+    localCounts: { cases: state?.cases?.length || 0, bookings: state?.bookings?.length || 0, resources: state?.resources?.length || 0 },
+    outbox: operations.map(({ payload, ...entry }) => ({ ...entry, payloadSummary: {
+      casesCount: payload?.casesCount,
+      bookingsCount: payload?.bookingsCount,
+      resourcesCount: payload?.resourcesCount,
+    } })),
+    openConflictCount: typeof getOpenSyncConflicts === "function" ? getOpenSyncConflicts().length : 0,
+    lastServerConfirmation: localStorage.getItem(`${STORAGE_KEY}:last-cloud-autosave`) || "",
+    lastError: localStorage.getItem(`${STORAGE_KEY}:last-cloud-autosave-error`) || "",
+  };
+  downloadJson(diagnostic, `nimr-sav-sync-diagnostic-${todayKey(new Date())}.json`);
+}
+
+function bindSupabaseSyncHealthActions() {
+  $("#supabase-sync-retry")?.addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      await processOfflineQueue();
+      await pullLatestSupabaseBackup("relance-manuelle");
+      await renderSupabaseSyncHealth();
+    } finally {
+      button.disabled = false;
+    }
+  });
+  $("#supabase-sync-export-diagnostic")?.addEventListener("click", () => exportSupabaseSyncDiagnostic().catch((error) => notifyUser(error.message || "Export diagnostic impossible.", "error")));
+  $("#supabase-sync-show-errors")?.addEventListener("click", () => {
+    setActiveTab("atelier");
+    const panel = document.getElementById("panel-activity-log");
+    if (panel) panel.hidden = false;
+    const filter = document.getElementById("activity-log-filter");
+    if (filter) filter.value = "errors";
+    if (typeof renderActivityLog === "function") renderActivityLog();
+  });
+  $("#supabase-sync-show-conflicts")?.addEventListener("click", () => navigateToConflictsAndFocus());
+  $("#supabase-sync-export-backup")?.addEventListener("click", () => exportSafetySnapshotNow());
 }
 
 function bindSupabaseActions() {
@@ -1871,6 +2157,19 @@ function bindSupabaseActions() {
   $("#supabase-test")?.addEventListener("click", testSupabaseConnection);
   $("#supabase-save")?.addEventListener("click", saveLocalToSupabase);
   $("#supabase-restore")?.addEventListener("click", restoreLocalFromSupabase);
+  bindSupabaseSyncHealthActions();
+  const accessGuard = typeof guardSensitiveAction === "function"
+    ? guardSensitiveAction("supabase.access", {}, { notify: false })
+    : { ok: false, message: "Accès Supabase non autorisé." };
+  ["supabase-login-form", "supabase-signout", "supabase-test", "supabase-save", "supabase-restore"].forEach((id) => {
+    const element = document.getElementById(id);
+    if (!element) return;
+    const controls = element.matches?.("form") ? [...element.querySelectorAll("input, button")] : [element];
+    controls.forEach((control) => {
+      control.disabled = !accessGuard.ok;
+      control.title = accessGuard.message || "";
+    });
+  });
   $("#supabase-download-safety-snapshot")?.addEventListener("click", () => {
     if (typeof guardSensitiveAction === "function") {
       const guard = guardSensitiveAction("export.backup");
@@ -1904,9 +2203,11 @@ function bindSupabaseActions() {
     }
   });
   refreshSupabasePanel();
-  startSupabaseLiveSync();
-  pullLatestSupabaseBackup("initialisation");
-  if (typeof processOfflineQueue === "function") processOfflineQueue();
+  if (accessGuard.ok) {
+    startSupabaseLiveSync();
+    pullLatestSupabaseBackup("initialisation");
+    if (typeof processOfflineQueue === "function") processOfflineQueue();
+  }
   window.addEventListener("focus", () => {
     pullLatestSupabaseBackup("focus");
     if (typeof processOfflineQueue === "function") processOfflineQueue();
@@ -1944,26 +2245,50 @@ function loadOfflineQueue() {
   try {
     const raw = localStorage.getItem("nimr-sav-offline-queue");
     offlineQueue = raw ? JSON.parse(raw) : [];
-  } catch (error) {
+  } catch {
     offlineQueue = [];
   }
+  if (typeof loadDurableOutboxOperations === "function") {
+    loadDurableOutboxOperations().then((records) => {
+      offlineQueue = records;
+      window.offlineQueue = offlineQueue;
+      if (typeof renderSyncStatusStrip === "function") renderSyncStatusStrip();
+      if (typeof renderSupabaseSyncHealth === "function") renderSupabaseSyncHealth();
+    }).catch(() => null);
+  }
+  window.offlineQueue = offlineQueue;
+  return offlineQueue;
 }
 
 function saveOfflineQueue() {
   try {
-    localStorage.setItem("nimr-sav-offline-queue", JSON.stringify(offlineQueue));
+    const compact = (offlineQueue || []).map((action) => ({
+      id: action.operationId || action.id,
+      operationId: action.operationId || action.id,
+      type: action.type || (action.entityType === "workshop_state" ? "sync_push" : action.action),
+      status: action.status || action.syncStatus || "pending",
+      attempts: Number(action.attempts || action.retryCount || 0),
+      error: action.error || action.lastError || "",
+      timestamp: action.timestamp || action.createdAt || new Date().toISOString(),
+    }));
+    localStorage.setItem("nimr-sav-offline-queue", JSON.stringify(compact));
   } catch (error) {
-    console.warn("Impossible de sauvegarder la file offline", error);
+    console.warn("Impossible de mettre à jour le miroir compact de l'outbox", error?.message || error);
   }
 }
 
 function enqueueOfflineAction(type = "sync_push", description = "Mise à jour des données") {
   loadOfflineQueue();
-  if (type === "sync_push" && offlineQueue.some(action => action.type === "sync_push" && action.status === "pending")) {
-    return;
+  if (type === "sync_push") {
+    offlineQueue = offlineQueue.filter((action) => !(
+      (action.type === "sync_push" || action.entityType === "workshop_state")
+      && ["pending", "failed"].includes(action.status || action.syncStatus)
+    ));
   }
+  const operationId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function" ? `operation-${crypto.randomUUID()}` : uid("operation");
   const action = {
-    id: uid("offline-action"),
+    id: operationId,
+    operationId,
     timestamp: new Date().toISOString(),
     type,
     description,
@@ -1973,48 +2298,104 @@ function enqueueOfflineAction(type = "sync_push", description = "Mise à jour de
   };
   offlineQueue.push(action);
   saveOfflineQueue();
+  window.offlineQueue = offlineQueue;
+  if (typeof enqueueDurableOutboxOperation === "function") {
+    const expectedVersion = Math.max(0, ...(state?.cases || []).map((item) => Number(item.localRevision || 0)));
+    enqueueDurableOutboxOperation({
+      operationId,
+      entityType: type === "sync_push" ? "workshop_state" : "application_event",
+      entityId: type === "sync_push" ? getSupabaseWorkshopId() : operationId,
+      action: type === "sync_push" ? "upsert_snapshot" : type,
+      payload: {
+        snapshotKey: "latest",
+        appVersion: APP_VERSION,
+        casesCount: Number(state?.cases?.length || 0),
+        bookingsCount: Number(state?.bookings?.length || 0),
+        resourcesCount: Number(state?.resources?.length || 0),
+        description,
+      },
+      workshopId: getSupabaseWorkshopId(),
+      userId: getCurrentActor()?.userId || "",
+      expectedVersion,
+      retryCount: 0,
+      lastError: "",
+      createdAt: action.timestamp,
+      syncStatus: "pending",
+      description,
+    }).catch((error) => console.warn("Écriture outbox IndexedDB impossible", error?.message || error));
+  }
+  // Les lectures asynchrones de l'outbox peuvent rafraîchir le miroir pendant
+  // l'enqueue ; réécrire immédiatement la vue compacte garantit aussi les
+  // environnements sans IndexedDB et les diagnostics synchrones.
+  saveOfflineQueue();
   if (typeof renderSyncStatusStrip === "function") renderSyncStatusStrip();
+  if (typeof renderSupabaseSyncHealth === "function") renderSupabaseSyncHealth();
+  return action;
 }
 
 let isProcessingOfflineQueue = false;
 
 async function processOfflineQueue() {
   if (isProcessingOfflineQueue) return;
-  loadOfflineQueue();
-  const pending = offlineQueue.filter(action => action.status === "pending" || action.status === "failed");
+  const records = typeof loadDurableOutboxOperations === "function"
+    ? await loadDurableOutboxOperations()
+    : loadOfflineQueue();
+  offlineQueue = records;
+  window.offlineQueue = offlineQueue;
+  const pending = offlineQueue.filter((action) => ["pending", "failed"].includes(action.syncStatus || action.status));
   if (!pending.length) return;
 
   if (typeof navigator !== "undefined" && navigator.onLine === false) {
     return;
   }
 
+  const client = getSupabaseClient();
+  const user = await getSupabaseUser();
+  if (!client || !user) return;
+
   isProcessingOfflineQueue = true;
-  for (const action of pending) {
-    action.status = "processing";
-    action.attempts = (action.attempts || 0) + 1;
-    saveOfflineQueue();
-    if (typeof renderSyncStatusStrip === "function") renderSyncStatusStrip();
-
-    try {
-      if (action.type === "sync_push") {
-        await autoBackupToSupabase("retry-offline-queue", { force: true });
+  try {
+    for (const action of pending) {
+      const operationId = action.operationId || action.id;
+      const retryCount = Number(action.retryCount || action.attempts || 0) + 1;
+      if (typeof updateDurableOutboxOperation === "function") {
+        await updateDurableOutboxOperation(operationId, { syncStatus: "processing", retryCount, lastError: "" });
       }
-      action.status = "success";
-      logSyncSuccess(action);
-    } catch (err) {
-      action.status = "failed";
-      action.error = err.message || String(err);
-      logSyncFailure(action, err);
-      saveOfflineQueue();
       if (typeof renderSyncStatusStrip === "function") renderSyncStatusStrip();
-      break;
-    }
-  }
 
-  offlineQueue = offlineQueue.filter(action => action.status !== "success");
-  saveOfflineQueue();
-  isProcessingOfflineQueue = false;
-  if (typeof renderSyncStatusStrip === "function") renderSyncStatusStrip();
+      try {
+        const acknowledgement = await autoBackupToSupabase(`outbox:${operationId}`, { force: true, requireAck: true });
+        if (!acknowledgement?.acknowledged) throw new Error("Aucun accusé de réception serveur.");
+        if (typeof updateDurableOutboxOperation === "function") {
+          await updateDurableOutboxOperation(operationId, {
+            syncStatus: "acknowledged",
+            retryCount,
+            lastError: "",
+            acknowledgedAt: acknowledgement.updatedAt,
+          });
+        }
+        logSyncSuccess({ ...action, description: action.description || action.payload?.description || "Mise à jour durable" });
+        if (typeof deleteDurableOutboxOperation === "function") await deleteDurableOutboxOperation(operationId);
+      } catch (err) {
+        const conflict = /conflict|version|409|23P01|serialization/i.test(String(err?.message || err));
+        if (typeof updateDurableOutboxOperation === "function") {
+          await updateDurableOutboxOperation(operationId, {
+            syncStatus: conflict ? "conflict" : "failed",
+            retryCount,
+            lastError: String(err?.message || err),
+          });
+        }
+        logSyncFailure({ ...action, description: action.description || action.payload?.description || "Mise à jour durable" }, err);
+        break;
+      }
+    }
+  } finally {
+    offlineQueue = typeof loadDurableOutboxOperations === "function" ? await loadDurableOutboxOperations() : [];
+    window.offlineQueue = offlineQueue;
+    isProcessingOfflineQueue = false;
+    if (typeof renderSyncStatusStrip === "function") renderSyncStatusStrip();
+    if (typeof renderSupabaseSyncHealth === "function") renderSupabaseSyncHealth();
+  }
 }
 
 function logSyncSuccess(action) {

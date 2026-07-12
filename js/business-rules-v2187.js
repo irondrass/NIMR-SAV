@@ -15,7 +15,6 @@
 
   const PAINTABLE_PHASES = ['prep', 'paint'];
   const PARAM_PHASES = ['body', 'oilService', 'mechanical', 'electrical', 'prep', 'paint', 'reassembly', 'finish'];
-  const FIXED_QUALITY_HOURS = 0.25;
 
   function normalizeEstimateLineIdentity(operation) {
     return normalizeEstimateOperationText(operation || '')
@@ -57,9 +56,8 @@
 
   function enforceDealerDurationRules(totals) {
     if (!totals) return totals;
-    const paint = Number(totals.paint || 0);
-    totals.finish = paint > 0 ? roundPlanningHours(paint * 0.5) : 0;
-    totals.quality = FIXED_QUALITY_HOURS;
+    totals.finish = roundPlanningHours(Number(totals.finish || 0));
+    totals.quality = roundPlanningHours(Number(totals.quality || 0));
     return totals;
   }
 
@@ -184,10 +182,6 @@
       }
       const optimized = optimizeEstimateAllocationsFromOriginalLines(claim.estimate.originalLines);
       const lines = optimized.lines.slice();
-      if (Number(optimized.totals.finish || 0) > 0) {
-        lines.push(buildSyntheticEstimateLine(claim.estimate.originalLines, 'finish', 'Finition + lavage - 50% du temps peinture', optimized.totals.finish));
-      }
-      lines.push(buildSyntheticEstimateLine(claim.estimate.originalLines, 'quality', 'Contrôle qualité forfaitaire', FIXED_QUALITY_HOURS));
       claim.estimate.lines = lines;
       claim.estimate.paintOptimization = optimized.paintOptimization;
       claim.estimate.totalOriginalHours = getOriginalLaborTotal(claim.estimate.originalLines);
@@ -257,6 +251,12 @@
   function getPlanningTaskMetadata(line, allocation, phase) {
     const linePhases = getSelectedPhasesFromLine(line);
     const lineRoleMatchesPhase = linePhases.length <= 1 || line?.phase === phase;
+    const sourceLineIds = [...new Set([
+      ...(Array.isArray(line?.sourceLineIds) ? line.sourceLineIds : []),
+      ...(Array.isArray(allocation?.sourceLineIds) ? allocation.sourceLineIds : []),
+      allocation?.sourceLineId,
+      line?.id,
+    ].filter(Boolean).map(String))];
     return {
       requiredRole: allocation?.requiredRole
         || (lineRoleMatchesPhase ? line?.requiredRole : '')
@@ -265,6 +265,8 @@
         || '',
       source: allocation?.source || line?.source || '',
       status: allocation?.status || line?.status || '',
+      sourceLineIds,
+      sourceOperations: [line?.operation || line?.rawText || ''].filter(Boolean),
     };
   }
 
@@ -287,9 +289,19 @@
     const sourceLine = exactLine || metadataLine || null;
     const sourceAllocation = exactAllocation || metadataAllocation || null;
     const metadata = getPlanningTaskMetadata(sourceLine, sourceAllocation, phase);
+    const sourceLineIds = [...new Set((lines || []).flatMap((line) => {
+      const allocations = (line?.allocations || []).filter((allocation) => allocation?.phase === phase);
+      if (!allocations.length) return [];
+      return [line?.id, ...allocations.flatMap((allocation) => [allocation?.sourceLineId, ...(allocation?.sourceLineIds || [])])];
+    }).filter(Boolean).map(String))];
     return {
       ...metadata,
       requiredRole: exactAllocation?.requiredRole || REQUIRED_ROLE_BY_PHASE[phase] || metadata.requiredRole,
+      sourceLineIds,
+      sourceOperations: (lines || [])
+        .filter((line) => (line?.allocations || []).some((allocation) => allocation?.phase === phase))
+        .map((line) => line?.operation || line?.rawText || '')
+        .filter(Boolean),
     };
   }
 
@@ -318,6 +330,7 @@
       return {
         ...allocation,
         ...getPlanningTaskMetadata(line, originalAllocation, allocation.phase),
+        sourceLineId: originalAllocation?.sourceLineId || line?.id || '',
       };
     });
     const isZeroHourPdfFallback = laborHours <= 0
@@ -395,15 +408,18 @@
 
   function buildOriginalEstimateLinesV2187(preview) {
     return cleanOriginalLaborLines((preview.laborLines || []).map((line) => ({
-      id: uid('estimate-original-line'),
+      id: line.id || uid('estimate-original-line'),
       code: line.code || lineCode(line.text || line.operation || ''),
       operation: line.operation || line.text || 'Opération devis',
       laborHours: roundPlanningHours(line.hours || 0),
       rawText: line.text || line.operation || '',
+      source: preview.sourceType === 'pdf' ? 'pdf_estimate' : (line.source || ''),
       allocations: (line.distributions || []).map((distribution) => ({
         phase: distribution.phase,
         operation: distribution.operation || line.operation || '',
         laborHours: roundPlanningHours(distribution.laborHours || 0),
+        sourceLineId: line.id || '',
+        source: preview.sourceType === 'pdf' ? 'pdf_estimate' : (distribution.source || line.source || ''),
       })),
       pieceKind: line.pieceKind || inferPieceKind(line.operation || line.text || ''),
       paintFaces: line.paintFaces || inferPaintFaces(line.operation || line.text || '', line.pieceKind || inferPieceKind(line.operation || line.text || '')),
@@ -504,12 +520,7 @@
     const originalLines = preview.originalLines || window.buildOriginalEstimateLines(preview);
     const optimized = optimizeEstimateAllocationsFromOriginalLines(originalLines);
     if (optimized.lines.length) {
-      const lines = optimized.lines.slice();
-      if (Number(optimized.totals.finish || 0) > 0) {
-        lines.push(buildSyntheticEstimateLine(originalLines, 'finish', 'Finition + lavage - 50% du temps peinture', optimized.totals.finish));
-      }
-      lines.push(buildSyntheticEstimateLine(originalLines, 'quality', 'Contrôle qualité forfaitaire', FIXED_QUALITY_HOURS));
-      return lines;
+      return optimized.lines.slice();
     }
     const fallback = originalBuildAppliedEstimateLines ? originalBuildAppliedEstimateLines(preview) : (preview.distributedLines || []);
     return fallback.map((line) => ({ ...line, laborHours: roundPlanningHours(line.laborHours || 0) }));
@@ -528,13 +539,10 @@
     });
     const result = originalRecompute ? originalRecompute(item) : false;
     if (item?.durations) {
-      item.durations.finish = Number(item.durations.paint || 0) > 0 ? roundPlanningHours(Number(item.durations.paint || 0) * 0.5) : 0;
-      const hasProductivePdfLabor = (item.claims || []).some((claim) => {
-        const originalLines = claim.estimate?.originalLines || [];
-        const appliedLines = claim.estimate?.lines || [];
-        return [...originalLines, ...appliedLines].some((line) => Number(line?.laborHours || 0) > 0 && line?.phase !== 'quality');
-      });
-      item.durations.quality = item.source === 'pdf_estimate' && !hasProductivePdfLabor ? 0 : FIXED_QUALITY_HOURS;
+      // Les étapes complémentaires ne sont jamais inventées : elles restent à
+      // zéro sauf si le devis contient explicitement une ligne correspondante.
+      item.durations.finish = Number(item.durations.finish || 0);
+      item.durations.quality = Number(item.durations.quality || 0);
     }
     return result;
   };

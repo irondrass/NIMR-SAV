@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
+import { currentBuild } from './helpers/build_version.mjs';
 
 const scriptFiles = [
   'js/utils.js',
@@ -84,9 +85,9 @@ const app = (code) => vm.runInContext(code, context);
 const stateSource = fs.readFileSync('js/state.js', 'utf8');
 const appSource = fs.readFileSync('app.js', 'utf8');
 const swSource = fs.readFileSync('sw.js', 'utf8');
-assert.match(stateSource, /APP_VERSION\s*=\s*"v23\.2\.6"/, 'APP_VERSION doit rester en v23.2.6 pour cette branche');
-assert.match(appSource, /serviceWorker\.register\("sw\.js\?v=23\.2\.6"/, 'le service worker doit pointer vers sw.js?v=23.2.6');
-assert.match(swSource, /nimr-sav-v23\.2\.6-reception-qc-field-usability/, 'le cache PWA doit refléter v23.2.6');
+assert.ok(stateSource.includes(`const APP_VERSION = "${currentBuild.appVersion}"`), 'APP_VERSION doit suivre js/version.js');
+assert.ok(appSource.includes(`serviceWorker.register("sw.js?v=${currentBuild.queryVersion}"`), 'le service worker doit pointer vers la query courante');
+assert.ok(swSource.includes(`const CACHE_NAME = "${currentBuild.cacheName}"`), 'le cache PWA doit suivre js/version.js');
 
 function setupPermissionState(currentUserId = 'u-admin', options = {}) {
   const now = new Date();
@@ -96,14 +97,13 @@ function setupPermissionState(currentUserId = 'u-admin', options = {}) {
   const laterEnd = new Date(now.getTime() + 5 * 60 * 60000).toISOString();
   const users = options.withoutUsers ? '' : `
     users: [
-      { id: 'u-admin', name: 'Admin SAV', role: 'admin', active: true },
+      { id: 'u-admin', name: 'Admin technique', role: 'admin_technique', active: true },
       { id: 'u-chef', name: 'Chef atelier', role: 'chef_atelier', active: true },
       { id: 'u-reception', name: 'Réception', role: 'reception', active: true },
       { id: 'u-tech-1', name: 'Tech 1', role: 'technicien', resourceId: 'tech-1', active: true },
       { id: 'u-tech-2', name: 'Tech 2', role: 'technicien', resourceId: 'tech-2', active: true },
       { id: 'u-tech-no-resource', name: 'Tech sans ressource', role: 'technicien', active: true },
-      { id: 'u-qualite', name: 'Qualité', role: 'qualite', active: true },
-      { id: 'u-readonly', name: 'Lecture', role: 'readonly', active: true }
+      { id: 'u-readonly', name: 'Lecture seule', role: 'lecture_seule', active: true }
     ],
     currentUserId: '${currentUserId}',`;
   app(`
@@ -168,32 +168,33 @@ assert.equal(app(`state.cases[0].history[0].userRole`), 'technicien', 'action te
 setupPermissionState('u-tech-1');
 const otherStart = app(`startTechnicianTask(state.cases[1], 'booking-tech-2', 'tech-2')`);
 assert.equal(otherStart.ok, false, 'technicien ne peut pas démarrer la tâche d’un autre');
-assert.match(otherStart.message, /autre technicien/i);
+assert.equal(otherStart.message, 'Action non autorisée pour le rôle utilisateur : technicien', 'le refus doit utiliser le diagnostic centralisé');
 app(`state.bookings.find((booking) => booking.id === 'booking-tech-2').status = 'started'`);
 const otherComplete = app(`completeTechnicianTask(state.cases[1], 'booking-tech-2', 'tech-2', { skipPhotoCheck: true })`);
 assert.equal(otherComplete.ok, false, 'technicien ne peut pas terminer la tâche d’un autre');
 
 setupPermissionState('u-tech-1');
 assert.equal(app(`guardAction('planning.edit').ok`), false, 'technicien ne peut pas éditer le planning');
-assert.match(app(`rescheduleCaseBooking(state.cases[0], 'booking-tech-1', new Date().toISOString()).message`), /chef atelier\/admin/i);
+assert.equal(
+  app(`guardAction('planning.edit').message`),
+  'Action non autorisée pour le rôle utilisateur : technicien',
+  'le déplacement refusé doit conserver le diagnostic centralisé',
+);
 
 setupPermissionState('u-tech-no-resource');
 const noResource = app(`startTechnicianTask(state.cases[0], 'booking-tech-1', 'tech-1')`);
 assert.equal(noResource.ok, false, 'technicien sans ressource ne doit pas démarrer');
-assert.match(noResource.message, /Aucune ressource technicien/i);
+assert.equal(noResource.message, 'Action non autorisée pour le rôle utilisateur : technicien', 'un technicien non lié reste refusé par la garde centrale');
 
 setupPermissionState('u-reception');
 assert.equal(app(`startTechnicianTask(state.cases[0], 'booking-tech-1', 'tech-1').ok`), false, 'réception ne démarre pas une tâche atelier');
 assert.equal(app(`completeTechnicianTask(state.cases[0], 'booking-tech-1', 'tech-1', { skipPhotoCheck: true }).ok`), false, 'réception ne termine pas une tâche atelier');
 assert.equal(app(`guardAction('planning.edit').ok`), false, 'réception ne déplace pas le planning');
 
-setupPermissionState('u-qualite');
-assert.equal(app(`startTechnicianTask(state.cases[0], 'booking-tech-1', 'tech-1').ok`), false, 'qualité ne démarre pas une tâche atelier');
-assert.equal(app(`completeTechnicianTask(state.cases[0], 'booking-tech-1', 'tech-1', { skipPhotoCheck: true }).ok`), false, 'qualité ne termine pas une tâche atelier');
-
 setupPermissionState('u-readonly');
 assert.equal(app(`startTechnicianTask(state.cases[0], 'booking-tech-1', 'tech-1').ok`), false, 'readonly ne fait aucune mutation tâche');
 assert.equal(app(`guardAction('planning.edit').ok`), false, 'readonly ne fait aucune mutation planning');
+assert.equal(app(`normalizeUserRole('qualite')`), 'lecture_seule', 'l’ancien rôle qualité doit migrer en lecture seule sans droit QC');
 
 setupPermissionState('u-chef');
 assert.equal(app(`guardAction('planning.edit').ok`), true, 'chef atelier peut éditer le planning');
@@ -203,7 +204,8 @@ setupPermissionState('u-reception');
 assert.equal(app(`rescheduleCaseBooking(state.cases[1], 'booking-tech-2', new Date(Date.now() + 6 * 60 * 60000).toISOString()).ok`), false, 'réception ne peut pas déplacer une tâche');
 
 setupPermissionState('u-admin', { withoutUsers: true });
-assert.equal(app(`getCurrentUser().role`), 'admin', 'ancien atelier sans users doit bootstrap admin');
-assert.equal(app(`startTechnicianTask(state.cases[0], 'booking-tech-1', 'tech-1').ok`), true, 'bootstrap admin évite le blocage des anciens ateliers');
+assert.equal(app(`getCurrentUser()`), null, 'un atelier sans utilisateur ne doit créer aucun admin caché');
+assert.equal(app(`state.currentUserId`), '', 'aucune session implicite ne doit être ouverte');
+assert.equal(app(`startTechnicianTask(state.cases[0], 'booking-tech-1', 'tech-1').ok`), false, 'sans acteur explicite toute mutation reste bloquée');
 
 console.log('Users roles permissions technician/planning OK');

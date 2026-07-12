@@ -159,8 +159,26 @@ async function exercisePdfFirstStartup(send, sessionId, label) {
         throw new Error(message);
       };
 
-      const bootstrapAdmin = state.users?.find((user) => user?.active !== false && user?.role === "admin");
-      if (!bootstrapAdmin) throw new Error("Admin bootstrap actif introuvable");
+      await waitUntil(() => typeof state !== "undefined" && Array.isArray(state.users), "state is not defined");
+      if (!state.users.some((user) => user?.active !== false)) {
+        const firstAccessForm = document.getElementById("first-access-form");
+        if (!firstAccessForm || document.getElementById("first-access-overlay")?.hidden !== false) {
+          throw new Error("L'écran Premier accès / récupération locale est absent");
+        }
+        firstAccessForm.elements.name.value = "Admin terrain startup";
+        firstAccessForm.elements.role.value = "admin_technique";
+        firstAccessForm.elements.pin.value = "739251";
+        firstAccessForm.elements.confirmPin.value = "739251";
+        firstAccessForm.requestSubmit();
+        await waitUntil(
+          () => state.users.some((user) => user?.active !== false && user?.role === "admin")
+            && document.getElementById("first-access-overlay")?.hidden !== false,
+          "La création explicite du premier responsable n'a pas abouti",
+        );
+      }
+
+      const bootstrapAdmin = state.users.find((user) => user?.active !== false && user?.role === "admin");
+      if (!bootstrapAdmin) throw new Error("Admin du premier accès introuvable");
       if (sessionStorage.getItem("nimr-user-pin-unlocked") !== bootstrapAdmin.id) {
         const loginForm = document.getElementById("user-login-form");
         if (!loginForm) throw new Error("Formulaire de connexion admin introuvable");
@@ -184,7 +202,6 @@ async function exercisePdfFirstStartup(send, sessionId, label) {
       }
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 
-      if (typeof state === "undefined") throw new Error("state is not defined");
       if (!Array.isArray(state.cases)) throw new Error("state.cases doit être un tableau");
       if (!Array.isArray(state.users)) throw new Error("state.users doit être un tableau");
       if (state.cases.length !== 0) {
@@ -192,10 +209,10 @@ async function exercisePdfFirstStartup(send, sessionId, label) {
       }
 
       const activeAdmins = state.users.filter((user) => user?.active !== false && user?.role === "admin");
-      if (!activeAdmins.length) throw new Error("Admin bootstrap actif introuvable");
+      if (!activeAdmins.length) throw new Error("Admin du premier accès introuvable");
       const currentUser = state.users.find((user) => user?.id === state.currentUserId);
       if (!currentUser || currentUser.active === false || currentUser.role !== "admin") {
-        throw new Error("La session bootstrap doit être portée par un admin actif");
+        throw new Error("La session du premier accès doit être portée par un admin actif");
       }
 
       const importView = document.getElementById("view-reception-workspace");
@@ -252,6 +269,13 @@ async function clearBrowserData(send, sessionId) {
       }
       if (navigator.serviceWorker?.getRegistrations) {
         await Promise.all((await navigator.serviceWorker.getRegistrations()).map((registration) => registration.unregister()));
+      }
+      if (indexedDB?.databases) {
+        await Promise.all((await indexedDB.databases()).map(({ name }) => new Promise((resolveDelete) => {
+          if (!name) return resolveDelete();
+          const request = indexedDB.deleteDatabase(name);
+          request.onsuccess = request.onerror = request.onblocked = () => resolveDelete();
+        })));
       }
       return true;
     })()

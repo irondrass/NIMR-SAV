@@ -4,10 +4,11 @@ import { existsSync } from "node:fs";
 import { extname, join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
+import { currentBuild } from "./helpers/build_version.mjs";
 
 const root = resolve(process.cwd());
 const defaultPort = Number(process.env.NIMR_BROWSER_TEST_PORT || 8787);
-const targetUrl = process.env.NIMR_BROWSER_TEST_URL || `http://127.0.0.1:${defaultPort}/?browser-smoke=23.2.7`;
+const targetUrl = process.env.NIMR_BROWSER_TEST_URL || `http://127.0.0.1:${defaultPort}/?browser-smoke=${encodeURIComponent(currentBuild.queryVersion)}`;
 const chromePath = process.env.CHROME_PATH || [
   "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
   "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
@@ -70,6 +71,12 @@ async function main() {
     return;
   }
 
+  const serviceWorkerSource = await readFile(join(root, "sw.js"), "utf8");
+  const assetsBlock = serviceWorkerSource.match(/\bconst\s+ASSETS\s*=\s*\[([\s\S]*?)\]\s*;/u);
+  const expectedVersionedCacheAssets = assetsBlock
+    ? [...assetsBlock[1].matchAll(/["']([^"']+\?v=[^"']+)["']/gu)].map((match) => match[1])
+    : [];
+  if (!expectedVersionedCacheAssets.length) throw new Error("Aucun asset versionné trouvé dans le précache PWA.");
   const server = await startStaticServer();
   const port = Number(process.env.NIMR_CDP_PORT || 9235);
   const profile = join(tmpdir(), `nimr-browser-smoke-${Date.now()}`);
@@ -149,8 +156,19 @@ async function main() {
       returnByValue: true,
       expression: `Promise.all([
         navigator.serviceWorker?.getRegistration?.().then(Boolean).catch(() => false),
-        caches?.keys?.().then((keys) => keys.some((key) => key.includes('nimr-sav-v23.2.7-pdf-first-intake'))).catch(() => false),
-      ]).then(([hasServiceWorker, hasExpectedCache]) => ({ hasServiceWorker, hasExpectedCache }))`,
+        caches?.keys?.().then((keys) => keys.includes(${JSON.stringify(currentBuild.cacheName)})).catch(() => false),
+        caches?.open?.(${JSON.stringify(currentBuild.cacheName)}).then((cache) => cache.keys()).then((requests) => {
+          const cached = new Set(requests.map((request) => {
+            const url = new URL(request.url);
+            return url.pathname + url.search;
+          }));
+          const expected = ${JSON.stringify(expectedVersionedCacheAssets)}.map((asset) => {
+            const url = new URL(asset, location.href);
+            return url.pathname + url.search;
+          });
+          return { exactAssetCount: expected.length, missingAssets: expected.filter((asset) => !cached.has(asset)) };
+        }).catch(() => ({ exactAssetCount: 0, missingAssets: ${JSON.stringify(expectedVersionedCacheAssets)} })),
+      ]).then(([hasServiceWorker, hasExpectedCache, cacheAssets]) => ({ hasServiceWorker, hasExpectedCache, ...cacheAssets }))`,
     }, sessionId);
 
     const errors = findings.filter((item) => item.level === "error" && String(item.text || "").trim());
@@ -159,7 +177,16 @@ async function main() {
     const pwa = pwaCheck.result?.value || {};
     console.log(JSON.stringify({ targetUrl, manifest, pwa, errors, warnings, findingsCount: findings.length }, null, 2));
 
-    if (errors.length || !manifest.has192 || !manifest.has512 || !manifest.hasStandalone) {
+    if (
+      errors.length
+      || !manifest.has192
+      || !manifest.has512
+      || !manifest.hasStandalone
+      || !pwa.hasServiceWorker
+      || !pwa.hasExpectedCache
+      || pwa.exactAssetCount !== expectedVersionedCacheAssets.length
+      || pwa.missingAssets?.length
+    ) {
       throw new Error("Browser console/PWA smoke failed.");
     }
     await send("Target.closeTarget", { targetId }).catch(() => null);

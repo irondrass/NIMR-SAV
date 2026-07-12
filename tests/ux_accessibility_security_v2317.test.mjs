@@ -85,7 +85,7 @@ assert.ok(appSource.includes("Utilisateur inactif ou invalide. Sélectionnez un 
 assert.ok(appSource.includes("PIN incorrect. Vérifiez le code du compte sélectionné."), "message PIN incorrect attendu");
 assert.ok(utilsSource.includes("Le nom du client est obligatoire."), "message donnees invalides client attendu");
 assert.ok(utilsSource.includes("Renseignez une immatriculation ou un VIN avant de créer le dossier."), "message donnees invalides vehicule attendu");
-assert.ok(stateSource.includes("Configuration Supabase réservée administrateur. Connectez-vous avec un administrateur technique."), "message permission Supabase attendu");
-assert.ok(stateSource.includes("Action réservée administrateur technique."), "message admin technique attendu pour les actions critiques");
+assert.ok(stateSource.includes("function getPermissionDeniedMessage(permission, context = {})"), "message de permission centralisé attendu");
+assert.ok(stateSource.includes("Action non autorisée pour le rôle utilisateur : ${role}"), "message de refus centralisé attendu");
 
 console.log("Tests UX/accessibility/security hardening OK");

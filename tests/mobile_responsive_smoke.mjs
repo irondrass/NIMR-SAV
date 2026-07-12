@@ -154,17 +154,17 @@ async function main() {
         awaitPromise: true,
         expression: `(async () => {
           for (let i = 0; i < 50; i++) {
-            if (typeof state !== "undefined" && state.users && typeof checkUserSessionStartup === "function") {
+            if (window.__nimrAppReady === true && typeof state !== "undefined" && state.users && typeof checkUserSessionStartup === "function") {
               break;
             }
             await new Promise(r => setTimeout(r, 100));
           }
-          let user = (state.users || []).find(u => u.active !== false && (u.role === "admin" || u.role === "reception"));
+          let user = (state.users || []).find(u => u.active !== false && u.role === "admin");
           if (!user) {
             user = {
-              id: "user-test-reception",
-              name: "Reception Test",
-              role: "reception",
+              id: "user-test-admin",
+              name: "Admin technique Test",
+              role: "admin",
               active: true,
               pinHash: "",
               pinSalt: ""

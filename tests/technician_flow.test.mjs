@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
+import { currentBuild, getVersionedAssetQueries } from './helpers/build_version.mjs';
 
 const scriptFiles = [
   'js/utils.js',
@@ -51,6 +52,7 @@ const context = {
   localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
   sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} },
   document: {
+    getElementById: () => stubElement(),
     querySelector: () => stubElement(),
     querySelectorAll: () => [],
     addEventListener() {},
@@ -83,13 +85,12 @@ const appSource = fs.readFileSync('app.js', 'utf8');
 const swSource = fs.readFileSync('sw.js', 'utf8');
 const versionSource = fs.readFileSync('js/version.js', 'utf8');
 const indexSource = fs.readFileSync('index.html', 'utf8');
-const appVersion = stateSource.match(/APP_VERSION\s*=\s*"(v\d+\.\d+(?:\.\d+)?)"/)?.[1];
-assert.equal(appVersion, 'v23.2.6', 'APP_VERSION doit rester en v23.2.6 pour cette branche');
-assert.match(appSource, /serviceWorker\.register\("sw\.js\?v=23\.2\.6"/, 'le service worker doit être enregistré avec sw.js?v=23.2.6');
-assert.match(swSource, /nimr-sav-v23\.2\.6-reception-qc-field-usability/, 'le cache PWA doit être en v23.2.6');
-assert.match(versionSource, /NIMR_BUILD\s*=\s*"v23\.2\.6"/, 'js/version.js doit exposer v23.2.6');
-[...indexSource.matchAll(/\?v=(\d+\.\d+(?:\.\d+)?)/g)].forEach((match) => {
-  assert.equal(match[1], '23.2.6', `référence index.html incohérente: ?v=${match[1]}`);
+assert.ok(stateSource.includes(`const APP_VERSION = "${currentBuild.appVersion}"`), 'APP_VERSION doit suivre js/version.js');
+assert.ok(appSource.includes(`serviceWorker.register("sw.js?v=${currentBuild.queryVersion}"`), 'le service worker doit utiliser la query courante');
+assert.ok(swSource.includes(`const CACHE_NAME = "${currentBuild.cacheName}"`), 'le cache PWA doit suivre js/version.js');
+assert.ok(versionSource.includes(`window.NIMR_BUILD = "${currentBuild.buildVersion}"`), 'js/version.js doit exposer NIMR_BUILD');
+getVersionedAssetQueries(indexSource).forEach((queryVersion) => {
+  assert.equal(queryVersion, currentBuild.queryVersion, `référence index.html incohérente: ?v=${queryVersion}`);
 });
 
 function setupTechnicianState() {
@@ -103,6 +104,11 @@ function setupTechnicianState() {
         { id: 'tech-2', name: 'Technicien 2', role: 'mecanicien', active: true },
         { id: 'pont-1', name: 'Pont 1', role: 'pont_mecanique', active: true }
       ],
+      users: [
+        { id: 'user-tech-1', name: 'Technicien 1', role: 'technicien', resourceId: 'tech-1', active: true },
+        { id: 'user-chef', name: 'Chef atelier', role: 'chef_atelier', active: true }
+      ],
+      currentUserId: 'user-tech-1',
       cases: [
         {
           id: 'case-tech',
@@ -168,7 +174,7 @@ const completeResult = app(`completeTechnicianTask(state.cases[0], '${remainder.
 assert.equal(completeResult.ok, true, 'une tâche reprise doit pouvoir être terminée');
 assert.equal(app(`state.bookings.find((booking) => booking.id === '${remainder.id}').status`), 'completed');
 assert.equal(app(`state.bookings.find((booking) => booking.id === 'booking-main').status`), 'completed');
-assert.equal(app(`state.cases[0].flags.workCompleted`), true, 'la dernière tâche atelier doit envoyer le dossier vers contrôle qualité');
+assert.equal(app(`state.cases[0].flags.workCompleted`), true, 'la dernière tâche atelier doit marquer les travaux terminés');
 
 setupTechnicianState();
 const blockResult = app(`blockTechnicianTask(state.cases[0], 'booking-main', 'tech-1', 'attente pièces', 'Filtre non reçu')`);
@@ -197,8 +203,7 @@ assert.match(wrongTechnicianHandleResult.message, /affectée/i);
 setupTechnicianState();
 app(`state.cases[0].claims[0].clientApproved = false`);
 const missingApprovalHandleResult = await app(`handleBookingTaskAction(state.cases[0], 'start', 'booking-main', { allowOverride: false, silent: true, persist: false, skipRender: true })`);
-assert.equal(missingApprovalHandleResult.ok, false, 'handleBookingTaskAction doit refuser un accord requis manquant');
-assert.match(missingApprovalHandleResult.message, /validation client|accord/i);
+assert.equal(missingApprovalHandleResult.ok, true, 'le démarrage atelier ne doit pas dépendre de l’ancien accord client supprimé');
 
 setupTechnicianState();
 const guardedStartResult = await app(`handleBookingTaskAction(state.cases[0], 'start', 'booking-main', { allowOverride: false, silent: true, persist: false, skipRender: true })`);
@@ -215,6 +220,7 @@ assert.equal(app(`state.bookings.find((booking) => booking.id === 'booking-main'
 
 setupTechnicianState();
 app(`state.cases[0].flags.received = false`);
+app(`state.currentUserId = 'user-chef'`);
 const overrideResult = await app(`handleBookingTaskAction(state.cases[0], 'start', 'booking-main', { overrideConfirmed: true, overrideReason: 'Urgence chef atelier', silent: true, persist: false, skipRender: true })`);
 assert.equal(overrideResult.ok, true, 'un override chef atelier explicite doit permettre une exception contrôlée');
 assert.equal(app(`state.bookings.find((booking) => booking.id === 'booking-main').status`), 'started');

@@ -817,10 +817,15 @@ function getActivePlanningColorCaseIds() {
   return [...ids];
 }
 
-function reconcileVehiclePlanningColors() {
-  const activeIds = getActivePlanningColorCaseIds();
+function reconcileVehiclePlanningColors(caseIds = null) {
+  const activeIds = caseIds
+    ? [...new Set((Array.isArray(caseIds) ? caseIds : [...caseIds]).filter(Boolean))]
+    : getActivePlanningColorCaseIds();
+  const indexedCases = typeof getUiRuntimeIndexes === "function"
+    ? getUiRuntimeIndexes().caseById
+    : new Map((state.cases || []).map((item) => [item.id, item]));
   const activeItems = activeIds
-    .map((caseId) => state.cases.find((item) => item.id === caseId))
+    .map((caseId) => indexedCases.get(caseId))
     .filter(Boolean)
     .sort((left, right) => {
       const leftStart = left.appointment?.start ? new Date(left.appointment.start).getTime() : 0;
@@ -853,7 +858,9 @@ function getVehiclePlanningColor(item) {
 function getBookingPlanningColor(booking, colorMap = null) {
   if (booking?.type === "leave") return booking.color || "#6b7280";
   if (typeof getBookingOperationalStatus === "function" && getBookingOperationalStatus(booking) === "completed") return "#64748b";
-  const item = state.cases.find((caseItem) => caseItem.id === booking?.caseId);
+  const item = typeof getIndexedCaseById === "function"
+    ? getIndexedCaseById(booking?.caseId)
+    : state.cases.find((caseItem) => caseItem.id === booking?.caseId);
   if (item) return getVehiclePlanningColor(item);
   if (colorMap && booking?.caseId && colorMap[booking.caseId]) return colorMap[booking.caseId];
   return booking?.color || "#11415f";

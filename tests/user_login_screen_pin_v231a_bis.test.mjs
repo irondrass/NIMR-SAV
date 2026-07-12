@@ -137,7 +137,7 @@ async function main() {
     }, sessionId);
     for (let i = 0; i < 40; i++) {
       const check = await send("Runtime.evaluate", {
-        expression: `!!(document.getElementById("user-login-overlay") && document.getElementById("user-pin-change-overlay") && document.querySelector(".app-shell"))`
+        expression: `!!(document.getElementById("first-access-overlay") && document.getElementById("user-login-overlay") && document.getElementById("user-pin-change-overlay") && document.querySelector(".app-shell"))`
       }, sessionId);
       if (check.result?.value) {
         break;
@@ -150,16 +150,17 @@ async function main() {
     const domCheck = await send("Runtime.evaluate", {
       returnByValue: true,
       expression: `(() => {
+        const firstAccessOverlay = document.getElementById("first-access-overlay");
         const loginOverlay = document.getElementById("user-login-overlay");
         const pinChangeOverlay = document.getElementById("user-pin-change-overlay");
         const appShell = document.querySelector(".app-shell");
-        if (!loginOverlay || !pinChangeOverlay || !appShell) {
+        if (!firstAccessOverlay || !loginOverlay || !pinChangeOverlay || !appShell) {
           return { ok: false, error: "Éléments requis introuvables dans le DOM" };
         }
-        if (appShell.contains(loginOverlay) || appShell.contains(pinChangeOverlay)) {
+        if (appShell.contains(firstAccessOverlay) || appShell.contains(loginOverlay) || appShell.contains(pinChangeOverlay)) {
           return { ok: false, error: "Les overlays sont enfants de .app-shell !" };
         }
-        if (loginOverlay.parentNode !== document.body || pinChangeOverlay.parentNode !== document.body) {
+        if (firstAccessOverlay.parentNode !== document.body || loginOverlay.parentNode !== document.body || pinChangeOverlay.parentNode !== document.body) {
           return { ok: false, error: "Les overlays ne sont pas enfants directs de body !" };
         }
         return { ok: true };
@@ -167,8 +168,39 @@ async function main() {
     }, sessionId);
     assert.ok(domCheck.result.value.ok, `Contrainte DOM violée : ${domCheck.result.value.error}`);
 
-    // Étape 3 : Configurer des techniciens pour les tests
-    console.log("Étape 3 : Configuration des techniciens Alaa et Karim...");
+    // Étape 3 : Créer explicitement le premier responsable, puis les techniciens
+    console.log("Étape 3 : Premier accès explicite puis configuration des techniciens...");
+    const firstAccess = await send("Runtime.evaluate", {
+      awaitPromise: true,
+      returnByValue: true,
+      expression: `(async () => {
+        const overlay = document.getElementById("first-access-overlay");
+        const form = document.getElementById("first-access-form");
+        if ((state.users || []).length !== 0) {
+          return { ok: false, error: "Un utilisateur caché a été créé avant le premier accès" };
+        }
+        if (!form || overlay.hidden) {
+          return { ok: false, error: "L'écran de premier accès explicite devrait être visible" };
+        }
+        form.elements.name.value = "Admin premier accès";
+        form.elements.role.value = "admin_technique";
+        form.elements.pin.value = "739251";
+        form.elements.confirmPin.value = "739251";
+        form.requestSubmit();
+        for (let attempt = 0; attempt < 40; attempt += 1) {
+          if (state.users.some(user => user.active !== false) && overlay.hidden) break;
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        const admin = state.users.find(user => user.canonicalRole === "admin_technique");
+        if (!admin || state.currentUserId !== admin.id || !overlay.hidden) {
+          return { ok: false, error: "La création explicite du premier responsable n'a pas abouti" };
+        }
+        return { ok: true, role: admin.role, canonicalRole: admin.canonicalRole };
+      })()`
+    }, sessionId);
+    assert.ok(firstAccess.result.value.ok, `Échec premier accès explicite : ${JSON.stringify(firstAccess.result.value)}`);
+    assert.equal(firstAccess.result.value.canonicalRole, "admin_technique");
+
     await send("Runtime.evaluate", {
       expression: `
         state.resources = [
@@ -177,13 +209,6 @@ async function main() {
         ];
         createUserLocal({ name: "Alaa", role: "technicien", resourceId: "res-alaa", email: "alaa@nimr.local", active: true });
         createUserLocal({ name: "Karim", role: "technicien", resourceId: "res-karim", email: "karim@nimr.local", active: true });
-
-        const adminUser = state.users.find(user => user.role === "admin");
-        if (adminUser) {
-          adminUser.pinSalt = "legacy-v231a-bis-salt";
-          adminUser.pinHash = "mockhash:0000:" + adminUser.pinSalt;
-          adminUser.updatedAt = new Date().toISOString();
-        }
         
         // Ajouter deux utilisateurs doublons pour tester l'alerte en bypassant createUserLocal pour le second
         createUserLocal({ name: "Dup1", role: "reception", email: "dup@nimr.local", active: true });
@@ -205,7 +230,7 @@ async function main() {
     }, sessionId);
     await wait(500);
 
-    // Étape 4 : Sélectionner l'admin bootstrap et saisir un PIN incorrect
+    // Étape 4 : Sélectionner le responsable explicite et saisir un PIN incorrect
     console.log("Étape 4 : Sélection admin, test PIN incorrect (et génération d'audit)...");
     const testIncorrectPin = await send("Runtime.evaluate", {
       awaitPromise: true,
@@ -249,51 +274,24 @@ async function main() {
     }, sessionId);
     assert.ok(testIncorrectPin.result.value.ok, `Échec test PIN incorrect : ${JSON.stringify(testIncorrectPin.result.value)}`);
 
-    // Étape 5 : Saisir PIN bootstrap 0000 -> forcer modification
-    console.log("Étape 5 : Saisie PIN bootstrap 0000 -> modification forcée...");
-    const testBootstrapRedirect = await send("Runtime.evaluate", {
+    // Étape 5 : Saisir le PIN robuste défini au premier accès
+    console.log("Étape 5 : Connexion avec le PIN robuste du premier accès...");
+    const testExplicitAdminLogin = await send("Runtime.evaluate", {
       awaitPromise: true,
       returnByValue: true,
       expression: `(async () => {
         const pinInput = document.getElementById("user-login-pin");
         const loginForm = document.getElementById("user-login-form");
-        pinInput.value = "0000";
+        pinInput.value = "739251";
         loginForm.dispatchEvent(new Event("submit"));
-        await new Promise(r => setTimeout(r, 100));
-
-        const changeOverlay = document.getElementById("user-pin-change-overlay");
-        const loginOverlay = document.getElementById("user-login-overlay");
-
-        if (changeOverlay.hidden || !loginOverlay.hidden) {
-          return { ok: false, error: "L'overlay de changement de PIN devrait être visible et le login masqué" };
-        }
-
-        return { ok: true };
-      })()`
-    }, sessionId);
-    assert.ok(testBootstrapRedirect.result.value.ok, `Échec redirection bootstrap : ${testBootstrapRedirect.result.value.error}`);
-
-    // Étape 6 : Renseigner un nouveau PIN robuste et valider la connexion admin
-    console.log("Étape 6 : Définition nouveau PIN robuste et activation interface...");
-    const testNewPinSetup = await send("Runtime.evaluate", {
-      awaitPromise: true,
-      returnByValue: true,
-      expression: `(async () => {
-        const changeOverlay = document.getElementById("user-pin-change-overlay");
-        const newPinInput = changeOverlay.querySelector("input[name='newPin']");
-        const confirmInput = changeOverlay.querySelector("input[name='confirmNewPin']");
-        newPinInput.value = "739251";
-        confirmInput.value = "739251";
-
-        const changeForm = document.getElementById("user-pin-change-form");
-        changeForm.dispatchEvent(new Event("submit"));
         await new Promise(r => setTimeout(r, 300));
 
+        const changeOverlay = document.getElementById("user-pin-change-overlay");
         const loginOverlay = document.getElementById("user-login-overlay");
         const appShell = document.querySelector(".app-shell");
 
         if (!loginOverlay.hidden || !changeOverlay.hidden) {
-          return { ok: false, error: "Les overlays de sécurité devraient être masqués" };
+          return { ok: false, error: "Le PIN robuste devrait ouvrir directement l'application" };
         }
         if (appShell.hasAttribute("inert")) {
           return { ok: false, error: "L'application est restée en mode inert après connexion réussie" };
@@ -314,7 +312,7 @@ async function main() {
         return { ok: true };
       })()`
     }, sessionId);
-    assert.ok(testNewPinSetup.result.value.ok, `Échec configuration nouveau PIN / Clics réels : ${testNewPinSetup.result.value.error}`);
+    assert.ok(testExplicitAdminLogin.result.value.ok, `Échec connexion responsable explicite / Clics réels : ${testExplicitAdminLogin.result.value.error}`);
 
     // Étape 7 : Refresh -> Admin doit ressaisir son PIN
     console.log("Étape 7 : Refresh page -> Demande de PIN obligatoire pour admin...");

@@ -75,6 +75,71 @@ async function exportClientFolder(item) {
   return exportCaseFolderZip(item, { clientOnly: true });
 }
 
+function buildOperationalCaseExport(item) {
+  const bookings = (state.bookings || [])
+    .filter((booking) => booking.caseId === item.id && booking.type !== "leave" && booking.temporary !== true)
+    .map((booking) => ({
+      id: booking.id,
+      title: booking.title,
+      key: booking.key,
+      status: typeof getBookingOperationalStatus === "function" ? getBookingOperationalStatus(booking) : booking.status,
+      plannedStart: booking.plannedStart || booking.start || null,
+      plannedEnd: booking.plannedEnd || booking.end || null,
+      actualStart: booking.actualStart || booking.startedAt || null,
+      actualEnd: booking.actualEnd || booking.completedAt || null,
+      plannedMinutes: Number(booking.plannedMinutes || 0),
+      actualWorkedMinutes: Number(booking.actualWorkedMinutes || 0),
+      resourceIds: Array.isArray(booking.resourceIds) ? [...booking.resourceIds] : [],
+      equipmentResourceIds: Array.isArray(booking.equipmentResourceIds) ? [...booking.equipmentResourceIds] : [],
+      dependencies: Array.isArray(booking.dependencies) ? [...booking.dependencies] : [],
+      subcontracting: booking.subcontracting && typeof booking.subcontracting === "object"
+        ? { ...booking.subcontracting }
+        : null,
+      blockReason: booking.blockReason || "",
+      notes: Array.isArray(booking.notes) ? booking.notes.map((note) => ({ ...note })) : [],
+    }));
+  const laborTasks = (item.claims || []).flatMap((claim) => {
+    const lines = claim.estimate?.originalLines?.length ? claim.estimate.originalLines : (claim.estimate?.lines || []);
+    return lines.map((line) => ({
+      id: line.id || "",
+      order: claim.number || "",
+      operation: line.operation || line.rawText || "",
+      phase: line.phase || line.allocations?.[0]?.phase || "",
+      requiredRole: line.requiredRole || line.allocations?.[0]?.requiredRole || "",
+      laborHours: Number(line.laborHours || 0),
+      status: line.status || "",
+      source: line.source || item.source || "",
+      dependencies: Array.isArray(line.dependencies) ? [...line.dependencies] : [],
+    }));
+  });
+  return {
+    schema: "nimr-sav-operational-case-v1",
+    exportedAt: new Date().toISOString(),
+    case: {
+      id: item.id,
+      source: item.source || "",
+      importedAt: item.importedAt || null,
+      createdAt: item.createdAt || null,
+      closedAt: item.closedAt || null,
+      archivedAt: item.archivedAt || null,
+      clientName: item.clientName || "À compléter",
+      phone: item.phone || "",
+      vehicle: item.vehicle || "À compléter",
+      plate: item.plate || "",
+      vin: item.vin || "",
+      mileage: item.mileage || "",
+      orNavNumber: item.orNavNumber || "",
+      pdfImportStatus: item.pdfImportStatus || "",
+      durations: { ...(item.durations || {}) },
+      deliveryEstimate: item.deliveryEstimate ? JSON.parse(JSON.stringify(item.deliveryEstimate)) : null,
+      subcontracting: item.subcontracting ? JSON.parse(JSON.stringify(item.subcontracting)) : null,
+      history: Array.isArray(item.history) ? item.history.map((entry) => ({ ...entry })) : [],
+    },
+    laborTasks,
+    bookings,
+  };
+}
+
 function getExportPhotoFolderName(category) {
   const normalized = normalizePhotoCategory(category);
   const folders = {
@@ -93,7 +158,6 @@ async function exportCaseFolderZip(item, { clientOnly = false } = {}) {
     const files = hasClaims
       ? [
           { path: `${folder}/00_Dossier_global/`, data: new Uint8Array(), type: "application/x-directory" },
-          { path: `${folder}/00_Dossier_global/00_Devis_original_importe/`, data: new Uint8Array(), type: "application/x-directory" },
           { path: `${folder}/Ordres_SAV/`, data: new Uint8Array(), type: "application/x-directory" },
           { path: `${folder}/Photos_globales/`, data: new Uint8Array(), type: "application/x-directory" },
           { path: `${folder}/Photos_globales/Avant_reparation/`, data: new Uint8Array(), type: "application/x-directory" },
@@ -109,47 +173,16 @@ async function exportCaseFolderZip(item, { clientOnly = false } = {}) {
           { path: `${folder}/Photos/Complement_avant_accord/`, data: new Uint8Array(), type: "application/x-directory" },
           { path: `${folder}/Photos/Divers/`, data: new Uint8Array(), type: "application/x-directory" },
           { path: `${folder}/PDF/`, data: new Uint8Array(), type: "application/x-directory" },
-          { path: `${folder}/PDF/00_Devis_original_importe/`, data: new Uint8Array(), type: "application/x-directory" },
         ];
     const pdfRoot = hasClaims ? `${folder}/00_Dossier_global` : `${folder}/PDF`;
     const addPdf = (name, lines) => {
       files.push({ path: `${pdfRoot}/${name}.pdf`, data: createSimplePdf(lines), type: "application/pdf" });
     };
-    const sourceFile = item.expertEstimate?.sourceFile;
-    if (sourceFile?.id && typeof getDocumentRecord === "function") {
-      const record = await getDocumentRecord(sourceFile.id).catch(() => null);
-      if (record?.blob) {
-        const bytes = new Uint8Array(await record.blob.arrayBuffer());
-        const sourceName = sanitizeFilename(sourceFile.name || "devis-original.pdf");
-        const sourceExt = /\.[a-z0-9]{2,5}$/i.test(sourceName) ? "" : ".pdf";
-        files.push({
-          path: `${pdfRoot}/00_Devis_original_importe/${sourceName}${sourceExt}`,
-          data: bytes,
-          type: sourceFile.type || record.blob.type || "application/octet-stream",
-        });
-      }
-    }
-
     for (const claim of item.claims || []) {
       const claimFolder = `${folder}/Ordres_SAV/${sanitizeFilename(`${claim.number || 'OT'}_${claim.title || 'Ordre'}`)}`;
       files.push({ path: `${claimFolder}/`, data: new Uint8Array(), type: "application/x-directory" });
-      files.push({ path: `${claimFolder}/Devis/`, data: new Uint8Array(), type: "application/x-directory" });
       files.push({ path: `${claimFolder}/Photos/`, data: new Uint8Array(), type: "application/x-directory" });
       files.push({ path: `${claimFolder}/01_Fiche_ordre.pdf`, data: createSimplePdf(buildClaimPdfLines(item, claim)), type: "application/pdf" });
-      const claimSource = claim.estimate?.sourceFile;
-      if (claimSource?.id && typeof getDocumentRecord === "function") {
-        const record = await getDocumentRecord(claimSource.id).catch(() => null);
-        if (record?.blob) {
-          const bytes = new Uint8Array(await record.blob.arrayBuffer());
-          const sourceName = sanitizeFilename(claimSource.name || `${claim.number || 'devis'}-original.pdf`);
-          const sourceExt = /\.[a-z0-9]{2,5}$/i.test(sourceName) ? "" : ".pdf";
-          files.push({
-            path: `${claimFolder}/Devis/${sourceName}${sourceExt}`,
-            data: bytes,
-            type: claimSource.type || record.blob.type || "application/octet-stream",
-          });
-        }
-      }
     }
 
     addPdf("00_Fiche_reception_vehicule", buildReceptionPdfLines(item));
@@ -157,7 +190,7 @@ async function exportCaseFolderZip(item, { clientOnly = false } = {}) {
     addPdf("02_Affectations_planning", buildPlanningPdfLines(item));
     if (!clientOnly) {
       addPdf("03_Logs_dossier", buildLogsPdfLines(item));
-      files.push({ path: `${folder}/dossier.json`, data: new TextEncoder().encode(JSON.stringify(item, null, 2)), type: "application/json" });
+      files.push({ path: `${folder}/dossier_atelier.json`, data: new TextEncoder().encode(JSON.stringify(buildOperationalCaseExport(item), null, 2)), type: "application/json" });
     }
 
     for (const photo of item.photos || []) {

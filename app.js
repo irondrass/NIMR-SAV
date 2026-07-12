@@ -1,7 +1,13 @@
 let quickEstimateCreationDraft = null;
 
-function initApp() {
+async function initApp() {
   try {
+    if (typeof hydrateLargeStateIfAvailable === "function") {
+      await hydrateLargeStateIfAvailable();
+    }
+    if (typeof loadDurableOutboxOperations === "function") {
+      await loadDurableOutboxOperations().catch(() => []);
+    }
     configurePdfWorker();
     bindMainNavigation();
     bindCaseList();
@@ -21,6 +27,7 @@ function initApp() {
     bindVehicleLookup();
     bindKeyboardShortcuts();
     bindAutoSaveSafety();
+    bindMobileResumeSafety();
     if (typeof migratePlanningLogicV28 === "function") migratePlanningLogicV28();
     if (typeof migratePlanningLogicV36 === "function") migratePlanningLogicV36();
     setActiveTab(activeTab || "dossiers");
@@ -35,7 +42,9 @@ function initApp() {
       cleanupOrphanedStorage().catch(() => null);
     }
     registerServiceWorker();
+    window.__nimrAppReady = true;
   } catch (error) {
+    window.__nimrAppReady = false;
     console.error("Initialisation impossible", error);
     notifyUser("L'application n'a pas pu démarrer. Ouvrez la console navigateur pour le détail.", "error");
   }
@@ -62,6 +71,18 @@ function bindAutoSaveSafety() {
   });
   window.addEventListener("pagehide", forceEmergencyAutosave);
   window.setInterval(forceEmergencyAutosave, 10000);
+}
+
+function bindMobileResumeSafety() {
+  const refreshForegroundState = () => {
+    if (typeof refreshTechnicianElapsedTimers === "function") refreshTechnicianElapsedTimers();
+    if (typeof renderSyncStatusStrip === "function") renderSyncStatusStrip();
+  };
+  window.addEventListener("focus", refreshForegroundState);
+  window.addEventListener("pageshow", refreshForegroundState);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") refreshForegroundState();
+  });
 }
 
 function bindOfflineStatus() {
@@ -97,7 +118,7 @@ function bindSyncConflictUsability() {
 
 function configurePdfWorker() {
   if (window.pdfjsLib?.GlobalWorkerOptions) {
-    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js";
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.2.8-full-audit";
   }
 }
 
@@ -111,9 +132,6 @@ function bindMainNavigation() {
       if (tab === "today") renderTodayWorkshop();
       if (tab === "planning") renderPlanning();
       if (tab === "technician") renderTechnicianDashboard();
-      if (tab === "qc-workspace") {
-        if (typeof renderQcWorkspace === "function") renderQcWorkspace();
-      }
       if (tab === "atelier") {
         renderResources();
         renderFastLaneSettings();
@@ -217,7 +235,7 @@ function bindCaseCreation() {
       render();
       notifyUser("Dossier créé depuis le devis PDF. Validez les travaux et préparez le planning.", "success");
     } catch (error) {
-      console.error("Création dossier depuis devis PDF impossible", error);
+      console.warn("Création dossier depuis devis PDF impossible", error?.name || "Error", String(error?.message || "Erreur inconnue").replace(/\s+/g, " ").slice(0, 300));
       if (status) status.textContent = "Création impossible. Corrigez l’aperçu ou réimportez le PDF.";
       notifyUser(error.message || "Impossible de créer le dossier depuis ce devis PDF.", "error");
     } finally {
@@ -259,7 +277,7 @@ function bindCaseCreation() {
       if (status) status.textContent = "Devis analysé. Vérifiez l’aperçu avant de créer le dossier.";
     } catch (error) {
       if (getQuickEstimateFileSignature(fileInput.files?.[0]) !== requestedSignature) return;
-      console.error("Pré-import devis création impossible", error);
+      console.warn("Pré-import devis création impossible", error?.name || "Error", String(error?.message || "Échec extraction PDF.js").replace(/\s+/g, " ").slice(0, 300));
       quickEstimateCreationDraft = null;
       if (status) status.textContent = "Import devis impossible.";
       notifyUser(error.message || "Impossible de lire ce devis.", "error");
@@ -338,16 +356,29 @@ function getPdfTaskRoleLabel(phase) {
 }
 
 function getPdfEstimateTaskRows(parsed) {
-  return (parsed?.distributedLines || []).map((line) => ({
-    id: line.id || uid("estimate-line"),
-    phase: line.phase || "body",
-    operation: line.operation || "Travaux atelier à préciser",
-    laborHours: roundPlanningHours(line.laborHours || 0),
-    requiredRole: getPdfTaskRequiredRole(line.phase),
-    roleLabel: getPdfTaskRoleLabel(line.phase),
-    source: "pdf_estimate",
-    status: "ready_for_validation",
-  }));
+  const aggregated = new Map();
+  (parsed?.distributedLines || []).forEach((line) => {
+    const phase = line.phase || "body";
+    const isFallbackTask = Number(line.laborHours || 0) <= 0 && line.operation === "Travaux atelier à préciser";
+    const task = aggregated.get(phase) || {
+      id: `pdf-task-${phase}`,
+      phase,
+      operation: isFallbackTask ? "Travaux atelier à préciser" : (getDurationLabel(phase) || "Travaux atelier à préciser"),
+      laborHours: 0,
+      requiredRole: getPdfTaskRequiredRole(phase),
+      roleLabel: getPdfTaskRoleLabel(phase),
+      sourceLineIds: [],
+      sourceOperations: [],
+      source: "pdf_estimate",
+      status: "ready_for_validation",
+    };
+    task.laborHours = roundPlanningHours(task.laborHours + Number(line.laborHours || 0));
+    if (line.sourceLineId && !task.sourceLineIds.includes(line.sourceLineId)) task.sourceLineIds.push(line.sourceLineId);
+    const sourceOperation = line.sourceOperation || line.operation || "";
+    if (sourceOperation && !task.sourceOperations.includes(sourceOperation)) task.sourceOperations.push(sourceOperation);
+    aggregated.set(phase, task);
+  });
+  return [...aggregated.values()];
 }
 
 function renderPdfEstimateCreationPreview(form, draft, file) {
@@ -461,6 +492,20 @@ async function createCaseFromPdfEstimate(draft, estimateFile = null, overrides =
       status: "ready_for_validation",
     })),
   }));
+  item.planningTasks = taskRows.map((task, index) => ({
+    ...task,
+    taskId: task.id,
+    title: task.operation,
+    durationMinutes: Math.round(Number(task.laborHours || 0) * 60),
+    dependencies: index > 0 ? [taskRows[index - 1].id] : [],
+    vehicleExclusive: true,
+    parallelizable: false,
+  }));
+  DURATIONS.forEach(([key]) => {
+    item.durations[key] = roundPlanningHours(taskRows
+      .filter((task) => task.phase === key)
+      .reduce((sum, task) => sum + Number(task.laborHours || 0), 0));
+  });
   item.pdfImportTaskCount = taskRows.length;
   addHistory(item, "claim.estimate.imported", "Devis PDF importé automatiquement", `${formatLocalizedDecimal(preview.detectedHours)} h MO · ${item.pdfImportTaskCount} tâche(s) prête(s) pour validation.`);
 
@@ -686,7 +731,15 @@ function inferEstimateCreationMetadata(parsed, extracted = {}) {
 function bindCaseFilters() {
   populateCaseStatusFilters();
   const search = $("#case-search");
-  search?.addEventListener("input", renderCases);
+  let searchDebounceTimer = null;
+  search?.addEventListener("input", () => {
+    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(() => {
+      searchDebounceTimer = null;
+      if (typeof resetCaseListPagination === "function") resetCaseListPagination();
+      renderCases();
+    }, 180);
+  });
 
   const status = $("#case-status-filter");
   if (status) {
@@ -694,6 +747,7 @@ function bindCaseFilters() {
     status.addEventListener("change", () => {
       state.ui.caseStatusFilter = normalizeCaseStatusFilter(status.value);
       status.value = state.ui.caseStatusFilter;
+      if (typeof resetCaseListPagination === "function") resetCaseListPagination();
       saveState();
       renderCases();
     });
@@ -704,6 +758,7 @@ function bindCaseFilters() {
     type.value = state.ui?.caseTypeFilter || "all";
     type.addEventListener("change", () => {
       state.ui.caseTypeFilter = type.value;
+      if (typeof resetCaseListPagination === "function") resetCaseListPagination();
       saveState();
       renderCases();
     });
@@ -714,6 +769,7 @@ function bindCaseFilters() {
     sort.value = state.ui?.caseSort || "recent";
     sort.addEventListener("change", () => {
       state.ui.caseSort = sort.value;
+      if (typeof resetCaseListPagination === "function") resetCaseListPagination();
       saveState();
       renderCases();
     });
@@ -743,7 +799,7 @@ function changePlanningDay(delta) {
 function bindWorkshopForms() {
   $("#resource-form")?.addEventListener("submit", (event) => {
     event.preventDefault();
-    const permission = guardAction("planning.edit", {}, { notify: false });
+    const permission = guardAction("resource.manage", {}, { notify: false });
     if (!permission.ok) return notifyUser(permission.message, "error");
     const form = event.currentTarget;
     const data = new FormData(form);
@@ -752,6 +808,16 @@ function bindWorkshopForms() {
       name: normalizeTextInputValue(data.get("name")),
       role: data.get("role"),
       location: normalizeTextInputValue(data.get("location")),
+      site: data.get("site") === "external" ? "external" : "internal",
+      kind: data.get("site") === "external" ? "external" : "internal",
+      external: data.get("site") === "external",
+      capacity: Math.max(1, Number(data.get("capacity") || 1) || 1),
+      simultaneousCapacity: Math.max(1, Number(data.get("capacity") || 1) || 1),
+      dailyCapacityMinutes: Number(data.get("dailyCapacityMinutes") || 0) || null,
+      compatibleRoles: String(data.get("compatibleRoles") || "").split(",").map((value) => value.trim()).filter(Boolean),
+      transferOutMinutes: Math.max(0, Number(data.get("transferOutMinutes") || 0) || 0),
+      transferReturnMinutes: Math.max(0, Number(data.get("transferReturnMinutes") || 0) || 0),
+      standardLeadTimeMinutes: Math.max(0, Number(data.get("standardLeadTimeMinutes") || 0) || 0),
       fastLane: Boolean(data.get("fastLane")),
       active: true,
     }));
@@ -837,7 +903,7 @@ function bindWorkshopForms() {
 
     // Lire le PIN
     const pin = form.elements.pin ? form.elements.pin.value : "";
-    const isSensitive = ["admin", "chef_atelier", "directeur_sav"].includes(role);
+    const isSensitive = ["admin_technique", "directeur", "chef_atelier"].includes(normalizeUserRole(role));
 
     const existingUser = userId ? getUserById(userId) : null;
     let pinData = {};
@@ -1001,9 +1067,9 @@ function registerServiceWorker() {
       notifyUser("Nouvelle version prête. Cliquez sur la bannière pour recharger au bon moment.", "success");
     }
   });
-  window.addEventListener("load", async () => {
+  const registerCurrentServiceWorker = async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=23.2.7", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=23.2.8-full-audit", { updateViaCache: "none" });
       const refreshRegistration = async () => {
         try {
           await registration.update?.();
@@ -1018,7 +1084,12 @@ function registerServiceWorker() {
     } catch (error) {
       console.warn("Service worker non enregistré", error);
     }
-  });
+  };
+  if (document.readyState === "complete") {
+    registerCurrentServiceWorker();
+  } else {
+    window.addEventListener("load", registerCurrentServiceWorker, { once: true });
+  }
 }
 
 function navigateToConflictsAndFocus() {
@@ -1236,7 +1307,7 @@ function renderActivityLog() {
         const localVal = targetConflict ? (targetConflict.localCase || targetConflict.localValue) : null;
         if (localVal) {
           const payload = {
-            version: "v23.2.7",
+            version: "v23.2.8-full-audit",
             timestamp: new Date().toISOString(),
             cases: [JSON.parse(JSON.stringify(localVal))],
             source: "manual_conflict_backup"
@@ -1309,9 +1380,10 @@ window.pendingSelectorUser = null;
 let userSessionReturnFocus = null;
 
 function isUserSessionOverlayVisible() {
+  const firstAccess = document.getElementById("first-access-overlay");
   const login = document.getElementById("user-login-overlay");
   const change = document.getElementById("user-pin-change-overlay");
-  return Boolean((login && !login.hidden) || (change && !change.hidden));
+  return Boolean((firstAccess && !firstAccess.hidden) || (login && !login.hidden) || (change && !change.hidden));
 }
 
 function captureUserSessionReturnFocus() {
@@ -1375,6 +1447,10 @@ function checkUserSessionStartup() {
   }
 
   const activeUsers = (state.users || []).filter(user => user.active !== false);
+  if (typeof isFirstAccessRecoveryRequired === "function" && isFirstAccessRecoveryRequired(state)) {
+    showFirstAccessRecovery();
+    return;
+  }
   const alwaysPrompt = state.settings.alwaysPromptUserStartup !== false &&
                        (state.settings.alwaysPromptUserStartup === true || activeUsers.length > 1);
 
@@ -1397,7 +1473,33 @@ function checkUserSessionStartup() {
   }
 }
 
+function showFirstAccessRecovery() {
+  const overlay = document.getElementById("first-access-overlay");
+  if (!overlay) return;
+  captureUserSessionReturnFocus();
+  bindUserSessionOverlayKeyboard(overlay);
+  hideUserLoginScreen();
+  hideUserPinChangeOverlay();
+  overlay.hidden = false;
+  document.querySelector(".app-shell")?.setAttribute("inert", "");
+  const status = document.getElementById("first-access-status");
+  if (status) status.textContent = "";
+  focusUserSessionDialog(overlay, "input[name='name']");
+}
+
+function hideFirstAccessRecovery() {
+  const overlay = document.getElementById("first-access-overlay");
+  if (!overlay) return;
+  overlay.hidden = true;
+  checkOverlaysInertState();
+  restoreUserSessionReturnFocus();
+}
+
 function showUserLoginScreen() {
+  if (typeof isFirstAccessRecoveryRequired === "function" && isFirstAccessRecoveryRequired(state)) {
+    showFirstAccessRecovery();
+    return;
+  }
   const overlay = document.getElementById("user-login-overlay");
   if (overlay) {
     captureUserSessionReturnFocus();
@@ -1458,10 +1560,12 @@ function hideUserPinChangeOverlay() {
 }
 
 function checkOverlaysInertState() {
+  const firstAccess = document.getElementById("first-access-overlay");
   const login = document.getElementById("user-login-overlay");
   const change = document.getElementById("user-pin-change-overlay");
   const localLock = document.getElementById("local-lock-overlay");
-  const anyVisible = (login && !login.hidden) ||
+  const anyVisible = (firstAccess && !firstAccess.hidden) ||
+                      (login && !login.hidden) ||
                       (change && !change.hidden) ||
                       (localLock && !localLock.hidden);
   if (!anyVisible) {
@@ -1484,7 +1588,7 @@ function renderUserLoginScreen() {
       directeur_sav: "Directeur SAV",
       reception: "Réception",
       technicien: "Technicien",
-      qualite: "Qualité",
+      qualite: "Lecture seule (rôle historique)",
       readonly: "Lecture seule"
     }[user.role] || user.role;
 
@@ -1577,7 +1681,7 @@ function triggerUserChangeScreen() {
 }
 
 // v23.2.5 — Déconnexion propre : efface la session sans afficher l'écran admin
-function triggerLogout() {
+async function triggerLogout() {
   const previousUser = (state.users || []).find(user => user.id === state.currentUserId && user.active !== false);
   const previousActor = previousUser ? {
     userId: previousUser.id,
@@ -1597,6 +1701,12 @@ function triggerLogout() {
     addAuditLog("users.session_logged_out", "Déconnexion utilisateur", previousUser ? `Déconnexion de ${previousUser.name}` : "Session locale effacée", { actor: previousActor });
   }
   if (typeof saveState === "function") saveState({ skipCloud: true, skipSnapshot: true });
+  if (typeof persistLargeStateSnapshot === "function") {
+    await persistLargeStateSnapshot(state, { appVersion: APP_VERSION, reason: "local-user-logout" }).catch((error) => {
+      console.warn("Persistance avant déconnexion locale impossible", error?.message || error);
+    });
+  }
+  if (typeof loadDurableOutboxOperations === "function") await loadDurableOutboxOperations().catch(() => []);
   if (typeof renderCurrentSessionIndicator === "function") renderCurrentSessionIndicator();
   showUserLoginScreen();
 }
@@ -1652,6 +1762,49 @@ function renderCurrentSessionIndicator() {
 }
 
 function bindUserSessionActions() {
+  const firstAccessForm = document.getElementById("first-access-form");
+  firstAccessForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const status = document.getElementById("first-access-status");
+    if (status) status.textContent = "";
+    const name = String(firstAccessForm.elements.name?.value || "").trim();
+    const role = String(firstAccessForm.elements.role?.value || "").trim();
+    const pin = String(firstAccessForm.elements.pin?.value || "");
+    const confirmPin = String(firstAccessForm.elements.confirmPin?.value || "");
+    const validation = typeof validateLocalPinStrength === "function"
+      ? validateLocalPinStrength(pin)
+      : { ok: pin.length >= 6, value: pin, message: "PIN trop faible." };
+    if (!name) {
+      if (status) status.textContent = "Le nom est obligatoire.";
+      return;
+    }
+    if (!validation.ok) {
+      if (status) status.textContent = validation.message || "PIN trop faible.";
+      return;
+    }
+    if (pin !== confirmPin) {
+      if (status) status.textContent = "Les deux PIN ne correspondent pas.";
+      return;
+    }
+    try {
+      const credentials = await createLocalPinCredentials(validation.value);
+      const result = createFirstAccessUserLocal({ name, role, ...credentials });
+      if (!result.ok) {
+        if (status) status.textContent = result.message;
+        return;
+      }
+      sessionStorage.setItem("nimr-user-pin-unlocked", result.user.id);
+      saveState({ skipCloud: true, cloudReason: "first-access" });
+      hideFirstAccessRecovery();
+      setActiveTab("reception-workspace");
+      render();
+      resetUserSessionIdleTimer();
+      quietNotify(`Bienvenue, ${result.user.name} !`, "success");
+    } catch (error) {
+      if (status) status.textContent = error?.message || "Création du premier accès impossible.";
+    }
+  });
+
   // Option checkbox dans Paramètres
   const alwaysPromptCheckbox = document.getElementById("always-prompt-startup");
   alwaysPromptCheckbox?.addEventListener("change", (event) => {

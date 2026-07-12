@@ -1,5 +1,309 @@
 const PLAIN_JSON_EXPORT_CONFIRMATION = "EXPORT NON CHIFFRE";
 const RESTORE_BACKUP_CONFIRMATION = "RESTAURER";
+const LARGE_STATE_DB_NAME = "nimr-sav-large-state";
+const LARGE_STATE_DB_VERSION = 2;
+const LARGE_STATE_STORE = "snapshots";
+const LARGE_STATE_KEY = "latest";
+const DURABLE_OUTBOX_STORE = "outbox";
+const SYNC_METADATA_STORE = "sync_metadata";
+const DURABLE_OUTBOX_MIRROR_KEY = "nimr-sav-outbox-mirror:v2";
+const DURABLE_OUTBOX_FALLBACK_KEY = "nimr-sav-outbox-fallback:v2";
+const LARGE_STATE_CASE_THRESHOLD = 250;
+const LARGE_STATE_BYTE_THRESHOLD = 2 * 1024 * 1024;
+
+function openLargeStateDatabase() {
+  if (typeof indexedDB === "undefined") return Promise.reject(new Error("IndexedDB indisponible."));
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(LARGE_STATE_DB_NAME, LARGE_STATE_DB_VERSION);
+    request.onupgradeneeded = () => {
+      const database = request.result;
+      if (!database.objectStoreNames.contains(LARGE_STATE_STORE)) {
+        database.createObjectStore(LARGE_STATE_STORE, { keyPath: "id" });
+      }
+      if (!database.objectStoreNames.contains(DURABLE_OUTBOX_STORE)) {
+        const outbox = database.createObjectStore(DURABLE_OUTBOX_STORE, { keyPath: "operationId" });
+        outbox.createIndex("syncStatus", "syncStatus", { unique: false });
+        outbox.createIndex("createdAt", "createdAt", { unique: false });
+      }
+      if (!database.objectStoreNames.contains(SYNC_METADATA_STORE)) {
+        database.createObjectStore(SYNC_METADATA_STORE, { keyPath: "key" });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error("Ouverture IndexedDB impossible."));
+  });
+}
+
+function runIndexedDbTransaction(storeName, mode, operation) {
+  return openLargeStateDatabase().then((database) => new Promise((resolve, reject) => {
+    const transaction = database.transaction(storeName, mode);
+    const store = transaction.objectStore(storeName);
+    let request;
+    try {
+      request = operation(store);
+    } catch (error) {
+      database.close();
+      reject(error);
+      return;
+    }
+    transaction.oncomplete = () => {
+      const result = request?.result;
+      database.close();
+      resolve(result);
+    };
+    transaction.onerror = () => {
+      const error = transaction.error || request?.error || new Error("Transaction IndexedDB impossible.");
+      database.close();
+      reject(error);
+    };
+    transaction.onabort = transaction.onerror;
+  }));
+}
+
+function runLargeStateTransaction(mode, operation) {
+  return runIndexedDbTransaction(LARGE_STATE_STORE, mode, operation);
+}
+
+function estimateStateJsonBytes(candidate = state) {
+  try {
+    return new TextEncoder().encode(JSON.stringify(candidate || {})).byteLength;
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
+}
+
+function shouldPersistStateInIndexedDb(candidate = state) {
+  return typeof indexedDB !== "undefined" && Boolean(candidate && typeof candidate === "object");
+}
+
+async function persistLargeStateSnapshot(candidate = state, metadata = {}) {
+  if (!candidate || typeof candidate !== "object") throw new Error("État applicatif invalide.");
+  const savedAt = new Date().toISOString();
+  // IndexedDB applique un structured clone récursif aux objets. Sur plusieurs
+  // milliers de dossiers normalisés, ce clonage peut bloquer l'interface bien
+  // plus longtemps qu'une sérialisation JSON équivalente.
+  const stateJson = JSON.stringify(candidate);
+  await runLargeStateTransaction("readwrite", (store) => store.put({
+    id: LARGE_STATE_KEY,
+    savedAt,
+    schemaVersion: Number(candidate.schemaVersion || 0),
+    casesCount: Number(candidate.cases?.length || 0),
+    metadata: { ...metadata },
+    stateJson,
+  }));
+  window.NIMR_INDEXED_DB_STATUS = { ok: true, savedAt, casesCount: Number(candidate.cases?.length || 0), primary: true };
+  return { savedAt, casesCount: Number(candidate.cases?.length || 0) };
+}
+
+async function loadLargeStateSnapshot() {
+  const record = await runLargeStateTransaction("readonly", (store) => store.get(LARGE_STATE_KEY));
+  if (!record) return null;
+  let restoredState = record.state;
+  if ((!restoredState || !Array.isArray(restoredState.cases)) && typeof record.stateJson === "string") {
+    try {
+      restoredState = JSON.parse(record.stateJson);
+    } catch {
+      return null;
+    }
+  }
+  if (!restoredState || !Array.isArray(restoredState.cases)) return null;
+  const { stateJson, ...metadata } = record;
+  window.NIMR_INDEXED_DB_STATUS = { ok: true, savedAt: record.savedAt || "", casesCount: restoredState.cases.length, primary: true };
+  return { ...metadata, state: restoredState };
+}
+
+async function removeLargeStateSnapshot() {
+  await runLargeStateTransaction("readwrite", (store) => store.delete(LARGE_STATE_KEY));
+}
+
+async function hydrateLargeStateIfAvailable() {
+  const record = await loadLargeStateSnapshot().catch(() => null);
+  if (!record?.state) return { hydrated: false, record: null };
+  const migrated = typeof migrateLegacyState === "function"
+    ? migrateLegacyState(record.state).state
+    : record.state;
+  state = normalizeState(migrated);
+  return { hydrated: true, record };
+}
+
+function makeOutboxIdentifier(prefix = "operation") {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return `${prefix}-${crypto.randomUUID()}`;
+  if (typeof uid === "function") return uid(prefix);
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function getOutboxWorkshopId() {
+  return typeof getSupabaseWorkshopId === "function" ? getSupabaseWorkshopId() : "local-workshop";
+}
+
+function getOutboxUserId() {
+  if (typeof getCurrentActor === "function") return String(getCurrentActor()?.userId || "");
+  return String(state?.currentUserId || "");
+}
+
+function normalizeDurableOutboxOperation(input = {}) {
+  const createdAt = input.createdAt || new Date().toISOString();
+  const operationId = String(input.operationId || input.id || makeOutboxIdentifier("operation"));
+  return {
+    operationId,
+    idempotencyKey: String(input.idempotencyKey || `${getOutboxWorkshopId()}:${operationId}`),
+    entityType: String(input.entityType || "workshop_state"),
+    entityId: String(input.entityId || getOutboxWorkshopId()),
+    action: String(input.action || "upsert_snapshot"),
+    payload: input.payload && typeof input.payload === "object" ? input.payload : {},
+    workshopId: String(input.workshopId || getOutboxWorkshopId()),
+    userId: String(input.userId || getOutboxUserId()),
+    expectedVersion: Number.isFinite(Number(input.expectedVersion)) ? Number(input.expectedVersion) : null,
+    retryCount: Math.max(0, Number(input.retryCount || input.attempts || 0)),
+    lastError: String(input.lastError || input.error || ""),
+    createdAt,
+    updatedAt: input.updatedAt || createdAt,
+    syncStatus: ["pending", "processing", "failed", "conflict", "acknowledged"].includes(input.syncStatus || input.status)
+      ? (input.syncStatus || input.status)
+      : "pending",
+    description: String(input.description || "Mise à jour des données"),
+  };
+}
+
+function readOutboxFallback() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(DURABLE_OUTBOX_FALLBACK_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed.map(normalizeDurableOutboxOperation) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeOutboxFallback(records) {
+  localStorage.setItem(DURABLE_OUTBOX_FALLBACK_KEY, JSON.stringify(records || []));
+}
+
+function publishDurableOutboxMirror(records = []) {
+  const compact = records.map((record) => ({
+    operationId: record.operationId,
+    entityType: record.entityType,
+    entityId: record.entityId,
+    action: record.action,
+    retryCount: record.retryCount,
+    lastError: record.lastError,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+    syncStatus: record.syncStatus,
+  }));
+  try {
+    localStorage.setItem(DURABLE_OUTBOX_MIRROR_KEY, JSON.stringify(compact));
+    localStorage.setItem("nimr-sav-offline-queue", JSON.stringify(compact.map((entry) => ({
+      id: entry.operationId,
+      operationId: entry.operationId,
+      type: entry.entityType === "workshop_state" ? "sync_push" : entry.action,
+      status: entry.syncStatus === "acknowledged" ? "success" : entry.syncStatus,
+      attempts: entry.retryCount,
+      error: entry.lastError,
+      timestamp: entry.createdAt,
+    }))));
+  } catch {
+    // Le miroir compact est informatif ; IndexedDB reste la source durable.
+  }
+  window.NIMR_OUTBOX_STATUS = {
+    pending: compact.filter((entry) => ["pending", "processing", "failed", "conflict"].includes(entry.syncStatus)).length,
+    conflicts: compact.filter((entry) => entry.syncStatus === "conflict").length,
+    failed: compact.filter((entry) => entry.syncStatus === "failed").length,
+    operations: compact,
+    updatedAt: new Date().toISOString(),
+  };
+  return window.NIMR_OUTBOX_STATUS;
+}
+
+async function loadDurableOutboxOperations() {
+  let records;
+  if (typeof indexedDB === "undefined") {
+    records = readOutboxFallback();
+  } else {
+    records = await runIndexedDbTransaction(DURABLE_OUTBOX_STORE, "readonly", (store) => store.getAll());
+  }
+  records = (records || []).map(normalizeDurableOutboxOperation)
+    .sort((left, right) => String(left.createdAt).localeCompare(String(right.createdAt)));
+  publishDurableOutboxMirror(records);
+  return records;
+}
+
+async function putDurableOutboxOperation(input) {
+  const operation = normalizeDurableOutboxOperation(input);
+  if (typeof indexedDB === "undefined") {
+    const records = readOutboxFallback().filter((entry) => entry.operationId !== operation.operationId);
+    records.push(operation);
+    writeOutboxFallback(records);
+  } else {
+    await runIndexedDbTransaction(DURABLE_OUTBOX_STORE, "readwrite", (store) => store.put(operation));
+  }
+  await loadDurableOutboxOperations();
+  return operation;
+}
+
+async function deleteDurableOutboxOperation(operationId) {
+  if (typeof indexedDB === "undefined") {
+    writeOutboxFallback(readOutboxFallback().filter((entry) => entry.operationId !== operationId));
+  } else {
+    await runIndexedDbTransaction(DURABLE_OUTBOX_STORE, "readwrite", (store) => store.delete(operationId));
+  }
+  return loadDurableOutboxOperations();
+}
+
+async function enqueueDurableOutboxOperation(input = {}) {
+  const candidate = normalizeDurableOutboxOperation(input);
+  const records = await loadDurableOutboxOperations();
+  const obsolete = records.filter((entry) => (
+    ["pending", "failed"].includes(entry.syncStatus)
+    && entry.entityType === candidate.entityType
+    && entry.entityId === candidate.entityId
+    && entry.action === candidate.action
+  ));
+  for (const entry of obsolete) await deleteDurableOutboxOperation(entry.operationId);
+  return putDurableOutboxOperation(candidate);
+}
+
+async function updateDurableOutboxOperation(operationId, changes = {}) {
+  const records = await loadDurableOutboxOperations();
+  const current = records.find((entry) => entry.operationId === operationId);
+  if (!current) return null;
+  return putDurableOutboxOperation({ ...current, ...changes, operationId, updatedAt: new Date().toISOString() });
+}
+
+function readDurableOutboxMirror() {
+  try {
+    const legacyRaw = localStorage.getItem("nimr-sav-offline-queue");
+    if (legacyRaw !== null) {
+      const legacy = JSON.parse(legacyRaw || "[]");
+      return Array.isArray(legacy) ? legacy.map((entry) => ({
+        ...entry,
+        syncStatus: entry.syncStatus || (entry.status === "success" ? "acknowledged" : entry.status) || "pending",
+      })) : [];
+    }
+    const operations = JSON.parse(localStorage.getItem(DURABLE_OUTBOX_MIRROR_KEY) || "[]");
+    return Array.isArray(operations) ? operations : [];
+  } catch {
+    return [];
+  }
+}
+
+function getPendingOutboxCount() {
+  return readDurableOutboxMirror().filter((entry) => ["pending", "processing", "failed", "conflict"].includes(entry.syncStatus)).length;
+}
+
+window.estimateStateJsonBytes = estimateStateJsonBytes;
+window.shouldPersistStateInIndexedDb = shouldPersistStateInIndexedDb;
+window.persistLargeStateSnapshot = persistLargeStateSnapshot;
+window.loadLargeStateSnapshot = loadLargeStateSnapshot;
+window.removeLargeStateSnapshot = removeLargeStateSnapshot;
+window.hydrateLargeStateIfAvailable = hydrateLargeStateIfAvailable;
+window.normalizeDurableOutboxOperation = normalizeDurableOutboxOperation;
+window.loadDurableOutboxOperations = loadDurableOutboxOperations;
+window.putDurableOutboxOperation = putDurableOutboxOperation;
+window.deleteDurableOutboxOperation = deleteDurableOutboxOperation;
+window.enqueueDurableOutboxOperation = enqueueDurableOutboxOperation;
+window.updateDurableOutboxOperation = updateDurableOutboxOperation;
+window.readDurableOutboxMirror = readDurableOutboxMirror;
+window.getPendingOutboxCount = getPendingOutboxCount;
 
 function isPlainObject(value) {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -164,11 +468,12 @@ function formatBackupDate(value) {
 }
 
 function getAutosaveHealth() {
-  const result = { principal: false, mirror: false, snapshots: 0, lastSavedAt: "", appVersion: APP_VERSION, casesCount: state.cases.length, errors: [] };
+  const result = { principal: false, mirror: false, indexedDb: Boolean(window.NIMR_INDEXED_DB_STATUS?.ok), snapshots: 0, lastSavedAt: "", appVersion: APP_VERSION, casesCount: state.cases.length, errors: [] };
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : null;
-    result.principal = !!(parsed && Array.isArray(parsed.cases));
+    result.principal = !!(parsed && (Array.isArray(parsed.cases) || parsed.largeState === true));
+    if (parsed?.largeState) result.indexedDb = true;
   } catch (error) {
     result.errors.push("sauvegarde principale illisible");
   }
@@ -185,6 +490,10 @@ function getAutosaveHealth() {
     const meta = JSON.parse(localStorage.getItem(STORAGE_META_KEY) || "null");
     if (meta?.savedAt && !result.lastSavedAt) result.lastSavedAt = meta.savedAt;
     if (Number.isFinite(meta?.casesCount)) result.casesCount = meta.casesCount;
+    if (meta?.largeState) {
+      result.indexedDb = true;
+      result.mirror = true;
+    }
   } catch (error) {
     result.errors.push("métadonnées illisibles");
   }
@@ -210,12 +519,12 @@ function renderAutosaveHealthStatus() {
   const target = $("#autosave-control-status");
   if (!target) return;
   const health = getAutosaveHealth();
-  const ok = health.principal && health.mirror && health.snapshots > 0 && !health.errors.length;
+  const ok = health.principal && (health.indexedDb || health.mirror) && !health.errors.length;
   target.dataset.state = ok ? "ok" : "error";
   target.innerHTML = `
     <strong>${ok ? "Sauvegarde automatique OK" : "Contrôle sauvegarde à vérifier"}</strong><br />
     Dernière sauvegarde locale : ${formatBackupDate(health.lastSavedAt)} · Version : ${health.appVersion} · Dossiers : ${health.casesCount}<br />
-    Principal : ${health.principal ? "OK" : "manquant"} · Miroir : ${health.mirror ? "OK" : "manquant"} · Points de restauration : ${health.snapshots}<br />
+    Principal : ${health.principal ? "OK" : "manquant"} · Cache IndexedDB : ${health.indexedDb ? "OK (primaire)" : "indisponible"} · Miroir : ${health.mirror ? "OK" : "manquant"} · Points de restauration : ${health.snapshots}<br />
     Cloud auto : ${health.cloud ? formatBackupDate(health.cloud) : "non configuré"}${health.cloudError ? ` · Dernière erreur cloud : ${health.cloudError}` : ""}
     ${health.errors.length ? `<br />Erreurs : ${health.errors.join(", ")}` : ""}
   `;
@@ -225,7 +534,7 @@ function controlAutosaveHealth() {
   saveState({ skipCloud: true });
   renderAutosaveHealthStatus();
   const health = getAutosaveHealth();
-  if (health.principal && health.mirror) {
+  if (health.principal && (health.indexedDb || health.mirror)) {
     quietNotify("Sauvegarde automatique locale contrôlée avec succès.", "success");
   } else {
     notifyUser("Contrôle sauvegarde incomplet. Exportez une sauvegarde JSON maintenant.", "error");

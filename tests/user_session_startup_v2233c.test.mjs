@@ -38,12 +38,12 @@ global.state = {
 
 global.uid = (prefix) => `${prefix}-${Math.random().toString(36).substring(2, 6)}`;
 global.USER_ROLES = {
-  admin: "Administrateur",
+  admin_technique: "Admin technique",
+  directeur: "Directeur SAV",
   chef_atelier: "Chef d'atelier",
   reception: "Réception",
   technicien: "Technicien",
-  qualite: "Qualité",
-  readonly: "Lecture seule"
+  lecture_seule: "Lecture seule"
 };
 
 // Mocks UI / Interactions
@@ -197,17 +197,26 @@ async function runTests() {
   console.log("Initialisation des actions de session...");
   global.bindUserSessionActions();
 
-  // Test 1: Aucun utilisateur -> bootstrap admin conservé
-  const bootstrapRes = normalizeUsers([], []);
-  assert.ok(bootstrapRes.length >= 1, "Il doit y avoir au moins un utilisateur bootstrap");
-  assert.equal(bootstrapRes[0].role, "admin", "Le bootstrap doit être un admin");
-  assert.equal(bootstrapRes[0].active, true, "Le bootstrap admin doit être actif");
+  // Test 1: Aucun utilisateur -> aucun compte caché et premier accès explicite
+  const emptyUsers = normalizeUsers([], []);
+  assert.deepEqual(emptyUsers, [], "Aucun administrateur bootstrap ne doit être créé");
+  assert.equal(isFirstAccessRecoveryRequired({ users: emptyUsers }), true, "Le premier accès explicite doit être requis");
+  state.users = emptyUsers;
+  state.currentUserId = "";
+  const firstAccessOverlay = getElement("first-access-overlay");
+  firstAccessOverlay.hidden = true;
+  userLoginOverlay.hidden = true;
+  checkUserSessionStartup();
+  assert.equal(firstAccessOverlay.hidden, false, "L'écran de premier accès explicite doit être affiché");
+  assert.equal(userLoginOverlay.hidden, true, "La sélection utilisateur ne doit pas remplacer le premier accès");
 
-  // Configurer 3 utilisateurs (2 actifs, 1 inactif)
-  const uAdmin = { id: "u-admin", name: "Admin Test", role: "admin", active: true };
-  const uTech = { id: "u-tech", name: "Tech Test", role: "technicien", active: true, resourceId: "r-tech1" };
-  const uTechNoRes = { id: "u-tech-no-res", name: "Tech Sans Ressource", role: "technicien", active: true, resourceId: "" };
-  const uInactif = { id: "u-inactif", name: "Inactif Test", role: "reception", active: false };
+  // Configurer explicitement 3 utilisateurs avec les rôles canoniques
+  const [uAdmin, uTech, uTechNoRes, uInactif] = normalizeUsers([
+    { id: "u-admin", name: "Admin Test", role: "admin_technique", active: true },
+    { id: "u-tech", name: "Tech Test", role: "technicien", active: true, resourceId: "r-tech1" },
+    { id: "u-tech-no-res", name: "Tech Sans Ressource", role: "technicien", active: true, resourceId: "" },
+    { id: "u-inactif", name: "Inactif Test", role: "reception", active: false }
+  ], state.resources);
 
   state.users = [uAdmin, uTech, uTechNoRes, uInactif];
   state.currentUserId = "";
@@ -252,12 +261,14 @@ async function runTests() {
   assert.equal(userLoginOverlay.hidden, false, "L'écran doit être forcé si l'utilisateur courant est inactif");
 
   // Test 6: Un seul utilisateur actif -> comportement conforme à l'option
-  const singleAdmin = { id: "u-single-admin", name: "Admin Unique", role: "reception", active: true };
-  state.users = [singleAdmin];
+  const singleReception = normalizeUsers([
+    { id: "u-single-reception", name: "Réception unique", role: "reception", active: true }
+  ], state.resources)[0];
+  state.users = [singleReception];
   
   // A. Toujours demander = false
   state.settings.alwaysPromptUserStartup = false;
-  state.currentUserId = "u-single-admin";
+  state.currentUserId = "u-single-reception";
   userLoginOverlay.hidden = true;
   checkUserSessionStartup();
   assert.equal(userLoginOverlay.hidden, true, "L'écran de sélection doit être ignoré si un seul actif et alwaysPrompt est faux");
@@ -286,7 +297,9 @@ async function runTests() {
   assert.ok(logSelected, "L'audit doit loguer users.session_selected au premier choix de session");
   
   // B. Changement d'utilisateur
-  const uReception = { id: "u-reception", name: "Reception Test", role: "reception", active: true };
+  const uReception = normalizeUsers([
+    { id: "u-reception", name: "Reception Test", role: "reception", active: true }
+  ], state.resources)[0];
   state.users.push(uReception);
   global.selectedUserIdForStartup = "u-reception";
   userLoginForm.elements.userId.value = global.selectedUserIdForStartup;

@@ -50,7 +50,8 @@ const context = {
     warn: () => {},
     error: console.error,
   },
-  localStorage: { getItem: () => null, setItem: () => {} },
+  localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+  sessionStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
   document: {
     querySelector: () => createElementStub(),
     querySelectorAll: () => [],
@@ -113,6 +114,8 @@ audit("Le schéma Supabase doit isoler les données par atelier", () => {
 vm.runInContext(`
   function createAuditState() {
     state = normalizeState({
+      users: [{ id: 'audit-chief', name: 'Chef audit', role: 'chef_atelier', active: true }],
+      currentUserId: 'audit-chief',
       cases: [],
       resources: [
         { id: 't1', name: 'Tôlier', role: 'tolier', active: true },
@@ -171,8 +174,8 @@ audit("Une réception ne doit pas être possible sans dossier complet (RDV fixé
   );
 });
 
-// SCÉNARIO 3 : Livraison avant contrôle qualité
-audit("Un véhicule ne doit pas être livré avant contrôle qualité", () => {
+// SCÉNARIO 3 : les anciennes portes QC/livraison restent inactives
+audit("Les anciennes portes QC et livraison ne déterminent plus le flux", () => {
   const dossier = context.normalizeCase({
     id: "case-delivery-no-qc",
     appointment: { start: "2026-05-18T08:00:00" },
@@ -182,10 +185,7 @@ audit("Un véhicule ne doit pas être livré avant contrôle qualité", () => {
   vm.runInContext(`state.bookings.push({ caseId: 'case-delivery-no-qc', resourceIds: ['t1'] })`, context);
 
   const issues = context.getBusinessRuleIssues(dossier, "delivered");
-  assert.ok(
-    issues.some(i => i.includes("Valider le contrôle qualité avant livraison")),
-    "Devrait bloquer la livraison si le contrôle qualité n'est pas validé."
-  );
+  assert.equal(issues.some(i => /contrôle qualité|livraison/i.test(i)), false, "Les anciennes portes QC/livraison doivent rester inactives.");
 });
 
 // SCÉNARIO 4 : La clôture atelier simplifiée ne réactive pas livraison/facturation
@@ -194,12 +194,12 @@ audit("La clôture atelier ne doit pas réactiver la livraison ou la facturation
     id: "case-invoice-no-delivery",
     flags: { delivered: false }
   });
-  const issues = context.getBusinessRuleIssues(dossier, "invoiced");
+  const issues = context.getBusinessRuleIssues(dossier, "close");
   assert.equal(issues.some(i => i.includes("Livrer le véhicule avant de facturer")), false, "Le P0 ne doit pas réactiver livraison/facturation.");
 });
 
-// SCÉNARIO 5 : Livraison d'un dossier assurance sans photo après réparation
-audit("Une livraison assurance nécessite une photo après réparation", () => {
+// SCÉNARIO 5 : clôture sans photo obligatoire
+audit("La clôture assurance n'exige pas de photo après réparation", () => {
   const dossier = context.normalizeCase({
     id: "case-delivery-no-after-photo",
     appointment: { start: "2026-05-18T08:00:00" },
@@ -213,11 +213,8 @@ audit("Une livraison assurance nécessite une photo après réparation", () => {
   });
   vm.runInContext(`state.bookings.push({ caseId: 'case-delivery-no-after-photo', resourceIds: ['t1'] })`, context);
 
-  const issues = context.getBusinessRuleIssues(dossier, "delivered");
-  assert.ok(
-    issues.some(i => i.includes("Après réparation avant livraison assurance")),
-    "Devrait exiger une photo Après réparation pour les dossiers assurance."
-  );
+  const issues = context.getBusinessRuleIssues(dossier, "close");
+  assert.equal(issues.some(i => /photo|livraison|qualité/i.test(i)), false, "La clôture ne doit pas dépendre d'une photo, livraison ou étape qualité.");
 });
 
 // SCÉNARIO 6 : Création massive de dossiers et progression logique (100 dossiers)
@@ -282,28 +279,19 @@ audit("Progression logique de 5 dossiers dans tous les états possibles", () => 
       keepEmptyBookings: true,
     });
 
-    // 7. Clôture atelier simplifiée, sans réactiver QC/livraison/facturation dans l'UI.
-    assert.equal(context.getNextWorkflowAction(dossier), "invoiced", "L'action suivante doit être la clôture atelier simplifiée");
-    context.applyWorkflowAction(dossier, "invoiced");
+    // 7. Clôture puis archive, sans réactiver QC/livraison/facturation dans l'UI.
+    assert.equal(context.getNextWorkflowAction(dossier), "close", "L'action suivante doit être la clôture atelier simplifiée");
+    context.applyWorkflowAction(dossier, "close");
+    assert.equal(context.getNextWorkflowAction(dossier), "archive", "L'archive doit suivre la clôture atelier");
+    context.applyWorkflowAction(dossier, "archive");
 
     // FIN
-    assert.equal(context.getNextWorkflowAction(dossier), null, "Un dossier facturé n'a plus d'action suivante");
+    assert.equal(context.getNextWorkflowAction(dossier), null, "Un dossier archivé n'a plus d'action suivante");
   }
 });
 
-// SCÉNARIO 7 : Vérifier le recalcul HT / TTC
-audit("Les calculs des montants doivent être cohérents", () => {
-  // Ceci dépend de getClaimAmount ou autre, voyons si l'export gère bien ça ou si ça existe.
-  // En l'occurrence, le montant est juste stocké dans 'amount'.
-  const dossier = context.normalizeCase({
-    claims: [{ amount: "1000" }]
-  });
-  assert.equal(dossier.claims[0].amount, 1000, "Le montant doit être un nombre");
-});
-
-
-// SCÉNARIO 8 : Préparation anticipée uniquement pour les pièces neuves à remplacer si capacité libre
-audit("Le planning anticipe seulement la préparation des pièces neuves si zone et peintre sont libres", () => {
+// SCÉNARIO 8 : aucune préparation automatique hors séquence
+audit("Le planning ne crée aucune préparation anticipée automatique", () => {
   vm.runInContext(`createAuditState();`, context);
   const dossier = context.normalizeCase({
     id: "case-new-parts-planning",
@@ -350,15 +338,11 @@ audit("Le planning anticipe seulement la préparation des pièces neuves si zone
   });
   const proposal = context.schedulePipeline(dossier, new Date("2026-05-18T08:00:00"), []);
   const anticipated = proposal.steps.filter((step) => step.planningMode === "anticipated-new-part");
-  assert.equal(anticipated.length, 1, "Une seule étape anticipée doit être créée.");
-  assert.ok(anticipated[0].title.includes("Préparation anticipée"), "L'étape anticipée doit être une préparation.");
-  assert.equal(anticipated[0].key, "prep", "Aucune peinture anticipée séparée ne doit exister.");
-  assert.equal(proposal.steps.some((step) => step.title.includes("Peinture anticipée")), false, "La peinture doit rester dans le flux normal groupé.");
+  assert.equal(anticipated.length, 0, "Aucune étape anticipée automatique ne doit être créée.");
   const body = proposal.steps.find((step) => step.key === "body");
-  const normalPrep = proposal.steps.find((step) => step.key === "prep" && step.planningMode !== "anticipated-new-part");
+  const normalPrep = proposal.steps.find((step) => step.key === "prep");
   const paint = proposal.steps.find((step) => step.key === "paint");
   const reassembly = proposal.steps.find((step) => step.key === "reassembly");
-  assert.equal(new Date(body.start).getTime(), new Date(anticipated[0].start).getTime(), "La préparation de la pièce neuve démarre en parallèle de la tôlerie.");
   assert.ok(new Date(normalPrep.start) >= new Date(body.end), "La préparation de la pièce réparée attend la fin de la tôlerie.");
   assert.ok(new Date(paint.start) >= new Date(normalPrep.end), "La peinture groupée démarre après les préparations.");
   assert.ok(new Date(reassembly.start) >= new Date(paint.end), "Le remontage attend la peinture groupée.");

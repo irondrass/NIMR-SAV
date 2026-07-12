@@ -94,7 +94,7 @@ const run = (source) => vm.runInContext(source, context);
 
 assert.equal(typeof context.getCaseStatus, "function", "getCaseStatus doit être exposé dans le contexte de test");
 assert.equal(run("createDefaultState().cases.length"), 0, "le seed initial ne doit créer aucun dossier de démonstration");
-assert.ok(appSource.includes('statuses: ["pdfChiefValidation"]'), "le Kanban doit afficher les dossiers en attente de validation Chef");
+assert.ok(appSource.includes('statuses: ["chief_validation"]'), "le Kanban doit afficher les dossiers en attente de validation Chef");
 
 const normalizedPdfCase = JSON.parse(run(`JSON.stringify(normalizeCase({
   id: "case-pdf-round-trip",
@@ -181,7 +181,7 @@ state = normalizeState({
 });
 `);
 
-assert.equal(run("getCaseStatus(state.cases[0])"), "pdfChiefValidation", "un dossier PDF importé doit attendre la validation Chef Atelier");
+assert.equal(run("getCaseStatus(state.cases[0])"), "chief_validation", "un dossier PDF importé doit attendre la validation Chef Atelier");
 assert.equal(run("statusLabels[getCaseStatus(state.cases[0])]"), "À valider Chef Atelier", "le statut PDF doit avoir le libellé métier attendu");
 assert.equal(run("getCaseNextAction(state.cases[0]).code"), "validate_pdf_work", "l'action suivante doit être la validation des travaux PDF");
 assert.equal(
@@ -377,8 +377,8 @@ const cleanedPdfMetadata = JSON.parse(run(`(() => {
 })()`));
 assert.ok(cleanedPdfMetadata.originalAllocations.length >= 2, "le cleaner doit conserver les allocations du cycle peinture");
 assert.ok(cleanedPdfMetadata.originalAllocations.every((line) => line.requiredRole === "peintre" && line.source === "pdf_estimate" && line.status === "ready_for_validation"), "les allocations nettoyées doivent conserver leurs métadonnées PDF");
-assert.ok(cleanedPdfMetadata.appliedLines.length >= 3, "le cleaner doit générer les tâches préparation, peinture et contrôle");
-assert.ok(cleanedPdfMetadata.appliedLines.every((line) => line.requiredRole && line.source === "pdf_estimate" && line.status === "ready_for_validation"), "toutes les tâches appliquées et synthétiques doivent conserver rôle, source et statut");
+assert.deepEqual(cleanedPdfMetadata.appliedLines.map((line) => line.phase).sort(), ["paint", "prep"], "le cleaner doit conserver uniquement les tâches réellement décrites dans le devis");
+assert.ok(cleanedPdfMetadata.appliedLines.every((line) => line.requiredRole && line.source === "pdf_estimate" && line.status === "ready_for_validation"), "toutes les tâches appliquées doivent conserver rôle, source et statut");
 
 const revalidationResult = JSON.parse(run(`(() => {
   const item = normalizeCase({
@@ -472,6 +472,8 @@ assert.equal(allocationRevalidationResult.lineStatus, "ready_for_validation", "u
 
 run(`
 state = normalizeState({
+  users: [{ id: "chef-simplified", name: "Chef atelier", role: "chef_atelier", active: true }],
+  currentUserId: "chef-simplified",
   resources: [
     { id: "tech-atelier", name: "Technicien atelier", role: "mecanicien", active: true }
   ],
@@ -514,19 +516,26 @@ state = normalizeState({
 
 assert.equal(
   run("getNextWorkflowAction(state.cases[0])"),
-  "invoiced",
+  "close",
   "après fin atelier, le flux simplifié doit demander la clôture atelier",
 );
 assert.equal(
-  run('getBusinessRuleIssues(state.cases[0], "invoiced").length'),
+  run('getBusinessRuleIssues(state.cases[0], "close").length'),
   0,
   "la clôture atelier ne doit pas être bloquée par une étape livraison/qualité masquée",
 );
 
-const result = run('applyWorkflowAction(state.cases[0], "invoiced")');
-assert.equal(result.ok, true, "archive succeeds after atelier closure");
-assert.equal(run("getCaseStatus(state.cases[0])"), "invoiced", "le statut réel doit être clôturé atelier");
-assert.equal(run("isCaseReadonlyArchive(state.cases[0])"), true, "le dossier clôturé atelier doit être readonly");
-assert.equal(run("getCaseNextAction(state.cases[0]).code"), "done", "un dossier clôturé atelier ne doit plus proposer d’action opérationnelle");
+const closeResult = run('applyWorkflowAction(state.cases[0], "close")');
+assert.equal(closeResult.ok, true, "la clôture atelier doit réussir");
+assert.equal(run("getCaseStatus(state.cases[0])"), "closed", "le statut réel doit être clôturé atelier");
+assert.equal(run("isCaseReadonlyArchive(state.cases[0])"), false, "la clôture ne doit pas se confondre avec l’archive");
+assert.equal(run("getNextWorkflowAction(state.cases[0])"), "archive", "l’archive doit être proposée après la clôture");
+assert.equal(run("getCaseNextAction(state.cases[0]).code"), "archive_case", "la prochaine action visible doit être l’archivage");
+
+const archiveResult = run('applyWorkflowAction(state.cases[0], "archive")');
+assert.equal(archiveResult.ok, true, "l’archive doit réussir après la clôture");
+assert.equal(run("getCaseStatus(state.cases[0])"), "archived", "le statut final doit être archivé");
+assert.equal(run("isCaseReadonlyArchive(state.cases[0])"), true, "le dossier archivé doit être readonly");
+assert.equal(run("getCaseNextAction(state.cases[0]).code"), "done", "un dossier archivé ne doit plus proposer d’action opérationnelle");
 
 console.log("Simplified workflow NIMR SAV OK");

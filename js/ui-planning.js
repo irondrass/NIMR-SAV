@@ -1,4 +1,5 @@
 function renderPlanning() {
+  if (typeof getUiRuntimeIndexes === "function") getUiRuntimeIndexes({ force: true });
   const date = parseDateKey(state.planningDate);
   $("#planning-day-label").textContent = longDate(date);
   const alert = $("#day-alert");
@@ -12,7 +13,7 @@ function renderPlanning() {
   }
 
   const resources = orderPlanningResources(state.resources.filter(isDisplayPlanningResource));
-  const dailyColorMap = buildDailyVehicleColorMap(todayKey(date));
+  const dailyColorMap = buildIndexedDailyVehicleColorMap(todayKey(date));
   const taskNumberMap = buildDailyPlanningTaskNumberMap(date, resources);
   const gantt = $("#gantt");
   const dayStart = atTime(date, "08:00");
@@ -50,6 +51,20 @@ function renderPlanning() {
   renderMobilePlanningList(date, resources, taskNumberMap);
 }
 
+function buildIndexedDailyVehicleColorMap(dateKey) {
+  const map = {};
+  const bookings = typeof getIndexedDayBookings === "function" ? getIndexedDayBookings(dateKey) : (state.bookings || []);
+  reconcileVehiclePlanningColors(bookings.filter((booking) => booking?.type !== "leave").map((booking) => booking.caseId));
+  bookings.forEach((booking) => {
+    if (!booking?.caseId || booking.type === "leave") return;
+    const item = typeof getIndexedCaseById === "function"
+      ? getIndexedCaseById(booking.caseId)
+      : state.cases.find((caseItem) => caseItem.id === booking.caseId);
+    map[booking.caseId] = getVehiclePlanningColor(item) || booking.color || "#11415f";
+  });
+  return map;
+}
+
 function getBookingLaborOperations(caseItem, key) {
   const lines = [];
   (caseItem?.claims || []).forEach((claim) => {
@@ -62,7 +77,7 @@ function getBookingLaborOperations(caseItem, key) {
     });
   });
   if (key === 'finish' && Number(caseItem?.durations?.finish || 0) > 0) lines.push(`Finition + lavage (50% peinture : ${formatLocalizedDecimal(caseItem.durations.finish)} h)`);
-  if (key === 'quality' && Number(caseItem?.durations?.quality || 0) > 0) lines.push(`Contrôle qualité forfaitaire (${formatLocalizedDecimal(caseItem.durations.quality)} h)`);
+  if (key === 'quality' && Number(caseItem?.durations?.quality || 0) > 0) lines.push(`Contrôle final importé (${formatLocalizedDecimal(caseItem.durations.quality)} h)`);
   return lines;
 }
 
@@ -71,9 +86,10 @@ function renderDailyLaborSummary(date, taskNumberMap) {
   if (!target) return;
   const day = todayKey(date);
   const rows = [];
-  state.bookings.forEach((booking) => {
+  const dayBookings = typeof getIndexedDayBookings === "function" ? getIndexedDayBookings(day) : state.bookings;
+  dayBookings.forEach((booking) => {
     if (booking.type === 'leave') return;
-    const caseItem = state.cases.find((item) => item.id === booking.caseId);
+    const caseItem = typeof getIndexedCaseById === "function" ? getIndexedCaseById(booking.caseId) : state.cases.find((item) => item.id === booking.caseId);
     if (isCaseOperationallyClosed(caseItem)) return;
     const hasSegmentOnDay = (booking.segments || []).some((segment) => todayKey(new Date(segment.start)) === day || todayKey(new Date(segment.end)) === day);
     if (!caseItem || !hasSegmentOnDay) return;
@@ -105,9 +121,10 @@ function renderMobilePlanningList(date, resources, taskNumberMap) {
   const dayStart = atTime(date, "08:00");
   const dayEnd = atTime(date, "17:00");
   const rows = [];
-  state.bookings.forEach((booking) => {
+  const dayBookings = typeof getIndexedDayBookings === "function" ? getIndexedDayBookings(day) : state.bookings;
+  dayBookings.forEach((booking) => {
     if (booking.type === "leave") return;
-    const caseItem = state.cases.find((item) => item.id === booking.caseId);
+    const caseItem = typeof getIndexedCaseById === "function" ? getIndexedCaseById(booking.caseId) : state.cases.find((item) => item.id === booking.caseId);
     if (isCaseOperationallyClosed(caseItem)) return;
     const visibleResources = resources.filter((resource) => isBookingVisibleForResource(booking, resource.id));
     const primaryResource = visibleResources.find((resource) => !isEquipmentResource(resource)) || visibleResources[0];
@@ -140,7 +157,7 @@ function renderMobilePlanningList(date, resources, taskNumberMap) {
     ${rows
       .map(({ booking, segment, caseItem, resource, start, end, status }) => {
         const taskNumber = taskNumberMap?.get(getPlanningTaskNumberKey(booking, segment)) || "";
-        const stage = booking.planningMode === "anticipated-new-part" ? (booking.title || "Pièces neuves anticipées") : (getDurationLabel(booking.key) || booking.title || "Étape planning");
+        const stage = getDurationLabel(booking.key) || booking.title || "Étape planning";
         const model = shortVehicleModel(caseItem?.vehicle || caseItem?.model || "Véhicule");
         const plate = caseItem?.plate || caseItem?.registration || caseItem?.vin || "";
         const statusLabel = getBookingStatusLabel(booking);
@@ -207,7 +224,8 @@ function renderBand(start, end, dayStart, total) {
 function renderResourceBookings(resource, date, dayStart, dayEnd, total, dailyColorMap = null, taskNumberMap = null) {
   const day = todayKey(date);
   const items = [];
-  state.bookings.forEach((booking) => {
+  const resourceBookings = typeof getIndexedResourceBookings === "function" ? getIndexedResourceBookings(resource.id) : state.bookings;
+  resourceBookings.forEach((booking) => {
     if (!isBookingVisibleForResource(booking, resource.id)) return;
     booking.segments.forEach((segment) => {
       const start = new Date(segment.start);
@@ -222,12 +240,12 @@ function renderResourceBookings(resource, date, dayStart, dayEnd, total, dailyCo
       const left = (diffMinutes(dayStart, clippedStart) * 100) / total;
       const width = Math.max(2, (diffMinutes(clippedStart, clippedEnd) * 100) / total);
       const isLeave = booking.type === "leave";
-      const caseItem = isLeave ? null : state.cases.find((item) => item.id === booking.caseId);
+      const caseItem = isLeave ? null : (typeof getIndexedCaseById === "function" ? getIndexedCaseById(booking.caseId) : state.cases.find((item) => item.id === booking.caseId));
       if (!isLeave && isCaseOperationallyClosed(caseItem)) return;
       const model = isLeave ? "Indisponible" : shortVehicleModel(caseItem?.vehicle || caseItem?.model || "Véhicule");
       const plate = isLeave ? "" : (caseItem?.plate || caseItem?.registration || "");
       const vehicleLine = isLeave ? (booking.title || "Congé / absence") : `${model}${plate ? ` · ${plate}` : ""}`;
-      const stage = isLeave ? "Congé / absence" : (booking.planningMode === "anticipated-new-part" ? (booking.title || "Pièces neuves anticipées") : (getDurationLabel(booking.key) || booking.title || "Étape planning"));
+      const stage = isLeave ? "Congé / absence" : (getDurationLabel(booking.key) || booking.title || "Étape planning");
       const timeLine = `${formatTime(clippedStart)}-${formatTime(clippedEnd)}`;
       const equipmentPrefix = isEquipmentResource(resource) ? `${ROLE_LABELS[resource.role] || "Équipement"} · ` : "";
       const taskNumber = taskNumberMap?.get(getPlanningTaskNumberKey(booking, segment)) || "";
@@ -240,7 +258,7 @@ function renderResourceBookings(resource, date, dayStart, dayEnd, total, dailyCo
       const maxTextLength = Math.max(vehicleLine.length, `${equipmentPrefix}${shortStage}`.length);
       const availableChars = Math.max(6, Math.floor(width * 1.35));
       const numberOnly = Boolean(taskNumber) && !isLeave && (width < 14 || maxTextLength > availableChars);
-      const compactClass = `${booking.planningMode === "anticipated-new-part" ? " anticipated-new-part-booking" : ""}${blocked ? " blocked-booking" : ""}${!isLeave ? ` task-status-${escapeAttr(getBookingOperationalStatus(booking))}` : ""}${numberOnly ? " number-only-booking" : width < 8 ? " compact-booking" : ""}`;
+      const compactClass = `${blocked ? " blocked-booking" : ""}${!isLeave ? ` task-status-${escapeAttr(getBookingOperationalStatus(booking))}` : ""}${numberOnly ? " number-only-booking" : width < 8 ? " compact-booking" : ""}`;
       const color = getBookingPlanningColor(booking, dailyColorMap);
       items.push(`
         <div class="booking ${isLeave ? 'leave-booking' : ''}${compactClass}" style="left:${left}%;width:${width}%;background:${color}" title="${escapeAttr(bookingTitle)}" aria-label="${escapeAttr(bookingTitle)}">
@@ -259,9 +277,10 @@ function buildDailyPlanningTaskNumberMap(date, resources) {
   const dayStart = atTime(date, "08:00");
   const dayEnd = atTime(date, "17:00");
   const rows = [];
-  state.bookings.forEach((booking) => {
+  const dayBookings = typeof getIndexedDayBookings === "function" ? getIndexedDayBookings(day) : state.bookings;
+  dayBookings.forEach((booking) => {
     if (booking.type === "leave") return;
-    const caseItem = state.cases.find((item) => item.id === booking.caseId);
+    const caseItem = typeof getIndexedCaseById === "function" ? getIndexedCaseById(booking.caseId) : state.cases.find((item) => item.id === booking.caseId);
     if (isCaseOperationallyClosed(caseItem)) return;
     const primaryResource = resources.find((resource) => isBookingVisibleForResource(booking, resource.id));
     if (!primaryResource) return;
@@ -290,8 +309,8 @@ function getPlanningTaskNumberKey(booking, segment) {
 
 function renderResources() {
   const target = $("#resource-list");
-  const canEditPlanning = canRenderAction("planning.edit");
-  const deniedTitle = canEditPlanning ? "" : getPermissionDeniedMessage("planning.edit");
+  const canEditPlanning = canRenderAction("resource.manage");
+  const deniedTitle = canEditPlanning ? "" : getPermissionDeniedMessage("resource.manage");
   target.innerHTML = state.resources
     .map(
       (resource) => `
@@ -313,8 +332,30 @@ function renderResources() {
               Emplacement
               <input data-resource-field="location" data-resource-id="${resource.id}" value="${escapeAttr(resource.location || "")}" ${canEditPlanning ? "" : `disabled title="${escapeAttr(deniedTitle)}"`} />
             </label>
+            <label>
+              Site
+              <select data-resource-field="site" data-resource-id="${resource.id}" ${canEditPlanning ? "" : `disabled title="${escapeAttr(deniedTitle)}"`}>
+                <option value="internal" ${resource.site !== "external" ? "selected" : ""}>Interne atelier</option>
+                <option value="external" ${resource.site === "external" ? "selected" : ""}>Sous-traitant externe</option>
+              </select>
+            </label>
+            <label>
+              Capacité simultanée
+              <input type="number" min="1" step="1" data-resource-field="capacity" data-resource-id="${resource.id}" value="${Math.max(1, Number(resource.capacity || 1))}" ${canEditPlanning ? "" : `disabled title="${escapeAttr(deniedTitle)}"`} />
+            </label>
+            <label>
+              Capacité journalière (min)
+              <input type="number" min="0" step="15" data-resource-field="dailyCapacityMinutes" data-resource-id="${resource.id}" value="${Number(resource.dailyCapacityMinutes || 0) || ""}" placeholder="Selon calendrier" ${canEditPlanning ? "" : `disabled title="${escapeAttr(deniedTitle)}"`} />
+            </label>
+            ${resource.site === "external" ? `
+              <label>Transfert aller (min)<input type="number" min="0" step="15" data-resource-field="transferOutMinutes" data-resource-id="${resource.id}" value="${Number(resource.transferOutMinutes || 0)}" ${canEditPlanning ? "" : `disabled title="${escapeAttr(deniedTitle)}"`} /></label>
+              <label>Transfert retour (min)<input type="number" min="0" step="15" data-resource-field="transferReturnMinutes" data-resource-id="${resource.id}" value="${Number(resource.transferReturnMinutes || 0)}" ${canEditPlanning ? "" : `disabled title="${escapeAttr(deniedTitle)}"`} /></label>
+              <label>Délai standard (min)<input type="number" min="0" step="15" data-resource-field="standardLeadTimeMinutes" data-resource-id="${resource.id}" value="${Number(resource.standardLeadTimeMinutes || 0)}" ${canEditPlanning ? "" : `disabled title="${escapeAttr(deniedTitle)}"`} /></label>
+            ` : ""}
             <span class="case-meta">
               ${resource.fastLane ? `<span class="tag ok">Fast Lane</span>` : ""}
+              ${resource.site === "external" ? `<span class="tag">Externe</span>` : ""}
+              <span class="tag soft">Capacité ${Math.max(1, Number(resource.capacity || 1))}</span>
               ${resource.active === false ? `<span class="tag warn">Inactive</span>` : ""}
             </span>
           </div>
@@ -332,21 +373,32 @@ function renderResources() {
     .join("");
   $$("[data-resource-field]", target).forEach((input) => {
     input.addEventListener("change", () => {
-      const permission = guardAction("planning.edit", {}, { notify: false });
+      const permission = guardAction("resource.manage", {}, { notify: false });
       if (!permission.ok) {
         notifyUser(permission.message, "error");
         renderResources();
         return;
       }
       const resource = getResource(input.dataset.resourceId);
-      resource[input.dataset.resourceField] = input.value;
+      const field = input.dataset.resourceField;
+      if (["capacity", "dailyCapacityMinutes", "transferOutMinutes", "transferReturnMinutes", "standardLeadTimeMinutes"].includes(field)) {
+        resource[field] = input.value === "" ? null : Number(input.value);
+        if (field === "capacity") resource.simultaneousCapacity = Math.max(1, Number(input.value || 1));
+      } else {
+        resource[field] = input.value;
+      }
+      if (field === "site") {
+        resource.external = input.value === "external";
+        resource.kind = resource.external ? "external" : "internal";
+      }
+      Object.assign(resource, normalizeResource(resource));
       saveState();
       render();
     });
   });
   $$("[data-toggle-resource]", target).forEach((button) => {
     button.addEventListener("click", () => {
-      const permission = guardAction("planning.edit", {}, { notify: false });
+      const permission = guardAction("resource.manage", {}, { notify: false });
       if (!permission.ok) return notifyUser(permission.message, "error");
       const resource = getResource(button.dataset.toggleResource);
       resource.active = resource.active === false;
@@ -356,7 +408,7 @@ function renderResources() {
   });
   $$("[data-toggle-fastlane]", target).forEach((button) => {
     button.addEventListener("click", () => {
-      const permission = guardAction("planning.edit", {}, { notify: false });
+      const permission = guardAction("resource.manage", {}, { notify: false });
       if (!permission.ok) return notifyUser(permission.message, "error");
       const resource = getResource(button.dataset.toggleFastlane);
       resource.fastLane = !resource.fastLane;
@@ -446,7 +498,7 @@ function renderHolidays() {
 }
 
 function getActiveCase() {
-  return state.cases.find((item) => item.id === activeCaseId) || state.cases[0] || null;
+  return (typeof getIndexedCaseById === "function" ? getIndexedCaseById(activeCaseId) : state.cases.find((item) => item.id === activeCaseId)) || state.cases[0] || null;
 }
 
 
@@ -636,7 +688,7 @@ function renderUsersAndRoles() {
       
       form.elements.userId.value = user.id;
       form.elements.name.value = user.name;
-      form.elements.role.value = user.role;
+      form.elements.role.value = getCanonicalUserRole(user);
       form.elements.email.value = user.email || "";
       form.elements.resourceId.value = user.resourceId || "";
       form.elements.active.checked = user.active !== false;

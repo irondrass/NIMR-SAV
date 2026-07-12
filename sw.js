@@ -1,39 +1,38 @@
-const CACHE_NAME = "nimr-sav-v23.2.7-pdf-first-intake";
+const CACHE_NAME = "nimr-sav-v23.2.8-full-audit";
 const ASSETS = [
   "./",
   "./index.html",
   "./offline.html",
   "./rescue.html",
-  "./styles.css",
-  "./app.js",
+  "./styles.css?v=23.2.8-full-audit",
+  "./app.js?v=23.2.8-full-audit",
   "./manifest.webmanifest",
-  "./js/version.js",
+  "./js/version.js?v=23.2.8-full-audit",
   "./supabase-schema.sql",
   "./assets/icon.svg",
   "./assets/icon-192.png",
   "./assets/icon-512.png",
   "./assets/apple-touch-icon.png",
-  "./vendor/pdf.min.js",
-  "./vendor/pdf.worker.min.js",
-  "./js/utils.js",
-  "./js/state.js",
-  "./js/ui-cases.js",
-  "./js/estimate-import.js",
-  "./js/ui-planning.js",
-  "./js/ui-reception.js",
-  "./js/photos.js",
-  "./js/storage.js",
-  "./js/planning.js",
-  "./js/exports.js",
-  "./js/business-rules-v2187.js",
-  "./js/supabase-config.js",
-  "./js/supabase-client.js",
-  "./js/supabase-sync.js",
+  "./vendor/pdf.min.js?v=23.2.8-full-audit",
+  "./vendor/pdf.worker.min.js?v=23.2.8-full-audit",
+  "./js/utils.js?v=23.2.8-full-audit",
+  "./js/state.js?v=23.2.8-full-audit",
+  "./js/ui-cases.js?v=23.2.8-full-audit",
+  "./js/estimate-import.js?v=23.2.8-full-audit",
+  "./js/ui-planning.js?v=23.2.8-full-audit",
+  "./js/photos.js?v=23.2.8-full-audit",
+  "./js/storage.js?v=23.2.8-full-audit",
+  "./js/planning.js?v=23.2.8-full-audit",
+  "./js/exports.js?v=23.2.8-full-audit",
+  "./js/business-rules-v2187.js?v=23.2.8-full-audit",
+  "./js/supabase-config.js?v=23.2.8-full-audit",
+  "./js/supabase-client.js?v=23.2.8-full-audit",
+  "./js/supabase-sync.js?v=23.2.8-full-audit",
 ];
 
 async function precache() {
   const cache = await caches.open(CACHE_NAME);
-  await Promise.all(ASSETS.map((asset) => cache.add(new Request(asset, { cache: "reload" })).catch(() => null)));
+  await Promise.all(ASSETS.map((asset) => cache.add(new Request(asset, { cache: "reload" }))));
 }
 
 self.addEventListener("install", (event) => {

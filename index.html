@@ -2,8 +2,12 @@
 <html lang="fr">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#11415f" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="NIMR SAV" />
     <meta name="description" content="Application PWA de pilotage SAV, ordres de travail, rendez-vous et planning atelier global." />
     <meta
       http-equiv="Content-Security-Policy"
@@ -16,8 +20,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <script src="js/version.js?v=23.2.7"></script>
-    <link rel="stylesheet" href="styles.css?v=23.2.7" />
+    <script src="js/version.js?v=23.2.8-full-audit"></script>
+    <link rel="stylesheet" href="styles.css?v=23.2.8-full-audit" />
   </head>
   <body>
     <a class="skip-link" href="#main-content">Aller au contenu principal</a>
@@ -60,10 +64,6 @@
           <button class="nav-button" type="button" data-tab="technician">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L4 17l3 3 5.3-5.3a4 4 0 0 0 5.4-5.4l-2.4 2.4-3-3 2.4-2.4Z"/><path d="m7 17 3 3"/></svg>
             Technicien
-          </button>
-          <button class="nav-button" type="button" data-tab="qc-workspace" hidden aria-hidden="true" style="display:none !important;" data-simplified-removed="qc-workspace">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 12l2 2 4-4"/><path d="M21 12c0 4.97-4.03 9-9 9s-9-4.03-9-9 4.03-9 9-9c2.07 0 3.98.7 5.5 1.86"/><path d="M22 4L12 14l-3-3"/></svg>
-            Espace hérité
           </button>
           <button class="nav-button" type="button" data-tab="atelier">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -193,7 +193,7 @@
             <div class="panel-heading">
               <div>
                 <h1>Aujourd'hui atelier</h1>
-                <p>Réceptions, travaux, blocages, qualité et livraisons à traiter.</p>
+                <p>Réceptions, travaux, blocages et échéances atelier à traiter.</p>
               </div>
               <span class="status-pill" id="today-count-pill">0 dossier</span>
             </div>
@@ -302,7 +302,7 @@
               <div class="section-heading compact-heading">
                 <div>
                   <h2>Alertes priorité Directeur SAV</h2>
-                  <span>Réceptions, livraisons, blocages et qualité à traiter.</span>
+                  <span>Réceptions, retards, blocages et clôtures atelier à traiter.</span>
                 </div>
               </div>
               <div class="pilotage-alerts" id="pilotage-alerts"></div>
@@ -365,6 +365,8 @@
                 <input type="date" id="technician-date" />
               </label>
             </div>
+            <div class="technician-field-focus" id="technician-field-focus" aria-live="polite"></div>
+            <div class="technician-field-action-dock" id="technician-field-action-dock" aria-label="Actions de la tâche prioritaire" hidden></div>
             <div class="technician-task-list" id="technician-task-list"></div>
           </section>
           <section class="panel technician-manager-panel">
@@ -376,11 +378,6 @@
             </div>
             <div id="technician-manager-board"></div>
           </section>
-        </section>
-
-        <!-- v23.2.5 - Vue Controle Qualite dediee (qualite, directeur_sav, admin) -->
-        <section class="view" id="view-qc-workspace" hidden>
-          <!-- Filled dynamically by renderQcWorkspace() -->
         </section>
 
         <section class="view" id="view-atelier">
@@ -403,9 +400,20 @@
                   <option value="cabine">Cabine peinture</option>
                   <option value="pont_vidange">Pont vidange</option>
                   <option value="pont_mecanique">Pont grands travaux mécaniques</option>
-                  <option value="controle">Finition atelier</option>
+                  <option value="transport">Transport / convoyage</option>
+                  <option value="controle">Contrôle final</option>
                 </select>
                 <input name="location" placeholder="Emplacement" />
+                <select name="site" aria-label="Site de la ressource">
+                  <option value="internal">Interne atelier</option>
+                  <option value="external">Sous-traitant externe</option>
+                </select>
+                <input name="capacity" type="number" min="1" step="1" value="1" placeholder="Capacité simultanée" />
+                <input name="dailyCapacityMinutes" type="number" min="0" step="15" placeholder="Capacité/jour en minutes (optionnel)" />
+                <input name="compatibleRoles" placeholder="Métiers compatibles, séparés par virgule" />
+                <input name="transferOutMinutes" type="number" min="0" step="15" placeholder="Transfert aller (min, externe)" />
+                <input name="transferReturnMinutes" type="number" min="0" step="15" placeholder="Transfert retour (min, externe)" />
+                <input name="standardLeadTimeMinutes" type="number" min="0" step="15" placeholder="Délai standard (min, externe)" />
                 <label class="check-card">
                   <input type="checkbox" name="fastLane" />
                   <span>Fast Lane</span>
@@ -439,13 +447,12 @@
                 <input name="userId" type="hidden" />
                 <input name="name" required placeholder="Nom complet" />
                 <select name="role" required>
-                  <option value="admin">Admin technique</option>
+                  <option value="admin_technique">Admin technique</option>
                   <option value="chef_atelier">Chef atelier</option>
-                  <option value="directeur_sav">Directeur SAV</option>
+                  <option value="directeur">Directeur SAV</option>
                   <option value="reception">Réception</option>
                   <option value="technicien">Technicien</option>
-                  <option value="qualite">Qualité</option>
-                  <option value="readonly">Lecture seule</option>
+                  <option value="lecture_seule">Lecture seule</option>
                 </select>
                 <input name="email" type="email" placeholder="Email (optionnel)" />
                 <input name="pin" type="password" inputmode="numeric" placeholder="PIN de sécurité (requis si sensible)" minlength="4" />
@@ -498,23 +505,19 @@
                 </article>
                 <article class="resource-card" style="padding: 12px; font-size: 0.85rem; display: block;">
                   <strong>Directeur SAV</strong>
-                  <p class="muted" style="margin: 4px 0 0;">Pilotage métier : dashboard performance SAV, dossiers, planning, KPI, exports, journal d'activité en consultation et override livraison si nécessaire. Pas d'accès aux actions techniques destructives.</p>
+                  <p class="muted" style="margin: 4px 0 0;">Pilotage métier : dashboard performance SAV, dossiers, planning, KPI, exports, journal d'activité et suivi des échéances. Pas d'accès aux actions techniques destructives.</p>
                 </article>
                 <article class="resource-card" style="padding: 12px; font-size: 0.85rem; display: block;">
                   <strong>Chef atelier</strong>
-                  <p class="muted" style="margin: 4px 0 0;">Supervision complète de la production, planification (Gantt), gestion des priorités et affectations, validation qualité et signature des overrides chef atelier.</p>
+                  <p class="muted" style="margin: 4px 0 0;">Supervision complète de la production, planification (Gantt), gestion des priorités, affectations et clôture des travaux avec traçabilité.</p>
                 </article>
                 <article class="resource-card" style="padding: 12px; font-size: 0.85rem; display: block;">
                   <strong>Réception</strong>
-                  <p class="muted" style="margin: 4px 0 0;">Création et édition de dossiers, import de devis, planification de rendez-vous, réception de véhicules, livraison de véhicules et clôture opérationnelle.</p>
+                  <p class="muted" style="margin: 4px 0 0;">Import de devis, édition des informations dossier, planification de rendez-vous et réception physique des véhicules.</p>
                 </article>
                 <article class="resource-card" style="padding: 12px; font-size: 0.85rem; display: block;">
                   <strong>Technicien</strong>
                   <p class="muted" style="margin: 4px 0 0;">Démarrer, suspendre (pause), reprendre et terminer ses propres tâches rattachées à sa ressource technicien d'atelier.</p>
-                </article>
-                <article class="resource-card" style="padding: 12px; font-size: 0.85rem; display: block;">
-                  <strong>Qualité</strong>
-                  <p class="muted" style="margin: 4px 0 0;">Accéder aux listes de contrôle qualité, valider ou refuser les contrôles de fin de travaux.</p>
                 </article>
                 <article class="resource-card" style="padding: 12px; font-size: 0.85rem; display: block;">
                   <strong>Lecture seule</strong>
@@ -680,7 +683,34 @@
               </div>
               <p class="muted backup-warning">Avant chaque sauvegarde cloud, l'application télécharge automatiquement une copie JSON locale de sécurité. Avant restauration, une copie locale est conservée silencieusement dans l'application.</p>
               <p class="muted backup-status" id="supabase-status">Supabase non configuré : synchronisation cloud inactive.</p>
-              <p class="muted" id="supabase-details">Exécutez le dernier supabase-schema.sql fourni avec cette version si le test indique que cloud_backups, Realtime, app_settings ou les politiques atelier manquent.</p>
+              <p class="muted" id="supabase-details">Exécutez en priorité supabase_nimr_sav_v23_2_8_full_audit.sql dans SQL Editor. supabase-schema.sql reste le schéma de compatibilité historique.</p>
+              <section class="sync-health-panel" id="supabase-sync-health" aria-labelledby="supabase-sync-health-title">
+                <div class="panel-heading compact-heading">
+                  <div>
+                    <h2 id="supabase-sync-health-title">État de synchronisation</h2>
+                    <p>État local, serveur, Realtime et opérations durables en attente</p>
+                  </div>
+                </div>
+                <dl class="sync-health-grid">
+                  <div><dt>Connexion</dt><dd data-sync-health="connection">Non vérifiée</dd></div>
+                  <div><dt>Utilisateur / atelier / rôle</dt><dd data-sync-health="identity">Non connecté</dd></div>
+                  <div><dt>Schéma / application</dt><dd data-sync-health="versions">—</dd></div>
+                  <div><dt>Realtime</dt><dd data-sync-health="realtime">Inactif</dd></div>
+                  <div><dt>Dernière confirmation serveur</dt><dd data-sync-health="last-sync">Jamais</dd></div>
+                  <div><dt>Dossiers local / serveur</dt><dd data-sync-health="cases">0 / —</dd></div>
+                  <div><dt>Ressources local / serveur</dt><dd data-sync-health="resources">0 / —</dd></div>
+                  <div><dt>Opérations en attente</dt><dd data-sync-health="pending">0</dd></div>
+                  <div><dt>Conflits</dt><dd data-sync-health="conflicts">0</dd></div>
+                  <div><dt>Dernière erreur</dt><dd data-sync-health="error">Aucune</dd></div>
+                </dl>
+                <div class="backup-actions sync-health-actions">
+                  <button class="primary-button" type="button" id="supabase-sync-retry">Relancer la synchronisation</button>
+                  <button class="ghost-button" type="button" id="supabase-sync-export-diagnostic">Exporter diagnostic</button>
+                  <button class="ghost-button" type="button" id="supabase-sync-show-errors">Voir erreurs</button>
+                  <button class="ghost-button" type="button" id="supabase-sync-show-conflicts">Voir conflits</button>
+                  <button class="ghost-button" type="button" id="supabase-sync-export-backup">Exporter sauvegarde locale</button>
+                </div>
+              </section>
             </section>
 
             <section class="panel activity-log-panel" id="panel-activity-log" hidden>
@@ -730,6 +760,34 @@
     <div class="offline-banner" id="offline-banner" role="status" hidden>
       <strong>Mode hors ligne</strong>
       <span>Les données locales restent consultables. La synchronisation Supabase reprendra automatiquement à la reconnexion.</span>
+    </div>
+    <div class="local-lock-overlay" id="first-access-overlay" hidden>
+      <form class="local-lock-dialog" id="first-access-form" role="dialog" aria-modal="true" aria-labelledby="first-access-title">
+        <div class="local-lock-logo">🛠️</div>
+        <h2 id="first-access-title">Premier accès / récupération locale</h2>
+        <p>Créez explicitement le premier responsable de ce poste. Aucun compte administrateur n’est généré automatiquement.</p>
+        <label>
+          Nom complet
+          <input name="name" autocomplete="name" required maxlength="120" placeholder="Nom du responsable" />
+        </label>
+        <label>
+          Rôle initial
+          <select name="role" required>
+            <option value="admin_technique">Admin technique</option>
+            <option value="directeur">Directeur SAV</option>
+          </select>
+        </label>
+        <label>
+          PIN robuste
+          <input name="pin" type="password" inputmode="numeric" autocomplete="new-password" required minlength="6" placeholder="6 chiffres minimum" />
+        </label>
+        <label>
+          Confirmer le PIN
+          <input name="confirmPin" type="password" inputmode="numeric" autocomplete="new-password" required minlength="6" placeholder="Confirmer le PIN" />
+        </label>
+        <button class="primary-button" type="submit" style="width: 100%;">Créer le responsable et ouvrir l’import PDF</button>
+        <p class="muted status-error" id="first-access-status" role="alert"></p>
+      </form>
     </div>
     <div class="local-lock-overlay" id="user-login-overlay" hidden>
       <form class="local-lock-dialog" id="user-login-form" role="dialog" aria-modal="true" aria-labelledby="user-login-title">
@@ -822,7 +880,6 @@
         <button class="case-subtab" type="button" data-case-tab="photos">📷 Photos</button>
         <button class="case-subtab" type="button" data-case-tab="planning">📅 RDV & Planning</button>
         <button class="case-subtab" type="button" data-case-tab="atelier">🛠️ Atelier & Compléments</button>
-        <button class="case-subtab" type="button" data-case-tab="livraison" hidden aria-hidden="true" style="display:none !important;" data-simplified-removed="livraison">Clôture héritée</button>
       </nav>
 
       <section class="case-panel active" data-case-panel="claims">
@@ -867,7 +924,7 @@
           <div class="summary-checks">
             <span class="tag" data-field="summary-photos"></span>
             <span class="tag" data-field="summary-expert"></span>
-            <span class="tag" data-field="summary-quality"></span>
+            <span class="tag" data-field="summary-assignments"></span>
           </div>
         </section>
       
@@ -916,28 +973,6 @@
         </section>
       
         <div class="detail-grid">
-          <section class="detail-section" hidden aria-hidden="true" style="display:none !important;" data-simplified-removed="expertise">
-            <div class="section-heading">
-              <h2>Expert assurance</h2>
-              <span data-field="expert-state"></span>
-            </div>
-            <div class="form-grid">
-              <label class="wide">Compagnie d’assurance<input data-input="insurance" placeholder="Ex. STAR, COMAR, GAT, BIAT Assurances…" /></label>
-              <label>Nom expert<input data-input="expertName" placeholder="Nom de l'expert" /></label>
-              <label>Téléphone expert<input data-input="expertPhone" inputmode="tel" placeholder="+216 ..." /></label>
-              <label class="wide">Email expert<input data-input="expertEmail" type="email" placeholder="expert@email.com" /></label>
-            </div>
-            <div class="approval-row">
-              <button class="primary-button" type="button" data-action-flag="expertApproved">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg>
-                Action héritée
-              </button>
-              <label class="check-card">
-                <input type="checkbox" data-toggle="clientApproved" />
-                <span>Action héritée</span>
-              </label>
-            </div>
-          </section>
           <section class="detail-section">
             <div class="section-heading">
               <h2>Récapitulatif main-d’œuvre</h2>
@@ -952,7 +987,7 @@
                 <span>Ajoutez les devis correspondant à chaque ordre.</span>
               </div>
             </div>
-            <p class="muted">Les devis sont importés dans les ordres de réparation. Cet onglet sert uniquement aux accords et au récapitulatif.</p>
+            <p class="muted">Les devis sont importés dans les ordres de réparation. Cet onglet sert à contrôler les lignes de main-d’œuvre et leur récapitulatif.</p>
             <div class="estimate-import-preview" data-field="estimate-import-preview"></div>
           </section>
         </div>
@@ -1068,9 +1103,13 @@
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg>
               Finaliser travaux via chef atelier
             </button>
-            <button class="primary-button" type="button" data-action-flag="invoiced" title="Clôture atelier après travaux terminés.">
+            <button class="primary-button" type="button" data-action-flag="close" title="Clôture atelier après travaux terminés.">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg>
               Clôturer atelier
+            </button>
+            <button class="ghost-button" type="button" data-action-flag="archive" data-allow-production-action title="Archive le dossier clôturé en consultation seule.">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18" /><path d="M5 6v14h14V6" /><path d="M9 10h6" /></svg>
+              Archiver le dossier
             </button>
           </div>
           <p class="muted">Le suivi opérationnel se fait dans l’onglet Technicien. La finalisation globale reste réservée au chef atelier avec les contrôles de permissions.</p>
@@ -1144,40 +1183,6 @@
         </section>
       </section>
 
-      <section class="case-panel" data-case-panel="livraison" hidden aria-hidden="true" style="display:none !important;" data-simplified-removed="livraison">
-        <section class="detail-section full-width">
-          <div class="section-heading">
-            <h2>Clôture héritée</h2>
-          </div>
-          <div class="approval-row">
-            <label class="check-card"><input type="checkbox" data-toggle="qualityApproved" /><span>Action héritée</span></label>
-            <label class="check-card"><input type="checkbox" data-toggle="delivered" /><span>Action héritée</span></label>
-            <label class="check-card"><input type="checkbox" data-toggle="invoiced" /><span>Clôture atelier</span></label>
-          </div>
-          <div class="quality-checklist" data-field="quality-checklist"></div>
-        </section>
-        <section class="detail-section full-width">
-          <div class="section-heading">
-            <h2>Dossier Windows complet</h2>
-            <div class="case-actions">
-              <button class="primary-button" type="button" id="legacy-export-case-folder">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M7 10l5 5 5-5" /><path d="M12 15V3" /></svg>
-                Exporter dossier ZIP
-              </button>
-              <button class="ghost-button" type="button" id="legacy-export-client-folder">Exporter dossier client</button>
-              <button class="ghost-button danger-button" type="button" id="legacy-delete-case">Supprimer dossier</button>
-            </div>
-          </div>
-          <p class="muted" data-field="dossier-export-summary"></p>
-        </section>
-        <section class="detail-section full-width">
-          <div class="section-heading">
-            <h2>Historique du dossier</h2>
-            <span data-field="history-count"></span>
-          </div>
-          <div class="history-list" data-field="history"></div>
-        </section>
-      </section>
     </template>
 
     <div id="custom-modal-overlay" class="custom-modal-overlay" hidden>
@@ -1191,21 +1196,21 @@
       </div>
     </div>
 
-    <script src="vendor/pdf.min.js" defer></script>
-    <script src="js/utils.js?v=23.2.7" defer></script>
-    <script src="js/state.js?v=23.2.7" defer></script>
-    <script src="js/ui-cases.js?v=23.2.7" defer></script>
-    <script src="js/estimate-import.js?v=23.2.7" defer></script>
-    <script src="js/ui-planning.js?v=23.2.7" defer></script>
-    <script src="js/photos.js?v=23.2.7" defer></script>
-    <script src="js/storage.js?v=23.2.7" defer></script>
-    <script src="js/planning.js?v=23.2.7" defer></script>
-    <script src="js/exports.js?v=23.2.7" defer></script>
-    <script src="js/business-rules-v2187.js?v=23.2.7" defer></script>
+    <script src="vendor/pdf.min.js?v=23.2.8-full-audit" defer></script>
+    <script src="js/utils.js?v=23.2.8-full-audit" defer></script>
+    <script src="js/state.js?v=23.2.8-full-audit" defer></script>
+    <script src="js/ui-cases.js?v=23.2.8-full-audit" defer></script>
+    <script src="js/estimate-import.js?v=23.2.8-full-audit" defer></script>
+    <script src="js/ui-planning.js?v=23.2.8-full-audit" defer></script>
+    <script src="js/photos.js?v=23.2.8-full-audit" defer></script>
+    <script src="js/storage.js?v=23.2.8-full-audit" defer></script>
+    <script src="js/planning.js?v=23.2.8-full-audit" defer></script>
+    <script src="js/exports.js?v=23.2.8-full-audit" defer></script>
+    <script src="js/business-rules-v2187.js?v=23.2.8-full-audit" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
-    <script src="js/supabase-config.js?v=23.2.7" defer></script>
-    <script src="js/supabase-client.js?v=23.2.7" defer></script>
-    <script src="js/supabase-sync.js?v=23.2.7" defer></script>
-    <script src="app.js?v=23.2.7" defer></script>
+    <script src="js/supabase-config.js?v=23.2.8-full-audit" defer></script>
+    <script src="js/supabase-client.js?v=23.2.8-full-audit" defer></script>
+    <script src="js/supabase-sync.js?v=23.2.8-full-audit" defer></script>
+    <script src="app.js?v=23.2.8-full-audit" defer></script>
   </body>
 </html>

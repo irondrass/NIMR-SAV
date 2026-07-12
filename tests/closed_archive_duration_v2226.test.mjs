@@ -89,6 +89,8 @@ function createCase(overrides = {}) {
       ...(overrides.flags || {}),
     },
     durations: { oilService: 3, quality: 0.25 },
+    closedAt: '2026-05-25T08:30:00.000Z',
+    archivedAt: '2026-05-25T08:31:00.000Z',
     history: [],
     claims: [],
     supplements: [],
@@ -122,12 +124,12 @@ resetState({
   bookings: [createBooking()],
 });
 
-assert.equal(run('isCaseReadonlyArchive(state.cases[0])'), true, 'dossier facturé doit être archive lecture seule');
+assert.equal(run('isCaseReadonlyArchive(state.cases[0])'), true, 'dossier explicitement archivé doit être en lecture seule');
 assert.equal(run('guardCaseEdit(state.cases[0], { notify: false }).ok'), false, 'édition dossier clôturé refusée');
 assert.equal(run('guardAppointmentSchedule(state.cases[0], { notify: false }).ok'), false, 'planning dossier clôturé refusé');
 assert.equal(run('guardVehicleReceive(state.cases[0], { notify: false }).ok'), false, 'réception dossier clôturé refusée');
 assert.equal(run('guardDeliveryComplete(state.cases[0], { notify: false }).ok'), false, 'livraison dossier clôturé refusée');
-assert.match(run('getArchivedCaseMessage(state.cases[0])'), /Dossier clôturé/, 'message archive attendu');
+assert.match(run('getArchivedCaseMessage(state.cases[0])'), /Dossier archivé/, 'message archive attendu');
 
 assert.equal(run('canRenderAction("print.task", { item: state.cases[0] })'), true, 'impression reste autorisée selon permission');
 assert.equal(run('startTechnicianTask(state.cases[0], "booking-vidange", "tech-1").ok'), false, 'démarrage tâche archive refusé');
@@ -141,6 +143,8 @@ assert.equal(run('isCaseReadonlyArchive(__item)', { __item: normalizedArchiveDat
 
 const openCase = createCase({
   id: 'case-open',
+  closedAt: '',
+  archivedAt: '',
   flags: { received: true, delivered: false, invoiced: false, workStarted: false, workCompleted: false, qualityApproved: false },
 });
 resetState({

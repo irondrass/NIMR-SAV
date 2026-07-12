@@ -206,6 +206,10 @@ global.showPromptModal = async (msg, expected) => {
   lastModalMessage = msg;
   return lastPromptValue === expected;
 };
+// Le test cible les protections RGPD de l'export lui-même. Les scripts chargés
+// redéfinissent le garde applicatif ; on le neutralise explicitement dans ce
+// contexte isolé afin de ne pas dépendre d'un ancien administrateur implicite.
+global.guardSensitiveAction = () => ({ ok: true });
 
 // Mock IndexedDB
 let dbDeleted = false;

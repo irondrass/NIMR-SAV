@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
+import { currentBuild } from "./helpers/build_version.mjs";
 
-console.log("Demarrage tests v23.2.6 security exports PIN and Supabase hardening...");
+console.log(`Demarrage tests ${currentBuild.appVersion} security exports PIN and Supabase hardening...`);
 
 const scriptFiles = [
   "js/utils.js",
@@ -107,10 +108,10 @@ const versionSource = fs.readFileSync("js/version.js", "utf8");
 const swSource = fs.readFileSync("sw.js", "utf8");
 const vehiclesSource = fs.readFileSync("data/vehicles.json", "utf8").trim();
 
-assert.match(stateSource, /APP_VERSION\s*=\s*"v23\.2\.6"/, "APP_VERSION v23.2.6 attendu");
-assert.match(appSource, /serviceWorker\.register\("sw\.js\?v=23\.2\.6"/, "service worker v23.2.6 attendu");
-assert.match(versionSource, /NIMR_CACHE_NAME\s*=\s*"nimr-sav-v23\.2\.6-reception-qc-field-usability"/, "cache annonce v23.2.6 attendu");
-assert.match(swSource, /nimr-sav-v23\.2\.6-reception-qc-field-usability/, "cache PWA v23.2.6 attendu");
+assert.ok(stateSource.includes(`const APP_VERSION = "${currentBuild.appVersion}"`), "state.js doit suivre APP_VERSION déclaré dans version.js");
+assert.ok(appSource.includes(`serviceWorker.register("sw.js?v=${currentBuild.queryVersion}"`), "app.js doit suivre la query déclarée dans version.js");
+assert.ok(versionSource.includes(`window.NIMR_CACHE_NAME = "${currentBuild.cacheName}"`), "version.js doit annoncer le cache courant");
+assert.ok(swSource.includes(`const CACHE_NAME = "${currentBuild.cacheName}"`), "sw.js doit utiliser le cache déclaré dans version.js");
 
 const weakBootstrap = Array(4).fill("0").join("");
 assert.equal(app(`validateLocalPinStrength(${JSON.stringify(weakBootstrap)}).ok`), false, "PIN faible historique refuse");
@@ -179,4 +180,4 @@ assert.match(supabaseClientSource, /looksLikeSupabaseServiceRoleKey/, "detection
 assert.equal(vehiclesSource, "[]", "data/vehicles.json doit rester vide");
 assert.doesNotMatch(swSource, /data\/vehicles\.json/, "data/vehicles.json ne doit pas etre precache");
 
-console.log("Tests v23.2.6 security exports PIN and Supabase hardening OK");
+console.log(`Tests ${currentBuild.appVersion} security exports PIN and Supabase hardening OK`);

@@ -44,7 +44,8 @@ function createElementStub() {
 
 const context = {
   console,
-  localStorage: { getItem: () => null, setItem: () => {} },
+  localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+  sessionStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
   document: {
     getElementById: () => createElementStub(),
     querySelector: () => createElementStub(),
@@ -76,7 +77,7 @@ const normalized = context.normalizeState({
   ui: { caseStatusFilter: 'delivered', caseSort: 'client' },
   cases: [{ clientName: 'Test', flags: { delivered: true } }],
 });
-assert.equal(normalized.ui.caseStatusFilter, 'delivered', 'le filtre dossiers doit être conservé');
+assert.equal(normalized.ui.caseStatusFilter, 'closed', 'un ancien filtre livraison doit migrer vers la clôture atelier');
 assert.equal(normalized.ui.caseSort, 'client', 'le tri dossiers doit être conservé');
 assert.ok(normalized.resources.some((resource) => resource.role === 'cabine'), 'les ressources indispensables doivent être restaurées');
 
@@ -259,7 +260,7 @@ const globalWorkCompletion = JSON.parse(vm.runInContext(`(() => {
         id: 'booking-quality',
         caseId: 'global-case',
         key: 'quality',
-        title: 'Contrôle qualité',
+        title: 'Contrôle final explicite',
         resourceIds: ['ctrl-1'],
         start: '2026-05-12T12:00:00.000Z',
         end: '2026-05-12T12:15:00.000Z',
@@ -280,11 +281,11 @@ const globalWorkCompletion = JSON.parse(vm.runInContext(`(() => {
     qualityStatus: state.bookings.find((booking) => booking.key === 'quality')?.status,
   });
 })()`, context));
-assert.equal(globalWorkCompletion.completed, 2, 'Terminer travaux doit clôturer les réservations productives restantes');
-assert.equal(globalWorkCompletion.removed, 1, 'les réservations productives futures doivent être supprimées pour libérer le planning');
+assert.equal(globalWorkCompletion.completed, 3, 'Terminer travaux doit clôturer toutes les réservations atelier restantes');
+assert.equal(globalWorkCompletion.removed, 2, 'les réservations futures doivent être supprimées pour libérer le planning');
 assert.equal(globalWorkCompletion.activeEnd, '2026-05-12T08:30:00.000Z', 'la tâche en cours doit être tronquée à l’heure réelle de fin');
-assert.deepEqual(globalWorkCompletion.keys, ['mechanical', 'quality'], 'le contrôle qualité doit rester planifié, mais les travaux futurs doivent être libérés');
-assert.equal(globalWorkCompletion.qualityStatus, 'planned', 'Terminer travaux ne doit pas valider le contrôle qualité');
+assert.deepEqual(globalWorkCompletion.keys, ['mechanical'], 'toutes les tâches futures, y compris un contrôle final explicite, doivent libérer le planning');
+assert.equal(globalWorkCompletion.qualityStatus, undefined, 'aucune étape QC distincte ne doit rester en attente après la fin globale');
 
 const alerts = context.buildPilotageAlerts(new Date('2026-05-12T12:00:00.000Z'));
 assert.ok(Array.isArray(alerts), 'le pilotage doit produire une liste d’alertes');
@@ -314,6 +315,8 @@ assert.equal(context.getNextWorkflowAction(quickManualCase), 'labor', 'un dossie
 vm.runInContext(`
 state = normalizeState({
   cases: [],
+  users: [{ id: 'chef-smoke', name: 'Chef Atelier smoke', role: 'chef_atelier', active: true }],
+  currentUserId: 'chef-smoke',
   resources: [
     { id: 'tolier-1', name: 'Tôlier', role: 'tolier', active: true },
     { id: 'peintre-1', name: 'Peintre', role: 'peintre', active: true },
@@ -479,17 +482,14 @@ const qualityGateCase = context.normalizeCase({
 });
 vm.runInContext(`state.bookings = [{ id: 'b-quality', caseId: 'case-quality-gate', resourceIds: ['tolier-1'], segments: [{ start: '2026-05-12T08:00:00.000Z', end: '2026-05-12T09:00:00.000Z' }] }];`, context);
 assert.equal(context.getNextWorkflowAction(qualityGateCase), 'workCompleted', 'le flux doit distinguer démarrage travaux et travaux terminés');
-assert.ok(
-  context.getBusinessRuleIssues(qualityGateCase, 'qualityApproved').some((issue) => issue.includes('travaux terminés')),
-  'la vérification atelier héritée ne doit pas être validée avant fin travaux'
-);
+assert.equal(context.getBusinessRuleIssues(qualityGateCase, 'qualityApproved').length, 0, 'une ancienne action qualité ne doit plus constituer une porte métier active');
 const qualityGateOverride = await context.completeCaseWorkWithChiefOverride(qualityGateCase, {
   overrideConfirmed: true,
   overrideReason: 'Smoke test clôture contrôlée',
 });
 assert.equal(qualityGateOverride.ok, true, 'la fin globale contrôlée doit accepter un override motivé dans ce scénario');
-assert.equal(context.getNextWorkflowAction(qualityGateCase), 'invoiced', 'après fin travaux, le flux simplifié doit passer à la clôture atelier');
-assert.equal(context.getBusinessRuleIssues(qualityGateCase, 'invoiced').length, 0, 'la clôture atelier doit être possible après fin travaux sans étape qualité/livraison');
+assert.equal(context.getNextWorkflowAction(qualityGateCase), 'close', 'après fin travaux, le flux simplifié doit passer à la clôture atelier');
+assert.equal(context.getBusinessRuleIssues(qualityGateCase, 'close').length, 0, 'la clôture atelier doit être possible après fin travaux sans étape qualité/livraison');
 
 const insuranceClosureCase = context.normalizeCase({
   id: 'case-workshop-close-photo',
@@ -501,7 +501,7 @@ const insuranceClosureCase = context.normalizeCase({
   claims: [{ type: 'assurance', includeInPlanning: true, expertApproved: true, clientApproved: true, estimate: { lines: [{ phase: 'body', operation: 'Réparation', laborHours: 1 }] } }],
 });
 vm.runInContext(`state.bookings = [{ id: 'b-close', caseId: 'case-workshop-close-photo', resourceIds: ['tolier-1'], status: 'completed', completedAt: '2026-05-12T09:00:00.000Z', segments: [{ start: '2026-05-12T08:00:00.000Z', end: '2026-05-12T09:00:00.000Z' }] }];`, context);
-assert.equal(context.getBusinessRuleIssues(insuranceClosureCase, 'invoiced').length, 0, 'la clôture atelier simplifiée ne doit plus exiger photo après ni livraison');
+assert.equal(context.getBusinessRuleIssues(insuranceClosureCase, 'close').length, 0, 'la clôture atelier simplifiée ne doit plus exiger photo après ni livraison');
 
 const zeroLaborApprovalCase = context.normalizeCase({
   id: 'case-zero-labor-approval',
@@ -525,11 +525,11 @@ const inconsistentClosureCase = context.normalizeCase({
   claims: [{ type: 'client', includeInPlanning: true, expertApproved: true, clientApproved: true, estimate: { lines: [{ phase: 'mechanical', operation: 'Réparation', laborHours: 1 }] } }],
 });
 assert.ok(
-  context.getBusinessRuleIssues(inconsistentClosureCase, 'invoiced').some((issue) => issue.includes('Démarrer les travaux')),
+  context.getBusinessRuleIssues(inconsistentClosureCase, 'close').some((issue) => issue.includes('Démarrer les travaux')),
   'la clôture atelier doit refuser un dossier sans démarrage travaux',
 );
 assert.ok(
-  context.getBusinessRuleIssues(inconsistentClosureCase, 'invoiced').some((issue) => issue.includes('Terminer les travaux')),
+  context.getBusinessRuleIssues(inconsistentClosureCase, 'close').some((issue) => issue.includes('Terminer les travaux')),
   'la clôture atelier doit refuser un dossier sans fin travaux',
 );
 
@@ -619,7 +619,7 @@ const clientFastCase = context.normalizeCase({
 });
 context.recomputeCaseDurationsFromClaims(clientFastCase);
 assert.equal(clientFastCase.durations.finish, 0, 'les ordres client hors sinistre ne doivent pas ajouter finition/lavage');
-assert.equal(clientFastCase.durations.quality, 0.25, 'les réparations rapides client doivent garder 15 min de contrôle qualité');
+assert.equal(clientFastCase.durations.quality, 0, 'aucun contrôle qualité séparé ne doit être ajouté implicitement');
 
 const manualLaborLine = context.buildManualClaimLaborLine({ phase: 'mechanical', operation: 'Diagnostic freinage', laborHours: '1,5' });
 const manualLaborCase = context.normalizeCase({
@@ -659,7 +659,7 @@ const clientLongCase = context.normalizeCase({
 });
 context.recomputeCaseDurationsFromClaims(clientLongCase);
 assert.equal(clientLongCase.durations.finish, 0, 'les réparations longues client ne doivent pas ajouter finition/lavage');
-assert.equal(clientLongCase.durations.quality, 0.25, 'le contrôle qualité doit rester forfaitaire à 0,25 h');
+assert.equal(clientLongCase.durations.quality, 0, 'une réparation longue ne doit pas créer de contrôle qualité séparé');
 
 const insuranceCase = context.normalizeCase({
   clientName: 'Sinistre',
@@ -671,10 +671,10 @@ const insuranceCase = context.normalizeCase({
 });
 context.recomputeCaseDurationsFromClaims(insuranceCase);
 assert.equal(insuranceCase.durations.finish, 0, 'sans peinture, les sinistres ne doivent pas ajouter finition/lavage');
-assert.equal(insuranceCase.durations.quality, 0.25, 'le contrôle qualité sinistre doit rester forfaitaire à 0,25 h');
+assert.equal(insuranceCase.durations.quality, 0, 'un sinistre ne doit pas créer de contrôle qualité séparé');
 console.log('Client order quality regression OK');
 
-assert.equal(context.getTabForAction('invoiced'), 'atelier', 'Clôturer atelier doit ouvrir Atelier');
+assert.equal(context.getTabForAction('close'), 'atelier', 'Clôturer atelier doit ouvrir Atelier');
 
 const clientWorkflowCase = context.normalizeCase({
   clientName: 'Client carrosserie',

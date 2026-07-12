@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
+import { currentBuild, getVersionedAssetQueries } from './helpers/build_version.mjs';
 
 const scriptFiles = [
   'js/utils.js',
@@ -75,12 +76,12 @@ const appSource = fs.readFileSync('app.js', 'utf8');
 const swSource = fs.readFileSync('sw.js', 'utf8');
 const versionSource = fs.readFileSync('js/version.js', 'utf8');
 const indexSource = fs.readFileSync('index.html', 'utf8');
-assert.match(stateSource, /APP_VERSION\s*=\s*"v23\.2\.6"/, 'APP_VERSION doit être en v23.2.6');
-assert.match(appSource, /serviceWorker\.register\("sw\.js\?v=23\.2\.6"/, 'le service worker doit pointer vers sw.js?v=23.2.6');
-assert.match(swSource, /nimr-sav-v23\.2\.6-reception-qc-field-usability/, 'le cache PWA doit être en v23.2.6');
-assert.match(versionSource, /NIMR_BUILD\s*=\s*"v23\.2\.6"/, 'js/version.js doit exposer v23.2.6');
-[...indexSource.matchAll(/\?v=(\d+\.\d+(?:\.\d+)?)/g)].forEach((match) => {
-  assert.equal(match[1], '23.2.6', `référence index.html incohérente: ?v=${match[1]}`);
+assert.ok(stateSource.includes(`const APP_VERSION = "${currentBuild.appVersion}"`), 'APP_VERSION doit suivre js/version.js');
+assert.ok(appSource.includes(`serviceWorker.register("sw.js?v=${currentBuild.queryVersion}"`), 'le service worker doit pointer vers la query courante');
+assert.ok(swSource.includes(`const CACHE_NAME = "${currentBuild.cacheName}"`), 'le cache PWA doit suivre js/version.js');
+assert.ok(versionSource.includes(`window.NIMR_BUILD = "${currentBuild.buildVersion}"`), 'js/version.js doit exposer NIMR_BUILD');
+getVersionedAssetQueries(indexSource).forEach((queryVersion) => {
+  assert.equal(queryVersion, currentBuild.queryVersion, `référence index.html incohérente: ?v=${queryVersion}`);
 });
 
 app(`
@@ -92,18 +93,19 @@ app(`
 `);
 
 assert.equal(app('Array.isArray(state.users)'), true, 'ancien state sans users doit migrer');
-assert.equal(app('state.users.length >= 1'), true, 'bootstrap doit créer un utilisateur');
-assert.equal(app('getCurrentUser().role'), 'admin', 'premier utilisateur local doit être admin');
-assert.equal(app('Boolean(getCurrentUser() && getCurrentUser().active)'), true, 'un utilisateur courant actif ou de secours doit être retourné');
+assert.equal(app('state.users.length'), 0, 'aucun administrateur bootstrap ou caché ne doit être créé');
+assert.equal(app('state.currentUserId'), '', 'aucun acteur ne doit être sélectionné implicitement');
+assert.equal(app('getCurrentUser()'), null, 'aucun utilisateur courant ne doit être inventé');
+assert.equal(app('isFirstAccessRecoveryRequired(state)'), true, 'le premier accès explicite doit être requis');
 
 const actor = app('getCurrentActor()');
-assert.equal(Boolean(actor.userId), true, 'acteur courant doit contenir userId');
-assert.equal(actor.userRole, 'admin', 'acteur courant doit contenir userRole');
-assert.equal(Boolean(actor.userName), true, 'acteur courant doit contenir userName');
+assert.equal(actor.userId, '', 'aucun userId caché ne doit être attribué à l’acteur');
+assert.equal(actor.userRole, '', 'aucun rôle caché ne doit être attribué à l’acteur');
+assert.equal(actor.userName, 'Atelier', 'l’acteur anonyme doit rester identifiable sans compte implicite');
 
 app(`
   state = normalizeState({
-    users: [{ id: 'u-admin', name: 'Chef SAV', role: 'admin', active: true }],
+    users: [{ id: 'u-admin', name: 'Chef SAV', role: 'admin_technique', active: true }],
     currentUserId: 'u-admin',
     resources: [],
     bookings: [],
@@ -115,6 +117,7 @@ app(`
     }]
   });
 `);
+assert.equal(app("getCanonicalUserRole(getCurrentUser())"), 'admin_technique', 'la fixture explicite doit conserver le rôle canonique');
 assert.equal(app('state.cases[0].history[0].user'), 'Atelier', 'ancien historique doit garder user Atelier');
 
 app(`
@@ -130,7 +133,7 @@ assert.equal(app("hasPermission('settings.edit', { userId: 'u-admin' })"), true,
 app(`
   state = normalizeState({
     users: [
-      { id: 'u-read', name: 'Lecture', role: 'readonly', active: true },
+      { id: 'u-read', name: 'Lecture', role: 'lecture_seule', active: true },
       { id: 'u-tech', name: 'Tech', role: 'technicien', resourceId: 'tech-1', active: true },
       { id: 'u-chef', name: 'Chef', role: 'chef_atelier', active: true }
     ],
@@ -153,7 +156,7 @@ assert.equal(app("canActOnTechnicianTask(getUserById('u-chef'), { resourceIds: [
 app(`
   state = normalizeState({
     users: [
-      { id: 'inactive-admin', name: 'Ancien admin', role: 'admin', active: false },
+      { id: 'inactive-admin', name: 'Ancien admin', role: 'admin_technique', active: false },
       { id: 'active-reception', name: 'Réception', role: 'reception', active: true }
     ],
     currentUserId: 'inactive-admin',
@@ -163,11 +166,12 @@ app(`
   });
 `);
 assert.notEqual(app('state.currentUserId'), 'inactive-admin', 'utilisateur inactif ne doit pas rester sélectionné');
-assert.equal(app('getCurrentUser().active'), true, 'fallback utilisateur actif obligatoire');
+assert.equal(app('state.currentUserId'), '', 'aucun autre utilisateur ne doit être sélectionné implicitement');
+assert.equal(app('getCurrentUser()'), null, 'une nouvelle sélection explicite doit être demandée');
 
 app(`
   state = normalizeState({
-    users: [{ id: 'local-admin', name: 'Admin local', role: 'admin', active: true }],
+    users: [{ id: 'local-admin', name: 'Admin local', email: 'admin@nimr.local', role: 'admin_technique', active: true }],
     currentUserId: 'local-admin',
     resources: [],
     bookings: [],
@@ -185,6 +189,7 @@ app(`
     bookings: []
   });
 `);
-assert.equal(app('getCurrentUser().role'), 'admin', 'offline/local sans Supabase doit fonctionner');
+assert.equal(app('getCurrentUser()'), null, 'offline/local sans utilisateur explicite ne doit pas créer de compte caché');
+assert.equal(app('isFirstAccessRecoveryRequired(state)'), true, 'offline/local doit demander le premier accès explicite');
 
 console.log('Users roles foundation v22.29 OK');

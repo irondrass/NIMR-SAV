@@ -6,6 +6,7 @@ const STORAGE_MIRROR_KEY = `${STORAGE_KEY}:mirror`;
 const STORAGE_SNAPSHOTS_KEY = `${STORAGE_KEY}:snapshots`;
 const STORAGE_META_KEY = `${STORAGE_KEY}:meta`;
 const SESSION_EMERGENCY_KEY = `${STORAGE_KEY}:session-emergency`;
+const PRE_MIGRATION_BACKUP_KEY = `${STORAGE_KEY}:pre-migration:last`;
 const CLOUD_UPDATED_META_KEY = `${STORAGE_KEY}:last-cloud-updated-at`;
 const LOCAL_CHANGE_META_KEY = `${STORAGE_KEY}:last-local-change-at`;
 const LOCAL_SECURITY_KEY = `${STORAGE_KEY}:local-security`;
@@ -20,9 +21,10 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v23.2.7";
+const APP_VERSION = "v23.2.8-full-audit";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
+const CURRENT_DATA_SCHEMA_VERSION = 2;
 const WORKSHOP_NAME = "NIMR SAV";
 const MAX_ESTIMATE_IMPORT_SIZE = 10 * 1024 * 1024;
 const ESTIMATE_IMPORT_EXTENSIONS = ["pdf", "xlsx", "csv"];
@@ -69,15 +71,15 @@ const DEFAULT_WORK_HOURS = {
 };
 
 const DEFAULT_DURATIONS = {
-  body: 6,
+  body: 0,
   oilService: 0,
   mechanical: 0,
   electrical: 0,
-  prep: 4,
-  paint: 3,
-  reassembly: 4,
-  finish: 2,
-  quality: 0.25,
+  prep: 0,
+  paint: 0,
+  reassembly: 0,
+  finish: 0,
+  quality: 0,
 };
 
 const DURATIONS = [
@@ -89,7 +91,7 @@ const DURATIONS = [
   ["paint", "Peinture + vernis"],
   ["reassembly", "Remontage"],
   ["finish", "Finition + lavage"],
-  ["quality", "Finition atelier"],
+  ["quality", "Contrôle final"],
 ];
 
 const DEFAULT_QUALITY_CHECKS = [
@@ -129,7 +131,9 @@ const ACTION_LABELS = {
   workCompleted: "Terminer les travaux",
   qualityApproved: "Action héritée",
   delivered: "Action héritée",
-  invoiced: "Clôturer le dossier atelier",
+  close: "Clôturer le dossier atelier",
+  archive: "Archiver le dossier",
+  invoiced: "Clôturer le dossier atelier (compatibilité)",
 };
 
 const PARTS_STATUS_OPTIONS = [
@@ -247,7 +251,7 @@ const STEP_TEMPLATES = [
   },
   {
     key: "quality",
-    title: "Finition atelier",
+    title: "Contrôle final",
     role: "controle",
     color: "#1f7a54",
   },
@@ -262,46 +266,110 @@ const ROLE_LABELS = {
   cabine: "Cabine peinture",
   pont_vidange: "Pont vidange",
   pont_mecanique: "Pont grands travaux mécaniques",
-  controle: "Finition atelier",
+  transport: "Transport / convoyage",
+  controle: "Contrôle final",
 };
 
-const USER_ROLES = {
-  admin: "Admin technique",
+const CANONICAL_USER_ROLES = Object.freeze({
+  admin_technique: "Admin technique",
+  directeur: "Directeur SAV",
   chef_atelier: "Chef atelier",
-  directeur_sav: "Directeur SAV",
   reception: "Réception",
   technicien: "Technicien",
-  qualite: "Qualité",
-  readonly: "Lecture seule",
+  lecture_seule: "Lecture seule",
+});
+
+// Les clés historiques restent lisibles par l'UI existante pendant la migration.
+// Toute décision de permission passe toutefois par normalizeUserRole().
+const USER_ROLES = {
+  ...CANONICAL_USER_ROLES,
+  admin: CANONICAL_USER_ROLES.admin_technique,
+  directeur_sav: CANONICAL_USER_ROLES.directeur,
+  readonly: CANONICAL_USER_ROLES.lecture_seule,
+  qualite: CANONICAL_USER_ROLES.lecture_seule,
 };
 
+const USER_ROLE_RUNTIME_KEYS = Object.freeze({
+  admin_technique: "admin",
+  directeur: "directeur_sav",
+  chef_atelier: "chef_atelier",
+  reception: "reception",
+  technicien: "technicien",
+  lecture_seule: "readonly",
+});
+
+const USER_ROLE_ALIASES = Object.freeze({
+  admin: "admin_technique",
+  "admin technique": "admin_technique",
+  administrateur: "admin_technique",
+  "administrateur technique": "admin_technique",
+  directeur: "directeur",
+  "directeur sav": "directeur",
+  direction: "directeur",
+  "direction sav": "directeur",
+  "responsable sav": "directeur",
+  manager: "directeur",
+  "chef atelier": "chef_atelier",
+  reception: "reception",
+  receptionnaire: "reception",
+  technicien: "technicien",
+  technician: "technicien",
+  lecture: "lecture_seule",
+  "lecture seule": "lecture_seule",
+  "read only": "lecture_seule",
+  readonly: "lecture_seule",
+  qualite: "lecture_seule",
+});
+
+const DIRECTOR_PERMISSIONS = [
+  "audit.view",
+  "dashboard.view",
+  "case.view",
+  "case.create",
+  "case.edit",
+  "case.close",
+  "case.archive",
+  "estimate.import",
+  "appointment.schedule",
+  "schedule_appointment",
+  "vehicle.receive",
+  "receive_vehicle",
+  "task.*",
+  "task.override",
+  "planning.view",
+  "planning.edit",
+  "resource.view",
+  "resource.manage",
+  "subcontractor.manage",
+  "delivery.complete",
+  "export.backup",
+  "import.backup",
+  "settings.edit",
+  "users.manage",
+  "supabase.access",
+  "supabase.configure",
+  "supabase.backup",
+  "supabase.restore",
+  "print.*",
+  "customer_claim.manage",
+  "quality.validate",
+  "quality.reject",
+  "quality.revalidate",
+  "notes.direction",
+];
+
+const READ_ONLY_PERMISSIONS = ["dashboard.view", "case.view", "planning.view", "resource.view", "print.*"];
+
 const ROLE_PERMISSIONS = {
-  admin: ["*"],
-  directeur_sav: [
-    // Directeur SAV : vision métier complète mais SANS administration technique
-    "audit.view",
-    "dashboard.view",
-    "case.create",
-    "case.edit",
-    "estimate.import",
-    "appointment.schedule",
-    "schedule_appointment",
-    "vehicle.receive",
-    "receive_vehicle",
-    "delivery.complete",
-    "export.backup",
-    "print.*",
-    "customer_claim.manage",
-    "quality.validate",
-    "quality.reject",
-    "quality.revalidate",
-    "notes.direction",
-  ],
+  admin_technique: ["*"],
+  directeur: DIRECTOR_PERMISSIONS,
   chef_atelier: [
     "audit.view",
     "dashboard.view",
+    "case.view",
     "case.create",
     "case.edit",
+    "case.archive",
     "estimate.import",
     "appointment.schedule",
     "schedule_appointment",
@@ -309,7 +377,11 @@ const ROLE_PERMISSIONS = {
     "receive_vehicle",
     "task.*",
     "task.override",
+    "planning.view",
     "planning.edit",
+    "resource.view",
+    "resource.manage",
+    "subcontractor.manage",
     "quality.validate",
     "quality.reject",
     "quality.revalidate",
@@ -320,6 +392,7 @@ const ROLE_PERMISSIONS = {
     "customer_claim.manage",
   ],
   reception: [
+    "case.view",
     "case.create",
     "case.edit",
     "estimate.import",
@@ -331,9 +404,14 @@ const ROLE_PERMISSIONS = {
     "print.*",
     "customer_claim.manage",
   ],
-  technicien: ["task.start", "task.pause", "task.resume", "task.complete", "task.block", "print.task"],
-  qualite: ["quality.validate", "quality.reject", "quality.revalidate", "print.quality"],
-  readonly: ["dashboard.view", "print.*"],
+  technicien: ["task.start", "task.pause", "task.resume", "task.complete", "task.block", "task.unblock", "task.note", "task.actual_time", "print.task"],
+  lecture_seule: READ_ONLY_PERMISSIONS,
+  // Alias de lecture transitoires pour les anciens tests/modules. hasPermission
+  // utilise toujours le rôle canonique et ne dépend pas de ces entrées.
+  admin: ["*"],
+  directeur_sav: DIRECTOR_PERMISSIONS,
+  readonly: READ_ONLY_PERMISSIONS,
+  qualite: READ_ONLY_PERMISSIONS,
 };
 
 const MUTATION_PERMISSIONS = [
@@ -342,13 +420,19 @@ const MUTATION_PERMISSIONS = [
   "task.resume",
   "task.complete",
   "task.block",
+  "task.unblock",
+  "task.note",
+  "task.actual_time",
   "task.override",
   "planning.edit",
+  "resource.manage",
+  "subcontractor.manage",
   "quality.validate",
   "quality.reject",
   "quality.revalidate",
   "delivery.complete",
   "case.close",
+  "case.archive",
   "case.delete",
   "case.create",
   "case.edit",
@@ -363,6 +447,9 @@ const MUTATION_PERMISSIONS = [
   "customer_claim.manage",
   "users.manage",
   "supabase.configure",
+  "supabase.backup",
+  "supabase.restore",
+  "workstation.purge",
   "audit.view",
   "notes.direction",
 ];
@@ -388,41 +475,73 @@ const ESTIMATE_PLANNING_KEYS = ["body", "oilService", "mechanical", "electrical"
 const ESTIMATE_ALLOWED_KEYS = [...ESTIMATE_PLANNING_KEYS, "quality"];
 
 const CASE_STATUS_DEFINITIONS = Object.freeze([
-  ["receptionDraft", "Réception à compléter"],
-  ["approvals", "Dossier à compléter"],
-  ["pdfChiefValidation", "À valider Chef Atelier"],
-  ["appointment", "RDV à fixer"],
-  ["appointmentScheduled", "RDV fixé"],
-  ["noShow", "Client absent"],
-  ["awaitingVehicle", "En attente réception"],
-  ["vehicleReceived", "Véhicule reçu"],
-  ["workScheduled", "Travaux planifiés"],
-  ["work", "En travaux"],
-  ["quality", "Travaux terminés"],
-  ["qualityRejected", "Retour atelier"],
-  ["qualityRework", "Retour atelier"],
-  ["delivered", "Clôturé atelier"],
-  ["invoiced", "Clôturé atelier"],
+  ["chief_validation", "À valider Chef Atelier"],
+  ["planning", "À planifier"],
+  ["in_progress", "En travaux"],
+  ["completed", "Travaux terminés"],
+  ["closed", "Atelier clôturé"],
+  ["archived", "Archivé"],
 ]);
 const CASE_STATUS_LABELS = Object.freeze(Object.fromEntries(CASE_STATUS_DEFINITIONS));
 const CASE_STATUS_KEYS = Object.freeze(CASE_STATUS_DEFINITIONS.map(([key]) => key));
-const CASE_STATUS_ALIASES = Object.freeze({ estimate: "receptionDraft" });
+const CASE_STATUS_ALIASES = Object.freeze({
+  estimate: "chief_validation",
+  receptionDraft: "chief_validation",
+  receptiondraft: "chief_validation",
+  reception: "chief_validation",
+  approvals: "chief_validation",
+  pdfChiefValidation: "chief_validation",
+  pdfchiefvalidation: "chief_validation",
+  appointment: "planning",
+  appointmentScheduled: "planning",
+  appointmentscheduled: "planning",
+  noShow: "planning",
+  noshow: "planning",
+  awaitingVehicle: "planning",
+  awaitingvehicle: "planning",
+  vehicleReceived: "in_progress",
+  vehiclereceived: "in_progress",
+  workScheduled: "in_progress",
+  workscheduled: "in_progress",
+  work: "in_progress",
+  quality: "completed",
+  qualityRejected: "in_progress",
+  qualityRework: "in_progress",
+  delivered: "closed",
+  invoiced: "closed",
+});
+const WORKSHOP_CASE_STATUS_ALIASES = Object.freeze({
+  reception: "chief_validation",
+  receptiondraft: "chief_validation",
+  estimate: "chief_validation",
+  approvals: "chief_validation",
+  pdfchiefvalidation: "chief_validation",
+  chiefvalidationpending: "chief_validation",
+  appointment: "planning",
+  appointmentscheduled: "planning",
+  awaitingvehicle: "planning",
+  vehiclereceived: "planning",
+  workscheduled: "planning",
+  work: "in_progress",
+  inprogress: "in_progress",
+  quality: "completed",
+  qualityrejected: "in_progress",
+  qualityrework: "in_progress",
+  workcompleted: "completed",
+  completed: "completed",
+  delivery: "closed",
+  delivered: "closed",
+  invoiced: "archived",
+  closed: "closed",
+  archived: "archived",
+});
 const CASE_STATUS_TRANSITIONS = Object.freeze({
-  receptionDraft: ["approvals", "pdfChiefValidation", "appointment", "appointmentScheduled"],
-  approvals: ["pdfChiefValidation", "appointment", "appointmentScheduled", "receptionDraft"],
-  pdfChiefValidation: ["appointment", "appointmentScheduled"],
-  appointment: ["appointmentScheduled", "approvals"],
-  appointmentScheduled: ["awaitingVehicle", "noShow", "vehicleReceived"],
-  noShow: ["appointment"],
-  awaitingVehicle: ["vehicleReceived", "appointment"],
-  vehicleReceived: ["workScheduled", "work"],
-  workScheduled: ["work", "vehicleReceived"],
-  work: ["quality", "invoiced"],
-  quality: ["qualityRejected", "invoiced"],
-  qualityRejected: ["qualityRework"],
-  qualityRework: ["work", "quality"],
-  delivered: ["invoiced"],
-  invoiced: [],
+  chief_validation: ["planning"],
+  planning: ["in_progress"],
+  in_progress: ["completed"],
+  completed: ["in_progress", "closed"],
+  closed: ["archived"],
+  archived: [],
 });
 const statusLabels = CASE_STATUS_LABELS;
 
@@ -434,7 +553,7 @@ const QUALITY_STATUS_ALIASES = Object.freeze({
   return_to_workshop: "rework",
 });
 
-function normalizeCaseStatus(value, fallback = "receptionDraft") {
+function normalizeCaseStatus(value, fallback = "chief_validation") {
   const raw = String(value || "").trim();
   const normalized = CASE_STATUS_ALIASES[raw] || raw;
   return CASE_STATUS_LABELS[normalized] ? normalized : fallback;
@@ -447,7 +566,7 @@ function normalizeCaseStatusFilter(value) {
 }
 
 function getCaseStatusLabel(value) {
-  return CASE_STATUS_LABELS[normalizeCaseStatus(value)] || CASE_STATUS_LABELS.receptionDraft;
+  return CASE_STATUS_LABELS[normalizeCaseStatus(value)] || CASE_STATUS_LABELS.chief_validation;
 }
 
 function getCaseStatusOptions() {
@@ -471,33 +590,20 @@ function normalizeQualityStatus(value) {
 }
 
 function getCaseStatus(item) {
-  if (!item) return "receptionDraft";
+  if (!item) return "chief_validation";
   const flags = item.flags || {};
-  const rw = item.receptionWorkflow || {};
-  const qualityStatus = normalizeQualityStatus(rw.qualityStatus);
-  if (flags.invoiced) return "invoiced";
-  if (flags.delivered) return "delivered";
-  if (qualityStatus === "rejected") return "qualityRejected";
-  if (qualityStatus === "rework") return "qualityRework";
-  if (flags.qualityApproved || qualityStatus === "validated") return "quality";
-  if (flags.workCompleted || (rw.sentToWorkshopAt && qualityStatus === "in_progress")) return "quality";
-  if (flags.workStarted) return "work";
-  if (item.pdfImportStatus === "chief_validation_pending") return "pdfChiefValidation";
+  if (item.archivedAt || item.status === "archived") return "archived";
+  if (flags.invoiced || item.closedAt || item.status === "closed") return "closed";
+  if (flags.workCompleted || item.status === "completed") return "completed";
+  if (flags.workStarted || item.status === "in_progress") return "in_progress";
+  if (item.pdfImportStatus === "chief_validation_pending" || item.status === "chief_validation") return "chief_validation";
 
-  const bookings = Array.isArray(state?.bookings) ? state.bookings : [];
+  const bookings = typeof getIndexedCaseBookings === "function"
+    ? getIndexedCaseBookings(item.id)
+    : (Array.isArray(state?.bookings) ? state.bookings : []);
   const hasAssignments = bookings.some((booking) => booking.caseId === item.id && booking.type !== "leave");
-  if (flags.received) return hasAssignments ? "workScheduled" : "vehicleReceived";
-  if (item.appointmentStatus === "no_show") return "noShow";
-
-  if (item.appointment) {
-    const appointmentStart = new Date(item.appointment.start);
-    const appointmentIsDue = !Number.isNaN(appointmentStart.getTime()) && appointmentStart <= new Date();
-    return appointmentIsDue ? "awaitingVehicle" : "appointmentScheduled";
-  }
-
-  if (hasRepairClaims(item)) return "appointment";
-  if (item.expertName) return "approvals";
-  return "receptionDraft";
+  if (flags.received || hasAssignments) return "in_progress";
+  return hasRepairClaims(item) || item.appointment ? "planning" : "chief_validation";
 }
 
 const DAY_LABELS = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"];
@@ -978,6 +1084,8 @@ function isApplicationLocalStorageKey(key) {
     || key.startsWith("nimr-carrosserie")
     || key.startsWith("nimr-sav-conflict-safety-snapshot:")
     || key === "nimr-sav-restore-safety-snapshot:last"
+    || key === "nimr-sav-offline-queue"
+    || key === "nimr-user-pin-unlocked"
     || normalized.startsWith("sb-")
     || normalized.includes("supabase")
     || normalized.includes("gotrue");
@@ -990,7 +1098,7 @@ function isApplicationCacheName(key) {
 }
 
 async function deleteApplicationIndexedDatabases() {
-  const names = new Set([DB_NAME]);
+  const names = new Set([DB_NAME, "nimr-sav-large-state"]);
   try {
     if (typeof indexedDB.databases === "function") {
       const databases = await indexedDB.databases();
@@ -1021,7 +1129,7 @@ function showWorkstationCleanedScreen() {
 }
 
 async function cleanLocalWorkstation() {
-  const permissionGuard = guardSensitiveAction("settings.edit");
+  const permissionGuard = guardSensitiveAction("workstation.purge");
   if (!permissionGuard.ok) return;
   const confirmed = await showPromptModal(
     "Cette action supprime les dossiers locaux, photos/documents IndexedDB, caches PWA, points de restauration, configuration Supabase et session Supabase locale de ce navigateur.<br><br>Les données déjà synchronisées dans Supabase ne sont pas supprimées.<br><br>Tapez NETTOYER pour confirmer.",
@@ -1065,10 +1173,215 @@ function uid(prefix) {
   return `${prefix}-${Math.random().toString(36).slice(2, 9)}-${Date.now().toString(36)}`;
 }
 
+function normalizeNullableDate(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : String(value);
+}
+
+function cloneMigrationValue(value) {
+  if (typeof structuredClone === "function") {
+    try {
+      return structuredClone(value);
+    } catch (error) {
+      // Le stockage JSON historique ne contient normalement que des valeurs
+      // sérialisables. Le fallback garde la migration utilisable en vieux WebView.
+    }
+  }
+  return JSON.parse(JSON.stringify(value));
+}
+
+function normalizeStringList(value) {
+  return Array.isArray(value)
+    ? [...new Set(value.map((entry) => String(entry || "").trim()).filter(Boolean))]
+    : [];
+}
+
+function normalizeWorkshopCaseStatus(value, item = {}) {
+  if (item.archivedAt) return "archived";
+  const flags = item.flags || {};
+  if (item.closedAt || flags.invoiced) return "closed";
+  if (flags.workCompleted) return "completed";
+  if (flags.workStarted) return "in_progress";
+  if (item.appointment || flags.received) return "planning";
+  if (item.pdfImportStatus === "chief_validation_pending" || item.source === "pdf_estimate") return "chief_validation";
+  if (Array.isArray(item.claims) && item.claims.length > 0) return "planning";
+  const token = normalizeRoleToken(value).replace(/\s/g, "");
+  return WORKSHOP_CASE_STATUS_ALIASES[token] || "chief_validation";
+}
+
+function normalizeDeliveryEstimate(value = {}, appointment = null) {
+  const raw = value && typeof value === "object" ? value : {};
+  const appointmentDelivery = normalizeNullableDate(appointment?.delivery);
+  const initial = normalizeNullableDate(raw.initial ?? raw.initialAt ?? raw.initialDeliveryAt) || appointmentDelivery;
+  const current = normalizeNullableDate(raw.current ?? raw.revised ?? raw.currentAt ?? raw.revisedDeliveryAt) || initial;
+  const reasons = normalizeStringList(raw.reasons || (raw.reason ? [raw.reason] : []));
+  const history = Array.isArray(raw.history)
+    ? raw.history.map((entry) => ({
+        at: normalizeNullableDate(entry?.at),
+        previous: normalizeNullableDate(entry?.previous),
+        next: normalizeNullableDate(entry?.next || entry?.value),
+        reason: String(entry?.reason || "").trim(),
+        actorId: String(entry?.actorId || entry?.userId || "").trim(),
+      }))
+    : [];
+  return {
+    initial,
+    current,
+    status: String(raw.status || (current ? "estimated" : "to_confirm")).trim(),
+    reasons,
+    history,
+  };
+}
+
+function normalizeSubcontracting(value = {}) {
+  const raw = value && typeof value === "object" ? value : {};
+  const providerResourceId = String(raw.providerResourceId || raw.subcontractorId || "").trim();
+  const assignmentSource = Array.isArray(raw.assignments)
+    ? raw.assignments
+    : (Array.isArray(raw.subcontracts) ? raw.subcontracts : []);
+  const assignments = assignmentSource.map((assignment, index) => ({
+    ...(assignment || {}),
+    id: String(assignment?.id || `subcontract-${index + 1}`),
+    taskId: String(assignment?.taskId || ""),
+    taskKey: String(assignment?.taskKey || ""),
+    taskTitle: String(assignment?.taskTitle || assignment?.title || ""),
+    providerId: String(assignment?.providerId || assignment?.providerResourceId || assignment?.subcontractorId || ""),
+    providerName: String(assignment?.providerName || assignment?.subcontractorName || ""),
+    status: String(assignment?.status || "to_schedule"),
+    plannedDepartureAt: normalizeNullableDate(assignment?.plannedDepartureAt),
+    plannedReturnAt: normalizeNullableDate(assignment?.plannedReturnAt),
+    actualDepartureAt: normalizeNullableDate(assignment?.actualDepartureAt),
+    actualReceivedAt: normalizeNullableDate(assignment?.actualReceivedAt),
+    actualReturnAt: normalizeNullableDate(assignment?.actualReturnAt),
+    bookingIds: normalizeStringList(assignment?.bookingIds),
+    resourceIds: normalizeStringList(assignment?.resourceIds),
+    history: Array.isArray(assignment?.history)
+      ? assignment.history.map((entry) => ({ ...entry, at: normalizeNullableDate(entry?.at) }))
+      : [],
+  }));
+  return {
+    enabled: Boolean(raw.enabled || providerResourceId || assignments.length),
+    providerResourceId,
+    status: String(raw.status || (providerResourceId ? "planned" : "inactive")).trim(),
+    specialty: String(raw.specialty || "").trim(),
+    resourceIds: normalizeStringList(raw.resourceIds),
+    outboundAt: normalizeNullableDate(raw.outboundAt || raw.departureAt),
+    receivedAt: normalizeNullableDate(raw.receivedAt),
+    returnPlannedAt: normalizeNullableDate(raw.returnPlannedAt),
+    returnedAt: normalizeNullableDate(raw.returnedAt),
+    transferOutMinutes: Math.max(0, Number(raw.transferOutMinutes || 0) || 0),
+    transferReturnMinutes: Math.max(0, Number(raw.transferReturnMinutes || 0) || 0),
+    notes: String(raw.notes || "").trim(),
+    history: Array.isArray(raw.history) ? raw.history.map((entry) => ({ ...entry, at: normalizeNullableDate(entry?.at) })) : [],
+    assignments,
+  };
+}
+
+function migrateLegacyState(raw, options = {}) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  const original = cloneMigrationValue(source);
+  const migratedAt = normalizeNullableDate(options.migratedAt) || null;
+  const fromVersion = Math.max(0, Number(original.dataSchemaVersion || original.schemaVersion || 0) || 0);
+  if (fromVersion >= CURRENT_DATA_SCHEMA_VERSION) {
+    return { state: original, migrated: false, fromVersion, toVersion: fromVersion, changes: [] };
+  }
+
+  const working = cloneMigrationValue(original);
+  const changes = [];
+  try {
+    if (fromVersion < 1) {
+      working.users = Array.isArray(working.users) ? working.users.map((user, index) => {
+        const canonicalRole = normalizeUserRole(user?.canonicalRole || user?.role || user?.userRole || (user?.isAdmin ? "admin" : ""));
+        return {
+          ...(user || {}),
+          id: String(user?.id || user?.userId || `legacy-user-${index + 1}`),
+          role: toRuntimeUserRole(canonicalRole),
+          canonicalRole,
+          createdAt: normalizeNullableDate(user?.createdAt),
+          updatedAt: normalizeNullableDate(user?.updatedAt || user?.createdAt),
+        };
+      }) : [];
+      working.cases = Array.isArray(working.cases) ? working.cases.map((item, index) => ({
+        ...(item || {}),
+        id: String(item?.id || `legacy-case-${index + 1}`),
+        status: normalizeWorkshopCaseStatus(item?.status, item || {}),
+      })) : [];
+      changes.push("roles-and-workshop-statuses");
+    }
+
+    if (fromVersion < 2) {
+      working.resources = Array.isArray(working.resources) ? working.resources.map((resource, index) => ({
+        ...(resource || {}),
+        id: String(resource?.id || `legacy-resource-${index + 1}`),
+        kind: String(resource?.kind || (resource?.external ? "external" : "internal")).trim(),
+        category: String(resource?.category || resource?.role || "").trim(),
+        capacity: Math.max(1, Number(resource?.capacity || 1) || 1),
+        dailyCapacityMinutes: Number.isFinite(Number(resource?.dailyCapacityMinutes)) ? Math.max(0, Number(resource.dailyCapacityMinutes)) : null,
+        calendar: resource?.calendar && typeof resource.calendar === "object" ? cloneMigrationValue(resource.calendar) : {},
+        compatibleRoles: normalizeStringList(resource?.compatibleRoles),
+        site: String(resource?.site || (resource?.external ? "external" : "internal")).trim(),
+        external: Boolean(resource?.external),
+        subcontracting: normalizeSubcontracting(resource?.subcontracting),
+      })) : [];
+      working.bookings = Array.isArray(working.bookings) ? working.bookings.map((booking, index) => {
+        const resourceIds = normalizeStringList(booking?.resourceIds || [booking?.resourceId, booking?.technicianId].filter(Boolean));
+        const segments = Array.isArray(booking?.segments) ? booking.segments.map((segment) => ({
+          start: normalizeNullableDate(segment?.start),
+          end: normalizeNullableDate(segment?.end),
+        })).filter((segment) => segment.start && segment.end) : [];
+        if (!segments.length && normalizeNullableDate(booking?.start) && normalizeNullableDate(booking?.end)) {
+          segments.push({ start: String(booking.start), end: String(booking.end) });
+        }
+        return {
+          ...(booking || {}),
+          id: String(booking?.id || `legacy-booking-${index + 1}`),
+          resourceIds,
+          equipmentResourceIds: normalizeStringList(booking?.equipmentResourceIds),
+          segments,
+          dependencies: normalizeStringList(booking?.dependencies),
+          needsScheduling: booking?.needsScheduling === true || booking?.status === "unplanned",
+          actualStart: normalizeNullableDate(booking?.actualStart || booking?.startedAt),
+          actualEnd: normalizeNullableDate(booking?.actualEnd || booking?.completedAt),
+        };
+      }) : [];
+      working.cases = Array.isArray(working.cases) ? working.cases.map((item) => ({
+        ...item,
+        plannedRepairStart: normalizeNullableDate(item?.plannedRepairStart),
+        plannedRepairEnd: normalizeNullableDate(item?.plannedRepairEnd),
+        actualRepairStart: normalizeNullableDate(item?.actualRepairStart),
+        actualRepairEnd: normalizeNullableDate(item?.actualRepairEnd),
+        materialResourceIds: normalizeStringList(item?.materialResourceIds),
+        subcontracting: normalizeSubcontracting(item?.subcontracting || { assignments: item?.subcontracts }),
+        deliveryEstimate: normalizeDeliveryEstimate(item?.deliveryEstimate, item?.appointment),
+      })) : [];
+      changes.push("resource-timeline-and-subcontracting-model");
+    }
+
+    working.dataSchemaVersion = CURRENT_DATA_SCHEMA_VERSION;
+    working.migrationLog = Array.isArray(working.migrationLog) ? working.migrationLog : [];
+    const logId = `data-migration-${fromVersion}-${CURRENT_DATA_SCHEMA_VERSION}`;
+    if (!working.migrationLog.some((entry) => entry?.id === logId)) {
+      working.migrationLog.push({
+        id: logId,
+        at: migratedAt,
+        fromVersion,
+        toVersion: CURRENT_DATA_SCHEMA_VERSION,
+        changes: [...changes],
+      });
+    }
+    return { state: working, migrated: true, fromVersion, toVersion: CURRENT_DATA_SCHEMA_VERSION, changes };
+  } catch (error) {
+    return { state: original, migrated: false, fromVersion, toVersion: fromVersion, changes: [], error };
+  }
+}
+
 function createDefaultState() {
   const today = new Date();
   const tomorrow = addDays(today, 1);
   const stateSeed = {
+    dataSchemaVersion: CURRENT_DATA_SCHEMA_VERSION,
+    migrationLog: [],
     cases: [],
     resources: [
       { id: "tolier-1", name: "Tôlier 1", role: "tolier", location: "Poste tôlerie A", active: true },
@@ -1119,9 +1432,6 @@ function createDefaultState() {
       technicianDate: todayKey(new Date()),
     },
   };
-  const admin = createBootstrapAdminUser();
-  stateSeed.users = [admin];
-  stateSeed.currentUserId = admin.id;
   return stateSeed;
 }
 
@@ -1131,9 +1441,13 @@ function parseStoredStateCandidate(raw, source) {
     const parsed = JSON.parse(raw);
     const stateCandidate = parsed?.state && Array.isArray(parsed.state.cases) ? parsed.state : parsed;
     if (!stateCandidate || !Array.isArray(stateCandidate.cases)) return null;
+    const migration = migrateLegacyState(stateCandidate, { migratedAt: new Date().toISOString() });
+    if (migration.error) throw migration.error;
     return {
       source,
-      state: normalizeState(stateCandidate),
+      state: normalizeState(migration.state, { skipMigration: true }),
+      rawState: stateCandidate,
+      migration,
       updatedAt: parsed?.savedAt || parsed?.updatedAt || parsed?.exportedAt || parsed?.state?.updatedAt || "",
       casesCount: stateCandidate.cases.length,
     };
@@ -1178,6 +1492,21 @@ function loadState() {
   if (candidates.length) {
     candidates.sort((left, right) => scoreStoredStateCandidate(right) - scoreStoredStateCandidate(left));
     const chosen = candidates[0];
+    if (chosen.migration?.migrated) {
+      try {
+        localStorage.setItem(PRE_MIGRATION_BACKUP_KEY, JSON.stringify({
+          app: BACKUP_APP_ID,
+          savedAt: new Date().toISOString(),
+          source: chosen.source,
+          fromVersion: chosen.migration.fromVersion,
+          toVersion: chosen.migration.toVersion,
+          state: chosen.rawState,
+        }));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(chosen.state));
+      } catch (error) {
+        console.warn("Copie de sécurité pré-migration impossible", error);
+      }
+    }
     if (chosen.source !== "principal") {
       console.warn(`Restauration automatique depuis sauvegarde ${chosen.source}.`);
       try {
@@ -1191,8 +1520,31 @@ function loadState() {
   return createDefaultState();
 }
 
+function normalizeRoleToken(role) {
+  return String(role || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ");
+}
+
 function normalizeUserRole(role) {
-  return Object.prototype.hasOwnProperty.call(USER_ROLES, role) ? role : "readonly";
+  const normalized = USER_ROLE_ALIASES[normalizeRoleToken(role)];
+  return normalized || "lecture_seule";
+}
+
+function isKnownUserRole(role) {
+  return Boolean(USER_ROLE_ALIASES[normalizeRoleToken(role)]);
+}
+
+function toRuntimeUserRole(role) {
+  return USER_ROLE_RUNTIME_KEYS[normalizeUserRole(role)] || "readonly";
+}
+
+function getCanonicalUserRole(user) {
+  return normalizeUserRole(user?.canonicalRole || user?.role || user?.userRole || "");
 }
 
 function createBootstrapAdminUser(seed = {}) {
@@ -1202,7 +1554,7 @@ function createBootstrapAdminUser(seed = {}) {
     authUserId: seed.authUserId || "",
     name: seed.name || seed.email || "Admin local",
     email: seed.email || "",
-    role: "admin",
+    role: "admin_technique",
     resourceId: seed.resourceId || "",
     active: seed.active !== false,
     createdAt: seed.createdAt || now,
@@ -1214,8 +1566,9 @@ function createBootstrapAdminUser(seed = {}) {
 
 function normalizeUser(user = {}, resources = []) {
   const allowedResourceIds = new Set((resources || []).map((resource) => resource.id).filter(Boolean));
-  const role = normalizeUserRole(user.role || user.userRole || (user.isAdmin ? "admin" : ""));
-  const createdAt = user.createdAt || new Date().toISOString();
+  const canonicalRole = normalizeUserRole(user.canonicalRole || user.role || user.userRole || (user.isAdmin ? "admin_technique" : ""));
+  const role = toRuntimeUserRole(canonicalRole);
+  const createdAt = normalizeNullableDate(user.createdAt);
   const resourceId = String(user.resourceId || user.technicianId || "").trim();
   return {
     id: String(user.id || user.userId || uid("user")).trim(),
@@ -1223,10 +1576,11 @@ function normalizeUser(user = {}, resources = []) {
     name: String(user.name || user.displayName || user.email || "Utilisateur atelier").trim(),
     email: String(user.email || "").trim().toLowerCase(),
     role,
+    canonicalRole,
     resourceId: !allowedResourceIds.size || allowedResourceIds.has(resourceId) ? resourceId : "",
     active: user.active !== false,
     createdAt,
-    updatedAt: user.updatedAt || createdAt,
+    updatedAt: normalizeNullableDate(user.updatedAt) || createdAt,
     pinHash: String(user.pinHash || user.userPinHash || "").trim(),
     pinSalt: String(user.pinSalt || user.userPinSalt || "").trim(),
   };
@@ -1240,11 +1594,7 @@ function normalizeUsers(users, resources = []) {
   normalized.forEach((user) => {
     if (!byId.has(user.id)) byId.set(user.id, user);
   });
-  const unique = [...byId.values()];
-  if (!unique.some((user) => user.active)) {
-    unique.push(createBootstrapAdminUser());
-  }
-  return unique;
+  return [...byId.values()];
 }
 
 function resolveCurrentUserId(currentUserId, users = []) {
@@ -1270,11 +1620,7 @@ function getUserById(userId) {
 
 function getCurrentUser() {
   const users = Array.isArray(state?.users) ? state.users : [];
-  const activeUsers = users.filter((user) => user.active !== false);
-  return activeUsers.find((user) => user.id === state.currentUserId)
-    || activeUsers.find((user) => user.role === "admin")
-    || activeUsers[0]
-    || null;
+  return users.find((user) => user.id === state.currentUserId && user.active !== false) || null;
 }
 
 function getCurrentActor() {
@@ -1286,6 +1632,7 @@ function getCurrentActor() {
     userId: user.id,
     userName: user.name || user.email || "Utilisateur atelier",
     userRole: user.role || "readonly",
+    canonicalRole: getCanonicalUserRole(user),
     resourceId: user.resourceId || "",
   };
 }
@@ -1297,14 +1644,55 @@ function setCurrentUser(userId) {
   return true;
 }
 
+function isFirstAccessRecoveryRequired(candidateState = state) {
+  return !(candidateState?.users || []).some((user) => user && user.active !== false);
+}
+
+function createFirstAccessUserLocal(userData = {}) {
+  if (!isFirstAccessRecoveryRequired()) {
+    return { ok: false, message: "Le premier accès est déjà terminé sur ce poste." };
+  }
+  const name = String(userData.name || "").trim();
+  const canonicalRole = normalizeUserRole(userData.role);
+  const allowedRoles = new Set(["admin_technique", "directeur"]);
+  if (!name) return { ok: false, message: "Le nom est obligatoire." };
+  if (!isKnownUserRole(userData.role) || !allowedRoles.has(canonicalRole)) {
+    return { ok: false, message: "Choisissez Admin technique ou Directeur SAV pour le premier accès." };
+  }
+  if (!String(userData.pinHash || "").trim() || !String(userData.pinSalt || "").trim()) {
+    return { ok: false, message: "Un PIN robuste et sa confirmation sont obligatoires." };
+  }
+  const now = new Date().toISOString();
+  const user = normalizeUser({
+    id: userData.id || uid("user"),
+    name,
+    email: userData.email || "",
+    role: canonicalRole,
+    active: true,
+    createdAt: now,
+    updatedAt: now,
+    pinHash: userData.pinHash,
+    pinSalt: userData.pinSalt,
+  }, state.resources || []);
+  state.users = [...(state.users || []).filter((candidate) => candidate?.id !== user.id), user];
+  state.currentUserId = user.id;
+  addAuditLog(
+    "users.first_access_created",
+    "Premier accès / récupération locale",
+    `Compte ${CANONICAL_USER_ROLES[canonicalRole]} créé explicitement pour ${user.name}.`,
+    { actor: { userId: user.id, userName: user.name, userRole: user.role, canonicalRole, resourceId: "" } },
+  );
+  return { ok: true, user };
+}
+
 function canDisableOrDemoteUser(userId, newRole, newActive) {
   const user = getUserById(userId);
   if (!user) return { ok: true };
-  const wasAdmin = user.role === "admin" && user.active !== false;
-  const becomesInactiveOrNonAdmin = newActive === false || newRole !== "admin";
+  const wasAdmin = getCanonicalUserRole(user) === "admin_technique" && user.active !== false;
+  const becomesInactiveOrNonAdmin = newActive === false || normalizeUserRole(newRole) !== "admin_technique";
   if (wasAdmin && becomesInactiveOrNonAdmin) {
     const otherActiveAdmins = (state.users || []).filter(
-      (u) => u.id !== userId && u.role === "admin" && u.active !== false
+      (u) => u.id !== userId && getCanonicalUserRole(u) === "admin_technique" && u.active !== false
     );
     if (otherActiveAdmins.length === 0) {
       return { ok: false, message: "Impossible de désactiver ou de retirer le rôle du dernier administrateur actif." };
@@ -1314,14 +1702,16 @@ function canDisableOrDemoteUser(userId, newRole, newActive) {
 }
 
 function createUserLocal(userData, actor = null) {
-  const resolvedActor = actor || getCurrentActor();
-  if (!hasPermission("users.manage", { user: resolvedActor })) {
-    return { ok: false, message: "Action réservée administrateur technique." };
+  // L'objet actor éventuel ne participe jamais à l'autorisation : seule la
+  // session réellement sélectionnée peut accorder users.manage.
+  const resolvedActor = getCurrentActor();
+  if (!hasPermission("users.manage")) {
+    return { ok: false, message: getPermissionDeniedMessage("users.manage") };
   }
   const name = String(userData?.name || "").trim();
   const role = String(userData?.role || "").trim();
   if (!name) return { ok: false, message: "Le nom complet est obligatoire." };
-  if (!role || !Object.prototype.hasOwnProperty.call(USER_ROLES, role)) {
+  if (!role || !isKnownUserRole(role)) {
     return { ok: false, message: "Le rôle sélectionné est invalide." };
   }
 
@@ -1329,7 +1719,9 @@ function createUserLocal(userData, actor = null) {
   const activeVal = userData?.active !== false;
   if (activeVal && emailNorm) {
     const isDuplicate = (state.users || []).some(
-      (u) => u.active !== false && String(u.email || "").trim().toLowerCase() === emailNorm && u.role === role
+      (u) => u.active !== false
+        && String(u.email || "").trim().toLowerCase() === emailNorm
+        && getCanonicalUserRole(u) === normalizeUserRole(role)
     );
     if (isDuplicate) {
       return { ok: false, message: "Un autre utilisateur actif possède déjà cet email avec le même rôle." };
@@ -1357,9 +1749,9 @@ function createUserLocal(userData, actor = null) {
 }
 
 function updateUserLocal(userId, userData, actor = null) {
-  const resolvedActor = actor || getCurrentActor();
-  if (!hasPermission("users.manage", { user: resolvedActor })) {
-    return { ok: false, message: "Action réservée administrateur technique." };
+  const resolvedActor = getCurrentActor();
+  if (!hasPermission("users.manage")) {
+    return { ok: false, message: getPermissionDeniedMessage("users.manage") };
   }
   const user = getUserById(userId);
   if (!user) return { ok: false, message: "Utilisateur introuvable." };
@@ -1367,7 +1759,7 @@ function updateUserLocal(userId, userData, actor = null) {
   const name = String(userData?.name || "").trim();
   const role = String(userData?.role || "").trim();
   if (!name) return { ok: false, message: "Le nom complet est obligatoire." };
-  if (!role || !Object.prototype.hasOwnProperty.call(USER_ROLES, role)) {
+  if (!role || !isKnownUserRole(role)) {
     return { ok: false, message: "Le rôle sélectionné est invalide." };
   }
 
@@ -1375,7 +1767,10 @@ function updateUserLocal(userId, userData, actor = null) {
   const activeVal = userData?.active !== false;
   if (activeVal && emailNorm) {
     const isDuplicate = (state.users || []).some(
-      (u) => u.id !== userId && u.active !== false && String(u.email || "").trim().toLowerCase() === emailNorm && u.role === role
+      (u) => u.id !== userId
+        && u.active !== false
+        && String(u.email || "").trim().toLowerCase() === emailNorm
+        && getCanonicalUserRole(u) === normalizeUserRole(role)
     );
     if (isDuplicate) {
       return { ok: false, message: "Un autre utilisateur actif possède déjà cet email avec le même rôle." };
@@ -1390,7 +1785,8 @@ function updateUserLocal(userId, userData, actor = null) {
   const oldActive = user.active;
 
   user.name = name;
-  user.role = role;
+  user.role = toRuntimeUserRole(role);
+  user.canonicalRole = normalizeUserRole(role);
   user.email = String(userData.email || "").trim().toLowerCase();
   user.resourceId = String(userData.resourceId || "").trim();
   user.active = newActive;
@@ -1433,7 +1829,10 @@ function updateUserLocal(userId, userData, actor = null) {
 function resolvePermissionUser(userOrId = null) {
   if (!userOrId) return getCurrentUser();
   if (typeof userOrId === "string") return getUserById(userOrId);
-  return normalizeUser(userOrId, state.resources || []);
+  // Ne jamais transformer un objet fourni par l'appelant en identité autorisée.
+  // Seul un identifiant déjà présent dans state.users peut être résolu.
+  const storedId = String(userOrId.id || userOrId.userId || "").trim();
+  return storedId ? getUserById(storedId) : null;
 }
 
 function permissionMatches(granted, requested) {
@@ -1449,14 +1848,14 @@ function hasPermission(permission, context = {}) {
   if (!requested) return false;
   const user = resolvePermissionUser(context.user || context.userId);
   if (!user || user.active === false) return false;
-  const permissions = ROLE_PERMISSIONS[user.role] || [];
+  const permissions = ROLE_PERMISSIONS[getCanonicalUserRole(user)] || [];
   return permissions.some((granted) => permissionMatches(granted, requested));
 }
 
 function requirePermission(permission, context = {}) {
   const allowed = hasPermission(permission, context);
   if (!allowed && context.notify !== false && typeof notifyUser === "function") {
-    notifyUser(context.message || "Action non autorisée pour ce rôle utilisateur.", "error");
+    notifyUser(context.message || getPermissionDeniedMessage(permission, context), "error");
   }
   return allowed;
 }
@@ -1464,40 +1863,18 @@ function requirePermission(permission, context = {}) {
 function getPermissionDeniedMessage(permission, context = {}) {
   const requested = String(permission || "").trim();
   const user = resolvePermissionUser(context.user || context.userId);
-  const role = user?.role || "";
   if (context.item && isCaseReadonlyArchive(context.item) && MUTATION_PERMISSIONS.includes(requested)) {
     return getArchivedCaseMessage(context.item);
   }
-  if (!user) return "Aucun utilisateur actif n'est sélectionné. Choisissez une session utilisateur avant de continuer.";
-  if (user.active === false) return "Utilisateur inactif. Sélectionnez un compte actif pour continuer.";
-  if (role === "readonly" && MUTATION_PERMISSIONS.includes(requested)) return "Mode lecture seule : modification impossible. Connectez-vous avec un rôle autorisé pour enregistrer des changements.";
-  if (requested === "case.delete") return "Suppression réservée administrateur technique. Demandez une validation avant de supprimer un dossier.";
-  if (requested === "supabase.configure") return "Configuration Supabase réservée administrateur. Connectez-vous avec un administrateur technique.";
-  if (requested === "import.backup") return "Import sauvegarde réservé administrateur technique. Vérifiez le rôle actif avant restauration complète.";
-  if (requested === "settings.edit" || requested === "users.manage") return "Action réservée administrateur technique. Vérifiez la session active.";
-  if (requested === "export.backup") return "Export sauvegarde réservé directeur SAV/chef atelier/admin technique. Demandez un export à un responsable autorisé.";
-  if (requested === "quality.validate" || requested === "quality.reject") return "Action réservée qualité/chef atelier/admin. Vérifiez le rôle de la session active.";
-  if (requested === "case.close") return "Clôture atelier réservée chef atelier/admin. Finalisez depuis une session responsable.";
-  if (requested === "delivery.complete") return "Action héritée réservée réception/directeur SAV/chef atelier/admin technique.";
-  if (["case.create", "case.edit", "estimate.import", "appointment.schedule", "schedule_appointment", "vehicle.receive", "receive_vehicle"].includes(requested)) {
-    return "Action réservée réception/chef atelier/admin. Connectez-vous avec un rôle autorisé.";
-  }
-  if (requested === "task.override" || requested === "planning.edit") return "Action réservée chef atelier/admin. Demandez un ajustement planning à un responsable.";
-  if (requested.startsWith("task.")) {
-    if (role === "technicien" && !user.resourceId) return "Aucune ressource technicien liée à cet utilisateur. Associez le profil à une ressource atelier.";
-    if (role === "technicien" && context.booking && !canActOnTechnicianTask(user, context.booking)) {
-      return "Cette tâche est affectée à un autre technicien. Seul le technicien assigné ou un responsable peut agir.";
-    }
-    if (role === "readonly") return "Mode lecture seule : modification impossible. Connectez-vous avec un rôle atelier autorisé.";
-    if (role === "reception" || role === "qualite") return "Action réservée au technicien affecté ou au chef atelier/admin.";
-  }
-  return "Permission insuffisante. Vérifiez le rôle de la session active.";
+  const role = user ? getCanonicalUserRole(user) : "aucun";
+  return `Action non autorisée pour le rôle utilisateur : ${role}`;
 }
 
 function guardAction(permission, context = {}, options = {}) {
   const requested = String(permission || "").trim();
-  const user = resolvePermissionUser(context.user || context.userId);
-  let allowed = hasPermission(requested, { user });
+  // Une frontière de mutation ne peut jamais changer d'acteur via context.
+  const user = getCurrentUser();
+  let allowed = hasPermission(requested);
   if (allowed && context.item && isCaseReadonlyArchive(context.item) && MUTATION_PERMISSIONS.includes(requested)) {
     allowed = false;
   }
@@ -1596,8 +1973,7 @@ function guardArchivedCaseMutation(permission, item, context = {}, options = {})
 // facturation/clôture/archive/suppression rend le dossier totalement lecture seule.
 function isCaseArchived(item) {
   if (!item) return false;
-  const flags = item.flags || {};
-  return Boolean(flags.invoiced || item.closedAt || item.archivedAt || item.deletedAt);
+  return Boolean(item.archivedAt || item.deletedAt || item.status === "archived");
 }
 
 function isCaseReadonlyArchive(item) {
@@ -1607,12 +1983,12 @@ function isCaseReadonlyArchive(item) {
 function isCaseOperationallyClosed(item) {
   if (!item) return false;
   const flags = item.flags || {};
-  return Boolean(isCaseArchived(item) || flags.delivered || flags.invoiced || item.closedAt || item.deletedAt);
+  return Boolean(isCaseArchived(item) || flags.invoiced || item.closedAt || ["closed", "archived"].includes(item.status) || item.deletedAt);
 }
 
 function getArchivedCaseMessage(item) {
   if (!isCaseReadonlyArchive(item)) return "";
-  return "Dossier clôturé — aucune action requise.";
+  return "Dossier archivé — consultation uniquement.";
 }
 
 function getWorkflowActionPermission(action, checked = true) {
@@ -1621,6 +1997,8 @@ function getWorkflowActionPermission(action, checked = true) {
   if (action === "received") return "vehicle.receive";
   if (action === "qualityApproved") return checked ? "quality.validate" : "quality.reject";
   if (action === "delivered") return "delivery.complete";
+  if (action === "close") return "case.close";
+  if (action === "archive") return "case.archive";
   if (action === "invoiced") return "case.close";
   return "";
 }
@@ -1687,33 +2065,34 @@ function guardSensitiveAction(permission, context = {}, options = {}) {
 }
 
 function isWorkshopManager(user = getCurrentUser()) {
-  const role = resolvePermissionUser(user)?.role || "";
-  return role === "admin" || role === "chef_atelier";
+  const resolved = resolvePermissionUser(user);
+  const role = resolved ? getCanonicalUserRole(resolved) : "";
+  return role === "admin_technique" || role === "chef_atelier";
 }
 
 function isReadOnlyMode() {
-  return getCurrentUser()?.role === "readonly";
+  return getCanonicalUserRole(getCurrentUser()) === "lecture_seule";
 }
 
 function canActOnTechnicianTask(user, booking) {
   const resolvedUser = resolvePermissionUser(user);
   if (!resolvedUser || !booking || resolvedUser.active === false) return false;
   if (isWorkshopManager(resolvedUser)) return true;
-  if (resolvedUser.role !== "technicien" || !resolvedUser.resourceId) return false;
+  if (getCanonicalUserRole(resolvedUser) !== "technicien" || !resolvedUser.resourceId) return false;
   return (booking.resourceIds || []).includes(resolvedUser.resourceId);
 }
 
 function syncCurrentUserWithSupabaseAuth(authUser) {
   if (!authUser?.id) return false;
   state.users = normalizeUsers(state.users, state.resources);
-  let user = state.users.find((candidate) => candidate.authUserId === authUser.id)
-    || state.users.find((candidate) => authUser.email && candidate.email === String(authUser.email).toLowerCase());
-  if (!user) {
-    user = getCurrentUser() || createBootstrapAdminUser();
-    if (!state.users.some((candidate) => candidate.id === user.id)) state.users.push(user);
-  }
+  const normalizedEmail = String(authUser.email || "").trim().toLowerCase();
+  const user = state.users.find((candidate) => candidate.active !== false && candidate.authUserId === authUser.id)
+    || state.users.find((candidate) => candidate.active !== false && normalizedEmail && candidate.email === normalizedEmail);
+  // Un compte cloud inconnu n'hérite jamais du compte local courant et ne crée
+  // jamais d'administrateur implicite.
+  if (!user) return false;
   user.authUserId = authUser.id;
-  user.email = String(authUser.email || user.email || "").trim().toLowerCase();
+  user.email = normalizedEmail || user.email;
   if (!user.name || user.name === "Admin local") user.name = user.email || "Utilisateur Supabase";
   user.updatedAt = new Date().toISOString();
   state.currentUserId = user.id;
@@ -1731,8 +2110,12 @@ function isLegacyDemoSeedCase(item) {
   );
 }
 
-function normalizeState(raw) {
+function normalizeState(raw, options = {}) {
   raw = raw && typeof raw === "object" ? raw : {};
+  if (!options.skipMigration) {
+    const migration = migrateLegacyState(raw, { migratedAt: options.migratedAt || new Date().toISOString() });
+    if (!migration.error) raw = migration.state;
+  }
   const seed = createDefaultState();
   const resources = Array.isArray(raw.resources) ? raw.resources.map(normalizeResource) : seed.resources;
   seed.resources.forEach((defaultResource) => {
@@ -1745,9 +2128,23 @@ function normalizeState(raw) {
   const users = normalizeUsers(raw.users, resources);
   const currentUserId = resolveCurrentUserId(raw.currentUserId, users);
   linkResourcesToUsers(resources, users);
+  const bookings = normalizeBookings(raw.bookings, resources);
+  const realBookingCaseIds = new Set(bookings
+    .filter((booking) => booking.type !== "leave" && booking.temporary !== true && !booking.needsScheduling && booking.status !== "cancelled" && !booking.deletedAt)
+    .map((booking) => booking.caseId));
   return {
+    dataSchemaVersion: CURRENT_DATA_SCHEMA_VERSION,
+    migrationLog: Array.isArray(raw.migrationLog)
+      ? raw.migrationLog.map((entry) => ({
+          id: String(entry?.id || "").trim(),
+          at: normalizeNullableDate(entry?.at),
+          fromVersion: Math.max(0, Number(entry?.fromVersion || 0) || 0),
+          toVersion: Math.max(0, Number(entry?.toVersion || 0) || 0),
+          changes: normalizeStringList(entry?.changes),
+        })).filter((entry) => entry.id)
+      : [],
     cases: Array.isArray(raw.cases)
-      ? raw.cases.filter((item) => !isLegacyDemoSeedCase(item)).map((c) => normalizeCase(c, raw.bookings))
+      ? raw.cases.filter((item) => !isLegacyDemoSeedCase(item)).map((c) => normalizeCase(c, bookings, realBookingCaseIds))
       : seed.cases,
     resources,
     users,
@@ -1755,7 +2152,7 @@ function normalizeState(raw) {
     auditLog: normalizeAuditLog(raw.auditLog),
     syncLog: normalizeSyncLog(raw.syncLog),
     syncConflicts: normalizeSyncConflicts(raw.syncConflicts),
-    bookings: normalizeBookings(raw.bookings, resources),
+    bookings,
     holidays: Array.isArray(raw.holidays) ? raw.holidays : seed.holidays,
     planningDate: raw.planningDate || todayKey(new Date()),
     settings: {
@@ -1816,6 +2213,22 @@ function normalizeStepPreferredResources(value = {}) {
   return normalized;
 }
 
+function normalizeStepExecutionModes(value = {}) {
+  const normalized = {};
+  DURATIONS.forEach(([key]) => {
+    normalized[key] = value?.[key] === "external" ? "external" : "internal";
+  });
+  return normalized;
+}
+
+function normalizeStepSubcontractorIds(value = {}) {
+  const normalized = {};
+  DURATIONS.forEach(([key]) => {
+    normalized[key] = typeof value?.[key] === "string" ? value[key] : "";
+  });
+  return normalized;
+}
+
 function normalizeStepAssignmentLocks(value = {}) {
   const normalized = {};
   DURATIONS.forEach(([key]) => {
@@ -1862,8 +2275,11 @@ function normalizeDurations(durations = {}) {
     const value = parseLocalizedDecimal(durations[key] ?? normalized[key]);
     normalized[key] = Math.min(MAX_STEP_DURATION_HOURS, Math.max(0, roundHours(value)));
   });
-  const productiveTotal = ESTIMATE_PLANNING_KEYS.reduce((sum, key) => sum + Number(normalized[key] || 0), 0);
-  normalized.quality = productiveTotal > 0 ? 0.25 : 0;
+  // Aucun contrôle qualité séparé n'est ajouté implicitement. Une durée de
+  // contrôle final n'existe que si elle est explicitement fournie.
+  normalized.quality = Object.prototype.hasOwnProperty.call(durations || {}, "quality")
+    ? Math.min(MAX_STEP_DURATION_HOURS, Math.max(0, roundHours(parseLocalizedDecimal(durations.quality))))
+    : 0;
   return normalized;
 }
 
@@ -1881,7 +2297,7 @@ function normalizeBookingStatus(value, temporary = false) {
   };
   const raw = String(value || "").trim();
   const normalized = aliases[raw] || raw;
-  return ["planned", "started", "paused", "completed", "temporary"].includes(normalized)
+  return ["unplanned", "planned", "started", "paused", "blocked", "completed", "cancelled", "temporary"].includes(normalized)
     ? normalized
     : (temporary ? "temporary" : "planned");
 }
@@ -1932,7 +2348,14 @@ function normalizeBooking(booking, resourceIds) {
     : [];
   const type = booking.type || "work";
   const caseId = booking.caseId || (type === "leave" ? "__leave__" : "");
-  if (!caseId || !ids.length || !segments.length) return null;
+  const explicitlyUnplanned = booking.needsScheduling === true || booking.status === "unplanned";
+  // Une tâche volontairement non planifiée peut ne pas encore avoir de
+  // ressource ou de segment. En revanche, une ancienne réservation qui
+  // prétend être planifiée mais dont les références/dates sont invalides est
+  // corrompue et doit être ignorée au lieu d'être transformée silencieusement.
+  if ((!ids.length || !segments.length) && !explicitlyUnplanned) return null;
+  const needsScheduling = Boolean(explicitlyUnplanned || !ids.length || !segments.length);
+  if (!caseId || (needsScheduling && type === "leave")) return null;
   const id = booking.id || uid(type === "leave" ? "leave" : "booking");
   const parentBookingId = booking.parentBookingId || "";
   return {
@@ -1941,8 +2364,8 @@ function normalizeBooking(booking, resourceIds) {
     type,
     title: booking.title || (type === "leave" ? "Congé / absence" : "Travail atelier"),
     key: booking.key || (type === "leave" ? "leave" : "body"),
-    start: booking.start || segments[0].start,
-    end: booking.end || segments.at(-1).end,
+    start: normalizeNullableDate(booking.start || segments[0]?.start),
+    end: normalizeNullableDate(booking.end || segments.at(-1)?.end),
     delivery: booking.delivery || "",
     resourceIds: ids,
     primaryResourceId: booking.primaryResourceId || ids[0] || null,
@@ -1950,16 +2373,17 @@ function normalizeBooking(booking, resourceIds) {
       ? booking.equipmentResourceIds.filter((id) => ids.includes(id))
       : ids.slice(1),
     segments,
-    plannedStart: booking.plannedStart || booking.start || segments[0].start,
-    plannedEnd: booking.plannedEnd || booking.end || segments.at(-1).end,
+    plannedStart: normalizeNullableDate(booking.plannedStart || booking.start || segments[0]?.start),
+    plannedEnd: normalizeNullableDate(booking.plannedEnd || booking.end || segments.at(-1)?.end),
     plannedSegments: Array.isArray(booking.plannedSegments) && booking.plannedSegments.length ? booking.plannedSegments : segments,
     plannedMinutes: Number(booking.plannedMinutes || 0) || segments.reduce((sum, segment) => sum + diffMinutes(new Date(segment.start), new Date(segment.end)), 0),
-    status: normalizeBookingStatus(booking.status, booking.temporary),
-    actualStart: booking.actualStart || booking.startedAt || "",
-    actualEnd: booking.actualEnd || booking.completedAt || "",
-    startedAt: booking.startedAt || booking.actualStart || "",
+    status: needsScheduling ? "unplanned" : normalizeBookingStatus(booking.status, booking.temporary),
+    needsScheduling,
+    actualStart: normalizeNullableDate(booking.actualStart || booking.startedAt),
+    actualEnd: normalizeNullableDate(booking.actualEnd || booking.completedAt),
+    startedAt: normalizeNullableDate(booking.startedAt || booking.actualStart),
     startedBy: booking.startedBy || "",
-    completedAt: booking.completedAt || "",
+    completedAt: normalizeNullableDate(booking.completedAt || booking.actualEnd),
     completedBy: booking.completedBy || "",
     completedByOverride: booking.completedByOverride || "",
     pausedAt: booking.pausedAt || "",
@@ -1978,6 +2402,22 @@ function normalizeBooking(booking, resourceIds) {
     remainingMinutes: Number(booking.remainingMinutes || 0) || 0,
     parentBookingId,
     businessTaskId: booking.businessTaskId || parentBookingId || id,
+    taskId: booking.taskId || booking.businessTaskId || parentBookingId || id,
+    dependencies: normalizeStringList(booking.dependencies || booking.dependsOn),
+    parallelizable: booking.parallelizable === true,
+    vehicleExclusive: booking.vehicleExclusive !== false,
+    vehicleLocation: String(booking.vehicleLocation || booking.vehicleSite || booking.site || (booking.subcontractId ? "external" : "internal")),
+    requiredRole: String(booking.requiredRole || ""),
+    requiredCategory: String(booking.requiredCategory || ""),
+    requiredRolesByResource: booking.requiredRolesByResource && typeof booking.requiredRolesByResource === "object" ? { ...booking.requiredRolesByResource } : {},
+    requiredCategoriesByResource: booking.requiredCategoriesByResource && typeof booking.requiredCategoriesByResource === "object" ? { ...booking.requiredCategoriesByResource } : {},
+    resourceUnits: booking.resourceUnits && typeof booking.resourceUnits === "object" ? { ...booking.resourceUnits } : {},
+    capacityUnits: Math.max(1, Number(booking.capacityUnits || 1) || 1),
+    serviceMode: String(booking.serviceMode || (booking.subcontractId ? "external" : "internal")),
+    subcontractId: String(booking.subcontractId || ""),
+    subcontractPhase: String(booking.subcontractPhase || ""),
+    initialPlannedStart: normalizeNullableDate(booking.initialPlannedStart),
+    initialPlannedEnd: normalizeNullableDate(booking.initialPlannedEnd),
     supersededBy: booking.supersededBy || "",
     remainingFromPaused: Boolean(booking.remainingFromPaused),
     rescheduledAt: booking.rescheduledAt || "",
@@ -1996,13 +2436,49 @@ function isValidDateValue(value) {
 }
 
 function normalizeResource(resource) {
+  resource = resource && typeof resource === "object" ? resource : {};
+  const role = String(resource.role || resource.category || "tolier").trim();
+  const external = Boolean(resource.external || ["external", "externe"].includes(String(resource.site || resource.kind || "").toLowerCase()));
+  const capacity = Math.max(1, Number(resource.capacity ?? resource.simultaneousCapacity ?? 1) || 1);
+  const outboundTransferMinutes = Math.max(0, Number(resource.outboundTransferMinutes ?? resource.transferOutMinutes ?? 0) || 0);
+  const returnTransferMinutes = Math.max(0, Number(resource.returnTransferMinutes ?? resource.transferReturnMinutes ?? 0) || 0);
+  const standardLeadTimeMinutes = Math.max(0, Number(resource.standardLeadTimeMinutes ?? resource.standardDelayMinutes ?? resource.delayMinutes ?? 0) || 0);
+  const minimumLeadTimeMinutes = Math.max(0, Number(resource.minimumLeadTimeMinutes ?? resource.minimumDelayMinutes ?? 0) || 0);
   return {
     id: resource.id || uid("resource"),
     name: resource.name || "Ressource",
-    role: resource.role || "tolier",
+    role,
+    type: String(resource.type || (external ? "external_resource" : "resource")),
+    kind: String(resource.kind || (external ? "external" : "internal")),
+    category: String(resource.category || role),
     location: resource.location || "",
     active: resource.active !== false,
     fastLane: Boolean(resource.fastLane),
+    capacity,
+    simultaneousCapacity: Math.max(1, Number(resource.simultaneousCapacity ?? capacity) || capacity),
+    dailyCapacityMinutes: Number.isFinite(Number(resource.dailyCapacityMinutes)) ? Math.max(0, Number(resource.dailyCapacityMinutes)) : null,
+    calendar: resource.calendar && typeof resource.calendar === "object" ? cloneMigrationValue(resource.calendar) : {},
+    compatibleRoles: normalizeStringList(resource.compatibleRoles?.length ? resource.compatibleRoles : [role]),
+    specialties: normalizeStringList(resource.specialties || resource.specialites),
+    site: String(resource.site || (external ? "external" : "internal")),
+    external,
+    contact: resource.contact && typeof resource.contact === "object" ? { ...resource.contact } : {},
+    constraints: resource.constraints && typeof resource.constraints === "object" ? cloneMigrationValue(resource.constraints) : {},
+    outboundTransferMinutes,
+    transferOutMinutes: outboundTransferMinutes,
+    returnTransferMinutes,
+    transferReturnMinutes: returnTransferMinutes,
+    standardLeadTimeMinutes,
+    standardDelayMinutes: standardLeadTimeMinutes,
+    minimumLeadTimeMinutes,
+    minimumDelayMinutes: minimumLeadTimeMinutes,
+    externalResourceIds: normalizeStringList(resource.externalResourceIds),
+    externalTechnicianId: String(resource.externalTechnicianId || ""),
+    preparationZoneId: String(resource.preparationZoneId || ""),
+    paintBoothId: String(resource.paintBoothId || ""),
+    transportResourceId: String(resource.transportResourceId || ""),
+    reservationHistory: Array.isArray(resource.reservationHistory) ? resource.reservationHistory.map((entry) => ({ ...entry })) : [],
+    subcontracting: normalizeSubcontracting(resource.subcontracting),
     userId: resource.userId || "",
     authUserId: resource.authUserId || "",
   };
@@ -2032,7 +2508,7 @@ function hasRealBooking(caseId, bookings) {
   });
 }
 
-function normalizeCase(item, bookings) {
+function normalizeCase(item, bookings, realBookingCaseIds = null) {
   item = item && typeof item === "object" ? item : {};
   const caseId = item.id || "";
   const normalizedPartsStatus = normalizePartsStatus(item.partsStatus);
@@ -2041,9 +2517,18 @@ function normalizeCase(item, bookings) {
   const blockerSource = ["manual", "task"].includes(item.blockerSource)
     ? item.blockerSource
     : (hasLegacyBlocker ? "manual" : "");
+  const normalizedClaims = normalizeRepairClaims(item.claims, item);
+  const normalizedDurations = normalizeDurations(item.durations);
+  const hasExplicitDurations = ESTIMATE_ALLOWED_KEYS.some((key) => Object.prototype.hasOwnProperty.call(item.durations || {}, key));
+  if (!hasExplicitDurations) {
+    const derived = deriveDurationsFromClaims(normalizedClaims);
+    ESTIMATE_ALLOWED_KEYS.forEach((key) => {
+      normalizedDurations[key] = derived[key];
+    });
+  }
 
   let appointmentStatus = item.appointmentStatus;
-  const hasBooking = hasRealBooking(caseId, bookings);
+  const hasBooking = realBookingCaseIds instanceof Set ? realBookingCaseIds.has(caseId) : hasRealBooking(caseId, bookings);
   if (hasBooking) {
     appointmentStatus = "scheduled";
   } else {
@@ -2054,12 +2539,12 @@ function normalizeCase(item, bookings) {
 
   return {
     id: caseId || uid("case"),
-    clientName: item.clientName || "Client",
+    clientName: item.clientName || "À compléter",
     phone: item.phone || "",
     ownerName: item.ownerName || item.companyName || item.owner || "",
     driverName: item.driverName || item.depositorName || item.broughtBy || "",
     driverPhone: item.driverPhone || item.depositorPhone || "",
-    vehicle: item.vehicle || "",
+    vehicle: item.vehicle || "À compléter",
     plate: item.plate || "",
     color: item.color || "",
     planningColor: isValidVehiclePlanningColor(item.planningColor) ? item.planningColor : "",
@@ -2086,12 +2571,17 @@ function normalizeCase(item, bookings) {
     expertPhone: item.expertPhone || "",
     expertEmail: item.expertEmail || "",
     expertEstimate: normalizeExpertEstimate(item.expertEstimate),
-    createdAt: item.createdAt || new Date().toISOString(),
+    createdAt: normalizeNullableDate(item.createdAt),
     history: normalizeHistory(item.history, item.createdAt),
     photos: Array.isArray(item.photos) ? item.photos.map(normalizePhotoMeta) : [],
-    durations: normalizeDurations(item.durations),
+    durations: normalizedDurations,
+    planningTasks: Array.isArray(item.planningTasks || item.tasks)
+      ? cloneMigrationValue(item.planningTasks || item.tasks)
+      : [],
     stepServiceTypes: normalizeStepServiceTypes(item.stepServiceTypes),
     stepPreferredResources: normalizeStepPreferredResources(item.stepPreferredResources),
+    stepExecutionModes: normalizeStepExecutionModes(item.stepExecutionModes),
+    stepSubcontractorIds: normalizeStepSubcontractorIds(item.stepSubcontractorIds),
     stepAssignmentLocks: normalizeStepAssignmentLocks(item.stepAssignmentLocks),
     flags: {
       expertApproved: false,
@@ -2105,18 +2595,31 @@ function normalizeCase(item, bookings) {
       ...(item.flags || {}),
     },
     appointmentStatus,
+    status: normalizeWorkshopCaseStatus(item.status, item),
     qualityChecklist: normalizeQualityChecklist(item.qualityChecklist),
     appointment: item.appointment || null,
-    claims: normalizeRepairClaims(item.claims, item),
+    claims: normalizedClaims,
     customerClaims: Array.isArray(item.customerClaims) ? item.customerClaims.map(normalizeCustomerClaim).filter(Boolean) : [],
     receptionWorkflow: normalizeReceptionWorkflow(item.receptionWorkflow),
     supplements: normalizeRepairSupplements(item.supplements),
-    closedAt: item.closedAt || "",
-    archivedAt: item.archivedAt || "",
+    plannedRepairStart: normalizeNullableDate(item.plannedRepairStart || item.appointment?.start),
+    plannedRepairEnd: normalizeNullableDate(item.plannedRepairEnd || item.appointment?.end),
+    actualRepairStart: normalizeNullableDate(item.actualRepairStart),
+    actualRepairEnd: normalizeNullableDate(item.actualRepairEnd),
+    initialEstimatedDelivery: normalizeNullableDate(item.initialEstimatedDelivery || item.deliveryEstimate?.initial || item.appointment?.delivery),
+    revisedEstimatedDelivery: normalizeNullableDate(item.revisedEstimatedDelivery || item.deliveryEstimate?.current || item.deliveryEstimate?.revised || item.appointment?.delivery),
+    deliveryEstimate: normalizeDeliveryEstimate(item.deliveryEstimate, item.appointment),
+    totalPlannedMinutes: Math.max(0, Number(item.totalPlannedMinutes || 0) || 0),
+    totalActualMinutes: Math.max(0, Number(item.totalActualMinutes || 0) || 0),
+    estimatedDelayMinutes: Math.max(0, Number(item.estimatedDelayMinutes || 0) || 0),
+    materialResourceIds: normalizeStringList(item.materialResourceIds),
+    subcontracting: normalizeSubcontracting(item.subcontracting || { assignments: item.subcontracts }),
+    closedAt: normalizeNullableDate(item.closedAt),
+    archivedAt: normalizeNullableDate(item.archivedAt),
     deletedAt: item.deletedAt || "",
     deletedBy: item.deletedBy || "",
     deleteReason: item.deleteReason || "",
-    updatedAt: item.updatedAt || item.createdAt || new Date().toISOString(),
+    updatedAt: normalizeNullableDate(item.updatedAt || item.createdAt),
     updatedBy: item.updatedBy || "",
     localRevision: Number(item.localRevision || 0),
     syncRevision: Number(item.syncRevision || 0),
@@ -2334,13 +2837,19 @@ function recomputeCaseDurationsFromClaims(item) {
     });
   });
   const hasInsuranceClaim = includedClaims.some((claim) => isInsuranceRepairClaim(claim));
-  const productiveTotal = ["body", "oilService", "mechanical", "electrical", "prep", "paint", "reassembly"].reduce((sum, key) => sum + Number(totals[key] || 0), 0);
-  if (hasInsuranceClaim) {
+  const hasPdfEstimate = includedClaims.some((claim) => {
+    const estimate = claim?.estimate || {};
+    return [...(estimate.lines || []), ...(estimate.originalLines || [])].some((line) => (
+      line?.source === "pdf_estimate"
+      || (line?.allocations || []).some((allocation) => allocation?.source === "pdf_estimate")
+    ));
+  });
+  if (hasInsuranceClaim && !hasPdfEstimate) {
     totals.finish = roundHours(Number(totals.paint || 0) * 0.5);
-    totals.quality = Math.max(0.25, roundHours(Number(totals.quality || 0)));
+    totals.quality = Math.max(0, roundHours(Number(totals.quality || 0)));
   } else {
-    totals.finish = 0;
-    totals.quality = Math.max(roundHours(Number(totals.quality || 0)), productiveTotal > 0 ? 0.25 : 0);
+    totals.finish = Math.max(0, roundHours(Number(totals.finish || 0)));
+    totals.quality = Math.max(0, roundHours(Number(totals.quality || 0)));
   }
   DURATIONS.forEach(([key]) => {
     item.durations[key] = roundHours(totals[key] || 0);
@@ -2473,9 +2982,35 @@ function normalizeExpertEstimateLine(line) {
     operation: line.operation || "",
     laborHours: roundHours(laborHours),
     requiredRole: line.requiredRole || "",
+    sourceLineIds: Array.isArray(line.sourceLineIds) ? [...new Set(line.sourceLineIds.filter(Boolean).map(String))] : [],
+    sourceOperations: Array.isArray(line.sourceOperations) ? [...new Set(line.sourceOperations.filter(Boolean).map(String))] : [],
     source: line.source === "pdf_estimate" ? "pdf_estimate" : (line.source || ""),
     status: ["ready_for_validation", "validated"].includes(line.status) ? line.status : "",
   };
+}
+
+function deriveDurationsFromClaims(claims = []) {
+  const durations = Object.fromEntries(ESTIMATE_ALLOWED_KEYS.map((key) => [key, 0]));
+  (claims || []).filter((claim) => claim?.includeInPlanning !== false).forEach((claim) => {
+    const estimate = claim.estimate || {};
+    const lines = Array.isArray(estimate.originalLines) && estimate.originalLines.length
+      ? estimate.originalLines
+      : (Array.isArray(estimate.lines) ? estimate.lines : []);
+    lines.forEach((line) => {
+      const allocations = Array.isArray(line?.allocations) && line.allocations.length
+        ? line.allocations
+        : [{ phase: line?.phase, laborHours: line?.laborHours }];
+      allocations.forEach((allocation) => {
+        const phase = String(allocation?.phase || "");
+        if (!Object.prototype.hasOwnProperty.call(durations, phase)) return;
+        durations[phase] += Math.max(0, Number(allocation?.laborHours || 0) || 0);
+      });
+    });
+  });
+  ESTIMATE_ALLOWED_KEYS.forEach((key) => {
+    durations[key] = Math.min(MAX_STEP_DURATION_HOURS, roundHours(durations[key]));
+  });
+  return durations;
 }
 
 function normalizeExpertEstimateOriginalLine(line) {
@@ -2484,10 +3019,11 @@ function normalizeExpertEstimateOriginalLine(line) {
   const operation = line.operation || line.text || "";
   const keepPdfFallbackAllocation = line.source === "pdf_estimate" && operation.trim() === "Travaux atelier à préciser";
   const allocations = Array.isArray(line.allocations)
-    ? line.allocations.map((allocation) => ({
+      ? line.allocations.map((allocation) => ({
         phase: DURATIONS.some(([key]) => key === allocation.phase) ? allocation.phase : "body",
         operation: allocation.operation || line.operation || "",
         laborHours: roundHours(parseLocalizedDecimal(allocation.laborHours ?? allocation.hours ?? 0)),
+        sourceLineId: allocation.sourceLineId || line.id || "",
         requiredRole: allocation.requiredRole || "",
         source: allocation.source === "pdf_estimate" ? "pdf_estimate" : (allocation.source || ""),
         status: ["ready_for_validation", "validated"].includes(allocation.status) ? allocation.status : "",
@@ -2518,24 +3054,20 @@ function normalizeHistory(history, fallbackDate) {
     ? history
         .map((entry) => ({
           id: entry.id || uid("history"),
-          at: entry.at || fallbackDate || new Date().toISOString(),
+          at: normalizeNullableDate(entry.at || fallbackDate),
           type: entry.type || "note",
           label: entry.label || "Action dossier",
           details: entry.details || "",
           user: entry.user || entry.userName || "Atelier",
           userId: entry.userId || "",
           userName: entry.userName || entry.user || "Atelier",
-          userRole: normalizeUserRole(entry.userRole || "") === "readonly" && !entry.userRole ? "" : normalizeUserRole(entry.userRole),
+          userRole: !entry.userRole ? "" : normalizeUserRole(entry.userRole),
           resourceId: entry.resourceId || "",
         }))
         .filter((entry) => entry.label)
     : [];
 
-  if (!normalized.length) {
-    normalized.push(makeHistoryEntry("case.created", "Dossier créé", fallbackDate || new Date().toISOString()));
-  }
-
-  return normalized.sort((a, b) => new Date(b.at) - new Date(a.at));
+  return normalized.sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0));
 }
 
 function normalizeAuditLog(entries) {
@@ -2810,7 +3342,7 @@ function resolveSyncConflict(conflictIdOrKey, action = "mark_resolved") {
       // Save a silent local case snapshot
       const snapshotKey = `nimr-sav-conflict-safety-snapshot:${caseId}:${conflictId}`;
       const snapshotPayload = {
-        version: "v23.2.7",
+        version: "v23.2.8-full-audit",
         timestamp: new Date().toISOString(),
         cases: [JSON.parse(JSON.stringify(localCase))],
         source: "conflict_safety_snapshot"
@@ -3201,19 +3733,64 @@ function clearLocalUserChangeAt() {
 function saveState(options = {}) {
   try {
     const modified = detectAndIncrementCaseRevisions();
-    if (modified && !options.skipCloud && typeof navigator !== "undefined" && navigator.onLine === false) {
-      if (typeof enqueueOfflineAction === "function") {
-        enqueueOfflineAction("sync_push", "Modification locale hors ligne");
-      }
+    const offline = typeof navigator !== "undefined" && navigator.onLine === false;
+    if (modified && !options.skipCloud && offline && typeof enqueueOfflineAction === "function") {
+      enqueueOfflineAction("sync_push", "Modification locale hors ligne");
     }
-    const envelope = buildAutosaveEnvelope();
+    const largeState = typeof shouldPersistStateInIndexedDb === "function" && shouldPersistStateInIndexedDb(state);
+    const envelope = largeState ? null : buildAutosaveEnvelope();
+    let indexedDbWrite = Promise.resolve(true);
+    if (largeState) {
+      const savedAt = new Date().toISOString();
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ app: BACKUP_APP_ID, largeState: true, savedAt, casesCount: state.cases.length }));
+      localStorage.removeItem(STORAGE_MIRROR_KEY);
+      localStorage.setItem(STORAGE_META_KEY, JSON.stringify({ savedAt, appVersion: APP_VERSION, casesCount: state.cases.length, largeState: true }));
+      if (typeof sessionStorage !== "undefined") sessionStorage.removeItem(SESSION_EMERGENCY_KEY);
+      if (typeof persistLargeStateSnapshot === "function") {
+        indexedDbWrite = persistLargeStateSnapshot(state, { appVersion: APP_VERSION, reason: options.cloudReason || "local-save" })
+          .then(() => true)
+          .catch((error) => {
+            console.warn("Sauvegarde IndexedDB différée impossible", error?.message || error);
+            return false;
+          });
+      }
+      if (!options.skipCloud) rememberLocalUserChangeAt(savedAt);
+    } else {
     const stateJson = JSON.stringify(state);
     localStorage.setItem(STORAGE_KEY, stateJson);
     localStorage.setItem(STORAGE_MIRROR_KEY, JSON.stringify(envelope));
-    localStorage.setItem(STORAGE_META_KEY, JSON.stringify({ savedAt: envelope.savedAt, appVersion: APP_VERSION, casesCount: state.cases.length }));
+    localStorage.setItem(STORAGE_META_KEY, JSON.stringify({ savedAt: envelope.savedAt, appVersion: APP_VERSION, casesCount: state.cases.length, largeState: false }));
     if (typeof sessionStorage !== "undefined") sessionStorage.setItem(SESSION_EMERGENCY_KEY, JSON.stringify(envelope));
     if (!options.skipSnapshot) writeStateSnapshot(envelope);
     if (!options.skipCloud) rememberLocalUserChangeAt(envelope.savedAt);
+      if (typeof removeLargeStateSnapshot === "function") removeLargeStateSnapshot().catch(() => null);
+    }
+    if (modified && !options.skipCloud && !offline && typeof enqueueDurableOutboxOperation === "function") {
+      const expectedVersion = Math.max(0, ...(state.cases || []).map((item) => Number(item.localRevision || 0)));
+      indexedDbWrite.then((persisted) => {
+        if (largeState && !persisted) throw new Error("Le snapshot IndexedDB n'a pas été confirmé.");
+        return enqueueDurableOutboxOperation({
+        entityType: "workshop_state",
+        entityId: typeof getSupabaseWorkshopId === "function" ? getSupabaseWorkshopId() : "local-workshop",
+        action: "upsert_snapshot",
+        expectedVersion,
+        payload: {
+          snapshotKey: "latest",
+          appVersion: APP_VERSION,
+          casesCount: Number(state.cases?.length || 0),
+          bookingsCount: Number(state.bookings?.length || 0),
+          resourcesCount: Number(state.resources?.length || 0),
+          reason: options.cloudReason || "local-save",
+        },
+        syncStatus: "pending",
+        description: typeof navigator !== "undefined" && navigator.onLine === false
+          ? "Modification locale hors ligne"
+          : "Modification locale à confirmer par le serveur",
+        });
+      }).then(() => {
+        if (typeof renderSyncStatusStrip === "function") renderSyncStatusStrip();
+      }).catch((error) => console.warn("Mise en file durable impossible", error?.message || error));
+    }
     if (!options.skipCloud && typeof scheduleAutoSupabaseBackup === "function") {
       scheduleAutoSupabaseBackup(options.cloudReason || "local-save");
     }
@@ -3230,6 +3807,13 @@ function saveState(options = {}) {
 
 function forceEmergencyAutosave() {
   try {
+    if (typeof shouldPersistStateInIndexedDb === "function" && shouldPersistStateInIndexedDb(state)) {
+      const savedAt = new Date().toISOString();
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ app: BACKUP_APP_ID, largeState: true, savedAt, casesCount: state.cases.length }));
+      localStorage.setItem(STORAGE_META_KEY, JSON.stringify({ savedAt, appVersion: APP_VERSION, casesCount: state.cases.length, largeState: true }));
+      if (typeof persistLargeStateSnapshot === "function") persistLargeStateSnapshot(state, { appVersion: APP_VERSION, reason: "emergency" }).catch(() => null);
+      return;
+    }
     const envelope = buildAutosaveEnvelope();
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     localStorage.setItem(STORAGE_MIRROR_KEY, JSON.stringify(envelope));
@@ -3542,8 +4126,8 @@ const ROLE_TABS = {
   chef_atelier:  ["reception-workspace", "dossiers", "today", "pilotage", "planning", "technician", "atelier"],
   reception:     ["reception-workspace", "dossiers", "today"],
   technicien:    ["technician"],
-  qualite:       ["dossiers"],
-  readonly:      ["pilotage"],
+  qualite:       ["dossiers", "pilotage", "planning"],
+  readonly:      ["dossiers", "pilotage", "planning"],
 };
 
 // Tab par défaut à afficher lors de la connexion selon le rôle
@@ -3554,15 +4138,15 @@ const ROLE_DEFAULT_TABS = {
   reception:     "reception-workspace",
   technicien:    "technician",
   qualite:       "dossiers",
-  readonly:      "pilotage",
+  readonly:      "dossiers",
 };
 
 function getDefaultTabForRole(role) {
-  return ROLE_DEFAULT_TABS[role] || "dossiers";
+  return ROLE_DEFAULT_TABS[toRuntimeUserRole(role)] || "dossiers";
 }
 
 function getAllowedTabsForRole(role) {
-  return ROLE_TABS[role] || [];
+  return ROLE_TABS[toRuntimeUserRole(role)] || [];
 }
 
 function getAllowedTabsForCurrentUser() {

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
+import { currentBuild } from './helpers/build_version.mjs';
 
 const scriptFiles = [
   'js/utils.js',
@@ -104,19 +105,18 @@ assert.match(exportsSource, /guardSensitiveAction\("case\.delete"/, 'suppression
 assert.match(estimateSource, /guardEstimateImport\(item\)/, 'import devis doit être gardé');
 assert.match(supabaseClientSource, /guardSensitiveAction\("supabase\.configure"/, 'configuration Supabase doit être gardée');
 assert.match(uiCasesSource, /guardWorkflowAction\(action, item, true\)/, 'workflow dossier doit être gardé côté fonction');
-assert.match(swSource, /nimr-sav-v23\.2\.6-reception-qc-field-usability/, 'cache PWA v23.2.6 attendu');
+assert.ok(swSource.includes(`const CACHE_NAME = "${currentBuild.cacheName}"`), 'cache PWA déclaré dans js/version.js attendu');
 
 function setupRole(role, extra = {}) {
   app(`
     state = normalizeState({
       users: [
-        { id: 'u-admin', name: 'Admin SAV', role: 'admin', active: true },
+        { id: 'u-admin', name: 'Admin technique', role: 'admin_technique', active: true },
         { id: 'u-chef', name: 'Chef atelier', role: 'chef_atelier', active: true },
-        { id: 'u-directeur_sav', name: 'Directeur SAV', role: 'directeur_sav', active: true },
+        { id: 'u-directeur_sav', name: 'Directeur SAV', role: 'directeur', active: true },
         { id: 'u-reception', name: 'Réception', role: 'reception', active: true },
         { id: 'u-tech', name: 'Technicien', role: 'technicien', resourceId: 'tech-1', active: true },
-        { id: 'u-qualite', name: 'Contrôle qualité', role: 'qualite', active: true },
-        { id: 'u-readonly', name: 'Lecture seule', role: 'readonly', active: true }
+        { id: 'u-readonly', name: 'Lecture seule', role: 'lecture_seule', active: true }
       ],
       currentUserId: 'u-${role}',
       resources: [
@@ -133,13 +133,10 @@ function setupRole(role, extra = {}) {
           received: true,
           workStarted: true,
           workCompleted: true,
-          qualityApproved: false,
-          delivered: false,
           invoiced: false
         },
         appointment: { start: '2026-06-03T08:00:00.000Z', delivery: '2026-06-03T18:00:00.000Z', end: '2026-06-03T09:00:00.000Z' },
-        qualityChecklist: Object.fromEntries(DEFAULT_QUALITY_CHECKS.map(l => [l, true])),
-        durations: { mechanical: 1, quality: 0.25 },
+        durations: { mechanical: 1 },
         claims: [{ type: 'client', includeInPlanning: true, clientApproved: true, expertApproved: true, estimate: { lines: [{ phase: 'mechanical', operation: 'MO', laborHours: 1 }] } }],
         history: []
       }],
@@ -163,24 +160,19 @@ assert.equal(app(`guardSensitiveAction('import.backup').ok`), false, 'réception
 setupRole('tech');
 assert.equal(app(`guardVehicleReceive(state.cases[0]).ok`), false, 'technicien ne réceptionne pas véhicule');
 assert.equal(app(`guardDeliveryComplete(state.cases[0]).ok`), false, 'technicien ne livre pas véhicule');
-assert.equal(app(`guardQualityValidate(state.cases[0]).ok`), false, 'technicien ne valide pas qualité');
 assert.equal(app(`guardSensitiveAction('export.backup').ok`), false, 'technicien ne fait pas de backup');
-
-setupRole('qualite');
-assert.equal(app(`guardQualityValidate(state.cases[0]).ok`), true, 'qualité peut valider qualité');
-assert.equal(app(`guardAction('quality.reject', { item: state.cases[0] }).ok`), true, 'qualité peut refuser qualité');
-assert.equal(app(`guardDeliveryComplete(state.cases[0]).ok`), false, 'qualité ne livre pas');
-assert.equal(app(`applyWorkflowAction(state.cases[0], 'qualityApproved'); state.cases[0].flags.qualityApproved`), true, 'qualité peut appliquer validation qualité');
-assert.equal(app(`state.cases[0].history[0].userId`), 'u-qualite', 'historique qualité contient userId');
-assert.equal(app(`state.cases[0].history[0].userRole`), 'qualite', 'historique qualité contient userRole');
 
 setupRole('readonly');
 assert.equal(app(`guardCaseCreate().ok`), false, 'readonly ne crée pas');
 assert.equal(app(`guardCaseEdit(state.cases[0]).ok`), false, 'readonly ne modifie pas');
-assert.equal(app(`guardQualityValidate(state.cases[0]).ok`), false, 'readonly ne valide pas qualité');
 assert.equal(app(`guardDeliveryComplete(state.cases[0]).ok`), false, 'readonly ne livre pas');
 assert.equal(app(`guardSensitiveAction('export.backup').ok`), false, 'readonly ne fait aucune mutation sensible');
-assert.match(app(`guardSensitiveAction('export.backup').message`), /lecture seule/i);
+assert.equal(
+  app(`guardSensitiveAction('export.backup').message`),
+  'Action non autorisée pour le rôle utilisateur : lecture_seule',
+  'le refus lecture seule doit utiliser le diagnostic centralisé',
+);
+assert.equal(app(`normalizeUserRole('qualite')`), 'lecture_seule', 'le rôle qualité historique doit migrer en lecture seule');
 
 setupRole('admin');
 assert.equal(app(`guardSensitiveAction('case.delete', { item: state.cases[0] }).ok`), true, 'admin peut supprimer dossier');
@@ -189,36 +181,29 @@ assert.equal(app(`guardSensitiveAction('settings.edit').ok`), true, 'admin peut 
 assert.equal(app(`guardSensitiveAction('supabase.configure').ok`), true, 'admin peut configurer Supabase');
 app(`addAuditLog('case.deleted', 'Dossier supprimé', 'Test suppression', { item: state.cases[0] })`);
 assert.equal(app(`state.auditLog[0].userId`), 'u-admin', 'audit suppression contient userId');
-assert.equal(app(`state.auditLog[0].userRole`), 'admin', 'audit suppression contient userRole');
+assert.equal(app(`state.auditLog[0].userRole`), 'admin', 'audit suppression conserve la clé runtime compatible');
+assert.equal(app(`getCurrentActor().canonicalRole`), 'admin_technique', 'l’acteur expose aussi le rôle canonique');
 app(`addAuditLog('backup.imported', 'Sauvegarde importée', 'Test import')`);
 app(`addAuditLog('backup.exported', 'Sauvegarde exportée', 'Test export')`);
 assert.equal(app(`state.auditLog[0].userId`), 'u-admin', 'audit export contient acteur');
-assert.equal(app(`state.auditLog[1].userName`), 'Admin SAV', 'audit import contient nom acteur');
+assert.equal(app(`state.auditLog[1].userName`), 'Admin technique', 'audit import contient nom acteur');
 
 setupRole('directeur_sav');
-app(`state.cases[0].flags.qualityApproved = false; state.cases[0].receptionWorkflow = { qualityStatus: 'pending' }; state.cases[0].customerClaims = [{ id: 'claim-open', status: 'open', text: 'Client attend accord' }];`);
 assert.equal(app(`hasPermission('audit.view')`), true, 'directeur SAV peut consulter le journal');
 assert.equal(app(`guardSensitiveAction('export.backup').ok`), true, 'directeur SAV peut exporter');
 assert.equal(app(`guardSensitiveAction('case.delete', { item: state.cases[0] }).ok`), false, 'directeur SAV ne supprime pas dossier');
-assert.equal(app(`guardSensitiveAction('import.backup').ok`), false, 'directeur SAV ne restaure pas backup');
-assert.equal(app(`guardSensitiveAction('settings.edit').ok`), false, 'directeur SAV ne modifie pas les paramètres système sensibles');
-assert.equal(app(`guardSensitiveAction('supabase.configure').ok`), false, 'directeur SAV ne configure pas Supabase');
-assert.equal(app(`guardSensitiveAction('users.manage').ok`), false, 'directeur SAV ne gère pas les permissions critiques');
-assert.equal(app(`guardDeliveryComplete(state.cases[0]).ok`), true, 'directeur SAV peut déclencher override livraison');
-assert.equal(app(`canAdvanceReceptionStep(state.cases[0], 11, { role: 'directeur_sav' }).ok`), false, 'directeur SAV ne peut pas livrer sans QC validé');
-app(`state.cases[0].flags.qualityApproved = true; state.cases[0].receptionWorkflow.qualityStatus = 'validated';`);
-assert.equal(app(`canAdvanceReceptionStep(state.cases[0], 11, { role: 'directeur_sav' }).ok`), true, 'directeur SAV peut passer l’étape livraison en override après QC validé');
+assert.equal(app(`guardSensitiveAction('import.backup').ok`), true, 'directeur SAV peut restaurer un backup');
+assert.equal(app(`guardSensitiveAction('settings.edit').ok`), true, 'directeur SAV peut administrer les paramètres métier');
+assert.equal(app(`guardSensitiveAction('supabase.configure').ok`), true, 'directeur SAV peut configurer Supabase');
+assert.equal(app(`guardSensitiveAction('users.manage').ok`), true, 'directeur SAV peut gérer les utilisateurs');
+assert.equal(app(`guardDeliveryComplete(state.cases[0]).ok`), true, 'directeur SAV peut finaliser la restitution');
 
 setupRole('chef');
-app(`state.cases[0].flags.qualityApproved = true;`);
-assert.equal(app(`guardQualityValidate(state.cases[0]).ok`), true, 'chef atelier peut valider qualité');
 assert.equal(app(`guardDeliveryComplete(state.cases[0]).ok`), true, 'chef atelier peut livrer');
 assert.equal(app(`guardSensitiveAction('export.backup').ok`), true, 'chef atelier peut exporter backup');
 assert.equal(app(`guardSensitiveAction('import.backup').ok`), false, 'chef atelier ne restaure pas backup');
 assert.equal(app(`guardSensitiveAction('supabase.configure').ok`), false, 'chef atelier ne configure pas Supabase');
-app(`applyWorkflowAction(state.cases[0], 'delivered')`);
-assert.equal(app(`state.cases[0].history[0].userId`), 'u-chef', 'historique livraison contient userId');
-assert.equal(app(`state.cases[0].history[0].userRole`), 'chef_atelier', 'historique livraison contient rôle');
+assert.equal(app(`getCurrentActor().userRole`), 'chef_atelier', 'les actions du chef conservent le rôle canonique');
 
 setupRole('reception');
 assert.equal(app(`canRenderAction('print.task')`), true, 'print.* autorise les impressions');
@@ -227,6 +212,8 @@ assert.equal(app(`guardSensitiveAction('export.backup').ok`), false, 'print.* ne
 
 setupRole('admin', { currentUserId: '' });
 app(`state = normalizeState({ cases: [], resources: [], bookings: [] })`);
-assert.equal(app(`getCurrentUser().role`), 'admin', 'bootstrap admin conserve le mode offline/local');
+assert.equal(app(`getCurrentUser()`), null, 'aucun admin caché ne doit être créé hors premier accès explicite');
+assert.equal(app(`state.currentUserId`), '', 'aucune session implicite ne doit être ouverte');
+assert.equal(app(`guardSensitiveAction('settings.edit').ok`), false, 'sans acteur explicite les opérations sensibles restent bloquées');
 
-console.log('Users roles permissions reception/quality/sensitive OK');
+console.log('Users roles permissions reception/canonical/sensitive OK');

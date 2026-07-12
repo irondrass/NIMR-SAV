@@ -161,7 +161,14 @@ create table if not exists public.planning_resources (
   local_id text,
   name text not null,
   type text not null,
+  category text,
+  kind text not null default 'internal',
+  site text not null default 'internal',
   capacity numeric(8,2) default 1,
+  simultaneous_capacity numeric(8,2) default 1,
+  daily_capacity_minutes integer,
+  calendar jsonb not null default '{}'::jsonb,
+  compatible_roles text[] not null default '{}'::text[],
   active boolean not null default true,
   created_at timestamptz not null default now()
 );
@@ -171,10 +178,24 @@ create table if not exists public.planning_slots (
   local_id text,
   repair_order_id uuid references public.repair_orders(id) on delete cascade,
   resource_id uuid references public.planning_resources(id) on delete set null,
+  resource_ids uuid[] not null default '{}'::uuid[],
+  primary_resource_id uuid references public.planning_resources(id) on delete set null,
+  equipment_resource_ids uuid[] not null default '{}'::uuid[],
+  task_id text,
+  step_key text,
+  dependencies text[] not null default '{}'::text[],
   title text,
   start_at timestamptz not null,
   end_at timestamptz not null,
   status text default 'planned',
+  planned_minutes integer not null default 0,
+  actual_worked_minutes integer not null default 0,
+  actual_start_at timestamptz,
+  actual_end_at timestamptz,
+  vehicle_location text not null default 'internal',
+  service_mode text not null default 'internal',
+  subcontract_id text,
+  temporary boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -301,6 +322,29 @@ alter table public.repair_claim_labor_lines add column if not exists workshop_id
 alter table public.repair_supplements add column if not exists workshop_id uuid references public.workshops(id);
 alter table public.repair_supplement_lines add column if not exists workshop_id uuid references public.workshops(id);
 alter table public.audit_logs add column if not exists workshop_id uuid references public.workshops(id);
+
+alter table public.planning_resources add column if not exists category text;
+alter table public.planning_resources add column if not exists kind text not null default 'internal';
+alter table public.planning_resources add column if not exists site text not null default 'internal';
+alter table public.planning_resources add column if not exists simultaneous_capacity numeric(8,2) default 1;
+alter table public.planning_resources add column if not exists daily_capacity_minutes integer;
+alter table public.planning_resources add column if not exists calendar jsonb not null default '{}'::jsonb;
+alter table public.planning_resources add column if not exists compatible_roles text[] not null default '{}'::text[];
+
+alter table public.planning_slots add column if not exists resource_ids uuid[] not null default '{}'::uuid[];
+alter table public.planning_slots add column if not exists primary_resource_id uuid references public.planning_resources(id) on delete set null;
+alter table public.planning_slots add column if not exists equipment_resource_ids uuid[] not null default '{}'::uuid[];
+alter table public.planning_slots add column if not exists task_id text;
+alter table public.planning_slots add column if not exists step_key text;
+alter table public.planning_slots add column if not exists dependencies text[] not null default '{}'::text[];
+alter table public.planning_slots add column if not exists planned_minutes integer not null default 0;
+alter table public.planning_slots add column if not exists actual_worked_minutes integer not null default 0;
+alter table public.planning_slots add column if not exists actual_start_at timestamptz;
+alter table public.planning_slots add column if not exists actual_end_at timestamptz;
+alter table public.planning_slots add column if not exists vehicle_location text not null default 'internal';
+alter table public.planning_slots add column if not exists service_mode text not null default 'internal';
+alter table public.planning_slots add column if not exists subcontract_id text;
+alter table public.planning_slots add column if not exists temporary boolean not null default false;
 
 update public.cloud_backups set workshop_id = '00000000-0000-0000-0000-000000000001' where workshop_id is null;
 update public.app_settings set workshop_id = '00000000-0000-0000-0000-000000000001' where workshop_id is null;

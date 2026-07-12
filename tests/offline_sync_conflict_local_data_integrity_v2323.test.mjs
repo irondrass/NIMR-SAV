@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 
-console.log("Demarrage tests v23.2.6 offline sync conflict and local data integrity...");
+console.log("Demarrage tests v23.2.7 offline sync conflict and local data integrity...");
 
 const scriptFiles = [
   "js/utils.js",
@@ -313,7 +313,7 @@ assert.equal(resolveDeferResult.conflict.status, "open", "defer_manual_merge sho
 const guardEditAfterDefer = app(`guardAction("case.edit", ${JSON.stringify(caseContext)})`);
 assert.equal(guardEditAfterDefer.ok, false, "Sensitive actions must remain blocked after deferring manual merge");
 
-// --- ADDITIONAL TESTS FOR HOTFIX v23.2.6 ---
+// --- ADDITIONAL TESTS FOR HOTFIX v23.2.7 ---
 console.log("Running additional hotfix assertions...");
 
 await app(`
@@ -695,4 +695,4 @@ const pendingText = app('getOrCreateMockElement("[data-sync-pending]").textConte
 assert.equal(pendingText, "0", "Le compteur de modifications en attente doit revenir à 0");
 
 console.log("Additional hotfix assertions OK");
-console.log("Tests v23.2.6 offline sync conflict and local data integrity OK");
+console.log("Tests v23.2.7 offline sync conflict and local data integrity OK");

@@ -79,11 +79,15 @@ app(`
   }
 `);
 
-console.log("Démarrage des tests v22.30 : Gestion Utilisateurs & Rôles...");
+console.log("Démarrage des tests v23.2.7 : Gestion Utilisateurs & Rôles...");
 
-// Setup initial clean state with default resources and a bootstrapped admin
+// Etat initial avec un administrateur explicitement créé et sélectionné.
 app(`
   state = normalizeState({
+    users: [
+      { id: 'admin-explicit', name: 'Admin technique explicite', role: 'admin_technique', active: true }
+    ],
+    currentUserId: 'admin-explicit',
     cases: [],
     resources: [
       { id: 'tech-res-1', name: 'SOFIENE', role: 'peintre', active: true },
@@ -100,11 +104,12 @@ const createRes1 = app(`
     role: 'chef_atelier',
     email: 'chef@nimr.local',
     active: true
-  }, getUserById(state.currentUserId))
+  })
 `);
 assert.equal(createRes1.ok, true, "L'administrateur devrait pouvoir créer un utilisateur.");
 assert.equal(createRes1.user.name, "Chef Atelier Test");
 assert.equal(createRes1.user.role, "chef_atelier");
+assert.equal(createRes1.user.canonicalRole, "chef_atelier");
 assert.equal(createRes1.user.active, true);
 
 // Test 2: admin can modify a role
@@ -115,11 +120,12 @@ const modifyRes = app(`
     role: 'reception',
     email: 'chef@nimr.local',
     active: true
-  }, getUserById(state.currentUserId))
+  })
 `);
 assert.equal(modifyRes.ok, true, "L'administrateur devrait pouvoir modifier un rôle.");
 assert.equal(modifyRes.user.name, "Chef Atelier Test Modifie");
 assert.equal(modifyRes.user.role, "reception");
+assert.equal(modifyRes.user.canonicalRole, "reception");
 
 // Test 3: admin can link a technician to resourceId
 const createTechRes = app(`
@@ -132,6 +138,7 @@ const createTechRes = app(`
 `);
 assert.equal(createTechRes.ok, true);
 assert.equal(createTechRes.user.resourceId, "tech-res-1");
+assert.equal(createTechRes.user.canonicalRole, "technicien");
 
 // Test 4: technician without resourceId displays warning
 const createTechNoRes = app(`
@@ -149,44 +156,50 @@ const deniedMessage = app(`
     booking: { resourceIds: ['tech-res-1'] }
   })
 `);
-assert.match(deniedMessage, /Aucune ressource technicien liée/i, "Devrait signaler l'absence de ressource liée.");
+assert.equal(createTechNoRes.user.resourceId, "", "Le technicien reste explicitement sans ressource liée.");
+assert.match(deniedMessage, /Action non autorisée.*technicien/i, "Le refus doit identifier le rôle canonique de l'acteur stocké.");
 
 // Test 5: non-admin cannot manage users
 const receptionUserId = modifyRes.user.id;
+assert.equal(app(`setCurrentUser('${receptionUserId}')`), true);
 const createByReception = app(`
   createUserLocal({
     name: 'Intrus',
-    role: 'readonly',
+    role: 'lecture_seule',
     active: true
-  }, getUserById('${receptionUserId}'))
+  })
 `);
 assert.equal(createByReception.ok, false, "Un non-admin ne devrait pas pouvoir créer d'utilisateurs.");
-assert.match(createByReception.message, /Action réservée administrateur/i);
+assert.match(createByReception.message, /Action non autorisée.*reception/i);
 
 // Test 6: readonly cannot manage users
+assert.equal(app(`setCurrentUser('admin-explicit')`), true);
 const createReadonlyUser = app(`
   createUserLocal({
     name: 'Lecture Seule Test',
-    role: 'readonly',
+    role: 'lecture_seule',
     active: true
   })
 `);
 assert.equal(createReadonlyUser.ok, true);
+assert.equal(createReadonlyUser.user.canonicalRole, "lecture_seule");
+assert.equal(app(`setCurrentUser('${createReadonlyUser.user.id}')`), true);
 const createByReadonly = app(`
   createUserLocal({
     name: 'Intrus 2',
-    role: 'readonly',
+    role: 'lecture_seule',
     active: true
-  }, getUserById('${createReadonlyUser.user.id}'))
+  })
 `);
 assert.equal(createByReadonly.ok, false, "Lecture seule ne peut pas créer d'utilisateurs.");
 
 // Test 7: impossible to deactivate the last active admin
-const localAdminId = app(`state.users.find(u => u.role === 'admin' && u.active !== false).id`);
+assert.equal(app(`setCurrentUser('admin-explicit')`), true);
+const localAdminId = app(`state.users.find(u => u.canonicalRole === 'admin_technique' && u.active !== false).id`);
 const disableAdminRes = app(`
   updateUserLocal('${localAdminId}', {
     name: 'Admin local',
-    role: 'admin',
+    role: 'admin_technique',
     active: false
   })
 `);
@@ -209,12 +222,13 @@ assert.equal(switchRes, true, "setCurrentUser doit retourner true pour un utilis
 assert.equal(app(`state.currentUserId`), receptionUserId, "state.currentUserId doit être mis à jour.");
 
 // Test 10: inactive user cannot become current user
+assert.equal(app(`setCurrentUser('${localAdminId}')`), true);
 const inactiveUserRes = app(`
   createUserLocal({
     name: 'Ancien Employe',
     role: 'reception',
     active: false
-  }, getUserById('${localAdminId}'))
+  })
 `);
 assert.equal(inactiveUserRes.ok, true);
 const switchInactiveRes = app(`setCurrentUser('${inactiveUserRes.user.id}')`);
@@ -238,16 +252,16 @@ const auditEntriesCountBefore = app(`state.auditLog.length`);
 app(`
   createUserLocal({
     name: 'Audit User',
-    role: 'readonly',
+    role: 'lecture_seule',
     active: true
-  }, getUserById('${localAdminId}'))
+  })
 `);
 const newAuditEntry = app(`state.auditLog[0]`);
 assert.equal(app(`state.auditLog.length`), auditEntriesCountBefore + 1);
 assert.equal(newAuditEntry.type, "users.created");
 assert.equal(newAuditEntry.userId, localAdminId, "L'entrée d'audit doit contenir le userId de l'acteur.");
 
-// Test 13: old state without users bootstraps local admin
+// Test 13: un ancien état sans utilisateurs reste sans acteur implicite
 app(`
   state = normalizeState({
     cases: [],
@@ -256,17 +270,42 @@ app(`
   });
 `);
 assert.equal(app(`Array.isArray(state.users)`), true, "Users doit être initialisé.");
-assert.equal(app(`state.users.length`), 1, "Un admin local par défaut doit être créé.");
-assert.equal(app(`state.users[0].role`), "admin", "Le bootstrap user doit être un admin.");
+assert.equal(app(`state.users.length`), 0, "Aucun administrateur implicite ne doit être créé.");
+assert.equal(app(`state.currentUserId`), "", "Aucune session implicite ne doit être ouverte.");
 
-// Test 14: offline/local mode works without Supabase
-assert.equal(app(`getCurrentUser().role`), "admin");
+// Test 14: le premier accès local crée explicitement l'acteur autorisé
+const firstAccessRes = app(`
+  createFirstAccessUserLocal({
+    id: 'first-access-admin',
+    name: 'Admin premier accès',
+    role: 'admin_technique',
+    pinHash: 'hash-test',
+    pinSalt: 'salt-test'
+  })
+`);
+assert.equal(firstAccessRes.ok, true);
+assert.equal(firstAccessRes.user.canonicalRole, "admin_technique");
+assert.equal(app(`getCurrentUser().id`), "first-access-admin");
 assert.equal(app(`hasPermission('settings.edit')`), true);
 
-// Test 15: existing permissions do not regress
-assert.equal(app(`hasPermission('planning.edit', { user: { role: 'reception', active: true } })`), false, "Réception ne peut pas éditer le planning.");
-assert.equal(app(`hasPermission('case.create', { user: { role: 'reception', active: true } })`), true, "Réception peut créer des dossiers.");
-assert.equal(app(`hasPermission('quality.validate', { user: { role: 'qualite', active: true } })`), true, "Qualité peut valider la qualité.");
-assert.equal(app(`hasPermission('task.start', { user: { role: 'technicien', active: true } })`), true, "Technicien peut démarrer les tâches.");
+// Test 15: permissions canoniques résolues uniquement depuis des acteurs stockés
+app(`
+  state = normalizeState({
+    users: [
+      { id: 'perm-reception', name: 'Reception permissions', role: 'reception', active: true },
+      { id: 'perm-technicien', name: 'Technicien permissions', role: 'technicien', active: true },
+      { id: 'perm-lecture', name: 'Lecture permissions', role: 'lecture_seule', active: true }
+    ],
+    currentUserId: 'perm-reception',
+    cases: [],
+    resources: [],
+    bookings: []
+  });
+`);
+assert.equal(app(`hasPermission('planning.edit', { userId: 'perm-reception' })`), false, "Réception ne peut pas éditer le planning.");
+assert.equal(app(`hasPermission('case.create', { userId: 'perm-reception' })`), true, "Réception peut créer des dossiers.");
+assert.equal(app(`hasPermission('task.start', { userId: 'perm-technicien' })`), true, "Technicien peut démarrer les tâches.");
+assert.equal(app(`hasPermission('case.view', { userId: 'perm-lecture' })`), true, "Lecture seule peut consulter les dossiers.");
+assert.equal(app(`hasPermission('case.edit', { userId: 'perm-lecture' })`), false, "Lecture seule ne peut pas modifier les dossiers.");
 
-console.log("Users roles management v22.30 tests OK !");
+console.log("Users roles management v23.2.7 tests OK !");

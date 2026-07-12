@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
+import { currentBuild, getVersionedAssetQueries } from "./helpers/build_version.mjs";
 
 const vehicleJson = fs.readFileSync("data/vehicles.json", "utf8");
 const swSource = fs.readFileSync("sw.js", "utf8");
@@ -10,11 +11,11 @@ const storageSource = fs.readFileSync("js/storage.js", "utf8");
 const stateSource = fs.readFileSync("js/state.js", "utf8");
 const versionSource = fs.readFileSync("js/version.js", "utf8");
 const supabaseSchema = fs.readFileSync("supabase-schema.sql", "utf8");
-const EXPECTED_APP_VERSION = "v23.2.6";
-const EXPECTED_QUERY_VERSION = "23.2.6";
-const EXPECTED_CACHE_NAME = "nimr-sav-v23.2.6-reception-qc-field-usability";
+const EXPECTED_APP_VERSION = currentBuild.appVersion;
+const EXPECTED_QUERY_VERSION = currentBuild.queryVersion;
+const EXPECTED_CACHE_NAME = currentBuild.cacheName;
 
-console.log("Démarrage tests sécurité données + version/cache v23.2.6...");
+console.log(`Démarrage tests sécurité données + version/cache ${EXPECTED_APP_VERSION}...`);
 
 assert.doesNotThrow(() => JSON.parse(vehicleJson), "data/vehicles.json doit rester un JSON valide");
 const vehicleRecords = JSON.parse(vehicleJson);
@@ -35,14 +36,15 @@ assert.equal(/\b\d{1,4}\s*TU\s*\d{1,3}\b/i.test(vehicleJson), false, "Aucune pla
 assert.equal(/\b(?:\+?216)?[\s.-]?\d{2}[\s.-]?\d{3}[\s.-]?\d{3}\b/.test(vehicleJson), false, "Aucun téléphone ne doit apparaître en clair");
 
 assert.equal(swSource.includes("./data/vehicles.json"), false, "sw.js ne doit pas précacher data/vehicles.json");
-assert.ok(swSource.includes(`const CACHE_NAME = "${EXPECTED_CACHE_NAME}"`), "sw.js doit exposer le cache PWA v23.2.6");
-assert.ok(stateSource.includes(`const APP_VERSION = "${EXPECTED_APP_VERSION}"`), "APP_VERSION doit être v23.2.6 dans state.js");
-assert.ok(versionSource.includes(`window.APP_VERSION = "${EXPECTED_APP_VERSION}"`), "version.js doit exposer APP_VERSION v23.2.6");
-assert.ok(versionSource.includes(`window.NIMR_BUILD = "${EXPECTED_APP_VERSION}"`), "version.js doit exposer NIMR_BUILD v23.2.6");
-assert.ok(versionSource.includes(`window.NIMR_CACHE_NAME = "${EXPECTED_CACHE_NAME}"`), "version.js doit annoncer le cache v23.2.6");
-assert.ok(appSource.includes(`serviceWorker.register("sw.js?v=${EXPECTED_QUERY_VERSION}"`), "app.js doit enregistrer sw.js?v=23.2.6");
-[...indexSource.matchAll(/\?v=(\d+\.\d+(?:\.\d+)?)/g)].forEach((match) => {
-  assert.equal(match[1], EXPECTED_QUERY_VERSION, `référence index.html incohérente: ?v=${match[1]}`);
+assert.ok(swSource.includes(`const CACHE_NAME = "${EXPECTED_CACHE_NAME}"`), `sw.js doit exposer le cache PWA ${EXPECTED_CACHE_NAME}`);
+assert.ok(stateSource.includes(`const APP_VERSION = "${EXPECTED_APP_VERSION}"`), `APP_VERSION doit être ${EXPECTED_APP_VERSION} dans state.js`);
+assert.ok(versionSource.includes(`window.APP_VERSION = "${EXPECTED_APP_VERSION}"`), "version.js doit exposer APP_VERSION");
+assert.ok(versionSource.includes(`window.NIMR_BUILD = "${currentBuild.buildVersion}"`), "version.js doit exposer NIMR_BUILD");
+assert.equal(currentBuild.buildVersion, EXPECTED_APP_VERSION, "NIMR_BUILD doit être identique à APP_VERSION");
+assert.ok(versionSource.includes(`window.NIMR_CACHE_NAME = "${EXPECTED_CACHE_NAME}"`), "version.js doit annoncer le cache courant");
+assert.ok(appSource.includes(`serviceWorker.register("sw.js?v=${EXPECTED_QUERY_VERSION}"`), `app.js doit enregistrer sw.js?v=${EXPECTED_QUERY_VERSION}`);
+getVersionedAssetQueries(indexSource).forEach((queryVersion) => {
+  assert.equal(queryVersion, EXPECTED_QUERY_VERSION, `référence index.html incohérente: ?v=${queryVersion}`);
 });
 [
   ["index.html", indexSource],
@@ -134,4 +136,4 @@ await assertVehicleDatabaseLoadDoesNotCrash(
   "Tableau vide",
 );
 
-console.log("Tests sécurité données + version/cache v23.2.6 OK");
+console.log(`Tests sécurité données + version/cache ${EXPECTED_APP_VERSION} OK`);

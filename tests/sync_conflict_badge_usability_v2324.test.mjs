@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
+import { currentBuild } from "./helpers/build_version.mjs";
 
-console.log("Demarrage tests v23.2.6 sync conflict badge usability hotfix...");
+console.log(`Demarrage tests ${currentBuild.appVersion} sync conflict badge usability hotfix...`);
 
 const scriptFiles = [
   "js/utils.js",
@@ -121,11 +122,11 @@ const appSource = fs.readFileSync("app.js", "utf8");
 
 assert.equal(vehiclesSource, "[]", "data/vehicles.json doit rester vide");
 assert.doesNotMatch(swSource, /data\/vehicles\.json/, "data/vehicles.json ne doit pas etre precache");
-assert.match(stateSource, /APP_VERSION\s*=\s*"v23\.2\.6"/, "state.js doit utiliser v23.2.6");
-assert.match(swSource, /CACHE_NAME\s*=\s*"nimr-sav-v23\.2\.6-reception-qc-field-usability"/, "sw.js doit precacher avec le cache v23.2.6");
-assert.match(versionSource, /APP_VERSION\s*=\s*"v23\.2\.6"/, "version.js doit exposer APP_VERSION v23.2.6");
-assert.match(versionSource, /NIMR_CACHE_NAME\s*=\s*"nimr-sav-v23\.2\.6-reception-qc-field-usability"/, "version.js doit exposer NIMR_CACHE_NAME v23.2.6");
-assert.match(appSource, /serviceWorker\.register\("sw\.js\?v=23\.2\.6"/, "app.js doit enregistrer sw.js?v=23.2.6");
+assert.ok(stateSource.includes(`const APP_VERSION = "${currentBuild.appVersion}"`), "state.js doit utiliser APP_VERSION déclaré dans version.js");
+assert.ok(swSource.includes(`const CACHE_NAME = "${currentBuild.cacheName}"`), "sw.js doit précacher avec le cache déclaré");
+assert.ok(versionSource.includes(`window.APP_VERSION = "${currentBuild.appVersion}"`), "version.js doit exposer APP_VERSION");
+assert.ok(versionSource.includes(`window.NIMR_CACHE_NAME = "${currentBuild.cacheName}"`), "version.js doit exposer NIMR_CACHE_NAME");
+assert.ok(appSource.includes(`serviceWorker.register("sw.js?v=${currentBuild.queryVersion}"`), "app.js doit enregistrer le service worker avec la query courante");
 
 // 2. Setup mock UI elements
 app(`
@@ -338,4 +339,4 @@ assert.equal(pendingText, "0", "Le compteur de modifications en attente doit rev
 // Test: aucun téléchargement automatique
 assert.equal(app('downloadJsonCalls.length'), 0, "Aucun téléchargement automatique ne doit être déclenché");
 
-console.log("Tests v23.2.6 sync conflict badge usability hotfix OK");
+console.log(`Tests ${currentBuild.appVersion} sync conflict badge usability hotfix OK`);

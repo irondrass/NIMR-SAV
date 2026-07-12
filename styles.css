@@ -23,6 +23,10 @@
   --radius-sm: 8px;
   --radius-lg: 16px;
   --transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
   font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
@@ -249,9 +253,12 @@ html {
 
 body {
   margin: 0;
-  min-width: 320px;
+  min-width: 0;
   min-height: 100vh;
   min-height: 100dvh;
+  padding-top: var(--safe-top);
+  padding-right: var(--safe-right);
+  padding-left: var(--safe-left);
   overflow-x: hidden;
   color: var(--ink);
   background: #f1f5f9;
@@ -3168,6 +3175,40 @@ a:focus-visible,
   font-weight: 700;
 }
 
+.sync-health-panel {
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-soft, #f6fafc);
+}
+
+.sync-health-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0 0 14px;
+}
+
+.sync-health-grid > div {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel, #fff);
+}
+
+.sync-health-grid dt { color: var(--muted); font-size: .78rem; }
+.sync-health-grid dd { margin: 4px 0 0; overflow-wrap: anywhere; font-weight: 700; }
+.sync-health-grid dd[data-state="ok"] { color: #1f7a54; }
+.sync-health-grid dd[data-state="warn"] { color: #a15c00; }
+.sync-health-grid dd[data-state="error"] { color: #b54040; }
+
+@media (max-width: 760px) {
+  .sync-health-grid { grid-template-columns: 1fr; }
+  .sync-health-actions > button { width: 100%; min-height: 48px; }
+}
+
 
 .supplement-form { border: 1px solid var(--border, #dce4e9); border-radius: 18px; margin-bottom: 18px; padding: 16px; }
 .supplement-list { display: grid; gap: 14px; }
@@ -4268,9 +4309,9 @@ a:focus-visible,
 
   .sidebar {
     position: fixed;
-    inset: auto 0 0 0;
+    inset: auto var(--safe-right) 0 var(--safe-left);
     height: auto;
-    padding: 7px 8px calc(7px + env(safe-area-inset-bottom));
+    padding: 7px 4px calc(7px + var(--safe-bottom));
     border-top: 1px solid var(--line);
     border-bottom: 0;
     box-shadow: 0 -10px 24px rgba(15, 23, 42, 0.12);
@@ -4282,8 +4323,8 @@ a:focus-visible,
 
   .sidebar-nav {
     display: grid;
-    grid-template-columns: repeat(6, minmax(0, 1fr));
-    gap: 4px;
+    grid-template-columns: repeat(7, minmax(44px, 1fr));
+    gap: 0;
     overflow: visible;
     padding: 0;
   }
@@ -4477,6 +4518,224 @@ a:focus-visible,
   .offline-banner {
     bottom: calc(82px + env(safe-area-inset-bottom));
     width: calc(100vw - 20px);
+  }
+}
+
+/* v23.2.8 — terrain mobile, safe areas et chronomètre technicien */
+.technician-field-focus {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.technician-field-focus:empty {
+  display: none;
+}
+
+.technician-current-task,
+.technician-next-task {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: #fff;
+  box-shadow: var(--shadow-sm);
+}
+
+.technician-current-task {
+  border: 2px solid color-mix(in srgb, var(--brand) 58%, white);
+  background: linear-gradient(145deg, #fff, #f1f8fc);
+}
+
+.technician-field-head,
+.technician-field-identity,
+.technician-field-sync {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.technician-field-head h2,
+.technician-next-task h3 {
+  margin: 0;
+}
+
+.technician-field-identity strong {
+  font-size: clamp(1.15rem, 4vw, 1.55rem);
+}
+
+.technician-field-identity span,
+.technician-field-sync,
+.technician-next-task p {
+  color: var(--muted);
+}
+
+.technician-field-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.technician-field-grid > div {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.technician-field-grid dt {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.technician-field-grid dd {
+  margin: 4px 0 0;
+  font-weight: 750;
+  overflow-wrap: anywhere;
+}
+
+.technician-live-timer {
+  color: var(--brand);
+  font-size: clamp(1.35rem, 5vw, 2rem);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+.technician-field-action-dock {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: var(--shadow);
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.technician-field-action-dock[hidden] {
+  display: none !important;
+}
+
+.technician-field-action-dock > button {
+  flex: 1 0 auto;
+  min-width: 112px;
+  min-height: 52px;
+}
+
+.technician-task-card.is-current-field-task {
+  border-color: color-mix(in srgb, var(--brand) 55%, var(--line));
+}
+
+.custom-modal-overlay,
+.local-lock-overlay,
+.photo-preview-modal {
+  padding-top: max(12px, var(--safe-top));
+  padding-right: max(12px, var(--safe-right));
+  padding-bottom: max(12px, var(--safe-bottom));
+  padding-left: max(12px, var(--safe-left));
+}
+
+.custom-modal-content,
+.local-lock-dialog,
+.photo-preview-dialog {
+  max-height: calc(100vh - var(--safe-top) - var(--safe-bottom) - 24px);
+  max-height: calc(100dvh - var(--safe-top) - var(--safe-bottom) - 24px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.custom-modal-actions {
+  position: sticky;
+  bottom: 0;
+  padding-top: 10px;
+  padding-bottom: max(2px, var(--safe-bottom));
+  background: var(--paper);
+}
+
+.custom-modal-actions .primary-button,
+.custom-modal-actions .ghost-button {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+@media (max-width: 1024px) {
+  .photo-tile button,
+  .photo-preview-header button,
+  .claim-line-action,
+  #fallback-resolve-conflict-btn,
+  #user-login-pin-toggle {
+    min-width: 44px !important;
+    min-height: 44px !important;
+    height: 44px !important;
+  }
+
+  .tab-button {
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 760px) {
+  .technician-field-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .technician-field-action-dock {
+    position: fixed;
+    right: calc(8px + var(--safe-right));
+    bottom: calc(90px + var(--safe-bottom));
+    left: calc(8px + var(--safe-left));
+    z-index: 60;
+    margin: 0;
+    border-color: color-mix(in srgb, var(--brand) 38%, var(--line));
+  }
+
+  #view-technician .technician-panel {
+    padding-bottom: calc(92px + var(--safe-bottom));
+  }
+}
+
+@media (max-width: 430px) {
+  .technician-current-task,
+  .technician-next-task {
+    padding: 12px;
+  }
+
+  .technician-field-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .technician-field-action-dock > button {
+    min-width: 124px;
+    min-height: 56px;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 520px) {
+  .custom-modal-overlay,
+  .local-lock-overlay,
+  .photo-preview-modal {
+    align-items: stretch;
+  }
+
+  .custom-modal-content,
+  .local-lock-dialog,
+  .photo-preview-dialog {
+    margin: auto;
+  }
+
+  .technician-field-action-dock {
+    bottom: calc(90px + var(--safe-bottom));
   }
 }
 

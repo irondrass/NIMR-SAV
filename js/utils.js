@@ -689,7 +689,7 @@ function startReceptionCaseCreation() {
 
 function bindKeyboardShortcuts() {
   document.addEventListener("keydown", (event) => {
-    const key = event.key.toLowerCase();
+    const key = String(event?.key || "").toLowerCase();
     if ((event.ctrlKey || event.metaKey) && key === "k") {
       event.preventDefault();
       focusCaseSearch();

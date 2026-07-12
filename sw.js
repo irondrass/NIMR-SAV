@@ -29,6 +29,7 @@ const ASSETS = [
   "./js/sync-v2-shadow.js?v=23.3.0",
   "./js/supabase-config.js?v=23.3.0",
   "./js/supabase-client.js?v=23.3.0",
+  "./js/sync-v2-shadow-readonly.js?v=23.3.0",
   "./js/supabase-sync.js?v=23.3.0",
 ];
 

@@ -11,6 +11,9 @@ async function initApp() {
     if (typeof initSyncV2ShadowMode === "function") {
       await initSyncV2ShadowMode(() => state);
     }
+    if (typeof initSyncV2ShadowReadonlyMode === "function") {
+      await initSyncV2ShadowReadonlyMode(() => state);
+    }
     configurePdfWorker();
     bindMainNavigation();
     bindCaseList();

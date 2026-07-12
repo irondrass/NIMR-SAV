@@ -64,12 +64,6 @@ begin
 end;
 $$;
 
--- Correctif v21.10 : l'ancien script pouvait creer order_number en UNIQUE.
--- En atelier SAV, un ancien import ou une reprise peut contenir un numero OR en double.
--- On garde local_id comme cle de synchronisation et on rend order_number non bloquant.
-alter table public.repair_orders drop constraint if exists repair_orders_order_number_key;
-drop index if exists public.repair_orders_order_number_key;
-create index if not exists repair_orders_order_number_idx on public.repair_orders(order_number);
 
 
 create table if not exists public.cloud_backups (
@@ -140,6 +134,13 @@ create table if not exists public.repair_orders (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+-- Correctif v21.10 : l'ancien script pouvait creer order_number en UNIQUE.
+-- En atelier SAV, un ancien import ou une reprise peut contenir un numero OR en double.
+-- On garde local_id comme cle de synchronisation et on rend order_number non bloquant.
+alter table public.repair_orders drop constraint if exists repair_orders_order_number_key;
+drop index if exists public.repair_orders_order_number_key;
+create index if not exists repair_orders_order_number_idx on public.repair_orders(order_number);
 
 create table if not exists public.repair_steps (
   id uuid primary key default gen_random_uuid(),

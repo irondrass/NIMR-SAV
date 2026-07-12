@@ -33,6 +33,9 @@ create table if not exists public.workshops (
   updated_at timestamptz not null default clock_timestamp()
 );
 
+alter table public.workshops add column if not exists schema_version text not null default '23.2.8-full-audit';
+alter table public.workshops add column if not exists updated_at timestamptz not null default clock_timestamp();
+
 insert into public.workshops (id, name, schema_version)
 values ('00000000-0000-0000-0000-000000000001', 'NIMR SAV', '23.2.8-full-audit')
 on conflict (id) do update
@@ -377,8 +380,6 @@ create table if not exists public.nimr_schema_migrations (
 -- 2. Mise à niveau idempotente des installations existantes
 -- ---------------------------------------------------------------------------
 
-alter table public.workshops add column if not exists schema_version text not null default '23.2.8-full-audit';
-alter table public.workshops add column if not exists updated_at timestamptz not null default clock_timestamp();
 alter table public.workshops add column if not exists version bigint not null default 1;
 alter table public.workshops add column if not exists created_by uuid;
 alter table public.workshops add column if not exists updated_by uuid;

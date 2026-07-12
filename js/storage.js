@@ -119,10 +119,14 @@ async function removeLargeStateSnapshot() {
 async function hydrateLargeStateIfAvailable() {
   const record = await loadLargeStateSnapshot().catch(() => null);
   if (!record?.state) return { hydrated: false, record: null };
+  const previousSelection = typeof captureCaseSelectionIdentity === "function"
+    ? captureCaseSelectionIdentity()
+    : { id: activeCaseId };
   const migrated = typeof migrateLegacyState === "function"
     ? migrateLegacyState(record.state).state
     : record.state;
   state = normalizeState(migrated);
+  if (typeof reconcileActiveCaseSelection === "function") reconcileActiveCaseSelection(previousSelection);
   return { hydrated: true, record };
 }
 
@@ -141,20 +145,230 @@ function getOutboxUserId() {
   return String(state?.currentUserId || "");
 }
 
+function hashSyncSnapshotString(value = "") {
+  const input = String(value || "");
+  let hashA = 2166136261;
+  let hashB = 2654435769;
+  for (let index = 0; index < input.length; index += 1) {
+    const code = input.charCodeAt(index);
+    hashA ^= code;
+    hashA = Math.imul(hashA, 16777619);
+    hashB ^= code + index;
+    hashB = Math.imul(hashB, 2246822519);
+  }
+  return [
+    "v1",
+    input.length,
+    (hashA >>> 0).toString(16).padStart(8, "0"),
+    (hashB >>> 0).toString(16).padStart(8, "0"),
+  ].join(":");
+}
+
+function cloneSyncStateSnapshot(candidateState = state) {
+  return JSON.parse(JSON.stringify(candidateState || {}));
+}
+
+function buildSyncFingerprintState(candidateState = state) {
+  const snapshot = cloneSyncStateSnapshot(candidateState);
+  delete snapshot.syncLog;
+  return snapshot;
+}
+
+function getSyncStateFingerprint(candidateState = state) {
+  return hashSyncSnapshotString(
+    JSON.stringify(buildSyncFingerprintState(candidateState)),
+  );
+}
+
+const DURABLE_OUTBOX_ACTIVE_STATUSES = new Set(["pending", "processing", "failed", "conflict"]);
+const DURABLE_OUTBOX_MAX_RETRY_COUNT = 10;
+let durableOutboxMutationTail = Promise.resolve();
+
+function normalizeOutboxExpectedVersion(value) {
+  if (value === null || value === undefined || value === "") return null;
+  return Number.isFinite(Number(value)) ? Number(value) : null;
+}
+
+function normalizeOutboxSnapshotFingerprint(value) {
+  return String(value || "").trim();
+}
+
+function getDurableOutboxEquivalenceKey(input = {}) {
+  const operation = normalizeDurableOutboxOperation(input);
+  return [
+    operation.workshopId,
+    operation.entityType,
+    operation.entityId,
+    operation.action,
+    operation.expectedVersion === null ? "null" : String(operation.expectedVersion),
+    operation.snapshotFingerprint || "no-fingerprint",
+  ].join("|");
+}
+
+function areDurableOutboxOperationsEquivalent(left, right) {
+  return getDurableOutboxEquivalenceKey(left) === getDurableOutboxEquivalenceKey(right);
+}
+
+function isSupersedableSnapshotOperation(operation = {}) {
+  return String(operation.entityType || "") === "workshop_state"
+    && String(operation.action || "") === "upsert_snapshot";
+}
+
+function areDurableOutboxOperationsSameSnapshotTarget(left = {}, right = {}) {
+  if (!isSupersedableSnapshotOperation(left) || !isSupersedableSnapshotOperation(right)) return false;
+  return String(left.workshopId || "") === String(right.workshopId || "")
+    && String(left.entityType || "") === String(right.entityType || "")
+    && String(left.entityId || "") === String(right.entityId || "")
+    && String(left.action || "") === String(right.action || "");
+}
+
+function getDurableOutboxConsolidationKey(operation = {}) {
+  if (!isSupersedableSnapshotOperation(operation)) {
+    return getDurableOutboxEquivalenceKey(operation);
+  }
+  return [
+    "latest-snapshot",
+    operation.workshopId,
+    operation.entityType,
+    operation.entityId,
+    operation.action,
+  ].map((part) => String(part || "")).join("|");
+}
+
+function runDurableOutboxMutation(callback) {
+  const run = durableOutboxMutationTail.then(callback, callback);
+  durableOutboxMutationTail = run.catch(() => null);
+  return run;
+}
+
+function chooseMergedOutboxStatus(entries, candidate) {
+  const processing = entries.find((entry) => entry.syncStatus === "processing");
+  if (processing) {
+    const processingFingerprint = normalizeOutboxSnapshotFingerprint(
+      processing.snapshotFingerprint || processing.payload?.snapshotFingerprint,
+    );
+    const candidateFingerprint = normalizeOutboxSnapshotFingerprint(
+      candidate.snapshotFingerprint || candidate.payload?.snapshotFingerprint,
+    );
+    if (
+      isSupersedableSnapshotOperation(candidate)
+      && candidateFingerprint
+      && processingFingerprint
+      && candidateFingerprint !== processingFingerprint
+    ) {
+      return "pending";
+    }
+    return "processing";
+  }
+  if (candidate.syncStatus === "pending" || entries.some((entry) => entry.syncStatus === "pending")) return "pending";
+  if (candidate.syncStatus === "conflict" || entries.some((entry) => entry.syncStatus === "conflict")) return "conflict";
+  return "failed";
+}
+
+function mergeEquivalentOutboxOperations(entries, candidate) {
+  const processing = entries.find((entry) => entry.syncStatus === "processing");
+  const keeper = processing || entries[0] || candidate;
+  const syncStatus = chooseMergedOutboxStatus(entries, candidate);
+  const retryValues = [...entries, candidate].map((entry) => Math.max(0, Number(entry.retryCount || 0)));
+  const retryCount = syncStatus === "processing"
+    ? Math.min(DURABLE_OUTBOX_MAX_RETRY_COUNT, Math.max(0, Number(keeper.retryCount || 0)))
+    : Math.min(DURABLE_OUTBOX_MAX_RETRY_COUNT, Math.min(...retryValues));
+  return normalizeDurableOutboxOperation({
+    ...keeper,
+    ...candidate,
+    operationId: keeper.operationId,
+    idempotencyKey: keeper.idempotencyKey,
+    createdAt: keeper.createdAt,
+    payload: {
+      ...(keeper.payload || {}),
+      ...(candidate.payload || {}),
+    },
+    syncStatus,
+    retryCount,
+    lastError: syncStatus === "pending" || syncStatus === "processing" ? "" : String(candidate.lastError || keeper.lastError || ""),
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+async function replaceDurableOutboxOperations(records = []) {
+  const normalized = records.map(normalizeDurableOutboxOperation)
+    .sort((left, right) => String(left.createdAt).localeCompare(String(right.createdAt)));
+  if (typeof indexedDB === "undefined") {
+    writeOutboxFallback(normalized);
+  } else {
+    await runIndexedDbTransaction(DURABLE_OUTBOX_STORE, "readwrite", (store) => {
+      store.clear();
+      normalized.forEach((entry) => store.put(entry));
+      return null;
+    });
+  }
+  publishDurableOutboxMirror(normalized);
+  return normalized;
+}
+
+async function consolidateDurableOutboxOperations() {
+  return runDurableOutboxMutation(async () => {
+    const records = await loadDurableOutboxOperations();
+    const groups = new Map();
+    const retained = [];
+    records.forEach((entry) => {
+      if (!DURABLE_OUTBOX_ACTIVE_STATUSES.has(entry.syncStatus)) {
+        retained.push(entry);
+        return;
+      }
+      const key = getDurableOutboxConsolidationKey(entry);
+      const group = groups.get(key) || [];
+      group.push(entry);
+      groups.set(key, group);
+    });
+    groups.forEach((group) => {
+      const newest = group[group.length - 1];
+      retained.push(mergeEquivalentOutboxOperations(group, newest));
+    });
+    return replaceDurableOutboxOperations(retained);
+  });
+}
+
+async function acknowledgeEquivalentDurableOutboxOperations(reference, acknowledgement = {}) {
+  return runDurableOutboxMutation(async () => {
+    const records = await loadDurableOutboxOperations();
+    const equivalent = records.filter((entry) => (
+      DURABLE_OUTBOX_ACTIVE_STATUSES.has(entry.syncStatus)
+      && areDurableOutboxOperationsEquivalent(entry, reference)
+    ));
+    const equivalentIds = new Set(equivalent.map((entry) => entry.operationId));
+    const retained = records.filter((entry) => !equivalentIds.has(entry.operationId));
+    await replaceDurableOutboxOperations(retained);
+    return {
+      acknowledged: equivalent.map((entry) => ({
+        ...entry,
+        syncStatus: "acknowledged",
+        retryCount: Math.min(DURABLE_OUTBOX_MAX_RETRY_COUNT, Number(entry.retryCount || 0)),
+        lastError: "",
+        acknowledgedAt: acknowledgement.updatedAt || new Date().toISOString(),
+      })),
+      remaining: retained,
+    };
+  });
+}
+
 function normalizeDurableOutboxOperation(input = {}) {
   const createdAt = input.createdAt || new Date().toISOString();
   const operationId = String(input.operationId || input.id || makeOutboxIdentifier("operation"));
   return {
     operationId,
-    idempotencyKey: String(input.idempotencyKey || `${getOutboxWorkshopId()}:${operationId}`),
+    idempotencyKey: String(input.idempotencyKey || `${input.workshopId || getOutboxWorkshopId()}:${operationId}`),
     entityType: String(input.entityType || "workshop_state"),
-    entityId: String(input.entityId || getOutboxWorkshopId()),
+    entityId: String(input.entityId || input.workshopId || getOutboxWorkshopId()),
     action: String(input.action || "upsert_snapshot"),
     payload: input.payload && typeof input.payload === "object" ? input.payload : {},
     workshopId: String(input.workshopId || getOutboxWorkshopId()),
     userId: String(input.userId || getOutboxUserId()),
-    expectedVersion: Number.isFinite(Number(input.expectedVersion)) ? Number(input.expectedVersion) : null,
-    retryCount: Math.max(0, Number(input.retryCount || input.attempts || 0)),
+    expectedVersion: normalizeOutboxExpectedVersion(input.expectedVersion),
+    snapshotFingerprint: normalizeOutboxSnapshotFingerprint(
+      input.snapshotFingerprint || input.payload?.snapshotFingerprint,
+    ),
+    retryCount: Math.min(DURABLE_OUTBOX_MAX_RETRY_COUNT, Math.max(0, Number(input.retryCount || input.attempts || 0))),
     lastError: String(input.lastError || input.error || ""),
     createdAt,
     updatedAt: input.updatedAt || createdAt,
@@ -184,6 +398,9 @@ function publishDurableOutboxMirror(records = []) {
     entityType: record.entityType,
     entityId: record.entityId,
     action: record.action,
+    workshopId: record.workshopId,
+    expectedVersion: record.expectedVersion,
+    snapshotFingerprint: record.snapshotFingerprint,
     retryCount: record.retryCount,
     lastError: record.lastError,
     createdAt: record.createdAt,
@@ -196,6 +413,12 @@ function publishDurableOutboxMirror(records = []) {
       id: entry.operationId,
       operationId: entry.operationId,
       type: entry.entityType === "workshop_state" ? "sync_push" : entry.action,
+      entityType: entry.entityType,
+      entityId: entry.entityId,
+      action: entry.action,
+      workshopId: entry.workshopId,
+      expectedVersion: entry.expectedVersion,
+      snapshotFingerprint: entry.snapshotFingerprint,
       status: entry.syncStatus === "acknowledged" ? "success" : entry.syncStatus,
       attempts: entry.retryCount,
       error: entry.lastError,
@@ -208,6 +431,7 @@ function publishDurableOutboxMirror(records = []) {
     pending: compact.filter((entry) => ["pending", "processing", "failed", "conflict"].includes(entry.syncStatus)).length,
     conflicts: compact.filter((entry) => entry.syncStatus === "conflict").length,
     failed: compact.filter((entry) => entry.syncStatus === "failed").length,
+    lastError: compact.slice().reverse().find((entry) => entry.lastError)?.lastError || "",
     operations: compact,
     updatedAt: new Date().toISOString(),
   };
@@ -229,44 +453,62 @@ async function loadDurableOutboxOperations() {
 
 async function putDurableOutboxOperation(input) {
   const operation = normalizeDurableOutboxOperation(input);
-  if (typeof indexedDB === "undefined") {
-    const records = readOutboxFallback().filter((entry) => entry.operationId !== operation.operationId);
-    records.push(operation);
-    writeOutboxFallback(records);
-  } else {
-    await runIndexedDbTransaction(DURABLE_OUTBOX_STORE, "readwrite", (store) => store.put(operation));
-  }
-  await loadDurableOutboxOperations();
-  return operation;
+  return runDurableOutboxMutation(async () => {
+    const records = await loadDurableOutboxOperations();
+    const retained = records.filter((entry) => entry.operationId !== operation.operationId);
+    retained.push(operation);
+    await replaceDurableOutboxOperations(retained);
+    return operation;
+  });
 }
 
 async function deleteDurableOutboxOperation(operationId) {
-  if (typeof indexedDB === "undefined") {
-    writeOutboxFallback(readOutboxFallback().filter((entry) => entry.operationId !== operationId));
-  } else {
-    await runIndexedDbTransaction(DURABLE_OUTBOX_STORE, "readwrite", (store) => store.delete(operationId));
-  }
-  return loadDurableOutboxOperations();
+  return runDurableOutboxMutation(async () => {
+    const records = await loadDurableOutboxOperations();
+    return replaceDurableOutboxOperations(records.filter((entry) => entry.operationId !== operationId));
+  });
 }
 
 async function enqueueDurableOutboxOperation(input = {}) {
   const candidate = normalizeDurableOutboxOperation(input);
-  const records = await loadDurableOutboxOperations();
-  const obsolete = records.filter((entry) => (
-    ["pending", "failed"].includes(entry.syncStatus)
-    && entry.entityType === candidate.entityType
-    && entry.entityId === candidate.entityId
-    && entry.action === candidate.action
-  ));
-  for (const entry of obsolete) await deleteDurableOutboxOperation(entry.operationId);
-  return putDurableOutboxOperation(candidate);
+  return runDurableOutboxMutation(async () => {
+    const records = await loadDurableOutboxOperations();
+    const mergeable = records.filter((entry) => (
+      DURABLE_OUTBOX_ACTIVE_STATUSES.has(entry.syncStatus)
+      && (
+        areDurableOutboxOperationsEquivalent(entry, candidate)
+        || areDurableOutboxOperationsSameSnapshotTarget(entry, candidate)
+      )
+    ));
+    if (!mergeable.length) {
+      await replaceDurableOutboxOperations([...records, candidate]);
+      return candidate;
+    }
+    const mergeableIds = new Set(mergeable.map((entry) => entry.operationId));
+    const merged = mergeEquivalentOutboxOperations(mergeable, candidate);
+    const retained = records.filter((entry) => !mergeableIds.has(entry.operationId));
+    retained.push(merged);
+    await replaceDurableOutboxOperations(retained);
+    return merged;
+  });
 }
 
 async function updateDurableOutboxOperation(operationId, changes = {}) {
-  const records = await loadDurableOutboxOperations();
-  const current = records.find((entry) => entry.operationId === operationId);
-  if (!current) return null;
-  return putDurableOutboxOperation({ ...current, ...changes, operationId, updatedAt: new Date().toISOString() });
+  return runDurableOutboxMutation(async () => {
+    const records = await loadDurableOutboxOperations();
+    const current = records.find((entry) => entry.operationId === operationId);
+    if (!current) return null;
+    const updated = normalizeDurableOutboxOperation({
+      ...current,
+      ...changes,
+      operationId,
+      updatedAt: new Date().toISOString(),
+    });
+    const retained = records.filter((entry) => entry.operationId !== operationId);
+    retained.push(updated);
+    await replaceDurableOutboxOperations(retained);
+    return updated;
+  });
 }
 
 function readDurableOutboxMirror() {
@@ -302,8 +544,16 @@ window.putDurableOutboxOperation = putDurableOutboxOperation;
 window.deleteDurableOutboxOperation = deleteDurableOutboxOperation;
 window.enqueueDurableOutboxOperation = enqueueDurableOutboxOperation;
 window.updateDurableOutboxOperation = updateDurableOutboxOperation;
+
+window.getDurableOutboxEquivalenceKey = getDurableOutboxEquivalenceKey;
+window.areDurableOutboxOperationsEquivalent = areDurableOutboxOperationsEquivalent;
+window.consolidateDurableOutboxOperations = consolidateDurableOutboxOperations;
+window.acknowledgeEquivalentDurableOutboxOperations = acknowledgeEquivalentDurableOutboxOperations;
 window.readDurableOutboxMirror = readDurableOutboxMirror;
 window.getPendingOutboxCount = getPendingOutboxCount;
+window.getSyncStateFingerprint = getSyncStateFingerprint;
+window.cloneSyncStateSnapshot = cloneSyncStateSnapshot;
+window.buildSyncFingerprintState = buildSyncFingerprintState;
 
 function isPlainObject(value) {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -596,11 +846,15 @@ async function restoreLatestAutomaticSnapshot() {
     const safetyPayload = await buildBackupPayload();
     downloadJson(safetyPayload, `nimr-carrosserie-avant-restauration-auto-${todayKey(new Date())}.json`);
     const restoreActor = getCurrentActor();
+    const previousSelection = typeof captureCaseSelectionIdentity === "function"
+      ? captureCaseSelectionIdentity()
+      : { id: activeCaseId };
     state = normalizeState(chosen.state);
     if (typeof initializeLastKnownCasesComparable === "function") {
       initializeLastKnownCasesComparable();
     }
-    activeCaseId = state.cases[0]?.id ?? null;
+    if (typeof reconcileActiveCaseSelection === "function") reconcileActiveCaseSelection(previousSelection);
+    else activeCaseId = state.cases[0]?.id ?? null;
     generatedProposals = {};
     addAuditLog("backup.snapshot.restored", "Point de restauration automatique restauré", formatSensitiveActionAuditDetails("restore-automatic-snapshot", {
       snapshotAt: chosen.savedAt || "inconnu",
@@ -927,11 +1181,15 @@ async function importBackup(event) {
     downloadJson(safetyPayload, `nimr-carrosserie-avant-import-${todayKey(new Date())}.json`);
 
     const importActor = getCurrentActor();
+    const previousSelection = typeof captureCaseSelectionIdentity === "function"
+      ? captureCaseSelectionIdentity()
+      : { id: activeCaseId };
     state = normalizeState(importedState);
     if (typeof initializeLastKnownCasesComparable === "function") {
       initializeLastKnownCasesComparable();
     }
-    activeCaseId = state.cases[0]?.id ?? null;
+    if (typeof reconcileActiveCaseSelection === "function") reconcileActiveCaseSelection(previousSelection);
+    else activeCaseId = state.cases[0]?.id ?? null;
     generatedProposals = {};
     
     // Nettoyer à la fois les photos et les documents

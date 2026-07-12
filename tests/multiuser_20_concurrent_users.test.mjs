@@ -31,6 +31,7 @@ const atomicFactory = new Function(
   "getSupabaseUser",
   "getSupabaseWorkshopId",
   "makeSupabaseConflictHash",
+  "caseSyncLocalId",
   `${syncSource.slice(atomicSourceStart, atomicSourceEnd)}\nreturn { reservePlanningProposalAtomically };`,
 );
 const workshopId = "10000000-0000-4000-8000-000000000001";
@@ -39,19 +40,43 @@ const zoneUuid = "20000000-0000-4000-8000-000000000002";
 let rpcCall = null;
 const mockClient = {
   from(table) {
-    assert.equal(table, "planning_resources");
+    if (table === "planning_resources") {
+      return {
+        select(columns) {
+          assert.equal(columns, "id,local_id");
+          return {
+            async eq(field, value) {
+              assert.equal(field, "workshop_id");
+              assert.equal(value, workshopId);
+              return {
+                data: [
+                  { id: technicianUuid, local_id: "tolier-1" },
+                  { id: zoneUuid, local_id: "zone-preparation-1" },
+                ],
+                error: null,
+              };
+            },
+          };
+        },
+      };
+    }
+    assert.equal(table, "repair_orders");
     return {
       select(columns) {
-        assert.equal(columns, "id,local_id");
+        assert.equal(columns, "planning_version");
+        const filters = [];
         return {
-          async eq(field, value) {
-            assert.equal(field, "workshop_id");
-            assert.equal(value, workshopId);
+          eq(field, value) {
+            filters.push([field, value]);
+            return this;
+          },
+          async maybeSingle() {
+            assert.deepEqual(filters, [
+              ["workshop_id", workshopId],
+              ["local_id", "case-local-1"],
+            ]);
             return {
-              data: [
-                { id: technicianUuid, local_id: "tolier-1" },
-                { id: zoneUuid, local_id: "zone-preparation-1" },
-              ],
+              data: { planning_version: 6 },
               error: null,
             };
           },
@@ -71,6 +96,7 @@ const { reservePlanningProposalAtomically } = atomicFactory(
   async () => ({ id: "user-1" }),
   () => workshopId,
   () => "proposal-hash",
+  (item) => item.id,
 );
 const localCase = { id: "case-local-1", localRevision: 3, syncRevision: 99, serverPlanningVersion: 6 };
 await reservePlanningProposalAtomically(localCase, {

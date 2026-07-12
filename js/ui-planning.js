@@ -498,7 +498,13 @@ function renderHolidays() {
 }
 
 function getActiveCase() {
-  return (typeof getIndexedCaseById === "function" ? getIndexedCaseById(activeCaseId) : state.cases.find((item) => item.id === activeCaseId)) || state.cases[0] || null;
+  const selected = typeof resolveCaseInCurrentState === "function"
+    ? resolveCaseInCurrentState(activeCaseId)
+    : ((typeof getIndexedCaseById === "function" ? getIndexedCaseById(activeCaseId) : state.cases.find((item) => item.id === activeCaseId)) || null);
+  if (selected) return selected;
+  const fallback = state.cases[0] || null;
+  activeCaseId = fallback?.id || null;
+  return fallback;
 }
 
 

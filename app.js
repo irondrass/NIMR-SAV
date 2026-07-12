@@ -118,7 +118,7 @@ function bindSyncConflictUsability() {
 
 function configurePdfWorker() {
   if (window.pdfjsLib?.GlobalWorkerOptions) {
-    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.2.8-full-audit";
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.0";
   }
 }
 
@@ -378,7 +378,10 @@ function getPdfEstimateTaskRows(parsed) {
     if (sourceOperation && !task.sourceOperations.includes(sourceOperation)) task.sourceOperations.push(sourceOperation);
     aggregated.set(phase, task);
   });
-  return [...aggregated.values()];
+  const tasks = [...aggregated.values()];
+  return typeof normalizePdfPlanningTasksForCase === "function"
+    ? normalizePdfPlanningTasksForCase(tasks)
+    : tasks;
 }
 
 function renderPdfEstimateCreationPreview(form, draft, file) {
@@ -1069,7 +1072,7 @@ function registerServiceWorker() {
   });
   const registerCurrentServiceWorker = async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=23.2.8-full-audit", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=23.3.0", { updateViaCache: "none" });
       const refreshRegistration = async () => {
         try {
           await registration.update?.();
@@ -1307,7 +1310,7 @@ function renderActivityLog() {
         const localVal = targetConflict ? (targetConflict.localCase || targetConflict.localValue) : null;
         if (localVal) {
           const payload = {
-            version: "v23.2.8-full-audit",
+            version: "v23.3.0",
             timestamp: new Date().toISOString(),
             cases: [JSON.parse(JSON.stringify(localVal))],
             source: "manual_conflict_backup"

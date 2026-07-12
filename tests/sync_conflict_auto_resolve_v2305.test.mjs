@@ -33,6 +33,17 @@ const script = `
   async function restorePhotoRecords() { return 0; }
   function isSupabaseConfigured() { return true; }
   async function buildBackupPayload() { return { state, photos: [] }; }
+  function cloneSyncStateSnapshot(candidateState = state) {
+    return JSON.parse(JSON.stringify(candidateState || {}));
+  }
+  function buildSyncFingerprintState(candidateState = state) {
+    const snapshot = cloneSyncStateSnapshot(candidateState);
+    delete snapshot.syncLog;
+    return snapshot;
+  }
+  function getSyncStateFingerprint(candidateState = state) {
+    return JSON.stringify(buildSyncFingerprintState(candidateState));
+  }
   function getSupabaseConfig() { return { backupTable: "cloud_backups", backupKey: "nimr-carrosserie-main" }; }
   function getSupabaseWorkshopId() { return "main"; }
   

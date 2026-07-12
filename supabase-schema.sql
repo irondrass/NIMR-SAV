@@ -530,7 +530,7 @@ declare
   t text;
   p text;
 begin
-  foreach t in array array['cloud_backups','app_settings','clients','vehicles','repair_orders','repair_steps','planning_resources','planning_slots','photos','repair_claims','repair_claim_labor_lines','repair_supplements','repair_supplement_lines','audit_logs']
+  foreach t in array array['cloud_backups','app_settings','clients','vehicles','repair_orders','repair_steps','planning_resources','planning_slots','photos','repair_claims','repair_claim_labor_lines','repair_supplements','repair_supplement_lines']
   loop
     execute format('drop policy if exists %I on public.%I', t || ' select authenticated', t);
     execute format('drop policy if exists %I on public.%I', t || ' insert authenticated', t);
@@ -550,6 +550,24 @@ begin
     execute format('create policy %I on public.%I for delete to authenticated using (public.is_workshop_member(workshop_id))', p, t);
   end loop;
 end $$;
+
+-- audit_logs reste strictement append-only : lecture et insertion uniquement.
+drop policy if exists "audit_logs select authenticated" on public.audit_logs;
+drop policy if exists "audit_logs insert authenticated" on public.audit_logs;
+drop policy if exists "audit_logs update authenticated" on public.audit_logs;
+drop policy if exists "audit_logs delete authenticated" on public.audit_logs;
+
+create policy "audit_logs select authenticated"
+on public.audit_logs for select to authenticated
+using (public.is_workshop_member(workshop_id));
+
+create policy "audit_logs insert authenticated"
+on public.audit_logs for insert to authenticated
+with check (public.is_workshop_member(workshop_id));
+
+revoke all privileges on table public.audit_logs from authenticated;
+revoke all privileges on table public.audit_logs from anon;
+grant select, insert on table public.audit_logs to authenticated;
 
 -- Bucket photos: a creer aussi dans Storage si besoin.
 -- Securite v23.1.5: les objets doivent etre stockes sous

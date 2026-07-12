@@ -21,7 +21,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v23.2.8-full-audit";
+const APP_VERSION = "v23.3.0";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const CURRENT_DATA_SCHEMA_VERSION = 2;
@@ -596,14 +596,23 @@ function getCaseStatus(item) {
   if (flags.invoiced || item.closedAt || item.status === "closed") return "closed";
   if (flags.workCompleted || item.status === "completed") return "completed";
   if (flags.workStarted || item.status === "in_progress") return "in_progress";
-  if (item.pdfImportStatus === "chief_validation_pending" || item.status === "chief_validation") return "chief_validation";
+  const pdfReadyForPlanning = isPdfCaseReadyForPlanning(item);
+  if (
+    !pdfReadyForPlanning
+    && (
+      item.pdfImportStatus === "chief_validation_pending"
+      || item.status === "chief_validation"
+    )
+  ) {
+    return "chief_validation";
+  }
 
   const bookings = typeof getIndexedCaseBookings === "function"
     ? getIndexedCaseBookings(item.id)
     : (Array.isArray(state?.bookings) ? state.bookings : []);
   const hasAssignments = bookings.some((booking) => booking.caseId === item.id && booking.type !== "leave");
   if (flags.received || hasAssignments) return "in_progress";
-  return hasRepairClaims(item) || item.appointment ? "planning" : "chief_validation";
+  return pdfReadyForPlanning || hasRepairClaims(item) || item.appointment ? "planning" : "chief_validation";
 }
 
 const DAY_LABELS = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"];
@@ -620,6 +629,85 @@ initializeLastKnownCasesComparable();
 let activeTab = "reception-workspace";
 let activeCaseId = state.cases[0]?.id ?? null;
 let activeCaseDetailTab = "resume";
+
+function normalizeCaseIdentityToken(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function captureCaseSelectionIdentity(item = null) {
+  const selected = item || (Array.isArray(state?.cases) ? state.cases.find((candidate) => candidate.id === activeCaseId) : null);
+  return {
+    id: String(selected?.id || activeCaseId || ""),
+    localId: String(selected?.local_id || selected?.localId || ""),
+    orNavNumber: String(selected?.orNavNumber || ""),
+    vin: String(selected?.vin || ""),
+    plate: String(selected?.plate || ""),
+  };
+}
+
+function findCaseBySelectionIdentity(identity = {}, cases = state?.cases) {
+  const list = Array.isArray(cases) ? cases.filter(Boolean) : [];
+  if (!list.length) return null;
+  const exactId = String(identity.id || "");
+  if (exactId) {
+    const match = list.find((item) => String(item.id || "") === exactId);
+    if (match) return match;
+  }
+  const matchUnique = (getter, expected) => {
+    const token = normalizeCaseIdentityToken(expected);
+    if (!token) return null;
+    const matches = list.filter((item) => normalizeCaseIdentityToken(getter(item)) === token);
+    return matches.length === 1 ? matches[0] : null;
+  };
+  return matchUnique((item) => item.local_id || item.localId, identity.localId)
+    || matchUnique((item) => item.orNavNumber, identity.orNavNumber)
+    || matchUnique((item) => item.vin, identity.vin)
+    || matchUnique((item) => item.plate, identity.plate)
+    || null;
+}
+
+function invalidateStateReplacementIndexes() {
+  if (typeof invalidateUiRuntimeIndexes === "function") invalidateUiRuntimeIndexes();
+  if (typeof invalidatePlanningRuntimeIndexes === "function") invalidatePlanningRuntimeIndexes();
+}
+
+function reconcileActiveCaseSelection(previousIdentity = null) {
+  invalidateStateReplacementIndexes();
+  const identity = previousIdentity || captureCaseSelectionIdentity();
+  const selected = findCaseBySelectionIdentity(identity, state?.cases)
+    || (Array.isArray(state?.cases) ? state.cases[0] : null)
+    || null;
+  activeCaseId = selected?.id || null;
+  return selected;
+}
+
+function resolveCaseInCurrentState(reference = null) {
+  const identity = typeof reference === "string"
+    ? { id: reference }
+    : captureCaseSelectionIdentity(reference);
+  const selected = findCaseBySelectionIdentity(identity, state?.cases);
+  if (selected && selected.id !== activeCaseId) activeCaseId = selected.id;
+  return selected;
+}
+
+function isPdfCaseReadyForPlanning(item) {
+  if (!item || item.source !== "pdf_estimate" || item.pdfImportStatus !== "ready_for_planning") return false;
+  const validatedAt = new Date(item.pdfValidatedAt || "");
+  return Number.isFinite(validatedAt.getTime());
+}
+
+function getPlanningBusinessRuleIssues(item) {
+  const issues = typeof getBusinessRuleIssues === "function"
+    ? getBusinessRuleIssues(item, "appointment")
+    : [];
+  if (!isPdfCaseReadyForPlanning(item)) return issues;
+  return issues.filter((issue) => !/chef atelier|validation chef/i.test(String(issue || "")));
+}
 let generatedProposals = {};
 let estimateImportPreviews = {};
 let localSecurityIdleTimer = null;
@@ -1197,6 +1285,61 @@ function normalizeStringList(value) {
     : [];
 }
 
+function normalizePdfPlanningTasksForCase(tasks = []) {
+  const phaseOrder = [
+    "body",
+    "oilService",
+    "mechanical",
+    "electrical",
+    "prep",
+    "paint",
+    "reassembly",
+    "finish",
+    "quality",
+  ];
+  const phaseRank = new Map(
+    phaseOrder.map((phase, index) => [phase, index]),
+  );
+  const ordered = (Array.isArray(tasks) ? tasks : [])
+    .filter(Boolean)
+    .map((task, originalIndex) => ({
+      task: { ...task },
+      originalIndex,
+    }))
+    .sort((left, right) => {
+      const leftRank = phaseRank.has(left.task.phase)
+        ? phaseRank.get(left.task.phase)
+        : phaseOrder.length;
+      const rightRank = phaseRank.has(right.task.phase)
+        ? phaseRank.get(right.task.phase)
+        : phaseOrder.length;
+      return leftRank - rightRank
+        || left.originalIndex - right.originalIndex;
+    });
+
+  const normalized = ordered.map(({ task }) => {
+    const phase = String(task.phase || task.key || "body");
+    const taskId = String(
+      task.taskId || task.id || `pdf-task-${phase}`,
+    );
+    return {
+      ...task,
+      id: taskId,
+      taskId,
+      phase,
+      key: task.key || phase,
+      vehicleExclusive: task.vehicleExclusive !== false,
+      parallelizable: false,
+    };
+  });
+
+  return normalized.map((task, index) => ({
+    ...task,
+    dependencies:
+      index > 0 ? [normalized[index - 1].taskId] : [],
+  }));
+}
+
 function normalizeWorkshopCaseStatus(value, item = {}) {
   if (item.archivedAt) return "archived";
   const flags = item.flags || {};
@@ -1204,7 +1347,14 @@ function normalizeWorkshopCaseStatus(value, item = {}) {
   if (flags.workCompleted) return "completed";
   if (flags.workStarted) return "in_progress";
   if (item.appointment || flags.received) return "planning";
-  if (item.pdfImportStatus === "chief_validation_pending" || item.source === "pdf_estimate") return "chief_validation";
+  const pdfReadyForPlanning = isPdfCaseReadyForPlanning(item);
+  if (pdfReadyForPlanning) return "planning";
+  if (
+    item.pdfImportStatus === "chief_validation_pending"
+    || item.source === "pdf_estimate"
+  ) {
+    return "chief_validation";
+  }
   if (Array.isArray(item.claims) && item.claims.length > 0) return "planning";
   const token = normalizeRoleToken(value).replace(/\s/g, "");
   return WORKSHOP_CASE_STATUS_ALIASES[token] || "chief_validation";
@@ -2539,6 +2689,17 @@ function normalizeCase(item, bookings, realBookingCaseIds = null) {
 
   return {
     id: caseId || uid("case"),
+    local_id: item.local_id || item.localId || "",
+    serverPlanningVersion: Math.max(
+      0,
+      Number(
+        item.serverPlanningVersion
+        ?? item.planningVersion
+        ?? item.planning_version
+        ?? item.serverVersion
+        ?? 0
+      ) || 0,
+    ),
     clientName: item.clientName || "À compléter",
     phone: item.phone || "",
     ownerName: item.ownerName || item.companyName || item.owner || "",
@@ -2575,9 +2736,15 @@ function normalizeCase(item, bookings, realBookingCaseIds = null) {
     history: normalizeHistory(item.history, item.createdAt),
     photos: Array.isArray(item.photos) ? item.photos.map(normalizePhotoMeta) : [],
     durations: normalizedDurations,
-    planningTasks: Array.isArray(item.planningTasks || item.tasks)
-      ? cloneMigrationValue(item.planningTasks || item.tasks)
-      : [],
+    planningTasks: item.source === "pdf_estimate"
+      ? normalizePdfPlanningTasksForCase(
+        item.planningTasks || item.tasks || [],
+      )
+      : (
+        Array.isArray(item.planningTasks || item.tasks)
+          ? cloneMigrationValue(item.planningTasks || item.tasks)
+          : []
+      ),
     stepServiceTypes: normalizeStepServiceTypes(item.stepServiceTypes),
     stepPreferredResources: normalizeStepPreferredResources(item.stepPreferredResources),
     stepExecutionModes: normalizeStepExecutionModes(item.stepExecutionModes),
@@ -3342,7 +3509,7 @@ function resolveSyncConflict(conflictIdOrKey, action = "mark_resolved") {
       // Save a silent local case snapshot
       const snapshotKey = `nimr-sav-conflict-safety-snapshot:${caseId}:${conflictId}`;
       const snapshotPayload = {
-        version: "v23.2.8-full-audit",
+        version: "v23.3.0",
         timestamp: new Date().toISOString(),
         cases: [JSON.parse(JSON.stringify(localCase))],
         source: "conflict_safety_snapshot"

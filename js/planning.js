@@ -78,7 +78,15 @@ function getExplicitPlanningTasks(item) {
   const direct = Array.isArray(item?.planningTasks)
     ? item.planningTasks
     : (Array.isArray(item?.workshopTasks) ? item.workshopTasks : []);
-  if (direct.length) return direct.filter(Boolean);
+  if (direct.length) {
+    const tasks = direct.filter(Boolean);
+    return (
+      item?.source === "pdf_estimate"
+      && typeof normalizePdfPlanningTasksForCase === "function"
+    )
+      ? normalizePdfPlanningTasksForCase(tasks)
+      : tasks;
+  }
   const hasExternalStep = Object.values(item?.stepExecutionModes || {}).some((mode) => mode === "external");
   if (hasExternalStep) {
     let previousTaskId = "";
@@ -139,6 +147,38 @@ function makePlanningStep(item, template, match, options = {}) {
   };
 }
 
+function describePlanningAvailabilityFailure(item, template, duration, tempBookings, fastJob, title, planningOptions = {}) {
+  const label = title || template.title || "la tâche";
+  const primaryResources = getAssignableResources(template.role, fastJob, {
+    requiredCategory: planningOptions.requiredCategory || "",
+    requiredSite: planningOptions.requiredSite || "internal",
+  });
+  if (!primaryResources.length) {
+    return `Aucun technicien compatible disponible pour ${label}.`;
+  }
+  if (template.equipmentRole) {
+    const equipmentResources = getAssignableResources(template.equipmentRole, fastJob, {
+      requiredCategory: "",
+      requiredSite: planningOptions.requiredSite || "internal",
+    });
+    if (!equipmentResources.length) {
+      return `Aucune zone ou ressource ${template.equipmentRole} disponible pour ${label}.`;
+    }
+  }
+  const finiteCapacities = primaryResources
+    .map((resource) => getResourceDailyCapacityMinutes(resource))
+    .filter((minutes) => Number.isFinite(minutes));
+  if (finiteCapacities.length && finiteCapacities.every((minutes) => minutes < duration)) {
+    const bestCapacity = Math.max(...finiteCapacities);
+    return `Durée de ${Math.round(duration / 6) / 10} h supérieure à la capacité journalière disponible de ${Math.round(bestCapacity / 6) / 10} h pour ${label}.`;
+  }
+  const sameCaseBookings = (tempBookings || []).filter((booking) => booking.caseId === item.id && booking.temporary !== true);
+  if (sameCaseBookings.length) {
+    return `Collision avec un booking existant ou capacité atelier insuffisante pour ${label}.`;
+  }
+  return `Capacité atelier insuffisante pour ${label} avec les ressources actuellement disponibles.`;
+}
+
 function scheduleSingleStep(item, template, cursor, duration, tempBookings, assignment, fastJob, title, details, planningMode = "standard", planningOptions = {}) {
   if (duration <= 0) return null;
   const preferredPrimaryId = getPreferredPrimaryResourceId(template, assignment, item);
@@ -164,7 +204,17 @@ function scheduleSingleStep(item, template, cursor, duration, tempBookings, assi
       requiredCategory: planningOptions.requiredCategory || "",
     },
   );
-  if (!match) throw new Error(`Aucune disponibilité pour ${title || template.title}.`);
+  if (!match) {
+    throw new Error(describePlanningAvailabilityFailure(
+      item,
+      template,
+      duration,
+      tempBookings,
+      fastJob,
+      title,
+      planningOptions,
+    ));
+  }
   rememberPlanningAssignment(template, assignment, match.primary.id, match.equipment?.id || null);
   const step = makePlanningStep(item, template, match, {
     title: title || template.title,
@@ -795,6 +845,12 @@ let planningCaseIndexSource = null;
 let planningCaseIndexLength = -1;
 let planningCaseIndex = new Map();
 
+function invalidatePlanningRuntimeIndexes() {
+  planningCaseIndexSource = null;
+  planningCaseIndexLength = -1;
+  planningCaseIndex = new Map();
+}
+
 function getPlanningCaseIndex() {
   const cases = Array.isArray(state?.cases) ? state.cases : [];
   if (planningCaseIndexSource !== cases || planningCaseIndexLength !== cases.length) {
@@ -806,21 +862,32 @@ function getPlanningCaseIndex() {
 }
 
 async function acceptProposalAtomically(item, proposal) {
+  const currentItem = typeof resolveCaseInCurrentState === "function"
+    ? resolveCaseInCurrentState(item)
+    : state.cases.find((candidate) => candidate.id === item?.id);
+  if (!currentItem) {
+    notifyUser("Le dossier sélectionné n'existe plus après synchronisation. Actualisez la liste.", "error");
+    return false;
+  }
+  if (currentItem.source === "pdf_estimate" && !isPdfCaseReadyForPlanning(currentItem)) {
+    notifyUser("Validation Chef Atelier du devis PDF absente ou invalide.", "error");
+    return false;
+  }
   if (!proposal || proposal.error) return false;
   let serverProposal;
   try {
-    serverProposal = recalculateProposalForAcceptance(item, proposal);
+    serverProposal = recalculateProposalForAcceptance(currentItem, proposal);
     if (typeof reservePlanningProposalAtomically === "function") {
-      await reservePlanningProposalAtomically(item, serverProposal);
+      await reservePlanningProposalAtomically(currentItem, serverProposal);
     }
   } catch (error) {
-    generatedProposals[item.id] = null;
+    generatedProposals[currentItem.id] = null;
     notifyUser(error.message || "Le planning a changé. Recalculez la proposition avant de la valider.", "error");
     renderCaseDetail();
     return false;
   }
-  acceptProposal(item, serverProposal);
-  return Boolean(item.appointment && state.bookings.some((booking) => booking.caseId === item.id));
+  acceptProposal(currentItem, serverProposal);
+  return Boolean(currentItem.appointment && state.bookings.some((booking) => booking.caseId === currentItem.id));
 }
 
 window.acceptProposalAtomically = acceptProposalAtomically;

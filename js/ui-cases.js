@@ -2985,14 +2985,24 @@ function renderCaseDetail() {
   });
   const proposalButton = $("#generate-proposals", detail);
   proposalButton.addEventListener("click", () => {
-    const permissionGuard = guardAppointmentSchedule(item);
+    const currentItem = typeof resolveCaseInCurrentState === "function"
+      ? resolveCaseInCurrentState(item)
+      : state.cases.find((candidate) => candidate.id === item.id);
+    if (!currentItem) {
+      notifyUser("Le dossier sélectionné n'existe plus après synchronisation. Actualisez la liste.", "error");
+      return;
+    }
+    const permissionGuard = guardAppointmentSchedule(currentItem);
     if (!permissionGuard.ok) return;
-    const issues = getBusinessRuleIssues(item, "appointment");
+    const issues = typeof getPlanningBusinessRuleIssues === "function"
+      ? getPlanningBusinessRuleIssues(currentItem)
+      : getBusinessRuleIssues(currentItem, "appointment");
     if (issues.length) {
       notifyUser(issues.join("\n"));
       return;
     }
-    generatedProposals[item.id] = generateAppointmentOptions(item);
+    generatedProposals[currentItem.id] = generateAppointmentOptions(currentItem);
+    activeCaseId = currentItem.id;
     renderCaseDetail();
   });
   $$("[data-action-flag]", detail).forEach((button) => {

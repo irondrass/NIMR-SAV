@@ -97,6 +97,13 @@ function bindOfflineStatus() {
     refresh();
     quietNotify("Connexion rétablie. La synchronisation Supabase va reprendre.", "success");
     if (typeof pullLatestSupabaseBackup === "function") pullLatestSupabaseBackup("online");
+    if (
+      typeof hasPendingWorkHoursChange === "function"
+      && hasPendingWorkHoursChange(state.workHours)
+      && typeof scheduleAutoSupabaseBackup === "function"
+    ) {
+      scheduleAutoSupabaseBackup("work-hours-online-recovery");
+    }
   });
   window.addEventListener("offline", () => {
     refresh();
@@ -118,7 +125,7 @@ function bindSyncConflictUsability() {
 
 function configurePdfWorker() {
   if (window.pdfjsLib?.GlobalWorkerOptions) {
-    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.0";
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.1";
   }
 }
 
@@ -1003,28 +1010,43 @@ function updateFastLaneSettings() {
   renderMetrics();
 }
 
+function handleDelegatedWorkHoursChange(event) {
+  const input = event.target?.closest?.("[data-work-day]");
+  if (!input) return;
+
+  const permission = guardAction("planning.edit", {}, { notify: false });
+  if (!permission.ok) {
+    notifyUser(permission.message, "error");
+    input.value = formatWorkIntervals(state.workHours[input.dataset.workDay] || []);
+    return;
+  }
+
+  try {
+    const previousWorkHours = cloneWorkHours(state.workHours || DEFAULT_WORK_HOURS);
+    const day = input.dataset.workDay;
+    state.workHours[day] = parseWorkIntervals(input.value);
+
+    if (typeof markWorkHoursLocallyModified === "function") {
+      markWorkHoursLocallyModified(state.workHours, {
+        previousWorkHours,
+        changedAt: new Date().toISOString(),
+      });
+    }
+
+    saveState({ cloudReason: "work-hours" });
+    renderPlanning();
+    renderMetrics();
+  } catch (error) {
+    notifyUser(error.message, "error");
+    input.value = formatWorkIntervals(state.workHours[input.dataset.workDay] || []);
+  }
+}
+
 function bindWorkHoursInputs() {
-  $$("[data-work-day]").forEach((input) => {
-    if (input.dataset.bound === "true") return;
-    input.dataset.bound = "true";
-    input.addEventListener("change", () => {
-      const permission = guardAction("planning.edit", {}, { notify: false });
-      if (!permission.ok) {
-        notifyUser(permission.message, "error");
-        input.value = formatWorkIntervals(state.workHours[input.dataset.workDay] || []);
-        return;
-      }
-      try {
-        state.workHours[input.dataset.workDay] = parseWorkIntervals(input.value);
-        saveState();
-        renderPlanning();
-        renderMetrics();
-      } catch (error) {
-        notifyUser(error.message, "error");
-        input.value = formatWorkIntervals(state.workHours[input.dataset.workDay] || []);
-      }
-    });
-  });
+  const bindingRoot = document.documentElement;
+  if (bindingRoot.dataset.workHoursDelegatedBound === "true") return;
+  bindingRoot.dataset.workHoursDelegatedBound = "true";
+  document.addEventListener("change", handleDelegatedWorkHoursChange);
 }
 
 function bindBackupActions() {
@@ -1072,7 +1094,7 @@ function registerServiceWorker() {
   });
   const registerCurrentServiceWorker = async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=23.3.0", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=23.3.1", { updateViaCache: "none" });
       const refreshRegistration = async () => {
         try {
           await registration.update?.();
@@ -1310,7 +1332,7 @@ function renderActivityLog() {
         const localVal = targetConflict ? (targetConflict.localCase || targetConflict.localValue) : null;
         if (localVal) {
           const payload = {
-            version: "v23.3.0",
+            version: "v23.3.1",
             timestamp: new Date().toISOString(),
             cases: [JSON.parse(JSON.stringify(localVal))],
             source: "manual_conflict_backup"

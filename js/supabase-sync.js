@@ -197,12 +197,26 @@ function makeMapByLocalId(rows) {
 }
 
 function buildWorkshopSettingsPayload(localState) {
+  const workHours = cloneWorkHours(localState.workHours || DEFAULT_WORK_HOURS);
+  const workHoursFingerprint = typeof getWorkHoursFingerprint === "function"
+    ? getWorkHoursFingerprint(workHours)
+    : "";
+  const workHoursSyncMeta = typeof getWorkHoursSyncMeta === "function"
+    ? getWorkHoursSyncMeta()
+    : {};
   return {
     schemaVersion: 1,
     appVersion: APP_VERSION,
     exportedAt: new Date().toISOString(),
     settings: { ...(localState.settings || {}) },
-    workHours: cloneWorkHours(localState.workHours || DEFAULT_WORK_HOURS),
+    workHours,
+    workHoursSync: {
+      version: 1,
+      fingerprint: workHoursFingerprint,
+      changedAt: workHoursSyncMeta.localChangedAt || "",
+      acknowledgedAt: workHoursSyncMeta.acknowledgedAt || "",
+      pending: Boolean(workHoursSyncMeta.pending),
+    },
     holidays: Array.isArray(localState.holidays) ? localState.holidays.map((holiday) => ({ ...holiday })) : [],
     resources: Array.isArray(localState.resources) ? localState.resources.map((resource) => ({ ...resource })) : [],
     planningDate: localState.planningDate || todayKey(new Date()),
@@ -227,6 +241,7 @@ async function syncWorkshopSettingsToSupabase(client, localState, user) {
   return {
     settings: Object.keys(payload.settings || {}).length,
     workHoursDays: Object.keys(payload.workHours || {}).length,
+    workHoursFingerprint: payload.workHoursSync?.fingerprint || "",
     holidays: payload.holidays.length,
     resources: payload.resources.length,
   };
@@ -247,6 +262,12 @@ function applyWorkshopSettingsToState(settingsPayload) {
   });
   state.settings = nextState.settings;
   state.workHours = nextState.workHours;
+  if (typeof acceptRemoteWorkHoursSync === "function") {
+    acceptRemoteWorkHoursSync(state.workHours, {
+      updatedAt: settingsPayload.workHoursSync?.changedAt || new Date(),
+      decision: "manual_app_settings_restore",
+    });
+  }
   state.holidays = nextState.holidays;
   state.resources = nextState.resources;
   state.bookings = normalizeBookings(state.bookings, state.resources);
@@ -773,6 +794,7 @@ async function syncBusinessTablesToSupabase(payload, user) {
     resources: resourceRows.length,
     settings: settingsStats.settings,
     workHoursDays: settingsStats.workHoursDays,
+    workHoursFingerprint: settingsStats.workHoursFingerprint,
     holidays: settingsStats.holidays,
     planningSlots: 0,
     planningSlotsManagedByRpc: bookingRows.length,
@@ -801,6 +823,26 @@ async function saveLocalToSupabase() {
     setSupabaseDetails("La sauvegarde cloud est bloquée tant qu'aucune session Supabase active n'est détectée.");
     return;
   }
+  const workHoursBlock =
+    getWorkHoursOutboundBlock();
+  if (workHoursBlock) {
+    setSupabaseStatus(
+      "Sauvegarde cloud bloquée : conflit horaires atelier.",
+      "warn",
+    );
+    setSupabaseDetails(
+      "Résolvez le conflit des horaires atelier avant "
+      + "tout envoi du snapshot local complet.",
+    );
+    if (typeof notifyUser === "function") {
+      notifyUser(
+        "Sauvegarde cloud bloquée : conflit horaires "
+        + "atelier non résolu.",
+        "warn",
+      );
+    }
+    return workHoursBlock;
+  }
   const confirmed = await showConfirmModal("Sauvegarder les données locales actuelles vers Supabase ? Une copie JSON locale de sécurité sera téléchargée avant l'envoi. Vérifiez que l'authentification et les règles RLS Supabase sont actives.");
   if (!confirmed) return;
 
@@ -826,6 +868,17 @@ async function saveLocalToSupabase() {
 
     setSupabaseStatus("Remplissage des tables métier...");
     const stats = await syncBusinessTablesToSupabase(payload, user);
+    if (
+      typeof acknowledgeWorkHoursSync === "function"
+      && typeof getWorkHoursFingerprint === "function"
+    ) {
+      const sentWorkHoursFingerprint = getWorkHoursFingerprint(payload.state?.workHours || {});
+      acknowledgeWorkHoursSync(state.workHours, {
+        cloudBackupFingerprint: sentWorkHoursFingerprint,
+        appSettingsFingerprint: stats.workHoursFingerprint,
+        updatedAt,
+      });
+    }
     if (typeof resolveKeptConflictsAfterPush === "function") {
       resolveKeptConflictsAfterPush();
     }
@@ -965,11 +1018,40 @@ const processedRealtimeEventIds = new Set();
 const SUPABASE_LIVE_PULL_INTERVAL_MS = 3000;
 const SUPABASE_AUTO_BACKUP_MIN_INTERVAL_MS = 1200;
 
+function getWorkHoursOutboundBlock(
+  options = {},
+) {
+  const blocked = Boolean(
+    typeof hasBlockingWorkHoursConflict === "function"
+    && hasBlockingWorkHoursConflict(
+      state?.workHours || {},
+    ),
+  );
+  if (!blocked) return null;
+
+  const message = [
+    "Synchronisation cloud bloquée : un conflit",
+    "non résolu existe sur les horaires atelier.",
+    "Le snapshot local complet ne sera pas envoyé.",
+  ].join(" ");
+
+  if (options.requireAck) {
+    throw new Error(message);
+  }
+
+  return {
+    acknowledged: false,
+    reason: "work-hours-conflict",
+    error: message,
+  };
+}
+
 function shouldAutoBackupToSupabase() {
   return Boolean(!applyingRemoteSupabaseState && getSupabaseClient && getSupabaseClient() && navigator.onLine !== false);
 }
 
 function scheduleAutoSupabaseBackup(reason = "autosave") {
+  if (getWorkHoursOutboundBlock()) return;
   if (!shouldAutoBackupToSupabase()) return;
   if (applyingRemoteSupabaseState) return;
   window.clearTimeout(autoSupabaseBackupTimer);
@@ -983,6 +1065,11 @@ async function flushSupabaseBackup(reason = "manual") {
 }
 
 async function autoBackupToSupabase(reason = "autosave", options = {}) {
+  const initialWorkHoursBlock =
+    getWorkHoursOutboundBlock(options);
+  if (initialWorkHoursBlock) {
+    return initialWorkHoursBlock;
+  }
   if (autoSupabaseBackupPromise) {
     pendingAutoSupabaseBackupReason = reason;
     return autoSupabaseBackupPromise;
@@ -1010,12 +1097,25 @@ async function autoBackupToSupabase(reason = "autosave", options = {}) {
         if (options.requireAck) throw new Error("Session Supabase requise ; l'opération reste dans l'outbox.");
         return { acknowledged: false, reason: "authentication-required" };
       }
+      const preBuildWorkHoursBlock =
+        getWorkHoursOutboundBlock(options);
+      if (preBuildWorkHoursBlock) {
+        return preBuildWorkHoursBlock;
+      }
       const payload = await buildCloudBackupPayload();
       const sentFingerprint = payload.snapshotFingerprint
         || getSyncStateFingerprint(payload.state);
+      const sentWorkHoursFingerprint = typeof getWorkHoursFingerprint === "function"
+        ? getWorkHoursFingerprint(payload.state?.workHours || {})
+        : "";
       const tableName = getSupabaseConfig().backupTable || "cloud_backups";
       const backupKey = getSupabaseConfig().backupKey || "nimr-carrosserie-main";
       const updatedAt = new Date().toISOString();
+      const preWriteWorkHoursBlock =
+        getWorkHoursOutboundBlock(options);
+      if (preWriteWorkHoursBlock) {
+        return preWriteWorkHoursBlock;
+      }
       await upsertCloudBackupRow(client, tableName, {
         backup_key: backupKey,
         app_version: APP_VERSION,
@@ -1056,6 +1156,19 @@ async function autoBackupToSupabase(reason = "autosave", options = {}) {
       const snapshotStillCurrent =
         currentFingerprint === sentFingerprint;
       acknowledgement.snapshotStillCurrent = snapshotStillCurrent;
+      if (
+        typeof acknowledgeWorkHoursSync === "function"
+        && sentWorkHoursFingerprint
+      ) {
+        const workHoursAcknowledgement = acknowledgeWorkHoursSync(state.workHours, {
+          cloudBackupFingerprint: sentWorkHoursFingerprint,
+          appSettingsFingerprint: stats.workHoursFingerprint,
+          updatedAt,
+        });
+        acknowledgement.workHoursAcknowledged = Boolean(
+          workHoursAcknowledgement.acknowledged,
+        );
+      }
 
       if (
         snapshotStillCurrent
@@ -1805,6 +1918,18 @@ function mergeRemoteStateIntoLocal(localState, remoteState, options = {}) {
   const localCaseById = new Map(normalizedLocal.cases.map((item) => [item.id, item]));
   const remoteCaseById = new Map(normalizedRemote.cases.map((item) => [item.id, item]));
   const mergedBookings = mergeBookingsById(normalizedLocal.bookings, normalizedRemote.bookings, stats, { localCaseById, remoteCaseById }).bookings;
+  const workHoursMerge = typeof resolveWorkHoursRemoteMerge === "function"
+    ? resolveWorkHoursRemoteMerge(
+        normalizedLocal.workHours,
+        normalizedRemote.workHours,
+        { remoteUpdatedAt: options.remoteUpdatedAt || "" },
+      )
+    : {
+        workHours: normalizedRemote.workHours,
+        decision: "accept_remote_legacy",
+        conflict: null,
+      };
+  if (workHoursMerge.conflict) stats.conflictEntries.push(workHoursMerge.conflict);
   const conflictMerge = mergeSyncConflictsForRemoteMerge(
     normalizedLocal.syncConflicts,
     normalizedRemote.syncConflicts,
@@ -1825,6 +1950,7 @@ function mergeRemoteStateIntoLocal(localState, remoteState, options = {}) {
     historyMerged: stats.historyMerged,
     conflicts: stats.conflicts,
     protectedKept: stats.protectedKept,
+    workHoursDecision: workHoursMerge.decision || "",
     details: options.details || "",
   };
   const mergedRaw = {
@@ -1841,6 +1967,7 @@ function mergeRemoteStateIntoLocal(localState, remoteState, options = {}) {
       ...(normalizedLocal.settings || {}),
       ...(normalizedRemote.settings || {}),
     },
+    workHours: workHoursMerge.workHours,
     ui: normalizedLocal.ui,
     currentUserId: normalizedLocal.currentUserId || normalizedRemote.currentUserId,
   };
@@ -2318,6 +2445,19 @@ function startSupabaseLiveSync() {
   }, SUPABASE_LIVE_PULL_INTERVAL_MS);
   pullLatestSupabaseBackup("live-start");
   if (typeof processOfflineQueue === "function") processOfflineQueue();
+  if (
+    typeof hasPendingWorkHoursChange === "function"
+    && hasPendingWorkHoursChange(state.workHours)
+    && !(
+      typeof hasBlockingWorkHoursConflict
+        === "function"
+      && hasBlockingWorkHoursConflict(
+        state.workHours,
+      )
+    )
+  ) {
+    scheduleAutoSupabaseBackup("work-hours-pending-recovery");
+  }
 }
 
 function stopSupabaseLiveSync() {

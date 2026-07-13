@@ -21,7 +21,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v23.3.0";
+const APP_VERSION = "v23.3.1";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const CURRENT_DATA_SCHEMA_VERSION = 2;
@@ -3509,7 +3509,7 @@ function resolveSyncConflict(conflictIdOrKey, action = "mark_resolved") {
       // Save a silent local case snapshot
       const snapshotKey = `nimr-sav-conflict-safety-snapshot:${caseId}:${conflictId}`;
       const snapshotPayload = {
-        version: "v23.3.0",
+        version: "v23.3.1",
         timestamp: new Date().toISOString(),
         cases: [JSON.parse(JSON.stringify(localCase))],
         source: "conflict_safety_snapshot"

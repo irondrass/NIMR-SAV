@@ -2060,3 +2060,28 @@ window.bindUserSessionIdleEvents = bindUserSessionIdleEvents;
 // --- FIN v22.33C User Selector Startup / Shared Session ---
 
 initApp();
+
+// Gestion du menu burger sur mobile
+function setupMobileMenu() {
+  const toggleBtn = document.getElementById('mobile-menu-toggle');
+  const sidebar = document.querySelector('.sidebar') || document.querySelector('.nav-menu');
+  if (!toggleBtn || !sidebar) return;
+
+  window.addEventListener('resize', () => {
+    if (window.innerWidth <= 768) {
+      toggleBtn.style.display = 'block';
+    } else {
+      toggleBtn.style.display = 'none';
+      sidebar.classList.remove('active');
+    }
+  });
+
+  toggleBtn.addEventListener('click', () => {
+    sidebar.classList.toggle('active');
+  });
+  
+  // Initialiser l'état au chargement
+  if (window.innerWidth <= 768) toggleBtn.style.display = 'block';
+}
+document.addEventListener('DOMContentLoaded', setupMobileMenu);
+window.addEventListener('load', setupMobileMenu);

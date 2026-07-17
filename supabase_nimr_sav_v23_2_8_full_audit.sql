@@ -6,7 +6,7 @@
 --   * version optimiste et horodatage serveur sur chaque table synchronisée ;
 --   * isolation stricte par workshop_id et rôle canonique ;
 --   * idempotence durable des opérations ;
---   * réservation planning atomique par RPC, avec verrou transactionnel et
+--   * réservation planning atomique par RP C, avec verrou transactionnel et
 --     contrainte d'exclusion pour les ressources exclusives ;
 --   * publication Realtime limitée aux tables contenant workshop_id. Le client
 --     doit en plus utiliser le filtre workshop_id=eq.<uuid> sur chaque écoute.
@@ -32,9 +32,6 @@ create table if not exists public.workshops (
   created_at timestamptz not null default clock_timestamp(),
   updated_at timestamptz not null default clock_timestamp()
 );
-
-alter table public.workshops add column if not exists schema_version text not null default '23.2.8-full-audit';
-alter table public.workshops add column if not exists updated_at timestamptz not null default clock_timestamp();
 
 insert into public.workshops (id, name, schema_version)
 values ('00000000-0000-0000-0000-000000000001', 'NIMR SAV', '23.2.8-full-audit')
@@ -380,6 +377,8 @@ create table if not exists public.nimr_schema_migrations (
 -- 2. Mise à niveau idempotente des installations existantes
 -- ---------------------------------------------------------------------------
 
+alter table public.workshops add column if not exists schema_version text not null default '23.2.8-full-audit';
+alter table public.workshops add column if not exists updated_at timestamptz not null default clock_timestamp();
 alter table public.workshops add column if not exists version bigint not null default 1;
 alter table public.workshops add column if not exists created_by uuid;
 alter table public.workshops add column if not exists updated_by uuid;
@@ -1144,18 +1143,13 @@ begin
     'repair_steps', 'planning_resources', 'repair_claims',
     'repair_claim_labor_lines', 'repair_supplements',
     'repair_supplement_lines', 'photos', 'app_settings', 'cloud_backups',
-    'sync_operations', 'sync_conflicts'
+    'audit_logs', 'sync_operations', 'sync_conflicts'
   ]
   loop
     execute format('grant insert, update, delete on table public.%I to authenticated', table_name);
   end loop;
 end
 $nimr$;
-
--- audit_logs est append-only : aucun privilege UPDATE/DELETE n'est accorde.
-revoke all privileges on table public.audit_logs from authenticated;
-revoke all privileges on table public.audit_logs from anon;
-grant select, insert on table public.audit_logs to authenticated;
 
 -- ---------------------------------------------------------------------------
 -- 5. RPC de réservation atomique
@@ -1217,12 +1211,17 @@ exception when invalid_datetime_format or datetime_field_overflow then
 end
 $nimr$;
 
-CREATE OR REPLACE FUNCTION public.nimr_reserve_planning_slots(p_workshop_id uuid, p_operation_id uuid, p_idempotency_key text, p_slots jsonb)
- RETURNS jsonb
- LANGUAGE plpgsql
- SECURITY DEFINER
- SET search_path TO 'pg_catalog', 'public'
-AS $function$
+create or replace function public.nimr_reserve_planning_slots(
+  p_workshop_id uuid,
+  p_operation_id uuid,
+  p_idempotency_key text,
+  p_slots jsonb
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = pg_catalog, public
+as $nimr$
 declare
   operation_row public.sync_operations%rowtype;
   existing_operation public.sync_operations%rowtype;
@@ -1231,9 +1230,6 @@ declare
   resource_id_value uuid;
   resource_ids_value uuid[];
   equipment_ids_value uuid[];
-  dependencies_value text[];
-  dependency_ref text;
-  dependency_end_value timestamptz;
   slot_id_value uuid;
   repair_order_id_value uuid;
   vehicle_id_value uuid;
@@ -1381,23 +1377,6 @@ begin
       is_vehicle_exclusive := lower(coalesce(slot_payload ->> 'vehicleExclusive', 'false')) = 'true'
         or location_value in ('external', 'transport');
 
-      select coalesce(
-        array_agg(distinct dependency_token order by dependency_token),
-        '{}'::text[]
-      )
-      into dependencies_value
-      from (
-        select nullif(trim(dependency_item.value), '') as dependency_token
-        from jsonb_array_elements_text(
-          case
-            when jsonb_typeof(slot_payload -> 'dependencies') = 'array'
-              then slot_payload -> 'dependencies'
-            else '[]'::jsonb
-          end
-        ) as dependency_item(value)
-      ) parsed_dependencies
-      where dependency_token is not null;
-
       if start_value is null or end_value is null or end_value <= start_value then
         conflict_result := jsonb_build_object(
           'ok', false, 'status', 'conflict', 'code', 'invalid_slot',
@@ -1423,68 +1402,6 @@ begin
         raise exception 'NIMR_RESERVATION_CONFLICT:%', conflict_result::text
           using errcode = 'P0001';
       end if;
-
-      foreach dependency_ref in array dependencies_value
-      loop
-        select max(
-          public.nimr_try_timestamptz(
-            coalesce(
-              dependency_slot.value ->> 'endAt',
-              dependency_slot.value ->> 'end_at',
-              dependency_slot.value ->> 'end'
-            )
-          )
-        )
-        into dependency_end_value
-        from jsonb_array_elements(p_slots) as dependency_slot(value)
-        where coalesce(
-          dependency_slot.value ->> 'taskId',
-          dependency_slot.value ->> 'task_id',
-          dependency_slot.value ->> 'stepKey',
-          dependency_slot.value ->> 'step_key'
-        ) = dependency_ref;
-
-        if dependency_end_value is null then
-          select max(existing_slot.end_at)
-          into dependency_end_value
-          from public.planning_slots existing_slot
-          where existing_slot.workshop_id = p_workshop_id
-            and existing_slot.repair_order_id = repair_order_id_value
-            and existing_slot.deleted_at is null
-            and (
-              existing_slot.task_id = dependency_ref
-              or existing_slot.step_key = dependency_ref
-            );
-        end if;
-
-        if dependency_end_value is null then
-          conflict_result := jsonb_build_object(
-            'ok', false,
-            'status', 'conflict',
-            'code', 'planning_dependency_not_found',
-            'slotId', slot_id_value,
-            'dependency', dependency_ref,
-            'message', 'Une dépendance du planning est introuvable.'
-          );
-          raise exception 'NIMR_RESERVATION_CONFLICT:%', conflict_result::text
-            using errcode = 'P0001';
-        end if;
-
-        if start_value < dependency_end_value then
-          conflict_result := jsonb_build_object(
-            'ok', false,
-            'status', 'conflict',
-            'code', 'planning_dependency_order_conflict',
-            'slotId', slot_id_value,
-            'dependency', dependency_ref,
-            'dependencyEnd', dependency_end_value,
-            'slotStart', start_value,
-            'message', 'Une tâche commence avant la fin de sa dépendance.'
-          );
-          raise exception 'NIMR_RESERVATION_CONFLICT:%', conflict_result::text
-            using errcode = 'P0001';
-        end if;
-      end loop;
 
       select coalesce(array_agg(distinct parsed_id order by parsed_id), '{}'::uuid[])
       into resource_ids_value
@@ -1565,7 +1482,6 @@ begin
             task_id = coalesce(slot_payload ->> 'taskId', slot_payload ->> 'task_id'),
             step_key = coalesce(slot_payload ->> 'stepKey', slot_payload ->> 'step_key'),
             title = slot_payload ->> 'title',
-            dependencies = dependencies_value,
             start_at = start_value,
             end_at = end_value,
             status = status_value,
@@ -1599,7 +1515,7 @@ begin
         insert into public.planning_slots (
           id, workshop_id, local_id, repair_order_id, resource_id, resource_ids,
           primary_resource_id, equipment_resource_ids, task_id, step_key, title,
-          dependencies, start_at, end_at, status, planned_minutes, vehicle_location,
+          start_at, end_at, status, planned_minutes, vehicle_location,
           vehicle_exclusive, service_mode, subcontract_id, capacity_units,
           resource_units, operation_id, idempotency_key, temporary, sync_source
         ) values (
@@ -1608,8 +1524,7 @@ begin
           equipment_ids_value,
           coalesce(slot_payload ->> 'taskId', slot_payload ->> 'task_id'),
           coalesce(slot_payload ->> 'stepKey', slot_payload ->> 'step_key'),
-          slot_payload ->> 'title', dependencies_value,
-          start_value, end_value, status_value,
+          slot_payload ->> 'title', start_value, end_value, status_value,
           greatest(0, coalesce(public.nimr_try_bigint(slot_payload ->> 'plannedMinutes'), 0))::integer,
           location_value, is_vehicle_exclusive, service_mode_value,
           coalesce(slot_payload ->> 'subcontractId', slot_payload ->> 'subcontract_id'),
@@ -1728,8 +1643,7 @@ begin
         'version', new_version_value,
         'startAt', start_value,
         'endAt', end_value,
-        'resourceIds', to_jsonb(resource_ids_value),
-        'dependencies', to_jsonb(dependencies_value)
+        'resourceIds', to_jsonb(resource_ids_value)
       ));
     end loop;
   exception
@@ -1810,7 +1724,7 @@ begin
 
   return final_result;
 end
-$function$;
+$nimr$;
 
 revoke all on function public.nimr_reserve_planning_slots(uuid, uuid, text, jsonb)
   from public, anon, authenticated;

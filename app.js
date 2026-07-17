@@ -218,12 +218,53 @@ function bindCaseCreation() {
       ? findDuplicateCase(duplicateCandidate)
       : null;
     if (duplicate) {
-      const confirmed = await showConfirmModal(`Un dossier similaire existe déjà (${escapeHtml(duplicate.clientName || duplicate.plate || duplicate.vin)}).<br><br>Créer quand même un dossier depuis ce devis PDF ?`);
-      if (!confirmed) {
-        activeCaseId = duplicate.id;
-        activeCaseDetailTab = "claims";
-        setActiveTab("dossiers");
-        render();
+      const isSupplement = await showConfirmModal(`Un dossier similaire existe déjà (${escapeHtml(duplicate.clientName || duplicate.plate || duplicate.vin)}).<br><br>Voulez-vous ajouter ce devis comme un <strong>COMPLÉMENT</strong> au dossier existant ?<br><br>(OK = Ajouter en complément, Annuler = Créer un nouveau dossier séparé)`);
+      if (isSupplement) {
+        if (submitButton) {
+          submitButton.dataset.busy = "true";
+          submitButton.disabled = true;
+        }
+        try {
+          const parsed = enrichParsedEstimateInfo(quickEstimateCreationDraft.parsed, quickEstimateCreationDraft.metadata);
+          const preview = prepareEstimateImportPreview(parsed, duplicate);
+          const appliedLines = typeof buildAppliedEstimateLines === "function" ? buildAppliedEstimateLines(preview) : [];
+          const partLines = typeof buildEstimatePartLines === "function" ? buildEstimatePartLines(preview) : [];
+          
+          const supplement = normalizeRepairSupplement({
+            title: "Complément " + (parsed.info?.estimateNumber || ""),
+            status: "draft",
+            laborLines: appliedLines.map(line => ({
+              phase: line.phase,
+              operation: line.operation,
+              laborHours: line.laborHours
+            })),
+            parts: partLines.map(part => ({
+              designation: part.designation,
+              quantity: part.quantity
+            }))
+          });
+          
+          duplicate.supplements = duplicate.supplements || [];
+          duplicate.supplements.push(supplement);
+          duplicate.updatedAt = new Date().toISOString();
+          addHistory(duplicate, "claim.supplement", "Complément ajouté via import PDF");
+          
+          saveState();
+          activeCaseId = duplicate.id;
+          activeCaseDetailTab = "claims";
+          resetPdfEstimateCreation(form);
+          setActiveTab("dossiers");
+          render();
+          notifyUser("Devis ajouté en tant que complément au dossier existant.", "success");
+        } catch (error) {
+          console.warn("Erreur complément devis", error);
+          notifyUser("Impossible d'ajouter le complément.", "error");
+        } finally {
+          if (submitButton) {
+            delete submitButton.dataset.busy;
+            submitButton.disabled = false;
+          }
+        }
         return;
       }
     }

@@ -1862,6 +1862,7 @@ function printTechnicianWorkOrders(item) {
             <div class="muted">Étape: ${escapeHtml(getDurationLabel(booking.key) || booking.key || "-")}</div>
             <div class="muted">Équipement: ${escapeHtml((booking.resourceIds || []).map((id) => getResource(id)).filter(isPrintEquipmentResource).map((resource) => resource.name).join(", ") || "-")}</div>
           </td>
+          <td>${formatLocalizedDecimal((booking.plannedMinutes || getBookingDurationMinutes(booking)) / 60)}</td>
           <td>${formatDateTime(booking.start)}</td>
           <td>${formatDateTime(booking.end)}</td>
           <td>${booking.actualStart ? formatDateTime(booking.actualStart) : ""}</td>
@@ -1941,7 +1942,7 @@ function printTechnicianWorkOrders(item) {
           <h2>Tâches planifiées</h2>
           <table>
             <thead>
-              <tr><th>N°</th><th>Tâche planning</th><th>Début prévu</th><th>Fin prévue</th><th>Début réel</th><th>Fin réelle</th><th>Pause / cause</th><th>Fait</th></tr>
+              <tr><th>N°</th><th>Tâche planning</th><th>Durée prévue (h)</th><th>Début prévu</th><th>Fin prévue</th><th>Début réel</th><th>Fin réelle</th><th>Pause / cause</th><th>Fait</th></tr>
             </thead>
             <tbody>${taskRows}</tbody>
           </table>

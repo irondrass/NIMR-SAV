@@ -679,7 +679,7 @@ function extractPdfContentTableRows(text) {
   const rows = [];
   const source = String(text || "");
   const operationPattern =
-    "\\(((?:D\\s*\\/\\s*P|PEINTURE|DRESSAGE|REMP|REMPL|REMPLACEMENT|DEPOSE|DÉPOSE|DEMONTAGE|DÉMONTAGE|REMONTAGE|REPOSE|PETIT FOURNITURE)[^()]*)\\)\\s*Tj" +
+    "\\(((?:D\\s*\\/\\s*P|PEINTURE ET|PEINTURE|DRESSAGE|CHANG(?:EMENT)?|REMPL|REMP|REMPLACEMENT|DEPOSE|DÉPOSE|DEMONTAGE|DÉMONTAGE|REMONTAGE|REPOSE|MO|STICKAGE)[^()]*)\\)\\s*Tj" +
     "[\\s\\S]{0,700}?\\((\\d+(?:[,.]\\d+)?)\\)\\s*Tj" +
     "[\\s\\S]{0,500}?\\((3[35][,.]000)\\)\\s*Tj" +
     "[\\s\\S]{0,500}?\\((\\d+(?:[,.]\\d+)?)\\)\\s*Tj";
@@ -688,6 +688,8 @@ function extractPdfContentTableRows(text) {
   while ((match = regex.exec(source))) {
     const operation = decodePdfLiteral(match[1]).replace(/\s+/g, " ").trim();
     if (!operation) continue;
+    if (/PETIT FOURNITURE|PRODUIT DE PEINTURE/i.test(operation)) continue;
+    if (/Montant à reporter|Report/i.test(operation)) continue;
     rows.push(`${operation} ${match[2]} ${match[3]} ${match[4]}`);
   }
   return [...new Set(rows)];
@@ -828,7 +830,9 @@ function findEstimateLabelValue(lines, aliases) {
 }
 
 function hasLaborKeyword(normalized) {
-  return /\b(D\s*\/\s*P|CHANG(?:EMENT)?|DEPOSE|POSE|REPOSE|DEMONTAGE|REMONTAGE|PREPARAT(?:ION|IN)|PEINTURE|F(?:I)?NITION|DRESSAGE|MARBRE|REMPLACEMENT|REMPL|REMP|REPARATION|CONTROLE|DIAGNOSTIC|AIRBAGS?|BOITE|VITESSE|VIDANGE|ENTRETIEN|ELECTRIQUE|ELECTRICITE|MECANIQUE|MECAN|EMBRAYAGE|FREIN|SUSPENSION|DISTRIBUTION|MOTEUR)\b/.test(normalized);
+  if (/PETIT FOURNITURE|PRODUIT DE PEINTURE/i.test(normalized)) return false;
+  if (/Montant à reporter|Report/i.test(normalized)) return false;
+  return /\b(D\s*\/\s*P|PEINTURE ET|CHANG(?:EMENT)?|DEPOSE|POSE|REPOSE|DEMONTAGE|REMONTAGE|PREPARAT(?:ION|IN)|PEINTURE|F(?:I)?NITION|DRESSAGE|MARBRE|REMPLACEMENT|REMPL|REMP|REPARATION|CONTROLE|DIAGNOSTIC|AIRBAGS?|BOITE|VITESSE|VIDANGE|ENTRETIEN|ELECTRIQUE|ELECTRICITE|MECANIQUE|MECAN|EMBRAYAGE|FREIN|SUSPENSION|DISTRIBUTION|MOTEUR|MO|STICKAGE)\b/.test(normalized);
 }
 
 function isEstimateLegalOrFooterLine(normalized) {

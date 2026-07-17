@@ -2743,15 +2743,9 @@ function normalizeCase(item, bookings, realBookingCaseIds = null) {
     history: normalizeHistory(item.history, item.createdAt),
     photos: Array.isArray(item.photos) ? item.photos.map(normalizePhotoMeta) : [],
     durations: normalizedDurations,
-    planningTasks: item.source === "pdf_estimate"
-      ? normalizePdfPlanningTasksForCase(
-        item.planningTasks || item.tasks || [],
-      )
-      : (
-        Array.isArray(item.planningTasks || item.tasks)
-          ? cloneMigrationValue(item.planningTasks || item.tasks)
-          : []
-      ),
+    planningTasks: normalizePdfPlanningTasksForCase(
+      item.planningTasks || item.tasks || []
+    ),
     stepServiceTypes: normalizeStepServiceTypes(item.stepServiceTypes),
     stepPreferredResources: normalizeStepPreferredResources(item.stepPreferredResources),
     stepExecutionModes: normalizeStepExecutionModes(item.stepExecutionModes),

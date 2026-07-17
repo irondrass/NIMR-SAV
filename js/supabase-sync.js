@@ -1116,25 +1116,24 @@ async function autoBackupToSupabase(reason = "autosave", options = {}) {
       if (preWriteWorkHoursBlock) {
         return preWriteWorkHoursBlock;
       }
-    // --- MODIFICATION CRITIQUE ---
-    // On désactive l'envoi du gros snapshot JSON dans cloud_backups pour éviter 
-    // que le Poste A n'écrase les données du Poste B.
-    // L'application utilise désormais syncBusinessTablesToSupabase pour pousser les données.
-    /* 
-    await upsertCloudBackupRow(client, tableName, {
-      backup_key: backupKey,
-      app_version: APP_VERSION,
-      state: payload.state,
-      photos: payload.photos,
-      cases_count: payload.state.cases.length,
-      photos_count: payload.photos.length,
-      updated_by: user.id,
-      updated_at: updatedAt,
-    });
-    */
-    
-    // On se contente de synchroniser les tables relationnelles (repair_orders, planning_slots, etc.)
+    // Synchronisation relationnelle granulaire
     const stats = await syncBusinessTablesToSupabase(payload, user);
+
+    // --- CORRECTION TERRAIN ---
+    // Sauvegarde de secours pour les photos : si des photos existent localement,
+    // on les pousse dans une ligne cloud_backup dédiée pour éviter toute perte de données terrain.
+    if (payload.photos && payload.photos.length > 0) {
+      await upsertCloudBackupRow(client, tableName, {
+        backup_key: `${backupKey}-photos-secours`,
+        app_version: APP_VERSION,
+        state: { photos: payload.photos },
+        photos: payload.photos,
+        cases_count: 0,
+        photos_count: payload.photos.length,
+        updated_by: user.id,
+        updated_at: updatedAt,
+      });
+    }
       const expectedVersion = Math.max(
         0,
         ...(payload.state?.cases || []).map(
@@ -3188,17 +3187,25 @@ async function processOfflineQueue() {
           });
           processed += 1;
         } catch (err) {
-          const conflict =
-            /conflict|version|409|23P01|serialization/i.test(
-              String(err?.message || err),
-            );
+          const isConflict = /conflict|version|409|23P01|serialization|exclude|overlap/i.test(String(err?.message || err));
+          
           if (typeof updateDurableOutboxOperation === "function") {
             await updateDurableOutboxOperation(operationId, {
-              syncStatus: conflict ? "conflict" : "failed",
+              syncStatus: isConflict ? "conflict" : "failed",
               retryCount,
-              lastError: String(err?.message || err),
+              lastError: String(err?.message || err).slice(0, 250),
             });
           }
+          
+          if (isConflict) {
+            console.warn("Conflit de planning ou SQL détecté, opération mise en attente de résolution.", err);
+            if (typeof addAuditLog === "function") {
+              addAuditLog("conflict.planning_overlap", "Conflit de réservation", `La tâche ${operationId} n'a pas pu être synchronisée.`);
+            }
+            continue; 
+          }
+          
+          console.warn("Échec sync outbox, nouvelle tentative plus tard.", err);
           logSyncFailure({
             ...actionReference,
             description:

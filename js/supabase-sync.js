@@ -1116,17 +1116,25 @@ async function autoBackupToSupabase(reason = "autosave", options = {}) {
       if (preWriteWorkHoursBlock) {
         return preWriteWorkHoursBlock;
       }
-      await upsertCloudBackupRow(client, tableName, {
-        backup_key: backupKey,
-        app_version: APP_VERSION,
-        state: payload.state,
-        photos: payload.photos,
-        cases_count: payload.state.cases.length,
-        photos_count: payload.photos.length,
-        updated_by: user.id,
-        updated_at: updatedAt,
-      });
-      const stats = await syncBusinessTablesToSupabase(payload, user);
+    // --- MODIFICATION CRITIQUE ---
+    // On désactive l'envoi du gros snapshot JSON dans cloud_backups pour éviter 
+    // que le Poste A n'écrase les données du Poste B.
+    // L'application utilise désormais syncBusinessTablesToSupabase pour pousser les données.
+    /* 
+    await upsertCloudBackupRow(client, tableName, {
+      backup_key: backupKey,
+      app_version: APP_VERSION,
+      state: payload.state,
+      photos: payload.photos,
+      cases_count: payload.state.cases.length,
+      photos_count: payload.photos.length,
+      updated_by: user.id,
+      updated_at: updatedAt,
+    });
+    */
+    
+    // On se contente de synchroniser les tables relationnelles (repair_orders, planning_slots, etc.)
+    const stats = await syncBusinessTablesToSupabase(payload, user);
       const expectedVersion = Math.max(
         0,
         ...(payload.state?.cases || []).map(
@@ -2392,71 +2400,114 @@ async function pullLatestSupabaseBackup(reason = "poll") {
   }
 }
 
+// REMPLACER l'ancienne fonction startSupabaseLiveSync par celle-ci
 function startSupabaseLiveSync() {
   const permissionGuard = typeof guardSensitiveAction === "function"
     ? guardSensitiveAction("supabase.access", {}, { notify: false })
     : { ok: false };
   if (!permissionGuard.ok) return;
+  
   const client = getSupabaseClient();
   if (!client || supabaseLiveSyncChannel) return;
-  const tableName = getSupabaseConfig().backupTable || "cloud_backups";
-  const backupKey = getSupabaseConfig().backupKey || "nimr-carrosserie-main";
+  
   const workshopId = getSupabaseWorkshopId();
-  const handleRealtimeChange = (payload = {}) => {
+  
+  // Nouvelle fonction pour gérer les changements en temps réel de manière granulaire
+  const handleGranularChange = (payload) => {
     const row = payload.new || payload.old || {};
     if (row.workshop_id && row.workshop_id !== workshopId) return;
-    if (payload.table === tableName && row.backup_key && row.backup_key !== backupKey) return;
-    const eventId = [payload.table || tableName, row.id || row.local_id || row.backup_key || "change", payload.commit_timestamp || row.updated_at || row.version || "event"].join(":");
+    
+    const eventId = [payload.table, row.id || row.local_id, payload.commit_timestamp || row.updated_at || "event"].join(":");
     if (processedRealtimeEventIds.has(eventId)) return;
     processedRealtimeEventIds.add(eventId);
     if (processedRealtimeEventIds.size > 500) processedRealtimeEventIds.delete(processedRealtimeEventIds.values().next().value);
+    
     window.NIMR_REALTIME_STATUS = { connected: true, workshopId, lastEventAt: new Date().toISOString(), lastEventId: eventId };
+    
+    // On attend 200ms pour éviter les déclenchements multiples trop rapides
     window.setTimeout(async () => {
-      await pullLatestSupabaseBackup(`realtime:${payload.table || tableName}`);
-      await processOfflineQueue();
+      // Si c'est un dossier qui change, on le met à jour directement dans l'état local
+      if (payload.table === "repair_orders") {
+        handleRemoteCaseChange(payload.new, payload.eventType);
+      } else {
+        // Pour les autres tables, on force un rafraîchissement léger
+        if (typeof pullLatestSupabaseBackup === "function") await pullLatestSupabaseBackup(`realtime:${payload.table}`);
+      }
+      if (typeof processOfflineQueue === "function") await processOfflineQueue();
     }, 200);
   };
+
   try {
     supabaseLiveSyncChannel = client
-      .channel(`nimr-sav-live-${workshopId}-${backupKey}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: tableName, filter: `workshop_id=eq.${workshopId}` }, handleRealtimeChange)
-      .on("postgres_changes", { event: "*", schema: "public", table: "repair_orders", filter: `workshop_id=eq.${workshopId}` }, handleRealtimeChange)
-      .on("postgres_changes", { event: "*", schema: "public", table: "planning_slots", filter: `workshop_id=eq.${workshopId}` }, handleRealtimeChange)
-      .on("postgres_changes", { event: "*", schema: "public", table: "planning_resources", filter: `workshop_id=eq.${workshopId}` }, handleRealtimeChange)
+      .channel(`nimr-sav-live-${workshopId}`)
+      // On écoute la table des dossiers
+      .on("postgres_changes", { event: "*", schema: "public", table: "repair_orders", filter: `workshop_id=eq.${workshopId}` }, handleGranularChange)
+      // On écoute la table du planning
+      .on("postgres_changes", { event: "*", schema: "public", table: "planning_slots", filter: `workshop_id=eq.${workshopId}` }, handleGranularChange)
+      // On écoute les ressources
+      .on("postgres_changes", { event: "*", schema: "public", table: "planning_resources", filter: `workshop_id=eq.${workshopId}` }, handleGranularChange)
       .subscribe((status) => {
         if (status === "SUBSCRIBED") {
           window.NIMR_REALTIME_STATUS = { connected: true, workshopId, subscribedAt: new Date().toISOString(), lastEventAt: "" };
-          setSupabaseDetails("Synchronisation temps réel active. Polling de secours toutes les 3 s.");
-          pullLatestSupabaseBackup("realtime-connect");
+          setSupabaseDetails("Synchronisation temps réel granulaire active.");
         }
         if (["CHANNEL_ERROR", "TIMED_OUT", "CLOSED"].includes(status)) {
           window.NIMR_REALTIME_STATUS = { connected: false, workshopId, status, updatedAt: new Date().toISOString() };
-          setSupabaseDetails("Realtime indisponible temporairement : polling de secours actif toutes les 3 s.");
+          setSupabaseDetails("Realtime indisponible temporairement : polling de secours actif.");
         }
       });
   } catch (error) {
     console.warn("Realtime Supabase indisponible, polling actif", error);
     supabaseLiveSyncChannel = null;
   }
+  
+  // Polling de secours : on passe de 3 secondes à 15 secondes pour réduire la charge réseau
+  // car le Realtime granulaire prend le relais
   window.clearInterval(supabaseLivePullTimer);
   supabaseLivePullTimer = window.setInterval(() => {
-    pullLatestSupabaseBackup("poll");
+    pullLatestSupabaseBackup("poll-secours");
     if (typeof processOfflineQueue === "function") processOfflineQueue();
-  }, SUPABASE_LIVE_PULL_INTERVAL_MS);
-  pullLatestSupabaseBackup("live-start");
-  if (typeof processOfflineQueue === "function") processOfflineQueue();
-  if (
-    typeof hasPendingWorkHoursChange === "function"
-    && hasPendingWorkHoursChange(state.workHours)
-    && !(
-      typeof hasBlockingWorkHoursConflict
-        === "function"
-      && hasBlockingWorkHoursConflict(
-        state.workHours,
-      )
-    )
-  ) {
-    scheduleAutoSupabaseBackup("work-hours-pending-recovery");
+  }, 15000); 
+}
+
+// AJOUTER cette nouvelle fonction pour mettre à jour un dossier sans tout recharger
+function handleRemoteCaseChange(remoteCase, eventType) {
+  if (!remoteCase || !remoteCase.id) return;
+  
+  // Si le dossier a été supprimé sur un autre poste
+  if (eventType === "DELETE") {
+    state.cases = state.cases.filter(c => c.id !== remoteCase.id);
+    if (typeof render === "function") render();
+    return;
+  }
+  
+  // Chercher si le dossier existe déjà localement
+  const localIndex = state.cases.findIndex(c => c.id === remoteCase.id);
+  
+  if (localIndex !== -1) {
+    // Le dossier existe : on ne l'écrase que si la version distante est plus récente
+    const localRev = Number(state.cases[localIndex].localRevision || 0);
+    const remoteRev = Number(remoteCase.version || 0);
+    
+    if (remoteRev >= localRev) {
+      // Fusion basique : on garde les données locales non synchronisées si besoin, 
+      // mais on prend les champs principaux du distant
+      state.cases[localIndex] = {
+        ...state.cases[localIndex],
+        ...remoteCase,
+        syncRevision: remoteRev,
+        localRevision: remoteRev // On aligne la révision locale
+      };
+      if (typeof render === "function") render();
+    }
+  } else {
+    // Nouveau dossier créé sur un autre poste : on l'ajoute localement
+    state.cases.push({
+      ...remoteCase,
+      syncRevision: Number(remoteCase.version || 0),
+      localRevision: Number(remoteCase.version || 0)
+    });
+    if (typeof render === "function") render();
   }
 }
 

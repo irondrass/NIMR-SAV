@@ -1257,8 +1257,15 @@ async function cleanLocalWorkstation() {
 }
 
 
-function uid(prefix) {
-  return `${prefix}-${Math.random().toString(36).slice(2, 9)}-${Date.now().toString(36)}`;
+// REMPLACER l'ancienne fonction uid par celle-ci
+function uid(prefix = "id") {
+  // Utilisation de crypto.randomUUID pour des identifiants cryptographiquement sûrs (UUID v4)
+  // Cela empêche les collisions quand deux postes créent un dossier en même temps
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `${prefix}-${crypto.randomUUID()}`;
+  }
+  // Fallback de secours si le navigateur est très ancien
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
 }
 
 function normalizeNullableDate(value) {

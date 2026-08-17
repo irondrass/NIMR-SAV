@@ -632,14 +632,14 @@
               <p class="muted backup-status" id="local-security-status">Sécurité locale non contrôlée.</p>
             </section>
 
-            <section class="panel supabase-panel" data-admin-technical-panel>
+            <section class="panel supabase-panel" data-supabase-status-panel>
               <div class="panel-heading">
                 <div>
                   <h1>Cloud Supabase</h1>
                   <p>Sauvegarde, restauration et réglages atelier sécurisés sans perdre les données locales</p>
                 </div>
               </div>
-              <form class="supabase-config-form" id="supabase-config-form">
+              <form class="supabase-config-form" id="supabase-config-form" data-supabase-admin-control="configure">
                 <label class="wide">
                   Project URL Supabase
                   <input name="url" type="url" placeholder="https://xxxx.supabase.co" autocomplete="off" />
@@ -662,7 +662,7 @@
                 </div>
               </form>
               <p class="muted backup-warning">Utilisez uniquement la publishable key / clé publique Supabase côté navigateur. Ne jamais utiliser service_role ici : la sécurité dépend de l'authentification, des règles RLS par atelier et de la vérification que RLS est activé avant un usage réel.</p>
-              <form class="supabase-login-form" id="supabase-login-form">
+              <form class="supabase-login-form" id="supabase-login-form" data-supabase-admin-control="access">
                 <label>
                   Email utilisateur
                   <input name="email" type="email" autocomplete="username" placeholder="email créé dans Supabase" />
@@ -673,13 +673,13 @@
                 </label>
                 <button class="primary-button" type="submit">Connexion Supabase</button>
               </form>
-              <div class="backup-actions supabase-actions">
+              <div class="backup-actions supabase-actions" data-supabase-admin-control="access">
                 <button class="ghost-button" type="button" id="supabase-test">Tester connexion</button>
                 <button class="primary-button" type="button" id="supabase-save">Sauvegarder local → Supabase</button>
                 <button class="ghost-button" type="button" id="supabase-restore">Restaurer Supabase → local</button>
                 <button class="ghost-button" type="button" id="supabase-signout">Déconnexion</button>
               </div>
-              <div id="supabase-safety-download-container" style="display: none; margin-top: 10px; padding: 10px; border: 1px dashed var(--border-color, #ccc); border-radius: 4px; background: rgba(255,193,7,0.05);">
+              <div id="supabase-safety-download-container" data-supabase-admin-control="restore" style="display: none; margin-top: 10px; padding: 10px; border: 1px dashed var(--border-color, #ccc); border-radius: 4px; background: rgba(255,193,7,0.05);">
                 <p class="muted" style="margin: 0 0 8px 0;">Une copie de sécurité locale est conservée dans l’application avant restauration cloud.</p>
                 <button class="ghost-button" type="button" id="supabase-download-safety-snapshot" style="width: 100%;">Télécharger copie locale avant restauration cloud</button>
               </div>
@@ -705,7 +705,7 @@
                   <div><dt>Conflits</dt><dd data-sync-health="conflicts">0</dd></div>
                   <div><dt>Dernière erreur</dt><dd data-sync-health="error">Aucune</dd></div>
                 </dl>
-                <div class="backup-actions sync-health-actions">
+                <div class="backup-actions sync-health-actions" data-supabase-admin-control="access">
                   <button class="primary-button" type="button" id="supabase-sync-retry">Relancer la synchronisation</button>
                   <button class="ghost-button" type="button" id="supabase-sync-export-diagnostic">Exporter diagnostic</button>
                   <button class="ghost-button" type="button" id="supabase-sync-show-errors">Voir erreurs</button>

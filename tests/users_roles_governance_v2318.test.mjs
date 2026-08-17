@@ -157,18 +157,21 @@ for (const tab of ['dossiers', 'today', 'pilotage', 'planning', 'atelier']) {
 }
 assert.equal(app(`hasPermission('audit.view')`), true, 'directeur SAV peut consulter le journal');
 assert.equal(app(`hasPermission('dashboard.view')`), true, 'directeur SAV peut consulter le dashboard performance');
+assert.equal(app(`hasPermission('supabase.status.view')`), true, 'directeur SAV peut consulter la santé Supabase');
 assert.equal(app(`guardSensitiveAction('export.backup').ok`), true, 'directeur SAV peut exporter');
 assert.equal(app(`guardDeliveryComplete(state.cases[0]).ok`), true, 'directeur SAV garde override livraison');
-assert.equal(app(`guardSensitiveAction('settings.edit').ok`), true, 'directeur SAV peut administrer les reglages autorises');
+assert.equal(app(`guardSensitiveAction('settings.edit').ok`), false, 'directeur SAV ne peut pas administrer les reglages systeme');
 assert.equal(app(`guardSensitiveAction('case.delete', { item: state.cases[0] }).ok`), false, 'directeur SAV ne peut pas supprimer donnees dossier');
-assert.equal(app(`guardSensitiveAction('import.backup').ok`), true, 'directeur SAV peut restaurer une sauvegarde');
-assert.equal(app(`guardSensitiveAction('supabase.configure').ok`), true, 'directeur SAV peut administrer la configuration cloud');
-assert.equal(app(`guardSensitiveAction('users.manage').ok`), true, 'directeur SAV peut gerer les utilisateurs');
+assert.equal(app(`guardSensitiveAction('import.backup').ok`), false, 'directeur SAV ne peut pas restaurer une sauvegarde');
+assert.equal(app(`guardSensitiveAction('supabase.configure').ok`), false, 'directeur SAV ne peut pas administrer la configuration cloud');
+assert.equal(app(`guardSensitiveAction('supabase.restore').ok`), false, 'directeur SAV ne peut pas restaurer Supabase');
+assert.equal(app(`guardSensitiveAction('users.manage').ok`), false, 'directeur SAV ne peut pas gerer les utilisateurs');
 assert.equal(app(`guardAction('planning.edit').ok`), true, 'directeur SAV peut editer le planning');
 assert.equal(app(`hasPermission('permission.inconnue')`), false, 'les permissions directeur restent explicites sans wildcard');
 
 setupGovernanceRole('admin_technique');
 assert.equal(app(`getCurrentUser().canonicalRole`), 'admin_technique', 'la session doit utiliser le role canonique admin technique');
+assert.equal(app(`hasPermission('supabase.status.view')`), true, 'admin technique peut consulter la santé Supabase');
 assert.equal(app(`guardSensitiveAction('settings.edit').ok`), true, 'admin technique peut gerer parametres systeme sensibles');
 assert.equal(app(`guardSensitiveAction('case.delete', { item: state.cases[0] }).ok`), true, 'admin technique peut supprimer donnees');
 assert.equal(app(`guardSensitiveAction('import.backup').ok`), true, 'admin technique peut restaurer completement');

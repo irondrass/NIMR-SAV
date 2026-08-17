@@ -55,7 +55,7 @@ run(`state = normalizeState({
 const matrix = [
   ["admin", "users.manage", true],
   ["admin", "supabase.configure", true],
-  ["director", "users.manage", true],
+  ["director", "users.manage", false],
   ["director", "planning.edit", true],
   ["chief", "planning.edit", true],
   ["chief", "users.manage", false],

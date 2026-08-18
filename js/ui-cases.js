@@ -244,6 +244,9 @@ function setControlVisible(control, visible, message = "Action réservée Admin 
 
 function renderAdminTechnicalVisibility() {
   const currentUser = state?.currentUserId && typeof getUserById === "function" ? getUserById(state.currentUserId) : null;
+  const canViewSupabaseStatus = typeof hasPermission === "function"
+    && currentUser
+    && hasPermission("supabase.status.view", { user: currentUser });
   const isAdminTechnical = typeof hasPermission === "function"
     && currentUser
     && hasPermission("users.manage", { user: currentUser })
@@ -252,6 +255,26 @@ function renderAdminTechnicalVisibility() {
   document.querySelectorAll("[data-admin-technical-panel]").forEach((panel) => {
     panel.hidden = !isAdminTechnical;
     panel.style.display = isAdminTechnical ? "" : "none";
+  });
+  document.querySelectorAll("[data-supabase-status-panel]").forEach((panel) => {
+    panel.hidden = !canViewSupabaseStatus;
+    panel.style.display = canViewSupabaseStatus ? "" : "none";
+  });
+  document.querySelectorAll("[data-supabase-admin-control]").forEach((control) => {
+    const capability = control.dataset.supabaseAdminControl;
+    const allowed = capability === "configure"
+      ? typeof hasPermission === "function" && hasPermission("supabase.configure", { user: currentUser })
+      : capability === "restore"
+        ? typeof hasPermission === "function" && hasPermission("supabase.restore", { user: currentUser })
+        : capability === "session"
+          ? typeof hasPermission === "function" && hasPermission("supabase.session.manage", { user: currentUser })
+          : capability === "sync"
+            ? typeof hasPermission === "function" && hasPermission("supabase.sync.use", { user: currentUser })
+            : capability === "export"
+              ? typeof hasPermission === "function" && hasPermission("export.backup", { user: currentUser })
+              : false;
+    control.hidden = !allowed;
+    control.style.display = allowed ? "" : "none";
   });
   const canImportBackup = typeof hasPermission === "function" && currentUser && hasPermission("import.backup", { user: currentUser });
   setControlVisible(document.getElementById("import-backup"), canImportBackup, "Restauration réservée Admin technique.");

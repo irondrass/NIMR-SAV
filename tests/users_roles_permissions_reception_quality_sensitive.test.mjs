@@ -192,10 +192,10 @@ setupRole('directeur_sav');
 assert.equal(app(`hasPermission('audit.view')`), true, 'directeur SAV peut consulter le journal');
 assert.equal(app(`guardSensitiveAction('export.backup').ok`), true, 'directeur SAV peut exporter');
 assert.equal(app(`guardSensitiveAction('case.delete', { item: state.cases[0] }).ok`), false, 'directeur SAV ne supprime pas dossier');
-assert.equal(app(`guardSensitiveAction('import.backup').ok`), true, 'directeur SAV peut restaurer un backup');
-assert.equal(app(`guardSensitiveAction('settings.edit').ok`), true, 'directeur SAV peut administrer les paramètres métier');
-assert.equal(app(`guardSensitiveAction('supabase.configure').ok`), true, 'directeur SAV peut configurer Supabase');
-assert.equal(app(`guardSensitiveAction('users.manage').ok`), true, 'directeur SAV peut gérer les utilisateurs');
+assert.equal(app(`guardSensitiveAction('import.backup').ok`), false, 'directeur SAV ne restaure pas un backup');
+assert.equal(app(`guardSensitiveAction('settings.edit').ok`), false, 'directeur SAV ne modifie pas les paramètres système');
+assert.equal(app(`guardSensitiveAction('supabase.configure').ok`), false, 'directeur SAV ne configure pas Supabase');
+assert.equal(app(`guardSensitiveAction('users.manage').ok`), false, 'directeur SAV ne gère pas les utilisateurs');
 assert.equal(app(`guardDeliveryComplete(state.cases[0]).ok`), true, 'directeur SAV peut finaliser la restitution');
 
 setupRole('chef');

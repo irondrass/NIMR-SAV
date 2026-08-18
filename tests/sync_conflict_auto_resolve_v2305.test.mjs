@@ -22,8 +22,9 @@ const localStorageMock = `
 const script = `
   ${localStorageMock}
   ${utilsJs}
-  ${stateJs.replace(/let state = loadState\(\);/, "let state = { cases: [], bookings: [], syncConflicts: [], syncLog: [], auditLog: [], resources: [], users: [], currentUserId: '' };")}
+  ${stateJs.replace(/let state = loadState\(\);/, "let state = { cases: [], bookings: [], syncConflicts: [], syncLog: [], auditLog: [], resources: [], users: [{ id: 'director', name: 'Directeur SAV', role: 'directeur_sav', active: true }], currentUserId: 'director' };")}
   const __saveCalls = [];
+  let __pushCalls = 0;
   const __notifications = [];
   function render() {}
   function setSupabaseStatus(label, level) { global.__lastSupabaseStatus = { label, level }; }
@@ -85,9 +86,11 @@ const script = `
   
   // Override functions after syncJs loads to avoid them being overwritten
   upsertCloudBackupRow = async function(client, tableName, data) {
+    __pushCalls += 1;
     if (__mockPushFails) throw new Error("Supabase push failed");
   };
   syncBusinessTablesToSupabase = async function(payload, user) {
+    __pushCalls += 1;
     if (__mockPushFails) throw new Error("Supabase business tables failed");
     return { repairOrders: 1, clients: 1, vehicles: 1, repairSteps: 1, resources: 1, holidays: 1, workHoursDays: 1, planningSlots: 1, claims: 1, supplements: 1, photos: 1 };
   };
@@ -102,7 +105,10 @@ const script = `
     clearLocalUserChangeAt,
     resolveKeptConflictsAfterPush,
     autoBackupToSupabase,
+    hasPermission,
     setMockPushFails: (val) => { __mockPushFails = val; },
+    resetPushCalls: () => { __pushCalls = 0; },
+    getPushCalls: () => __pushCalls,
     getState: () => state,
     setState: (next) => { state = next; },
     getNotifications: () => __notifications,
@@ -124,7 +130,10 @@ const {
   clearLocalUserChangeAt,
   resolveKeptConflictsAfterPush,
   autoBackupToSupabase,
+  hasPermission,
   setMockPushFails,
+  resetPushCalls,
+  getPushCalls,
   getState,
   setState,
   getNotifications,
@@ -135,6 +144,9 @@ const {
 function baseCase(phone = "111") {
   return { id: "case-1", orNavNumber: "OR-1", clientName: "Client", phone, flags: {}, history: [] };
 }
+
+const directorUser = { id: "director", name: "Directeur SAV", role: "directeur_sav", active: true };
+assert.equal(hasPermission("supabase.sync.use"), true, "Directeur SAV dispose de supabase.sync.use");
 
 // 1. kept_local case flags.received + push réussi => status resolved.
 {
@@ -156,8 +168,8 @@ function baseCase(phone = "111") {
     syncLog: [],
     auditLog: [],
     resources: [],
-    users: [],
-    currentUserId: ''
+    users: [directorUser],
+    currentUserId: 'director'
   });
   
   setMockPushFails(false);
@@ -190,8 +202,8 @@ function baseCase(phone = "111") {
     syncLog: [],
     auditLog: [],
     resources: [],
-    users: [],
-    currentUserId: ''
+    users: [directorUser],
+    currentUserId: 'director'
   });
   
   await autoBackupToSupabase("autosave", { force: true });
@@ -221,8 +233,8 @@ function baseCase(phone = "111") {
     syncLog: [],
     auditLog: [],
     resources: [],
-    users: [],
-    currentUserId: ''
+    users: [directorUser],
+    currentUserId: 'director'
   });
   
   await autoBackupToSupabase("autosave", { force: true });
@@ -252,8 +264,8 @@ function baseCase(phone = "111") {
     syncLog: [],
     auditLog: [],
     resources: [],
-    users: [],
-    currentUserId: ''
+    users: [directorUser],
+    currentUserId: 'director'
   });
   
   await autoBackupToSupabase("autosave", { force: true });
@@ -261,6 +273,35 @@ function baseCase(phone = "111") {
   const conflicts = getState().syncConflicts;
   const target = conflicts.find(c => c.id === "c-remote");
   assert.equal(target.status, "resolved", "kept_remote conflict resolved after successful push");
+}
+
+// 5. Aucun utilisateur local autorisé => le push automatique reste bloqué.
+{
+  setState({
+    cases: [baseCase("111")],
+    bookings: [],
+    syncConflicts: [{
+      id: "c-anonymous",
+      entity: "case",
+      entityId: "case-1",
+      field: "phone",
+      decision: "kept_local",
+      status: "open",
+      localValue: "111",
+      remoteValue: "222",
+    }],
+    syncLog: [],
+    auditLog: [],
+    resources: [],
+    users: [],
+    currentUserId: "",
+  });
+  setMockPushFails(false);
+  resetPushCalls();
+  const blocked = await autoBackupToSupabase("anonymous", { force: true });
+  assert.equal(blocked.acknowledged, false, "un utilisateur absent ne peut pas lancer le push automatique");
+  assert.equal(getPushCalls(), 0, "aucun appel Supabase ne doit être effectué sans utilisateur autorisé");
+  assert.equal(getState().syncConflicts[0].status, "open", "un conflit reste ouvert sans push autorisé");
 }
 
 // 5. resolved/ignored non comptés par le Cloud indicator.

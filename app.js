@@ -1775,6 +1775,7 @@ async function triggerLogout() {
   if (typeof loadDurableOutboxOperations === "function") await loadDurableOutboxOperations().catch(() => []);
   if (typeof renderCurrentSessionIndicator === "function") renderCurrentSessionIndicator();
   showUserLoginScreen();
+  if (typeof refreshSupabasePermissionState === "function") refreshSupabasePermissionState("local-logout");
 }
 
 function renderCurrentSessionIndicator() {
@@ -1864,6 +1865,7 @@ function bindUserSessionActions() {
       hideFirstAccessRecovery();
       setActiveTab("reception-workspace");
       render();
+      if (typeof refreshSupabasePermissionState === "function") refreshSupabasePermissionState("first-access");
       resetUserSessionIdleTimer();
       quietNotify(`Bienvenue, ${result.user.name} !`, "success");
     } catch (error) {
@@ -2061,6 +2063,7 @@ function completeUserLogin(targetUser) {
     }
 
     render();
+    if (typeof refreshSupabasePermissionState === "function") refreshSupabasePermissionState("local-login");
     resetUserSessionIdleTimer();
 
     if (targetUser.role === "technicien" && !targetUser.resourceId) {

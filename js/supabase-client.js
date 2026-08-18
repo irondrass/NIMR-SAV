@@ -173,21 +173,34 @@ function clearSupabaseRuntimeConfig() {
   refreshSupabasePanel();
 }
 
-function bindSupabaseConfigForm() {
+function refreshSupabaseConfigPermissionState() {
   const form = $("#supabase-config-form");
-  form?.addEventListener("submit", saveSupabaseRuntimeConfigFromForm);
-  $("#supabase-config-clear")?.addEventListener("click", clearSupabaseRuntimeConfig);
-  hydrateSupabaseConfigForm();
-  const permissionGuard = guardSensitiveAction("supabase.configure", {}, { notify: false });
+  const permissionGuard = typeof guardSensitiveAction === "function"
+    ? guardSensitiveAction("supabase.configure", {}, { notify: false })
+    : { ok: false, message: "Configuration Supabase non autorisée." };
   if (form) {
     $$("input, button", form).forEach((control) => {
       control.disabled = !permissionGuard.ok;
-      control.title = permissionGuard.message;
+      control.title = permissionGuard.message || "";
     });
   }
   const clearButton = $("#supabase-config-clear");
   if (clearButton) {
     clearButton.disabled = !permissionGuard.ok;
-    clearButton.title = permissionGuard.message;
+    clearButton.title = permissionGuard.message || "";
   }
+  return permissionGuard;
+}
+
+let supabaseConfigFormBound = false;
+
+function bindSupabaseConfigForm() {
+  const form = $("#supabase-config-form");
+  if (!supabaseConfigFormBound) {
+    form?.addEventListener("submit", saveSupabaseRuntimeConfigFromForm);
+    $("#supabase-config-clear")?.addEventListener("click", clearSupabaseRuntimeConfig);
+    hydrateSupabaseConfigForm();
+    supabaseConfigFormBound = true;
+  }
+  return refreshSupabaseConfigPermissionState();
 }

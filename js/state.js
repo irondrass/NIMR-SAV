@@ -276,6 +276,7 @@ const CANONICAL_USER_ROLES = Object.freeze({
   chef_atelier: "Chef atelier",
   reception: "Réception",
   technicien: "Technicien",
+  controle_qualite: "Contrôleur Qualité",
   lecture_seule: "Lecture seule",
 });
 
@@ -285,8 +286,8 @@ const USER_ROLES = {
   ...CANONICAL_USER_ROLES,
   admin: CANONICAL_USER_ROLES.admin_technique,
   directeur_sav: CANONICAL_USER_ROLES.directeur,
+  qualite: CANONICAL_USER_ROLES.controle_qualite,
   readonly: CANONICAL_USER_ROLES.lecture_seule,
-  qualite: CANONICAL_USER_ROLES.lecture_seule,
 };
 
 const USER_ROLE_RUNTIME_KEYS = Object.freeze({
@@ -295,6 +296,7 @@ const USER_ROLE_RUNTIME_KEYS = Object.freeze({
   chef_atelier: "chef_atelier",
   reception: "reception",
   technicien: "technicien",
+  controle_qualite: "controle_qualite",
   lecture_seule: "readonly",
 });
 
@@ -314,11 +316,14 @@ const USER_ROLE_ALIASES = Object.freeze({
   receptionnaire: "reception",
   technicien: "technicien",
   technician: "technicien",
+  "controle qualite": "controle_qualite",
+  "controleur qualite": "controle_qualite",
+  "quality controller": "controle_qualite",
   lecture: "lecture_seule",
   "lecture seule": "lecture_seule",
   "read only": "lecture_seule",
   readonly: "lecture_seule",
-  qualite: "lecture_seule",
+  qualite: "controle_qualite",
 });
 
 const DIRECTOR_PERMISSIONS = [
@@ -355,6 +360,12 @@ const DIRECTOR_PERMISSIONS = [
 ];
 
 const READ_ONLY_PERMISSIONS = ["dashboard.view", "case.view", "planning.view", "resource.view", "print.*"];
+const QUALITY_CONTROLLER_PERMISSIONS = [
+  ...READ_ONLY_PERMISSIONS,
+  "quality.validate",
+  "quality.reject",
+  "quality.revalidate",
+];
 
 const ROLE_PERMISSIONS = {
   admin_technique: ["*"],
@@ -401,13 +412,14 @@ const ROLE_PERMISSIONS = {
     "customer_claim.manage",
   ],
   technicien: ["task.start", "task.pause", "task.resume", "task.complete", "task.block", "task.unblock", "task.note", "task.actual_time", "print.task"],
+  controle_qualite: QUALITY_CONTROLLER_PERMISSIONS,
   lecture_seule: READ_ONLY_PERMISSIONS,
   // Alias de lecture transitoires pour les anciens tests/modules. hasPermission
   // utilise toujours le rôle canonique et ne dépend pas de ces entrées.
   admin: ["*"],
   directeur_sav: DIRECTOR_PERMISSIONS,
   readonly: READ_ONLY_PERMISSIONS,
-  qualite: READ_ONLY_PERMISSIONS,
+  qualite: QUALITY_CONTROLLER_PERMISSIONS,
 };
 
 const MUTATION_PERMISSIONS = [
@@ -4282,7 +4294,7 @@ function showInputPromptModal({
 
 // v23.2.5 — Workspaces par rôle
 // directeur_sav : vision métier (pas admin technique)
-// qualite : rôle conservé, sans workspace QC dans le flux simplifié
+// controle_qualite : inspection et contrôle qualité sans administration atelier
 // readonly : uniquement pilotage (lecture)
 const ROLE_TABS = {
   admin:         ["reception-workspace", "dossiers", "today", "pilotage", "planning", "technician", "atelier"],
@@ -4290,6 +4302,7 @@ const ROLE_TABS = {
   chef_atelier:  ["reception-workspace", "dossiers", "today", "pilotage", "planning", "technician", "atelier"],
   reception:     ["reception-workspace", "dossiers", "today"],
   technicien:    ["technician"],
+  controle_qualite: ["dossiers", "pilotage", "planning"],
   qualite:       ["dossiers", "pilotage", "planning"],
   readonly:      ["dossiers", "pilotage", "planning"],
 };
@@ -4301,6 +4314,7 @@ const ROLE_DEFAULT_TABS = {
   chef_atelier:  "reception-workspace",
   reception:     "reception-workspace",
   technicien:    "technician",
+  controle_qualite: "dossiers",
   qualite:       "dossiers",
   readonly:      "dossiers",
 };
@@ -4359,7 +4373,7 @@ function guardUserSwitch() {
 }
 
 // v23.2.5 — Visibilité des notes par rôle
-// Les notes direction ne sont JAMAIS exposées aux rôles : reception, technicien, qualite, readonly.
+// Les notes direction ne sont JAMAIS exposées aux rôles : reception, technicien, controle_qualite, readonly.
 // L'audit est journalisé sans exposer le contenu pour les rôles non autorisés.
 const NOTES_VISIBILITY = {
   admin:         ["reception", "technique", "qualite", "direction"],
@@ -4367,6 +4381,7 @@ const NOTES_VISIBILITY = {
   chef_atelier:  ["reception", "technique", "qualite"],
   reception:     ["reception", "technique"],
   technicien:    ["technique"],
+  controle_qualite: ["technique", "qualite"],
   qualite:       ["technique", "qualite"],
   readonly:      [],
 };

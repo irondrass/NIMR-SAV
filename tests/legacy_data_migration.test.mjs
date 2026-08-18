@@ -40,7 +40,7 @@ assert.equal(migrated.migrated, true);
 assert.equal(migrated.fromVersion, 0);
 assert.equal(migrated.toVersion, 2);
 assert.equal(JSON.stringify(legacy), originalJson, "la migration ne doit jamais modifier la source");
-assert.deepEqual(Array.from(migrated.state.users, (user) => user.canonicalRole), ["admin_technique", "directeur", "lecture_seule"]);
+assert.deepEqual(Array.from(migrated.state.users, (user) => user.canonicalRole), ["admin_technique", "directeur", "controle_qualite"]);
 assert.deepEqual(Array.from(migrated.state.bookings[0].resourceIds), ["legacy-body"]);
 assert.equal(migrated.state.bookings[0].actualStart, "2026-06-01T07:05:00.000Z");
 assert.equal(migrated.state.resources[1].site, "external");

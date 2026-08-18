@@ -3075,10 +3075,10 @@ function renderCaseDetail() {
 
 function setupCaseDetailTabs(root, item) {
   const user = getCurrentUser();
-  const role = user?.role || "readonly";
+  const role = user ? getCanonicalUserRole(user) : "lecture_seule";
 
   let allowedSubTabs = ["claims", "photos", "planning", "atelier"];
-  if (role === "qualite") {
+  if (role === "controle_qualite") {
     allowedSubTabs = ["claims", "photos", "atelier"];
   } else if (role === "technicien") {
     allowedSubTabs = [];

@@ -31,7 +31,9 @@ await assert.rejects(
 );
 assert.doesNotMatch(syncSource, /upsert\(legacyRow/u, "aucun fallback non cloisonné ne doit retirer workshop_id");
 assert.doesNotMatch(syncSource, /upsert\(cleanRows,\s*\{\s*onConflict:\s*["']local_id/u, "les tables métier doivent rester cloisonnées par atelier");
-assert.match(syncSource, /guardSensitiveAction\("supabase\.access"\)/u, "connexion, test et déconnexion doivent être gardés");
+assert.match(syncSource, /signInSupabaseFromForm[\s\S]*guardSensitiveAction\("supabase\.session\.manage"\)/u, "la connexion Supabase doit gérer la session avec la permission dédiée");
+assert.match(syncSource, /signOutSupabase[\s\S]*guardSensitiveAction\("supabase\.session\.manage"\)/u, "la déconnexion Supabase doit gérer la session avec la permission dédiée");
+assert.match(syncSource, /testSupabaseConnection[\s\S]*guardSensitiveAction\("supabase\.sync\.use"\)/u, "le test Supabase doit rester un diagnostic opérationnel");
 
 [
   "workshops",

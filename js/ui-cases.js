@@ -266,7 +266,13 @@ function renderAdminTechnicalVisibility() {
       ? typeof hasPermission === "function" && hasPermission("supabase.configure", { user: currentUser })
       : capability === "restore"
         ? typeof hasPermission === "function" && hasPermission("supabase.restore", { user: currentUser })
-        : typeof hasPermission === "function" && hasPermission("supabase.access", { user: currentUser });
+        : capability === "session"
+          ? typeof hasPermission === "function" && hasPermission("supabase.session.manage", { user: currentUser })
+          : capability === "sync"
+            ? typeof hasPermission === "function" && hasPermission("supabase.sync.use", { user: currentUser })
+            : capability === "export"
+              ? typeof hasPermission === "function" && hasPermission("export.backup", { user: currentUser })
+              : false;
     control.hidden = !allowed;
     control.style.display = allowed ? "" : "none";
   });

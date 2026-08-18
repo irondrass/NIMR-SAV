@@ -344,6 +344,8 @@ const DIRECTOR_PERMISSIONS = [
   "delivery.complete",
   "export.backup",
   "supabase.status.view",
+  "supabase.sync.use",
+  "supabase.session.manage",
   "print.*",
   "customer_claim.manage",
   "quality.validate",

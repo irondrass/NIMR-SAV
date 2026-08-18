@@ -3,7 +3,7 @@ const SUPABASE_SCHEMA_HINT =
 
 async function signInSupabaseFromForm(event) {
   event.preventDefault();
-  const permissionGuard = guardSensitiveAction("supabase.access");
+  const permissionGuard = guardSensitiveAction("supabase.session.manage");
   if (!permissionGuard.ok) return;
   const client = getSupabaseClient();
   if (!client) {
@@ -38,7 +38,7 @@ async function signInSupabaseFromForm(event) {
 }
 
 async function signOutSupabase() {
-  const permissionGuard = guardSensitiveAction("supabase.access");
+  const permissionGuard = guardSensitiveAction("supabase.session.manage");
   if (!permissionGuard.ok) return;
   const client = getSupabaseClient();
   if (!client) return;
@@ -62,7 +62,7 @@ async function signOutSupabase() {
 }
 
 async function testSupabaseConnection() {
-  const permissionGuard = guardSensitiveAction("supabase.access");
+  const permissionGuard = guardSensitiveAction("supabase.sync.use");
   if (!permissionGuard.ok) return;
   const client = getSupabaseClient();
   if (!client) {
@@ -1047,7 +1047,14 @@ function getWorkHoursOutboundBlock(
 }
 
 function shouldAutoBackupToSupabase() {
-  return Boolean(!applyingRemoteSupabaseState && getSupabaseClient && getSupabaseClient() && navigator.onLine !== false);
+  return Boolean(
+    !applyingRemoteSupabaseState
+    && typeof hasPermission === "function"
+    && hasPermission("supabase.sync.use")
+    && getSupabaseClient
+    && getSupabaseClient()
+    && navigator.onLine !== false,
+  );
 }
 
 function scheduleAutoSupabaseBackup(reason = "autosave") {
@@ -2369,7 +2376,7 @@ async function pullLatestSupabaseBackup(reason = "poll") {
     const permissionGuard =
       typeof guardSensitiveAction === "function"
         ? guardSensitiveAction(
-            "supabase.access",
+            "supabase.sync.use",
             {},
             { notify: false },
           )
@@ -2402,7 +2409,7 @@ async function pullLatestSupabaseBackup(reason = "poll") {
 // REMPLACER l'ancienne fonction startSupabaseLiveSync par celle-ci
 function startSupabaseLiveSync() {
   const permissionGuard = typeof guardSensitiveAction === "function"
-    ? guardSensitiveAction("supabase.access", {}, { notify: false })
+    ? guardSensitiveAction("supabase.sync.use", {}, { notify: false })
     : { ok: false };
   if (!permissionGuard.ok) return;
   
@@ -2764,16 +2771,32 @@ function bindSupabaseActions() {
   $("#supabase-save")?.addEventListener("click", saveLocalToSupabase);
   $("#supabase-restore")?.addEventListener("click", restoreLocalFromSupabase);
   bindSupabaseSyncHealthActions();
-  const accessGuard = typeof guardSensitiveAction === "function"
-    ? guardSensitiveAction("supabase.access", {}, { notify: false })
-    : { ok: false, message: "Accès Supabase non autorisé." };
-  ["supabase-login-form", "supabase-signout", "supabase-test", "supabase-save", "supabase-restore"].forEach((id) => {
+  const sessionGuard = typeof guardSensitiveAction === "function"
+    ? guardSensitiveAction("supabase.session.manage", {}, { notify: false })
+    : { ok: false, message: "Session Supabase non autorisée." };
+  const syncGuard = typeof guardSensitiveAction === "function"
+    ? guardSensitiveAction("supabase.sync.use", {}, { notify: false })
+    : { ok: false, message: "Synchronisation Supabase non autorisée." };
+  const exportGuard = typeof guardSensitiveAction === "function"
+    ? guardSensitiveAction("export.backup", {}, { notify: false })
+    : { ok: false, message: "Export non autorisé." };
+  const restoreGuard = typeof guardSensitiveAction === "function"
+    ? guardSensitiveAction("import.backup", {}, { notify: false })
+    : { ok: false, message: "Restauration non autorisée." };
+  const controlGuards = {
+    "supabase-login-form": sessionGuard,
+    "supabase-signout": sessionGuard,
+    "supabase-test": syncGuard,
+    "supabase-save": exportGuard,
+    "supabase-restore": restoreGuard,
+  };
+  Object.entries(controlGuards).forEach(([id, guard]) => {
     const element = document.getElementById(id);
     if (!element) return;
     const controls = element.matches?.("form") ? [...element.querySelectorAll("input, button")] : [element];
     controls.forEach((control) => {
-      control.disabled = !accessGuard.ok;
-      control.title = accessGuard.message || "";
+      control.disabled = !guard.ok;
+      control.title = guard.message || "";
     });
   });
   $("#supabase-download-safety-snapshot")?.addEventListener("click", async () => {
@@ -2811,7 +2834,7 @@ function bindSupabaseActions() {
     }
   });
   refreshSupabasePanel();
-  if (accessGuard.ok) {
+  if (syncGuard.ok) {
     startSupabaseLiveSync();
     pullLatestSupabaseBackup("initialisation");
     if (typeof processOfflineQueue === "function") processOfflineQueue();
@@ -3061,6 +3084,10 @@ let offlineQueueProcessingPromise = null;
 async function processOfflineQueue() {
   if (offlineQueueProcessingPromise) return offlineQueueProcessingPromise;
   const run = (async () => {
+    if (typeof guardSensitiveAction === "function") {
+      const permissionGuard = guardSensitiveAction("supabase.sync.use", {}, { notify: false });
+      if (!permissionGuard.ok) return { processed: 0, reason: "permission-denied" };
+    }
     if (typeof consolidateDurableOutboxOperations === "function") {
       await consolidateDurableOutboxOperations();
     }

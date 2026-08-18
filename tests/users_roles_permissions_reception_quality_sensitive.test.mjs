@@ -172,7 +172,7 @@ assert.equal(
   'Action non autorisée pour le rôle utilisateur : lecture_seule',
   'le refus lecture seule doit utiliser le diagnostic centralisé',
 );
-assert.equal(app(`normalizeUserRole('qualite')`), 'lecture_seule', 'le rôle qualité historique doit migrer en lecture seule');
+assert.equal(app(`normalizeUserRole('qualite')`), 'controle_qualite', 'le rôle qualité historique doit migrer vers le contrôleur qualité');
 
 setupRole('admin');
 assert.equal(app(`guardSensitiveAction('case.delete', { item: state.cases[0] }).ok`), true, 'admin peut supprimer dossier');

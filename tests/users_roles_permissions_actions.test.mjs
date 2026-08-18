@@ -194,7 +194,7 @@ assert.equal(app(`guardAction('planning.edit').ok`), false, 'réception ne dépl
 setupPermissionState('u-readonly');
 assert.equal(app(`startTechnicianTask(state.cases[0], 'booking-tech-1', 'tech-1').ok`), false, 'readonly ne fait aucune mutation tâche');
 assert.equal(app(`guardAction('planning.edit').ok`), false, 'readonly ne fait aucune mutation planning');
-assert.equal(app(`normalizeUserRole('qualite')`), 'lecture_seule', 'l’ancien rôle qualité doit migrer en lecture seule sans droit QC');
+assert.equal(app(`normalizeUserRole('qualite')`), 'controle_qualite', 'l’ancien rôle qualité doit migrer vers le contrôleur qualité');
 
 setupPermissionState('u-chef');
 assert.equal(app(`guardAction('planning.edit').ok`), true, 'chef atelier peut éditer le planning');

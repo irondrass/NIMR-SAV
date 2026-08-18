@@ -11,7 +11,8 @@ const aliases = {
   "Réceptionnaire": "reception",
   technician: "technicien",
   "lecture seule": "lecture_seule",
-  qualite: "lecture_seule",
+  readonly: "lecture_seule",
+  qualite: "controle_qualite",
 };
 Object.entries(aliases).forEach(([legacy, canonical]) => {
   assert.equal(context.normalizeUserRole(legacy), canonical, `${legacy} doit migrer vers ${canonical}`);

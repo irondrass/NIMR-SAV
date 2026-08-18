@@ -1654,7 +1654,8 @@ function renderUserLoginScreen() {
       directeur_sav: "Directeur SAV",
       reception: "Réception",
       technicien: "Technicien",
-      qualite: "Lecture seule (rôle historique)",
+      controle_qualite: "Contrôleur Qualité",
+      qualite: "Contrôleur Qualité (rôle historique)",
       readonly: "Lecture seule"
     }[user.role] || user.role;
 
@@ -1782,8 +1783,9 @@ function renderCurrentSessionIndicator() {
   const currentUser = state.currentUserId && typeof getUserById === "function" ? getUserById(state.currentUserId) : null;
   const sidebarUserName = document.getElementById("sidebar-user-name");
   if (sidebarUserName) {
+    const canonicalRole = currentUser ? getCanonicalUserRole(currentUser) : "";
     const roleLabel = currentUser
-      ? (currentUser.role === "admin" ? "Admin technique" : currentUser.role)
+      ? (CANONICAL_USER_ROLES[canonicalRole] || USER_ROLES[currentUser.role] || currentUser.role)
       : "";
     sidebarUserName.textContent = currentUser ? `${currentUser.name} (${roleLabel})` : "Atelier";
   }

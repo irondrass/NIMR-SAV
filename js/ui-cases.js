@@ -1735,7 +1735,7 @@ async function handleTechnicianTaskAction(action, bookingId, technicianId) {
       }
       if (result.ok && result.booking) {
         const currentUser = typeof getCurrentUser === "function" ? getCurrentUser() : null;
-        const isManager = !currentUser || currentUser.role === "admin" || currentUser.role === "chef_atelier";
+        const isManager = !currentUser || canRenderAction("planning.edit");
         if (isManager) {
           const previews = previewDependentBookingReschedule(item, result.booking);
           if (previews.length > 0) {
@@ -4446,7 +4446,7 @@ async function handleBookingTaskAction(item, action, bookingId, options = {}) {
       result = await runSecuredBookingTaskAction(item, action, bookingId, { ...options, note });
       if (result && result.ok && result.booking) {
         const currentUser = typeof getCurrentUser === "function" ? getCurrentUser() : null;
-        const isManager = !currentUser || currentUser.role === "admin" || currentUser.role === "chef_atelier";
+        const isManager = !currentUser || canRenderAction("planning.edit");
         if (isManager) {
           const previews = previewDependentBookingReschedule(item, result.booking);
           if (previews.length > 0) {

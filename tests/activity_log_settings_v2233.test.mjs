@@ -44,6 +44,13 @@ let state = {
 global.state = state;
 let currentActorMock = { role: "admin" };
 global.getCurrentActor = () => currentActorMock;
+global.normalizeUserRole = (value) => ({ admin: "admin_technique", chef_atelier: "chef_atelier" }[value] || value);
+global.ROLE_PERMISSIONS = { admin_technique: ["*"], chef_atelier: [] };
+global.permissionMatches = (granted, requested) => granted === "*" || granted === requested;
+global.hasPermission = (permission, context = {}) => {
+  const role = context.user?.role || currentActorMock.role || "readonly";
+  return (global.ROLE_PERMISSIONS[global.normalizeUserRole(role)] || []).some((granted) => global.permissionMatches(granted, permission));
+};
 
 // Extraire et évaluer la fonction getAggregatedActivityLog depuis le code de state.js
 const extractFunction = (source, name) => {

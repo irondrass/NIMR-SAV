@@ -339,6 +339,7 @@ const DIRECTOR_PERMISSIONS = [
   "schedule_appointment",
   "vehicle.receive",
   "receive_vehicle",
+  "delivery.override",
   "task.*",
   "task.override",
   "planning.view",
@@ -382,6 +383,7 @@ const ROLE_PERMISSIONS = {
     "schedule_appointment",
     "vehicle.receive",
     "receive_vehicle",
+    "delivery.override",
     "task.*",
     "task.override",
     "planning.view",
@@ -439,6 +441,7 @@ const MUTATION_PERMISSIONS = [
   "quality.reject",
   "quality.revalidate",
   "delivery.complete",
+  "delivery.override",
   "case.close",
   "case.archive",
   "case.delete",
@@ -2069,6 +2072,7 @@ function guardAction(permission, context = {}, options = {}) {
           "quality.validate",
           "quality.reject",
           "delivery.complete",
+          "delivery.override",
           "case.delete",
           "case.edit"
         ].includes(requested);
@@ -2231,8 +2235,7 @@ function guardSensitiveAction(permission, context = {}, options = {}) {
 
 function isWorkshopManager(user = getCurrentUser()) {
   const resolved = resolvePermissionUser(user);
-  const role = resolved ? getCanonicalUserRole(resolved) : "";
-  return role === "admin_technique" || role === "chef_atelier";
+  return Boolean(resolved && hasPermission("task.override", { user: resolved }));
 }
 
 function isReadOnlyMode() {
@@ -3662,11 +3665,14 @@ function getAggregatedActivityLog(limit = 200, roleOrUser = null) {
   }
 
   const events = [];
+  const auditViewerCanManageUsers = roleOrUser && typeof roleOrUser === "object" && (roleOrUser.id || roleOrUser.userId)
+    ? hasPermission("users.manage", { user: roleOrUser })
+    : (ROLE_PERMISSIONS[normalizeUserRole(role)] || []).some((granted) => permissionMatches(granted, "users.manage"));
 
   // 1. Audit Log
   if (Array.isArray(state.auditLog)) {
     state.auditLog.forEach(log => {
-      if (role !== "admin") {
+      if (!auditViewerCanManageUsers) {
         if (log.type.startsWith("users.") || log.type.startsWith("supabase.") || log.type.startsWith("settings.")) {
           return;
         }

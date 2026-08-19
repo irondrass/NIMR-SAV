@@ -4,8 +4,9 @@ import { createNimrVmContext } from "./helpers/nimr_vm_context.mjs";
 
 const indexSource = fs.readFileSync(new URL("../index.html", import.meta.url), "utf8");
 const appSource = fs.readFileSync(new URL("../app.js", import.meta.url), "utf8");
+const stateSource = fs.readFileSync(new URL("../js/state.js", import.meta.url), "utf8");
 assert.match(indexSource, /option value=["']controle_qualite["'][^>]*>Contrôleur Qualité/u);
-assert.match(appSource, /controle_qualite:\s*["']Contrôleur Qualité["']/u);
+assert.match(stateSource, /controle_qualite:\s*["']Contrôleur Qualité["']/u);
 
 const { context, run } = createNimrVmContext({ filename: "quality-controller-role-v235.js" });
 

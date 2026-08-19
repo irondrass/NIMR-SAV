@@ -608,9 +608,10 @@ function renderUsersAndRoles() {
   activeUsers.forEach((u) => {
     const emailNorm = String(u.email || "").trim().toLowerCase();
     if (emailNorm) {
-      const count = activeUsers.filter(ou => String(ou.email || "").trim().toLowerCase() === emailNorm && ou.role === u.role).length;
-      if (count > 1 && !duplicates.includes(emailNorm + ":" + u.role)) {
-        duplicates.push(emailNorm + ":" + u.role);
+      const canonicalRole = getCanonicalUserRole(u);
+      const count = activeUsers.filter(ou => String(ou.email || "").trim().toLowerCase() === emailNorm && getCanonicalUserRole(ou) === canonicalRole).length;
+      if (count > 1 && !duplicates.includes(emailNorm + ":" + canonicalRole)) {
+        duplicates.push(emailNorm + ":" + canonicalRole);
       }
     }
   });
@@ -635,13 +636,14 @@ function renderUsersAndRoles() {
   list.innerHTML = users.map((user) => {
     const isCurrent = user.id === state.currentUserId;
     const linkedResource = user.resourceId ? state.resources.find(r => r.id === user.resourceId) : null;
-    const isTechWithoutRes = user.role === "technicien" && !user.resourceId;
+    const canonicalRole = getCanonicalUserRole(user);
+    const isTechWithoutRes = canonicalRole === "technicien" && !user.resourceId;
     
-    const roleLabel = USER_ROLES[user.role] || user.role;
+    const roleLabel = CANONICAL_USER_ROLES[canonicalRole] || USER_ROLES[user.role] || user.role;
     const activeLabel = user.active !== false ? `<span class="tag ok">Actif</span>` : `<span class="tag warn">Inactif</span>`;
     const currentBadge = isCurrent ? `<span class="tag" style="background:#e0f2fe;color:#0369a1;">Utilisateur actuel</span>` : "";
     const supabaseBadge = user.authUserId ? `<span class="tag soft" title="Supabase UID: ${escapeAttr(user.authUserId)}">Supabase</span>` : "";
-    const isDuplicate = user.active !== false && user.email && activeUsers.some(ou => ou.id !== user.id && String(ou.email || "").trim().toLowerCase() === String(user.email || "").trim().toLowerCase() && ou.role === user.role);
+    const isDuplicate = user.active !== false && user.email && activeUsers.some(ou => ou.id !== user.id && String(ou.email || "").trim().toLowerCase() === String(user.email || "").trim().toLowerCase() && getCanonicalUserRole(ou) === canonicalRole);
     const duplicateBadge = isDuplicate ? `<span class="tag warn" title="Un autre utilisateur actif a le même email et rôle !">Doublon</span>` : "";
     const warnNoResource = isTechWithoutRes ? `<p class="risk-pill" style="margin-top: 6px; font-size: 0.8rem; font-weight: 700;">Aucune ressource technicien liée à cet utilisateur.</p>` : "";
     
@@ -679,10 +681,11 @@ function renderUsersAndRoles() {
   if (switcher) {
     switcher.innerHTML = activeUsers.map(u => {
       const emailNorm = String(u.email || "").trim().toLowerCase();
-      const isDup = emailNorm && activeUsers.some(ou => ou.id !== u.id && String(ou.email || "").trim().toLowerCase() === emailNorm && ou.role === u.role);
+      const canonicalRole = getCanonicalUserRole(u);
+      const isDup = emailNorm && activeUsers.some(ou => ou.id !== u.id && String(ou.email || "").trim().toLowerCase() === emailNorm && getCanonicalUserRole(ou) === canonicalRole);
       const displayLabel = isDup 
-        ? `${u.name} (${USER_ROLES[u.role] || u.role}) [Doublon: ${u.id.substring(5)}]`
-        : `${u.name} (${USER_ROLES[u.role] || u.role})`;
+        ? `${u.name} (${CANONICAL_USER_ROLES[canonicalRole] || USER_ROLES[u.role] || u.role}) [Doublon: ${u.id.substring(5)}]`
+        : `${u.name} (${CANONICAL_USER_ROLES[canonicalRole] || USER_ROLES[u.role] || u.role})`;
       return `<option value="${escapeAttr(u.id)}" ${u.id === state.currentUserId ? 'selected' : ''}>${escapeHtml(displayLabel)}</option>`;
     }).join("");
   }

@@ -1460,11 +1460,11 @@ function migrateLegacyState(raw, options = {}) {
   try {
     if (fromVersion < 1) {
       working.users = Array.isArray(working.users) ? working.users.map((user, index) => {
-        const canonicalRole = normalizeUserRole(user?.canonicalRole || user?.role || user?.userRole || (user?.isAdmin ? "admin" : ""));
+        const canonicalRole = resolveUserRole(user);
         return {
           ...(user || {}),
           id: String(user?.id || user?.userId || `legacy-user-${index + 1}`),
-          role: toRuntimeUserRole(canonicalRole),
+          role: canonicalRole,
           canonicalRole,
           createdAt: normalizeNullableDate(user?.createdAt),
           updatedAt: normalizeNullableDate(user?.updatedAt || user?.createdAt),
@@ -1711,8 +1711,23 @@ function toRuntimeUserRole(role) {
   return USER_ROLE_RUNTIME_KEYS[normalizeUserRole(role)] || "readonly";
 }
 
+function getRuntimeUserRole(user) {
+  return toRuntimeUserRole(getCanonicalUserRole(user));
+}
+
+function resolveUserRole(user = {}) {
+  const rawRole = user?.role;
+  const hasExplicitRole = rawRole !== undefined && rawRole !== null && String(rawRole).trim() !== "";
+  if (isKnownUserRole(rawRole)) return normalizeUserRole(rawRole);
+  if (hasExplicitRole) return "lecture_seule";
+  if (isKnownUserRole(user?.canonicalRole)) return normalizeUserRole(user.canonicalRole);
+  if (isKnownUserRole(user?.userRole)) return normalizeUserRole(user.userRole);
+  if (user?.isAdmin) return "admin_technique";
+  return "lecture_seule";
+}
+
 function getCanonicalUserRole(user) {
-  return normalizeUserRole(user?.canonicalRole || user?.role || user?.userRole || "");
+  return resolveUserRole(user);
 }
 
 function createBootstrapAdminUser(seed = {}) {
@@ -1734,8 +1749,7 @@ function createBootstrapAdminUser(seed = {}) {
 
 function normalizeUser(user = {}, resources = []) {
   const allowedResourceIds = new Set((resources || []).map((resource) => resource.id).filter(Boolean));
-  const canonicalRole = normalizeUserRole(user.canonicalRole || user.role || user.userRole || (user.isAdmin ? "admin_technique" : ""));
-  const role = toRuntimeUserRole(canonicalRole);
+  const canonicalRole = resolveUserRole(user);
   const createdAt = normalizeNullableDate(user.createdAt);
   const resourceId = String(user.resourceId || user.technicianId || "").trim();
   return {
@@ -1743,7 +1757,7 @@ function normalizeUser(user = {}, resources = []) {
     authUserId: String(user.authUserId || user.auth_user_id || user.supabaseUserId || "").trim(),
     name: String(user.name || user.displayName || user.email || "Utilisateur atelier").trim(),
     email: String(user.email || "").trim().toLowerCase(),
-    role,
+    role: canonicalRole,
     canonicalRole,
     resourceId: !allowedResourceIds.size || allowedResourceIds.has(resourceId) ? resourceId : "",
     active: user.active !== false,
@@ -1799,7 +1813,7 @@ function getCurrentActor() {
   return {
     userId: user.id,
     userName: user.name || user.email || "Utilisateur atelier",
-    userRole: user.role || "readonly",
+    userRole: getRuntimeUserRole(user),
     canonicalRole: getCanonicalUserRole(user),
     resourceId: user.resourceId || "",
   };
@@ -1848,7 +1862,7 @@ function createFirstAccessUserLocal(userData = {}) {
     "users.first_access_created",
     "Premier accès / récupération locale",
     `Compte ${CANONICAL_USER_ROLES[canonicalRole]} créé explicitement pour ${user.name}.`,
-    { actor: { userId: user.id, userName: user.name, userRole: user.role, canonicalRole, resourceId: "" } },
+    { actor: { userId: user.id, userName: user.name, userRole: getRuntimeUserRole(user), canonicalRole, resourceId: "" } },
   );
   return { ok: true, user };
 }
@@ -1949,12 +1963,13 @@ function updateUserLocal(userId, userData, actor = null) {
   const safety = canDisableOrDemoteUser(userId, role, newActive);
   if (!safety.ok) return safety;
 
-  const oldRole = user.role;
+  const oldRole = normalizeUserRole(user.role);
+  const newRole = normalizeUserRole(role);
   const oldActive = user.active;
 
   user.name = name;
-  user.role = toRuntimeUserRole(role);
-  user.canonicalRole = normalizeUserRole(role);
+  user.role = newRole;
+  user.canonicalRole = user.role;
   user.email = String(userData.email || "").trim().toLowerCase();
   user.resourceId = String(userData.resourceId || "").trim();
   user.active = newActive;
@@ -1974,8 +1989,8 @@ function updateUserLocal(userId, userData, actor = null) {
 
   linkResourcesToUsers(state.resources, state.users);
 
-  if (oldRole !== role) {
-    addAuditLog("users.role_changed", `Rôle modifié pour ${user.name} : ${USER_ROLES[oldRole]} -> ${USER_ROLES[role]}`, "", { actor: resolvedActor });
+  if (oldRole !== newRole) {
+    addAuditLog("users.role_changed", `Rôle modifié pour ${user.name} : ${USER_ROLES[oldRole]} -> ${USER_ROLES[newRole]}`, "", { actor: resolvedActor });
   }
   if (oldActive !== newActive) {
     if (newActive === false) {
@@ -1983,7 +1998,7 @@ function updateUserLocal(userId, userData, actor = null) {
     } else {
       addAuditLog("users.updated", `Utilisateur réactivé : ${user.name}`, "", { actor: resolvedActor });
     }
-  } else if (oldRole === role) {
+  } else if (oldRole === newRole) {
     addAuditLog("users.updated", `Utilisateur modifié : ${user.name}`, "", { actor: resolvedActor });
   }
 
@@ -2109,7 +2124,8 @@ function guardAction(permission, context = {}, options = {}) {
     actor: user ? {
       userId: user.id,
       userName: user.name || user.email || "Utilisateur atelier",
-      userRole: user.role || "readonly",
+      userRole: getRuntimeUserRole(user),
+      canonicalRole: getCanonicalUserRole(user),
       resourceId: user.resourceId || "",
     } : { userId: "", userName: "Atelier", userRole: "", resourceId: "" },
   };

@@ -1436,7 +1436,7 @@ function renderActivityLog() {
 
 
 // --- DEBUT v22.33C User Selector Startup / Shared Session ---
-const SENSITIVE_ROLES = ["admin", "chef_atelier", "directeur_sav"];
+const SENSITIVE_ROLES = ["admin_technique", "chef_atelier", "directeur"];
 window.selectedUserIdForStartup = "";
 window.pendingSelectorUser = null;
 
@@ -1527,7 +1527,7 @@ function checkUserSessionStartup() {
     showUserLoginScreen();
   } else {
     // Si l'utilisateur actif est sensible et n'est pas déverrouillé, on doit demander le PIN
-    if (currentUser && SENSITIVE_ROLES.includes(currentUser.role) && sessionStorage.getItem("nimr-user-pin-unlocked") !== currentUser.id) {
+    if (currentUser && SENSITIVE_ROLES.includes(getCanonicalUserRole(currentUser)) && sessionStorage.getItem("nimr-user-pin-unlocked") !== currentUser.id) {
       showUserLoginScreen();
     } else {
       hideUserLoginScreen();
@@ -1648,19 +1648,11 @@ function renderUserLoginScreen() {
   const activeUsers = (state.users || []).filter(user => user.active !== false);
 
   selectEl.innerHTML = activeUsers.map(user => {
-    const roleLabel = {
-      admin: "Admin technique",
-      chef_atelier: "Chef d'atelier",
-      directeur_sav: "Directeur SAV",
-      reception: "Réception",
-      technicien: "Technicien",
-      controle_qualite: "Contrôleur Qualité",
-      qualite: "Contrôleur Qualité (rôle historique)",
-      readonly: "Lecture seule"
-    }[user.role] || user.role;
+    const canonicalRole = getCanonicalUserRole(user);
+    const roleLabel = CANONICAL_USER_ROLES[canonicalRole] || USER_ROLES[user.role] || user.role;
 
     const emailNorm = String(user.email || "").trim().toLowerCase();
-    const isDup = emailNorm && activeUsers.some(ou => ou.id !== user.id && String(ou.email || "").trim().toLowerCase() === emailNorm && ou.role === user.role);
+    const isDup = emailNorm && activeUsers.some(ou => ou.id !== user.id && String(ou.email || "").trim().toLowerCase() === emailNorm && getCanonicalUserRole(ou) === getCanonicalUserRole(user));
     const shortId = user.id.substring(5);
     const displayLabel = isDup
       ? `${user.name} (${roleLabel}) [Doublon: ${shortId}]`
@@ -1691,7 +1683,7 @@ function updateLoginPinRequirement() {
   const user = (state.users || []).find(u => u.id === userId);
   if (!user) return;
 
-  const isSensitive = ["admin", "chef_atelier", "directeur_sav"].includes(user.role);
+  const isSensitive = ["admin_technique", "chef_atelier", "directeur"].includes(getCanonicalUserRole(user));
   const hasPin = Boolean(user.pinHash);
   const pinRequired = isSensitive || user.pinRequired || hasPin;
 
@@ -1943,7 +1935,7 @@ function bindUserSessionActions() {
 
     sessionStorage.removeItem("nimr-user-pin-unlocked");
 
-    const isSensitive = ["admin", "chef_atelier", "directeur_sav"].includes(user.role);
+    const isSensitive = ["admin_technique", "chef_atelier", "directeur"].includes(getCanonicalUserRole(user));
     const hasPin = Boolean(user.pinHash);
     const pinRequired = isSensitive || user.pinRequired || hasPin;
 
@@ -2057,7 +2049,7 @@ function completeUserLogin(targetUser) {
 
     // Forcer la redirection et vider le DOM selon les règles d'accessibilité (Contrainte 11 hotfix test)
     ensureCurrentTabAllowed();
-    if (targetUser.role === "technicien") {
+    if (getCanonicalUserRole(targetUser) === "technicien") {
       const caseDetail = document.getElementById("case-detail");
       const gantt = document.getElementById("gantt");
       if (caseDetail) caseDetail.innerHTML = "";
@@ -2068,7 +2060,7 @@ function completeUserLogin(targetUser) {
     if (typeof refreshSupabasePermissionState === "function") refreshSupabasePermissionState("local-login");
     resetUserSessionIdleTimer();
 
-    if (targetUser.role === "technicien" && !targetUser.resourceId) {
+    if (getCanonicalUserRole(targetUser) === "technicien" && !targetUser.resourceId) {
       notifyUser("Avertissement : Aucun technicien / ressource n'est lié à votre profil. Certaines fonctionnalités seront restreintes.", "warn");
     } else {
       quietNotify(`Bienvenue, ${targetUser.name} !`, "success");
@@ -2082,7 +2074,7 @@ let userSessionIdleTimer = null;
 function resetUserSessionIdleTimer() {
   window.clearTimeout(userSessionIdleTimer);
   const currentUser = getCurrentUser();
-  if (!currentUser || !SENSITIVE_ROLES.includes(currentUser.role)) return;
+  if (!currentUser || !SENSITIVE_ROLES.includes(getCanonicalUserRole(currentUser))) return;
   userSessionIdleTimer = window.setTimeout(() => {
     sessionStorage.removeItem("nimr-user-pin-unlocked");
     addAuditLog("security.session_timeout", "Session verrouillée pour inactivité", `Déconnexion automatique de ${currentUser.name} après 15 minutes d'inactivité.`);

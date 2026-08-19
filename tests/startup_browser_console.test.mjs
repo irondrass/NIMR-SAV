@@ -171,13 +171,13 @@ async function exercisePdfFirstStartup(send, sessionId, label) {
         firstAccessForm.elements.confirmPin.value = "739251";
         firstAccessForm.requestSubmit();
         await waitUntil(
-          () => state.users.some((user) => user?.active !== false && user?.role === "admin")
+          () => state.users.some((user) => user?.active !== false && user?.role === "admin_technique")
             && document.getElementById("first-access-overlay")?.hidden !== false,
           "La création explicite du premier responsable n'a pas abouti",
         );
       }
 
-      const bootstrapAdmin = state.users.find((user) => user?.active !== false && user?.role === "admin");
+      const bootstrapAdmin = state.users.find((user) => user?.active !== false && user?.role === "admin_technique");
       if (!bootstrapAdmin) throw new Error("Admin du premier accès introuvable");
       if (sessionStorage.getItem("nimr-user-pin-unlocked") !== bootstrapAdmin.id) {
         const loginForm = document.getElementById("user-login-form");
@@ -208,10 +208,10 @@ async function exercisePdfFirstStartup(send, sessionId, label) {
         throw new Error("Le démarrage avec stockage vide doit contenir 0 dossier, reçu : " + state.cases.length);
       }
 
-      const activeAdmins = state.users.filter((user) => user?.active !== false && user?.role === "admin");
+      const activeAdmins = state.users.filter((user) => user?.active !== false && user?.role === "admin_technique");
       if (!activeAdmins.length) throw new Error("Admin du premier accès introuvable");
       const currentUser = state.users.find((user) => user?.id === state.currentUserId);
-      if (!currentUser || currentUser.active === false || currentUser.role !== "admin") {
+      if (!currentUser || currentUser.active === false || currentUser.role !== "admin_technique") {
         throw new Error("La session du premier accès doit être portée par un admin actif");
       }
 

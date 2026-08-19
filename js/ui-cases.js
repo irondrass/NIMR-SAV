@@ -1352,21 +1352,21 @@ function renderTechnicianDashboard() {
 
   const currentUser = typeof getCurrentUser === "function" ? getCurrentUser() : null;
   const allTechnicians = getTechnicianDashboardResources();
-  const technicians = currentUser?.role === "technicien"
+  const technicians = getCanonicalUserRole(currentUser) === "technicien"
     ? allTechnicians.filter((resource) => resource.id === currentUser.resourceId)
     : allTechnicians;
   if (!state.ui.technicianDate) state.ui.technicianDate = todayKey(new Date());
   if (!state.ui.technicianId || !technicians.some((resource) => resource.id === state.ui.technicianId)) {
-    state.ui.technicianId = currentUser?.role === "technicien" ? (currentUser.resourceId || "") : (technicians[0]?.id || "");
+    state.ui.technicianId = getCanonicalUserRole(currentUser) === "technicien" ? (currentUser.resourceId || "") : (technicians[0]?.id || "");
   }
 
   select.innerHTML = technicians.length
     ? technicians.map((resource) => `<option value="${escapeAttr(resource.id)}">${escapeHtml(resource.name)} · ${escapeHtml(ROLE_LABELS[resource.role] || resource.role)}</option>`).join("")
-    : `<option value="">${currentUser?.role === "technicien" ? "Aucune ressource liée" : "Aucun technicien actif"}</option>`;
+    : `<option value="">${getCanonicalUserRole(currentUser) === "technicien" ? "Aucune ressource liée" : "Aucun technicien actif"}</option>`;
   select.value = state.ui.technicianId || "";
   dateInput.value = state.ui.technicianDate || todayKey(new Date());
 
-  const selectedTechnicianId = currentUser?.role === "technicien" ? (currentUser.resourceId || "__no_resource__") : select.value;
+  const selectedTechnicianId = getCanonicalUserRole(currentUser) === "technicien" ? (currentUser.resourceId || "__no_resource__") : select.value;
   const rows = typeof getTechnicianTaskRows === "function" && selectedTechnicianId !== "__no_resource__"
     ? getTechnicianTaskRows(selectedTechnicianId, dateInput.value)
     : [];
@@ -1378,11 +1378,11 @@ function renderTechnicianDashboard() {
   actionDock.hidden = !actionDock.innerHTML.trim();
   list.innerHTML = rows.length
     ? orderedRows.map((row) => renderTechnicianTaskCard(row, { isCurrent: row === currentRow })).join("")
-    : `<div class="empty-state compact-empty"><strong>Aucune tâche pour ce technicien.</strong><span>${currentUser?.role === "technicien" && !currentUser.resourceId ? "Aucune ressource technicien n'est liée à votre utilisateur." : "Les tâches apparaissent ici dès qu'elles sont planifiées et affectées."}</span></div>`;
+    : `<div class="empty-state compact-empty"><strong>Aucune tâche pour ce technicien.</strong><span>${getCanonicalUserRole(currentUser) === "technicien" && !currentUser.resourceId ? "Aucune ressource technicien n'est liée à votre utilisateur." : "Les tâches apparaissent ici dès qu'elles sont planifiées et affectées."}</span></div>`;
 
-  manager.innerHTML = currentUser?.role === "technicien" ? "" : renderWorkshopChiefSummary(dateInput.value);
+  manager.innerHTML = getCanonicalUserRole(currentUser) === "technicien" ? "" : renderWorkshopChiefSummary(dateInput.value);
   const managerPanel = manager.closest(".technician-manager-panel");
-  if (managerPanel) managerPanel.hidden = currentUser?.role === "technicien";
+  if (managerPanel) managerPanel.hidden = getCanonicalUserRole(currentUser) === "technicien";
 
   if (select.dataset.bound !== "true") {
     select.dataset.bound = "true";

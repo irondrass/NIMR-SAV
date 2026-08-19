@@ -847,6 +847,9 @@ function renderStep10_QualityCheck(item) {
   const openClaims = (item.customerClaims || []).filter((c) => ["open", "in_progress", "unresolved"].includes(c.status));
   const qsLabels = { not_started: "Non commencé", in_progress: "En cours", validated: "Validé ✓", rejected: "Refusé / reprise nécessaire", rework: "Retour atelier / retravail" };
   const qsClass = { not_started: "", in_progress: "tag-info", validated: "priority-low", rejected: "priority-urgent", rework: "priority-high" };
+  const canEditQuality = typeof canRenderAction === "function"
+    && ["quality.validate", "quality.reject", "quality.revalidate"].some((permission) => canRenderAction(permission, { item }));
+  const qualityDeniedTitle = canEditQuality ? "" : (typeof getPermissionDeniedMessage === "function" ? getPermissionDeniedMessage("quality.validate", { item }) : "Action qualité non autorisée.");
 
   return `
     <div class="step-card step-card-active">
@@ -874,7 +877,7 @@ function renderStep10_QualityCheck(item) {
       <form id="reception-quality-form" class="step-form" data-case-id="${item.id}">
         <label class="step-field">
           <span>Mettre à jour le statut qualité</span>
-          <select name="qualityStatus">
+          <select name="qualityStatus" ${canEditQuality ? "" : `disabled title="${escapeAttr(qualityDeniedTitle)}"`}>
             <option value="not_started" ${rw.qualityStatus === "not_started" ? "selected" : ""}>Non commencé</option>
             <option value="in_progress" ${rw.qualityStatus === "in_progress" ? "selected" : ""}>En cours</option>
             <option value="rejected" ${rw.qualityStatus === "rejected" ? "selected" : ""}>Refusé — reprise nécessaire</option>
@@ -884,9 +887,9 @@ function renderStep10_QualityCheck(item) {
         </label>
         <label class="step-field">
           <span>Motif (si refus ou reprise)</span>
-          <textarea name="qualityReason" rows="2" placeholder="Détails de la non-conformité...">${escapeHtml(rw.qualityReturnReason || "")}</textarea>
+          <textarea name="qualityReason" rows="2" placeholder="Détails de la non-conformité..." ${canEditQuality ? "" : `disabled title="${escapeAttr(qualityDeniedTitle)}"`}>${escapeHtml(rw.qualityReturnReason || "")}</textarea>
         </label>
-        <button class="step-primary-btn" type="submit">Mettre à jour le contrôle qualité</button>
+        <button class="step-primary-btn" type="submit" ${canEditQuality ? "" : `disabled title="${escapeAttr(qualityDeniedTitle)}"`}>Mettre à jour le contrôle qualité</button>
       </form>
 
       ${rw.qualityStatus === "validated" ? `
@@ -1740,7 +1743,10 @@ async function verifyDeliveryClaimsBlock(item) {
   if (!hasUnresolved) return true;
   if (typeof addAuditLog === "function") addAuditLog("reception.delivery_warning", "Avertissement clôture", `Réclamations non résolues pour ${item.plate || item.vin}.`, { caseId: item.id });
   const user = typeof getCurrentUser === "function" ? getCurrentUser() : null;
-  const isAuthorized = user && ["admin", "chef_atelier", "directeur_sav"].includes(user.role);
+  const overrideGuard = typeof guardAction === "function"
+    ? guardAction("delivery.override", { item }, { notify: false })
+    : { ok: false };
+  const isAuthorized = Boolean(user && overrideGuard && overrideGuard.ok);
   if (!isAuthorized) {
     if (typeof showConfirmModal === "function") await showConfirmModal("Clôture bloquée : réclamations client non résolues. Seul un administrateur, chef d'atelier ou Directeur SAV peut forcer la clôture avec motif.");
     else alert("Clôture bloquée : réclamations client non résolues.");

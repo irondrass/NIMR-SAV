@@ -1794,7 +1794,7 @@ function renderCurrentSessionIndicator() {
   // Pour tous les autres rôles, affiche "Déconnexion".
   const changeBtn = document.getElementById("sidebar-change-user-btn");
   if (changeBtn) {
-    const isAdmin = currentUser && currentUser.role === "admin";
+    const isAdmin = currentUser && hasPermission("users.manage", { user: currentUser });
     changeBtn.textContent = isAdmin ? "Changer" : "Déconnexion";
     changeBtn.title = isAdmin
       ? "Changer d'utilisateur (Admin technique)"
@@ -1804,7 +1804,7 @@ function renderCurrentSessionIndicator() {
 
   const settingsChangeBtn = document.getElementById("change-user-settings-btn");
   if (settingsChangeBtn) {
-    const isAdmin = currentUser && currentUser.role === "admin";
+    const isAdmin = currentUser && hasPermission("users.manage", { user: currentUser });
     settingsChangeBtn.textContent = isAdmin ? "Changer d'utilisateur" : "Déconnexion";
     settingsChangeBtn.title = isAdmin
       ? "Changer d'utilisateur (Admin technique)"
@@ -1820,7 +1820,7 @@ function renderCurrentSessionIndicator() {
                       (state.settings.alwaysPromptUserStartup !== false && activeUsers.length > 1);
     alwaysPromptCheckbox.checked = isChecked;
 
-    const isAdmin = currentUser && currentUser.role === "admin";
+    const isAdmin = currentUser && hasPermission("settings.edit", { user: currentUser });
     alwaysPromptCheckbox.disabled = !isAdmin;
     const container = alwaysPromptCheckbox.closest(".check-card");
     if (container) {
@@ -1879,7 +1879,7 @@ function bindUserSessionActions() {
   const alwaysPromptCheckbox = document.getElementById("always-prompt-startup");
   alwaysPromptCheckbox?.addEventListener("change", (event) => {
     const currentUser = getCurrentUser();
-    if (!currentUser || currentUser.role !== "admin") {
+    if (!currentUser || !hasPermission("settings.edit", { user: currentUser })) {
       notifyUser("Action réservée administrateur technique.", "error");
       renderCurrentSessionIndicator();
       return;

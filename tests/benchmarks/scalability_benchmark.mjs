@@ -12,9 +12,16 @@ fs.writeFileSync(path.join(dir, "p0-006-results.json"), `${JSON.stringify(output
 const ms = (x) => x?.stats?.median == null ? x?.status ?? "n/a" : `${x.stats.median.toFixed(2)} ms`;
 const op = (x) => x?.meanMsPerOperation == null ? "n/a" : `${x.meanMsPerOperation.toFixed(3)} ms/op`;
 const digest = (x) => x?.resultDigest ? JSON.stringify(x.resultDigest) : "n/a";
+const lookup = (e, key) => e.lookups?.[key] ?? ({ id: e.lookupId, vin: e.lookupVin, plate: e.lookupPlate, orNavNumber: e.lookupOr }[key]);
+const lookupRows = cases.map((e) => ["id", "vin", "plate", "orNavNumber"].map((key) => {
+  const metric = lookup(e, key);
+  return `| ${e.scale} | ${key} | ${metric?.batchRepetitions ?? "n/a"} | ${metric?.stats?.median?.toFixed(6) ?? metric?.status ?? "n/a"} | ${metric?.meanMsPerOperation == null ? "n/a" : `${metric.meanMsPerOperation.toFixed(6)} ms/op`} |`;
+}).join("\n")).join("\n");
 const caseRows = cases.map((e) => `| ${e.scale} | ${e.rawValidation?.cases ?? e.cases ?? "n/a"} | ${e.rawValidation?.bookings ?? e.bookings ?? "n/a"} | ${e.rawValidation?.exact ?? "n/a"} | ${e.normalizedValidation?.cases ?? "n/a"}/${e.normalizedValidation?.bookings ?? "n/a"} | ${ms(e.normalizeState)} | ${ms(e.indexBuild)} | ${e.normalizedJsonStringify?.status ?? "n/a"} |`).join("\n");
-const lookupRows = cases.map((e) => ["id", "vin", "plate", "orNavNumber"].map((key) => `| ${e.scale} | ${key} | ${e.lookups?.[key]?.batchRepetitions ?? "n/a"} | ${e.lookups?.[key]?.stats?.median?.toFixed(2) ?? e.lookups?.[key]?.status ?? "n/a"} | ${op(e.lookups?.[key])} |`).join("\n")).join("\n");
 const dashboardRows = dashboard.map((e) => `| ${e.scale} | ${e.dashboard?.representative?.status ?? "n/a"} | ${ms(e.dashboard?.representative)} | ${digest(e.dashboard?.representative)} | ${e.dashboard?.broad?.status ?? "n/a"} | ${ms(e.dashboard?.broad)} | ${digest(e.dashboard?.broad)} |`).join("\n");
+const latestSerialized = [...cases].reverse().find((e) => e.normalizedJsonStringify?.bytes != null);
+const measuredDensity = latestSerialized.normalizedJsonStringify.bytes / latestSerialized.cases;
+const estimated100kBytes = Math.round(measuredDensity * 100000);
 const report = `# P0-006 — Scalability benchmark report
 
 All values are **FINAL CORRECTED MEASUREMENT** unless explicitly marked **PARTIAL CHECKPOINT** or **ESTIMATE**. Aggregated only from saved individual result files; this aggregation did not rerun workers.
@@ -27,7 +34,7 @@ ${caseRows}
 
 100k raw counts: cases ${cases[3].rawValidation?.cases ?? cases[3].cases}, bookings ${cases[3].rawValidation?.bookings ?? cases[3].bookings}, unique IDs ${cases[3].rawValidation?.uniqueCaseIds ?? "n/a"}, unique VINs ${cases[3].rawValidation?.uniqueVins ?? "n/a"}. Normalized counts: ${cases[3].normalizedValidation?.cases ?? "n/a"} cases / ${cases[3].normalizedValidation?.bookings ?? "n/a"} bookings. Normalize timing: ${ms(cases[3].normalizeState)}. afterNormalize RSS/heap: ${JSON.stringify(cases[3].memory?.afterNormalize ?? null)}. afterIndex RSS/heap: ${JSON.stringify(cases[3].memory?.afterIndexBuild ?? null)}. Index: ${ms(cases[3].indexBuild)}. Stringify: ${cases[3].normalizedJsonStringify?.status ?? "n/a"} (${cases[3].normalizedJsonStringify?.errorName ?? ""}: ${cases[3].normalizedJsonStringify?.error ?? ""}).
 
-50k and 100k are **PARTIAL CHECKPOINT** results because workers reached timeout. Normalized stringify at 100k is a measured Node/V8 RangeError, not a platform-wide claim.
+50k and 100k are **PARTIAL CHECKPOINT** results because workers reached timeout. Normalized stringify at 100k is **MEASURED** as a Node/V8 RangeError in this synthetic benchmark, not a platform-wide claim.
 
 ## Lookups and operations
 
@@ -55,9 +62,15 @@ ${audit.map((e) => `| ${e.entries} | ${e.status ?? "PASS"} | ${e.generatedMs?.to
 
 ## Snapshot density and bottlenecks
 
-Measured bytes/case: ${cases.filter((e) => e.normalizedJsonStringify?.bytes).map((e) => `${e.scale}: ${(e.normalizedJsonStringify.bytes / e.cases).toFixed(1)}`).join(", ")}. Estimated 100k snapshot size from latest successful density: **ESTIMATE**, not a successful 100k serialization.
+Measured bytes/case: ${cases.filter((e) => e.normalizedJsonStringify?.bytes).map((e) => `${e.scale}: ${(e.normalizedJsonStringify.bytes / e.cases).toFixed(5)}`).join(", ")}. **ESTIMATE:** 100k snapshot projection from the latest successful 50k density is ${estimated100kBytes} bytes, ~${(estimated100kBytes / 1000000).toFixed(1)} MB decimal (~${(estimated100kBytes / 1048576).toFixed(1)} MiB). It was not successfully serialized at 100k.
 
-Corrected top five: (1) normalized snapshot serialization at 100k; (2) full-state normalization at 50k; (3) VIN/plate/OR fallback lookups; (4) high-density booking conflict; (5) full-collection search/sort and dashboard traversal at 50k.
+**MEASURED:** normalized JSON.stringify at 100k fails with RangeError; 100k normalizeState is ${ms(cases[3].normalizeState)}; 50k/100k lookup timings are present in the table; 100k conflict is ${ms(cases[3].conflict)}; 100k search/sort are ${ms(cases[3].search)}/${ms(cases[3].sorting)}; 10k dashboard month is ${ms(dashboard[1].dashboard?.broad)}; 50k dashboard is TIMEOUT.
+
+**PARTIAL:** 50k and 100k case workers, isolated 50k dashboard, and 500k-booking stress preserve checkpoint evidence but did not complete.
+
+**INFERRED:** full-collection traversal and fallback lookup growth are code-path interpretations of the measured timings, not formal Big-O claims.
+
+Corrected top five bottlenecks: (1) **CRITICAL — normalized global snapshot serialization:** 100k normalized JSON.stringify RangeError in this Node/V8 synthetic benchmark; (2) **CRITICAL — full-state normalization:** 100k normalizeState measured at ${ms(cases[3].normalizeState)}; (3) **HIGH — VIN/plate/OR fallback lookups:** measured growth through 50k/100k; (4) **HIGH — booking conflict:** 100k cases / 300k bookings measured at ${ms(cases[3].conflict)}, with dense 500k-booking stress partial timeout; (5) **HIGH — full-collection search/sort/dashboard traversal:** 100k search/sort ${ms(cases[3].search)}/${ms(cases[3].sorting)}, 10k month ${ms(dashboard[1].dashboard?.broad)}, 50k dashboard TIMEOUT.
 
 Machine-readable source: results/p0-006-results.json.
 `;

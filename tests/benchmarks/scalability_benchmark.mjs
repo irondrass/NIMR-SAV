@@ -15,7 +15,7 @@ const digest = (x) => x?.resultDigest ? JSON.stringify(x.resultDigest) : "n/a";
 const lookup = (e, key) => e.lookups?.[key] ?? ({ id: e.lookupId, vin: e.lookupVin, plate: e.lookupPlate, orNavNumber: e.lookupOr }[key]);
 const lookupRows = cases.map((e) => ["id", "vin", "plate", "orNavNumber"].map((key) => {
   const metric = lookup(e, key);
-  return `| ${e.scale} | ${key} | ${metric?.batchRepetitions ?? "n/a"} | ${metric?.stats?.median?.toFixed(6) ?? metric?.status ?? "n/a"} | ${metric?.meanMsPerOperation == null ? "n/a" : `${metric.meanMsPerOperation.toFixed(6)} ms/op`} |`;
+  return `| ${e.scale} | ${key} | ${metric?.requestedOperations ?? "n/a"} | ${metric?.actualOperations ?? "n/a"} | ${metric?.stats?.median?.toFixed(6) ?? metric?.status ?? "n/a"} | ${metric?.meanMsPerOperation == null ? "n/a" : `${metric.meanMsPerOperation.toFixed(6)} ms/op`} |`;
 }).join("\n")).join("\n");
 const caseRows = cases.map((e) => `| ${e.scale} | ${e.rawValidation?.cases ?? e.cases ?? "n/a"} | ${e.rawValidation?.bookings ?? e.bookings ?? "n/a"} | ${e.rawValidation?.exact ?? "n/a"} | ${e.normalizedValidation?.cases ?? "n/a"}/${e.normalizedValidation?.bookings ?? "n/a"} | ${ms(e.normalizeState)} | ${ms(e.indexBuild)} | ${e.normalizedJsonStringify?.status ?? "n/a"} |`).join("\n");
 const dashboardRows = dashboard.map((e) => `| ${e.scale} | ${e.dashboard?.representative?.status ?? "n/a"} | ${ms(e.dashboard?.representative)} | ${digest(e.dashboard?.representative)} | ${e.dashboard?.broad?.status ?? "n/a"} | ${ms(e.dashboard?.broad)} | ${digest(e.dashboard?.broad)} |`).join("\n");
@@ -38,8 +38,8 @@ ${caseRows}
 
 ## Lookups and operations
 
-| Scale | Lookup | Batch repetitions | Batch median ms | Mean ms/op |
-|---:|---|---:|---:|---:|
+| Scale | Lookup | Requested ops | Actual measured ops | Batch median ms | Mean ms/op |
+|---:|---|---:|---:|---:|---:|
 ${lookupRows}
 
 100k search: ${ms(cases[3].search)}; sort: ${ms(cases[3].sorting)}; conflict: ${ms(cases[3].conflict)}. These are single-operation medians; interactive classification applies only to mean ms/op.

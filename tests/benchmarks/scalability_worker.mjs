@@ -34,9 +34,17 @@ function timed(label, fn, count = repeats) {
 function safeCall(fn) { try { return { ok: true, value: fn() }; } catch (error) { return { ok: false, error }; } }
 function skipped(label, reason) { return { label, status: "SKIPPED_DEPENDENCY", dependency: reason }; }
 function lookupMetric(vm, expression, identities) {
-  const metric = timed("lookup", () => { for (const identity of identities) { vm.context.__benchmarkIdentity = identity; for (let i = 0; i < Math.ceil(lookupRepetitions / identities.length); i += 1) vm.run(expression); } }, Math.min(repeats, 3));
-  if (metric.stats) metric.meanMsPerOperation = metric.stats.median / lookupRepetitions;
-  metric.batchRepetitions = lookupRepetitions;
+  const requestedOperations = lookupRepetitions;
+  const actualOperations = requestedOperations;
+  const metric = timed("lookup", () => {
+    for (let index = 0; index < actualOperations; index += 1) {
+      vm.context.__benchmarkIdentity = identities[index % identities.length];
+      vm.run(expression);
+    }
+  }, Math.min(repeats, 3));
+  if (metric.stats) metric.meanMsPerOperation = metric.stats.median / actualOperations;
+  metric.requestedOperations = requestedOperations;
+  metric.actualOperations = actualOperations;
   return metric;
 }
 

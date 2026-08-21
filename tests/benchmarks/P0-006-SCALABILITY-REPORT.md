@@ -17,24 +17,24 @@ All values are **FINAL CORRECTED MEASUREMENT** unless explicitly marked **PARTIA
 
 ## Lookups and operations
 
-| Scale | Lookup | Batch repetitions | Batch median ms | Mean ms/op |
-|---:|---|---:|---:|---:|
-| 1000 | id | 1000 | 3.441200 | 0.003441 ms/op |
-| 1000 | vin | 1000 | 432.347000 | 0.432347 ms/op |
-| 1000 | plate | 1000 | 462.836300 | 0.462836 ms/op |
-| 1000 | orNavNumber | 1000 | 571.932600 | 0.571933 ms/op |
-| 10000 | id | 1000 | 4.215400 | 0.004215 ms/op |
-| 10000 | vin | 1000 | 4369.225500 | 4.369225 ms/op |
-| 10000 | plate | 1000 | 4741.472000 | 4.741472 ms/op |
-| 10000 | orNavNumber | 1000 | 5867.391800 | 5.867392 ms/op |
-| 50000 | id | 100 | 0.408300 | 0.004083 ms/op |
-| 50000 | vin | 100 | 2457.628900 | 24.576289 ms/op |
-| 50000 | plate | 100 | 2614.666400 | 26.146664 ms/op |
-| 50000 | orNavNumber | 100 | 3179.022600 | 31.790226 ms/op |
-| 100000 | id | 100 | 1.304400 | 0.013044 ms/op |
-| 100000 | vin | 100 | 5140.748500 | 51.407485 ms/op |
-| 100000 | plate | 100 | 5512.566300 | 55.125663 ms/op |
-| 100000 | orNavNumber | 100 | 6904.273400 | 69.042734 ms/op |
+| Scale | Lookup | Requested ops | Actual measured ops | Batch median ms | Mean ms/op |
+|---:|---|---:|---:|---:|---:|
+| 1000 | id | 1000 | 1002 | 3.441200 | 0.003434 ms/op |
+| 1000 | vin | 1000 | 1002 | 432.347000 | 0.431484 ms/op |
+| 1000 | plate | 1000 | 1002 | 462.836300 | 0.461912 ms/op |
+| 1000 | orNavNumber | 1000 | 1002 | 571.932600 | 0.570791 ms/op |
+| 10000 | id | 1000 | 1002 | 4.215400 | 0.004207 ms/op |
+| 10000 | vin | 1000 | 1002 | 4369.225500 | 4.360504 ms/op |
+| 10000 | plate | 1000 | 1002 | 4741.472000 | 4.732008 ms/op |
+| 10000 | orNavNumber | 1000 | 1002 | 5867.391800 | 5.855680 ms/op |
+| 50000 | id | 100 | 102 | 0.408300 | 0.004003 ms/op |
+| 50000 | vin | 100 | 102 | 2457.628900 | 24.094401 ms/op |
+| 50000 | plate | 100 | 102 | 2614.666400 | 25.633984 ms/op |
+| 50000 | orNavNumber | 100 | 102 | 3179.022600 | 31.166888 ms/op |
+| 100000 | id | 100 | 102 | 1.304400 | 0.012788 ms/op |
+| 100000 | vin | 100 | 102 | 5140.748500 | 50.399495 ms/op |
+| 100000 | plate | 100 | 102 | 5512.566300 | 54.044768 ms/op |
+| 100000 | orNavNumber | 100 | 102 | 6904.273400 | 67.688955 ms/op |
 
 100k search: 840.49 ms; sort: 900.11 ms; conflict: 1612.72 ms. These are single-operation medians; interactive classification applies only to mean ms/op.
 

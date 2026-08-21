@@ -103,8 +103,9 @@
         4.076200000003155
       ]
     },
-    "meanMsPerOperation": 0.0039038999999975203,
-    "batchRepetitions": 1000
+    "meanMsPerOperation": 0.003896107784428663,
+    "requestedOperations": 1000,
+    "actualOperations": 1002
   },
   "lookupVin": {
     "label": "lookup",
@@ -119,8 +120,9 @@
         437.18309999999474
       ]
     },
-    "meanMsPerOperation": 0.4437253999999957,
-    "batchRepetitions": 1000
+    "meanMsPerOperation": 0.44283972055887794,
+    "requestedOperations": 1000,
+    "actualOperations": 1002
   },
   "lookupPlate": {
     "label": "lookup",
@@ -135,8 +137,9 @@
         483.00569999999425
       ]
     },
-    "meanMsPerOperation": 0.47614919999999983,
-    "batchRepetitions": 1000
+    "meanMsPerOperation": 0.4751988023952094,
+    "requestedOperations": 1000,
+    "actualOperations": 1002
   },
   "lookupOr": {
     "label": "lookup",
@@ -151,8 +154,9 @@
         590.042300000001
       ]
     },
-    "meanMsPerOperation": 0.5955881999999983,
-    "batchRepetitions": 1000
+    "meanMsPerOperation": 0.5943994011976031,
+    "requestedOperations": 1000,
+    "actualOperations": 1002
   },
   "search": {
     "label": "search",

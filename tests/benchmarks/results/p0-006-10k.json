@@ -134,8 +134,9 @@
           3.6001999999989494
         ]
       },
-      "meanMsPerOperation": 0.004215400000000954,
-      "batchRepetitions": 1000
+      "meanMsPerOperation": 0.004206986027945065,
+      "requestedOperations": 1000,
+      "actualOperations": 1002
     },
     "vin": {
       "label": "lookup",
@@ -150,8 +151,9 @@
           4417.937099999999
         ]
       },
-      "meanMsPerOperation": 4.369225499999997,
-      "batchRepetitions": 1000
+      "meanMsPerOperation": 4.360504491017961,
+      "requestedOperations": 1000,
+      "actualOperations": 1002
     },
     "plate": {
       "label": "lookup",
@@ -166,8 +168,9 @@
           4741.472000000002
         ]
       },
-      "meanMsPerOperation": 4.741472000000002,
-      "batchRepetitions": 1000
+      "meanMsPerOperation": 4.732007984031938,
+      "requestedOperations": 1000,
+      "actualOperations": 1002
     },
     "orNavNumber": {
       "label": "lookup",
@@ -182,8 +185,9 @@
           5872.691200000001
         ]
       },
-      "meanMsPerOperation": 5.86739179999999,
-      "batchRepetitions": 1000
+      "meanMsPerOperation": 5.8556804391217465,
+      "requestedOperations": 1000,
+      "actualOperations": 1002
     }
   },
   "search": {

@@ -1,0 +1,362 @@
+{
+  "mode": "cases",
+  "scale": 1000,
+  "bookingPerCase": 3,
+  "cases": 1000,
+  "bookings": 3000,
+  "resources": 4,
+  "repeats": 5,
+  "lookupRepetitions": 1000,
+  "statusRatios": {
+    "chief_validation": 0.1,
+    "planning": 0.15,
+    "in_progress": 0.25,
+    "completed": 0.2,
+    "closed": 0.2,
+    "archived": 0.1
+  },
+  "generationMs": 31.530500000000004,
+  "rawValidation": {
+    "cases": 1000,
+    "bookings": 3000,
+    "uniqueCaseIds": 1000,
+    "uniqueVins": 1000,
+    "exact": true
+  },
+  "rawJsonStringify": {
+    "label": "raw_json_stringify",
+    "status": "PASS",
+    "stats": {
+      "median": 4.190200000000004,
+      "min": 4.0154,
+      "max": 4.368600000000001,
+      "runs": [
+        4.107199999999992,
+        4.190200000000004,
+        4.0154,
+        4.368600000000001,
+        4.192300000000003
+      ]
+    },
+    "bytes": 1808444
+  },
+  "normalizeState": {
+    "label": "normalizeState",
+    "status": "PASS",
+    "stats": {
+      "median": 93.49820000000005,
+      "min": 83.33339999999998,
+      "max": 102.42800000000003,
+      "runs": [
+        102.42800000000003,
+        93.49820000000005,
+        99.67370000000005,
+        86.44360000000006,
+        83.33339999999998
+      ]
+    }
+  },
+  "normalizedValidation": {
+    "cases": 1000,
+    "bookings": 3000,
+    "exact": true
+  },
+  "normalizedJsonStringify": {
+    "label": "normalized_json_stringify",
+    "status": "PASS",
+    "stats": {
+      "median": 42.38880000000006,
+      "min": 41.12580000000003,
+      "max": 43.59029999999996,
+      "runs": [
+        43.57009999999991,
+        42.38880000000006,
+        41.12580000000003,
+        42.258800000000065,
+        43.59029999999996
+      ]
+    },
+    "bytes": 9153963
+  },
+  "jsonParse": {
+    "label": "json_parse",
+    "status": "PASS",
+    "stats": {
+      "median": 30.21699999999987,
+      "min": 22.403299999999945,
+      "max": 31.36200000000008,
+      "runs": [
+        31.36200000000008,
+        22.403299999999945,
+        30.21699999999987
+      ]
+    }
+  },
+  "normalizeParsed": {
+    "label": "normalize_after_parse",
+    "status": "PASS",
+    "stats": {
+      "median": 108.6911,
+      "min": 108.20299999999997,
+      "max": 116.83829999999989,
+      "runs": [
+        116.83829999999989,
+        108.20299999999997,
+        108.6911
+      ]
+    }
+  },
+  "indexBuild": {
+    "label": "runtime_index_build",
+    "status": "PASS",
+    "stats": {
+      "median": 10.03410000000008,
+      "min": 9.445300000000088,
+      "max": 10.498900000000049,
+      "runs": [
+        10.498900000000049,
+        9.445300000000088,
+        10.03410000000008
+      ]
+    }
+  },
+  "lookups": {
+    "id": {
+      "label": "lookup",
+      "status": "PASS",
+      "stats": {
+        "median": 3.4411999999999807,
+        "min": 3.358699999999999,
+        "max": 4.867800000000216,
+        "runs": [
+          3.4411999999999807,
+          3.358699999999999,
+          4.867800000000216
+        ]
+      },
+      "meanMsPerOperation": 0.00343433133732533,
+      "requestedOperations": 1000,
+      "actualOperations": 1002
+    },
+    "vin": {
+      "label": "lookup",
+      "status": "PASS",
+      "stats": {
+        "median": 432.3470000000002,
+        "min": 431.10480000000007,
+        "max": 454.29359999999997,
+        "runs": [
+          454.29359999999997,
+          432.3470000000002,
+          431.10480000000007
+        ]
+      },
+      "meanMsPerOperation": 0.43148403193612794,
+      "requestedOperations": 1000,
+      "actualOperations": 1002
+    },
+    "plate": {
+      "label": "lookup",
+      "status": "PASS",
+      "stats": {
+        "median": 462.83629999999994,
+        "min": 454.6208999999999,
+        "max": 470.3878999999997,
+        "runs": [
+          462.83629999999994,
+          454.6208999999999,
+          470.3878999999997
+        ]
+      },
+      "meanMsPerOperation": 0.46191247504990013,
+      "requestedOperations": 1000,
+      "actualOperations": 1002
+    },
+    "orNavNumber": {
+      "label": "lookup",
+      "status": "PASS",
+      "stats": {
+        "median": 571.9326000000001,
+        "min": 550.7117000000007,
+        "max": 574.6288999999997,
+        "runs": [
+          550.7117000000007,
+          574.6288999999997,
+          571.9326000000001
+        ]
+      },
+      "meanMsPerOperation": 0.570791017964072,
+      "requestedOperations": 1000,
+      "actualOperations": 1002
+    }
+  },
+  "search": {
+    "label": "search",
+    "status": "PASS",
+    "stats": {
+      "median": 8.558399999999892,
+      "min": 8.044499999999971,
+      "max": 9.425000000000182,
+      "runs": [
+        8.044499999999971,
+        8.558399999999892,
+        9.425000000000182
+      ]
+    }
+  },
+  "statusFilter": {
+    "label": "status_filter",
+    "status": "PASS",
+    "stats": {
+      "median": 0.5380000000004657,
+      "min": 0.5239999999994325,
+      "max": 0.6584000000002561,
+      "runs": [
+        0.6584000000002561,
+        0.5239999999994325,
+        0.5380000000004657
+      ]
+    }
+  },
+  "sorting": {
+    "label": "sort",
+    "status": "PASS",
+    "stats": {
+      "median": 8.027799999999843,
+      "min": 7.721599999999853,
+      "max": 9.8787999999995,
+      "runs": [
+        9.8787999999995,
+        8.027799999999843,
+        7.721599999999853
+      ]
+    }
+  },
+  "dashboard": {
+    "productionPath": "buildSavPerformanceDashboard -> getSavDashboardRange -> getSavDashboardCases",
+    "representative": {
+      "label": "dashboard_today",
+      "status": "PASS",
+      "stats": {
+        "median": 51.163399999999456,
+        "min": 47.15910000000076,
+        "max": 52.45979999999963,
+        "runs": [
+          47.15910000000076,
+          51.163399999999456,
+          52.45979999999963
+        ]
+      },
+      "resultDigest": {
+        "filtered": 1000,
+        "filteredCases": 1000,
+        "periodCases": 108,
+        "activeCases": 75,
+        "createdCases": 36,
+        "scheduledAppointments": 13
+      }
+    },
+    "broad": {
+      "label": "dashboard_month",
+      "status": "PASS",
+      "stats": {
+        "median": 450.20969999999943,
+        "min": 440.1741999999995,
+        "max": 452.2572,
+        "runs": [
+          440.1741999999995,
+          452.2572,
+          450.20969999999943
+        ]
+      },
+      "resultDigest": {
+        "filtered": 1000,
+        "filteredCases": 1000,
+        "periodCases": 1000,
+        "activeCases": 700,
+        "createdCases": 1000,
+        "scheduledAppointments": 250
+      }
+    }
+  },
+  "bookingLookup": {
+    "label": "booking_lookup",
+    "status": "PASS",
+    "stats": {
+      "median": 0.00559999999950378,
+      "min": 0.0027000000000043656,
+      "max": 0.008700000000317232,
+      "runs": [
+        0.00559999999950378,
+        0.008700000000317232,
+        0.0027000000000043656
+      ]
+    }
+  },
+  "conflict": {
+    "label": "conflict",
+    "status": "PASS",
+    "stats": {
+      "median": 10.745299999999588,
+      "min": 9.928899999999885,
+      "max": 11.532599999999547,
+      "runs": [
+        11.532599999999547,
+        10.745299999999588,
+        9.928899999999885
+      ]
+    }
+  },
+  "planningPrep": {
+    "label": "planning_preparation",
+    "status": "PASS",
+    "stats": {
+      "median": 0.24470000000019354,
+      "min": 0.23480000000017753,
+      "max": 0.31670000000030996,
+      "runs": [
+        0.31670000000030996,
+        0.23480000000017753,
+        0.24470000000019354
+      ]
+    }
+  },
+  "memory": {
+    "before": {
+      "rss": 42749952,
+      "heapTotal": 7180288,
+      "heapUsed": 4364112,
+      "external": 1835176
+    },
+    "afterRaw": {
+      "rss": 49352704,
+      "heapTotal": 16355328,
+      "heapUsed": 6839264,
+      "external": 1835176
+    },
+    "afterNormalize": {
+      "rss": 141090816,
+      "heapTotal": 62775296,
+      "heapUsed": 22949608,
+      "external": 1947119
+    },
+    "afterStringify": {
+      "rss": 149028864,
+      "heapTotal": 66166784,
+      "heapUsed": 29547184,
+      "external": 1947119
+    },
+    "afterIndexBuild": {
+      "rss": 199696384,
+      "heapTotal": 85565440,
+      "heapUsed": 38585152,
+      "external": 1947119
+    }
+  },
+  "validation": {
+    "raw": true,
+    "normalized": true,
+    "lookupId": true,
+    "lookupVin": true
+  }
+}

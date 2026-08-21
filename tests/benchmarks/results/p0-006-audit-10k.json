@@ -1,0 +1,52 @@
+{
+  "mode": "audit",
+  "entries": 10000,
+  "generatedMs": 2.5656999999999996,
+  "stringify": {
+    "label": "audit_stringify",
+    "status": "PASS",
+    "stats": {
+      "median": 3.3266999999999953,
+      "min": 3.2676000000000016,
+      "max": 3.3704000000000036,
+      "runs": [
+        3.3266999999999953,
+        3.3704000000000036,
+        3.2676000000000016
+      ]
+    }
+  },
+  "parse": {
+    "label": "audit_parse",
+    "status": "PASS",
+    "stats": {
+      "median": 4.262500000000003,
+      "min": 3.6633000000000067,
+      "max": 7.674000000000007,
+      "runs": [
+        7.674000000000007,
+        4.262500000000003,
+        3.6633000000000067
+      ]
+    }
+  },
+  "jsonBytes": 1507781,
+  "before": {
+    "rss": 42913792,
+    "heapTotal": 7180288,
+    "heapUsed": 4364152,
+    "external": 1835176
+  },
+  "afterGeneration": {
+    "rss": 45645824,
+    "heapTotal": 11112448,
+    "heapUsed": 5797640,
+    "external": 1835176
+  },
+  "afterStringify": {
+    "rss": 60710912,
+    "heapTotal": 25735168,
+    "heapUsed": 7310512,
+    "external": 1835176
+  }
+}

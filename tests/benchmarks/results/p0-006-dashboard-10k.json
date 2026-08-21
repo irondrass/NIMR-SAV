@@ -1,0 +1,79 @@
+{
+  "mode": "dashboard",
+  "scale": 10000,
+  "bookingPerCase": 3,
+  "cases": 10000,
+  "bookings": 30000,
+  "normalizedValidation": {
+    "cases": 10000,
+    "bookings": 30000,
+    "exact": true
+  },
+  "dashboard": {
+    "productionPath": "buildSavPerformanceDashboard -> getSavDashboardRange -> getSavDashboardCases",
+    "representative": {
+      "label": "dashboard_today",
+      "status": "PASS",
+      "stats": {
+        "median": 741.3253999999997,
+        "min": 650.2340000000004,
+        "max": 764.8163999999988,
+        "runs": [
+          764.8163999999988,
+          741.3253999999997,
+          650.2340000000004
+        ]
+      },
+      "resultDigest": {
+        "filtered": 10000,
+        "filteredCases": 10000,
+        "periodCases": 1068,
+        "activeCases": 747,
+        "createdCases": 356,
+        "scheduledAppointments": 91
+      }
+    },
+    "broad": {
+      "label": "dashboard_month",
+      "status": "PASS",
+      "stats": {
+        "median": 7332.4961,
+        "min": 6359.630799999999,
+        "max": 7655.371799999997,
+        "runs": [
+          6359.630799999999,
+          7332.4961,
+          7655.371799999997
+        ]
+      },
+      "resultDigest": {
+        "filtered": 10000,
+        "filteredCases": 10000,
+        "periodCases": 10000,
+        "activeCases": 7000,
+        "createdCases": 10000,
+        "scheduledAppointments": 2500
+      }
+    }
+  },
+  "memory": {
+    "before": {
+      "rss": 42729472,
+      "heapTotal": 7180288,
+      "heapUsed": 4366792,
+      "external": 1835176
+    },
+    "afterRaw": {
+      "rss": 87531520,
+      "heapTotal": 64049152,
+      "heapUsed": 28901696,
+      "external": 1835176
+    },
+    "afterNormalize": {
+      "rss": 736538624,
+      "heapTotal": 203874304,
+      "heapUsed": 140595440,
+      "external": 1947119
+    }
+  }
+}

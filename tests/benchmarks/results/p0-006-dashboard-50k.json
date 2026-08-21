@@ -1,0 +1,56 @@
+{
+  "mode": "dashboard",
+  "scale": 50000,
+  "bookingPerCase": 3,
+  "cases": 50000,
+  "bookings": 150000,
+  "rawValidation": {
+    "cases": 50000,
+    "bookings": 150000,
+    "uniqueCaseIds": 50000,
+    "uniqueVins": 50000,
+    "exact": true
+  },
+  "memory": {
+    "before": {
+      "rss": 42815488,
+      "heapTotal": 7180288,
+      "heapUsed": 4366792,
+      "external": 1835176
+    },
+    "afterRaw": {
+      "rss": 198291456,
+      "heapTotal": 164507648,
+      "heapUsed": 127664056,
+      "external": 1835176
+    },
+    "afterNormalize": {
+      "rss": 2246529024,
+      "heapTotal": 913571840,
+      "heapUsed": 664035472,
+      "external": 1947119
+    }
+  },
+  "rawJsonStringify": {
+    "label": "raw_json_stringify",
+    "status": "PASS",
+    "stats": {
+      "median": 217.34199999999998,
+      "min": 216.94220000000018,
+      "max": 220.75919999999996,
+      "runs": [
+        217.34199999999998,
+        216.94220000000018,
+        220.75919999999996
+      ]
+    },
+    "bytes": 90824152
+  },
+  "normalizedValidation": {
+    "cases": 50000,
+    "bookings": 150000,
+    "exact": true
+  },
+  "status": "TIMEOUT",
+  "exitCode": null
+}

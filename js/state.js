@@ -3658,6 +3658,7 @@ function addAuditLog(type, label, details = "", context = {}) {
   };
   state.auditLog.unshift(entry);
   state.auditLog = state.auditLog.slice(0, 500);
+  if (typeof markEntityAuditEntryDirty === "function") markEntityAuditEntryDirty(entry);
   return entry;
 }
 
@@ -3811,9 +3812,11 @@ function detectAndIncrementCaseRevisions() {
   const actor = getCurrentActor();
   const now = new Date().toISOString();
   let anyIncremented = false;
+  const currentCaseIds = new Set();
 
   if (typeof state !== "undefined" && state && Array.isArray(state.cases)) {
     state.cases.forEach((caseItem) => {
+      currentCaseIds.add(caseItem.id);
       const currentJSON = getComparableCaseJSON(caseItem);
       const previousJSON = runtimeScope.lastKnownCasesComparable[caseItem.id];
 
@@ -3822,14 +3825,22 @@ function detectAndIncrementCaseRevisions() {
         caseItem.updatedAt = caseItem.updatedAt || now;
         caseItem.updatedBy = caseItem.updatedBy || actor.userName || "Atelier";
         runtimeScope.lastKnownCasesComparable[caseItem.id] = currentJSON;
+        if (typeof markEntityCaseDirty === "function") markEntityCaseDirty(caseItem);
         anyIncremented = true;
       } else if (previousJSON !== currentJSON) {
         caseItem.localRevision = (Number(caseItem.localRevision) || 0) + 1;
         caseItem.updatedAt = now;
         caseItem.updatedBy = actor.userName || "Atelier";
         runtimeScope.lastKnownCasesComparable[caseItem.id] = currentJSON;
+        if (typeof markEntityCaseDirty === "function") markEntityCaseDirty(caseItem);
         anyIncremented = true;
       }
+    });
+    Object.keys(runtimeScope.lastKnownCasesComparable).forEach((caseId) => {
+      if (currentCaseIds.has(caseId)) return;
+      delete runtimeScope.lastKnownCasesComparable[caseId];
+      if (typeof markEntityCaseDeleted === "function") markEntityCaseDeleted(caseId);
+      anyIncremented = true;
     });
   }
   return anyIncremented;
@@ -3934,8 +3945,16 @@ function clearLocalUserChangeAt() {
   }
 }
 
+function handleLargeStatePersistenceFailure(error) {
+  console.warn("Sauvegarde IndexedDB différée impossible", error?.message || error);
+  updateSaveStatusIndicator("Échec sauvegarde locale", "error");
+  notifyUser("La sauvegarde locale IndexedDB a échoué. Exportez une sauvegarde avant de fermer l'application.", "error");
+  return false;
+}
+
 function saveState(options = {}) {
   invalidateStateReplacementIndexes();
+  let saveCompletion = Promise.resolve(true);
   try {
     const modified = detectAndIncrementCaseRevisions();
     const offline = typeof navigator !== "undefined" && navigator.onLine === false;
@@ -3947,18 +3966,28 @@ function saveState(options = {}) {
     let indexedDbWrite = Promise.resolve(true);
     if (largeState) {
       const savedAt = new Date().toISOString();
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ app: BACKUP_APP_ID, largeState: true, savedAt, casesCount: state.cases.length }));
-      localStorage.removeItem(STORAGE_MIRROR_KEY);
-      localStorage.setItem(STORAGE_META_KEY, JSON.stringify({ savedAt, appVersion: APP_VERSION, casesCount: state.cases.length, largeState: true }));
-      if (typeof sessionStorage !== "undefined") sessionStorage.removeItem(SESSION_EMERGENCY_KEY);
-      if (typeof persistLargeStateSnapshot === "function") {
-        indexedDbWrite = persistLargeStateSnapshot(state, { appVersion: APP_VERSION, reason: options.cloudReason || "local-save" })
-          .then(() => true)
-          .catch((error) => {
-            console.warn("Sauvegarde IndexedDB différée impossible", error?.message || error);
-            return false;
-          });
-      }
+      updateSaveStatusIndicator("Sauvegarde locale...", "saving");
+      const persistence = typeof persistLargeStateSnapshot === "function"
+        ? persistLargeStateSnapshot(state, { appVersion: APP_VERSION, reason: options.cloudReason || "local-save" })
+        : Promise.reject(new Error("Persistance IndexedDB indisponible."));
+      indexedDbWrite = persistence.then(() => {
+        const marker = {
+          app: BACKUP_APP_ID,
+          largeState: true,
+          entityState: true,
+          formatVersion: 1,
+          savedAt,
+          casesCount: Number(state.cases?.length || 0),
+          bookingsCount: Number(state.bookings?.length || 0),
+        };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(marker));
+        localStorage.removeItem(STORAGE_MIRROR_KEY);
+        localStorage.setItem(STORAGE_META_KEY, JSON.stringify({ ...marker, appVersion: APP_VERSION }));
+        if (typeof sessionStorage !== "undefined") sessionStorage.removeItem(SESSION_EMERGENCY_KEY);
+        updateSaveStatusIndicator("Sauvegardé", "saved");
+        return true;
+      }).catch(handleLargeStatePersistenceFailure);
+      saveCompletion = indexedDbWrite;
       if (!options.skipCloud) rememberLocalUserChangeAt(savedAt);
     } else {
     const stateJson = JSON.stringify(state);
@@ -4003,10 +4032,14 @@ function saveState(options = {}) {
       flushSupabaseBackup(options.cloudReason || "local-save-now");
     }
     if (typeof renderSyncStatusStrip === "function") renderSyncStatusStrip();
-    if (typeof updateSaveStatusIndicator === "function") updateSaveStatusIndicator("Sauvegardé", "saved");
+    if (!largeState) {
+      if (typeof updateSaveStatusIndicator === "function") updateSaveStatusIndicator("Sauvegardé", "saved");
+    }
+    return saveCompletion;
   } catch (error) {
     console.error("Impossible d'enregistrer les données locales", error);
     notifyUser("Le stockage local est saturé. Exportez une sauvegarde JSON depuis Atelier > Sauvegarde.", "error");
+    return Promise.resolve(false);
   }
 }
 
@@ -4014,9 +4047,21 @@ function forceEmergencyAutosave() {
   try {
     if (typeof shouldPersistStateInIndexedDb === "function" && shouldPersistStateInIndexedDb(state)) {
       const savedAt = new Date().toISOString();
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ app: BACKUP_APP_ID, largeState: true, savedAt, casesCount: state.cases.length }));
-      localStorage.setItem(STORAGE_META_KEY, JSON.stringify({ savedAt, appVersion: APP_VERSION, casesCount: state.cases.length, largeState: true }));
-      if (typeof persistLargeStateSnapshot === "function") persistLargeStateSnapshot(state, { appVersion: APP_VERSION, reason: "emergency" }).catch(() => null);
+      if (typeof persistLargeStateSnapshot === "function") {
+        persistLargeStateSnapshot(state, { appVersion: APP_VERSION, reason: "emergency" }).then(() => {
+          const marker = {
+            app: BACKUP_APP_ID,
+            largeState: true,
+            entityState: true,
+            formatVersion: 1,
+            savedAt,
+            casesCount: Number(state.cases?.length || 0),
+            bookingsCount: Number(state.bookings?.length || 0),
+          };
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(marker));
+          localStorage.setItem(STORAGE_META_KEY, JSON.stringify({ ...marker, appVersion: APP_VERSION }));
+        }).catch((error) => console.warn("Sauvegarde d'urgence IndexedDB impossible", error?.message || error));
+      }
       return;
     }
     const envelope = buildAutosaveEnvelope();

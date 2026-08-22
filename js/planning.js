@@ -752,6 +752,7 @@ function invalidatePlanningRuntimeIndexes() {
 }
 
 function getPlanningCaseIndex() {
+  if (typeof getUiRuntimeIndexes === "function") return getUiRuntimeIndexes().caseById;
   const cases = Array.isArray(state?.cases) ? state.cases : [];
   if (planningCaseIndexSource !== cases || planningCaseIndexLength !== cases.length) {
     planningCaseIndexSource = cases;
@@ -938,7 +939,10 @@ function rangesOverlap(startA, endA, startB, endB) {
 
 function getActiveTechnicianBookings(technicianId) {
   if (!technicianId) return [];
-  return state.bookings.filter((booking) => (
+  const bookings = typeof getIndexedResourceBookings === "function"
+    ? getIndexedResourceBookings(technicianId)
+    : state.bookings;
+  return bookings.filter((booking) => (
     booking.type !== "leave"
     && booking.temporary !== true
     && (booking.resourceIds || []).includes(technicianId)
@@ -2559,13 +2563,36 @@ function getBookingConstraintEnd(booking) {
   return new Date(booking.end || booking.plannedEnd || 0);
 }
 
+let lastPlanningConflictCandidateStats = {
+  sourceCount: 0,
+  candidateCount: 0,
+  indexed: false,
+};
+
+function getPlanningConflictCandidateStats() {
+  return { ...lastPlanningConflictCandidateStats };
+}
+
 function validatePlanningCandidate(candidate, bookings = state.bookings, options = {}) {
   const issues = [];
   const conflicts = [];
   const slot = { start: candidate?.start, end: candidate?.end, segments: getPlanningSlotSegments(candidate) };
-  if (!slot.segments.length) return { ok: false, issues: ["Créneau planning invalide."], conflicts: [{ type: "slot", code: "invalid_slot" }], nextAt: null };
+  const sourceBookings = Array.isArray(bookings) ? bookings : [];
+  if (!slot.segments.length) {
+    lastPlanningConflictCandidateStats = { sourceCount: sourceBookings.length, candidateCount: 0, indexed: false };
+    return { ok: false, issues: ["Créneau planning invalide."], conflicts: [{ type: "slot", code: "invalid_slot" }], nextAt: null };
+  }
   const resources = Array.isArray(state?.resources) ? state.resources : [];
   const resourceIds = [...new Set((candidate?.resourceIds || []).filter(Boolean))];
+  const indexedBookings = options.runtimeIndexCandidates !== false && typeof getIndexedConflictCandidateBookings === "function"
+    ? getIndexedConflictCandidateBookings(slot, resourceIds, sourceBookings, candidate?.caseId || "")
+    : sourceBookings;
+  lastPlanningConflictCandidateStats = {
+    sourceCount: sourceBookings.length,
+    candidateCount: indexedBookings.length,
+    indexed: indexedBookings !== sourceBookings,
+  };
+  bookings = indexedBookings;
   const requiredRoles = candidate?.requiredRolesByResource || options.requiredRolesByResource || {};
   const requiredCategories = candidate?.requiredCategoriesByResource || options.requiredCategoriesByResource || {};
   const requiredSite = candidate?.requiredSite || options.requiredSite || "any";

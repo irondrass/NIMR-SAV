@@ -2483,6 +2483,7 @@ function startSupabaseLiveSync() {
 // AJOUTER cette nouvelle fonction pour mettre à jour un dossier sans tout recharger
 function handleRemoteCaseChange(remoteCase, eventType) {
   if (!remoteCase || !remoteCase.id) return;
+  if (typeof invalidateStateReplacementIndexes === "function") invalidateStateReplacementIndexes();
   
   // Si le dossier a été supprimé sur un autre poste
   if (eventType === "DELETE") {

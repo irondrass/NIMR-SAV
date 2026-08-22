@@ -662,23 +662,29 @@ function captureCaseSelectionIdentity(item = null) {
 }
 
 function findCaseBySelectionIdentity(identity = {}, cases = state?.cases) {
-  const list = Array.isArray(cases) ? cases.filter(Boolean) : [];
-  if (!list.length) return null;
+  const source = Array.isArray(cases) ? cases : [];
+  if (!source.length) return null;
+  const indexes = cases === state?.cases && typeof getUiRuntimeIndexes === "function"
+    ? getUiRuntimeIndexes()
+    : null;
+  const list = indexes ? null : source.filter(Boolean);
   const exactId = String(identity.id || "");
   if (exactId) {
-    const match = list.find((item) => String(item.id || "") === exactId);
+    const match = indexes?.caseById.get(exactId)
+      || list?.find((item) => String(item.id || "") === exactId);
     if (match) return match;
   }
-  const matchUnique = (getter, expected) => {
+  const matchUnique = (getter, expected, indexName) => {
     const token = normalizeCaseIdentityToken(expected);
     if (!token) return null;
+    if (indexes?.[indexName]) return indexes[indexName].get(token) || null;
     const matches = list.filter((item) => normalizeCaseIdentityToken(getter(item)) === token);
     return matches.length === 1 ? matches[0] : null;
   };
-  return matchUnique((item) => item.local_id || item.localId, identity.localId)
-    || matchUnique((item) => item.orNavNumber, identity.orNavNumber)
-    || matchUnique((item) => item.vin, identity.vin)
-    || matchUnique((item) => item.plate, identity.plate)
+  return matchUnique((item) => item.local_id || item.localId, identity.localId, "caseByLocalId")
+    || matchUnique((item) => item.orNavNumber, identity.orNavNumber, "caseByOrNavNumber")
+    || matchUnique((item) => item.vin, identity.vin, "caseByVin")
+    || matchUnique((item) => item.plate, identity.plate, "caseByPlate")
     || null;
 }
 
@@ -3929,6 +3935,7 @@ function clearLocalUserChangeAt() {
 }
 
 function saveState(options = {}) {
+  invalidateStateReplacementIndexes();
   try {
     const modified = detectAndIncrementCaseRevisions();
     const offline = typeof navigator !== "undefined" && navigator.onLine === false;

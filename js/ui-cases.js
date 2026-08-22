@@ -2,38 +2,105 @@ const CASE_LIST_PAGE_SIZE = 50;
 let caseListPage = 1;
 let caseListFilterSignature = "";
 let savPerformanceDashboardCache = null;
+let uiRuntimeIndexRevision = 0;
+let ephemeralBookingRuntimeIndexes = new WeakMap();
 let uiRuntimeIndexes = {
   casesSource: null,
   casesLength: -1,
   bookingsSource: null,
   bookingsLength: -1,
+  revision: -1,
+  generation: 0,
+  buildCount: 0,
   caseById: new Map(),
+  caseByLocalId: new Map(),
+  caseByOrNavNumber: new Map(),
+  caseByVin: new Map(),
+  caseByPlate: new Map(),
   bookingsByCaseId: new Map(),
   bookingsByResourceId: new Map(),
   bookingsByDayKey: new Map(),
+  bookingsByResourceDayKey: new Map(),
+  bookingOrder: new Map(),
 };
 
 function invalidateUiRuntimeIndexes() {
+  uiRuntimeIndexRevision += 1;
   uiRuntimeIndexes.casesSource = null;
   uiRuntimeIndexes.casesLength = -1;
   uiRuntimeIndexes.bookingsSource = null;
   uiRuntimeIndexes.bookingsLength = -1;
+  ephemeralBookingRuntimeIndexes = new WeakMap();
   savPerformanceDashboardCache = null;
 }
 
-function rebuildUiRuntimeIndexes() {
-  const cases = Array.isArray(state?.cases) ? state.cases : [];
-  const bookings = Array.isArray(state?.bookings) ? state.bookings : [];
-  const caseById = new Map();
+function invalidateBookingRuntimeIndexes(bookings) {
+  if (bookings === state?.bookings) {
+    invalidateUiRuntimeIndexes();
+    return;
+  }
+  if (Array.isArray(bookings)) ephemeralBookingRuntimeIndexes.delete(bookings);
+}
+
+function addUniqueCaseIdentity(index, ambiguous, value, item) {
+  const key = normalizeCaseIdentityToken(value);
+  if (!key || ambiguous.has(key)) return;
+  if (index.has(key)) {
+    index.delete(key);
+    ambiguous.add(key);
+    return;
+  }
+  index.set(key, item);
+}
+
+function getRuntimeBookingSegments(booking) {
+  return booking?.segments?.length
+    ? booking.segments
+    : (booking?.start && booking?.end ? [{ start: booking.start, end: booking.end }] : []);
+}
+
+function getRuntimeIndexDayKeysForRange(startValue, endValue) {
+  const start = new Date(startValue);
+  const end = new Date(endValue);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) return [];
+  const lastTouched = new Date(end.getTime() - 1);
+  const cursor = new Date(start);
+  cursor.setHours(0, 0, 0, 0);
+  const lastDay = new Date(lastTouched);
+  lastDay.setHours(0, 0, 0, 0);
+  const keys = [];
+  while (cursor <= lastDay) {
+    keys.push(todayKey(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return keys;
+}
+
+function getRuntimeIndexDayKeysForSlot(slot) {
+  const segments = slot?.segments?.length
+    ? slot.segments
+    : (slot?.start && slot?.end ? [{ start: slot.start, end: slot.end }] : []);
+  const keys = new Set();
+  segments.forEach((segment) => {
+    getRuntimeIndexDayKeysForRange(segment?.start, segment?.end).forEach((key) => keys.add(key));
+  });
+  return [...keys];
+}
+
+function runtimeResourceDayKey(resourceId, dayKey) {
+  return `${String(resourceId || "")}\u0000${String(dayKey || "")}`;
+}
+
+function buildBookingRuntimeIndexes(bookings) {
   const bookingsByCaseId = new Map();
   const bookingsByResourceId = new Map();
   const bookingsByDayKeySets = new Map();
+  const bookingsByResourceDayKeySets = new Map();
+  const bookingOrder = new Map();
 
-  cases.forEach((item) => {
-    if (item?.id) caseById.set(item.id, item);
-  });
-  bookings.forEach((booking) => {
+  bookings.forEach((booking, index) => {
     if (!booking) return;
+    if (!bookingOrder.has(booking)) bookingOrder.set(booking, index);
     if (booking.caseId) {
       const rows = bookingsByCaseId.get(booking.caseId) || [];
       rows.push(booking);
@@ -45,30 +112,70 @@ function rebuildUiRuntimeIndexes() {
       rows.push(booking);
       bookingsByResourceId.set(resourceId, rows);
     });
-    const segments = booking.segments?.length
-      ? booking.segments
-      : (booking.start && booking.end ? [{ start: booking.start, end: booking.end }] : []);
-    segments.forEach((segment) => {
-      [segment.start, segment.end].filter(Boolean).forEach((value) => {
-        const date = new Date(value);
-        if (Number.isNaN(date.getTime())) return;
-        const key = todayKey(date);
-        const rows = bookingsByDayKeySets.get(key) || new Set();
-        rows.add(booking);
-        bookingsByDayKeySets.set(key, rows);
+    const dayKeys = new Set();
+    getRuntimeBookingSegments(booking).forEach((segment) => {
+      getRuntimeIndexDayKeysForRange(segment?.start, segment?.end).forEach((key) => dayKeys.add(key));
+    });
+    dayKeys.forEach((key) => {
+      const rows = bookingsByDayKeySets.get(key) || new Set();
+      rows.add(booking);
+      bookingsByDayKeySets.set(key, rows);
+      new Set(booking.resourceIds || []).forEach((resourceId) => {
+        if (!resourceId) return;
+        const combinedKey = runtimeResourceDayKey(resourceId, key);
+        const combinedRows = bookingsByResourceDayKeySets.get(combinedKey) || new Set();
+        combinedRows.add(booking);
+        bookingsByResourceDayKeySets.set(combinedKey, combinedRows);
       });
     });
   });
 
-  uiRuntimeIndexes = {
-    casesSource: cases,
-    casesLength: cases.length,
+  return {
     bookingsSource: bookings,
     bookingsLength: bookings.length,
-    caseById,
     bookingsByCaseId,
     bookingsByResourceId,
     bookingsByDayKey: new Map([...bookingsByDayKeySets].map(([key, rows]) => [key, [...rows]])),
+    bookingsByResourceDayKey: new Map([...bookingsByResourceDayKeySets].map(([key, rows]) => [key, [...rows]])),
+    bookingOrder,
+  };
+}
+
+function rebuildUiRuntimeIndexes() {
+  const cases = Array.isArray(state?.cases) ? state.cases : [];
+  const bookings = Array.isArray(state?.bookings) ? state.bookings : [];
+  const caseById = new Map();
+  const caseByLocalId = new Map();
+  const caseByOrNavNumber = new Map();
+  const caseByVin = new Map();
+  const caseByPlate = new Map();
+  const ambiguousLocalIds = new Set();
+  const ambiguousOrNavNumbers = new Set();
+  const ambiguousVins = new Set();
+  const ambiguousPlates = new Set();
+
+  cases.forEach((item) => {
+    if (!item) return;
+    if (item.id && !caseById.has(String(item.id))) caseById.set(String(item.id), item);
+    addUniqueCaseIdentity(caseByLocalId, ambiguousLocalIds, item.local_id || item.localId, item);
+    addUniqueCaseIdentity(caseByOrNavNumber, ambiguousOrNavNumbers, item.orNavNumber, item);
+    addUniqueCaseIdentity(caseByVin, ambiguousVins, item.vin, item);
+    addUniqueCaseIdentity(caseByPlate, ambiguousPlates, item.plate, item);
+  });
+  const bookingIndexes = buildBookingRuntimeIndexes(bookings);
+
+  uiRuntimeIndexes = {
+    casesSource: cases,
+    casesLength: cases.length,
+    revision: uiRuntimeIndexRevision,
+    generation: Number(uiRuntimeIndexes.generation || 0) + 1,
+    buildCount: Number(uiRuntimeIndexes.buildCount || 0) + 1,
+    caseById,
+    caseByLocalId,
+    caseByOrNavNumber,
+    caseByVin,
+    caseByPlate,
+    ...bookingIndexes,
   };
   return uiRuntimeIndexes;
 }
@@ -78,11 +185,54 @@ function getUiRuntimeIndexes(options = {}) {
   const bookings = Array.isArray(state?.bookings) ? state.bookings : [];
   if (options.force) savPerformanceDashboardCache = null;
   const stale = options.force
+    || uiRuntimeIndexes.revision !== uiRuntimeIndexRevision
     || uiRuntimeIndexes.casesSource !== cases
     || uiRuntimeIndexes.casesLength !== cases.length
     || uiRuntimeIndexes.bookingsSource !== bookings
     || uiRuntimeIndexes.bookingsLength !== bookings.length;
   return stale ? rebuildUiRuntimeIndexes() : uiRuntimeIndexes;
+}
+
+function getUiRuntimeIndexStats() {
+  const indexes = getUiRuntimeIndexes();
+  return {
+    generation: indexes.generation,
+    buildCount: indexes.buildCount,
+    revision: indexes.revision,
+    cases: indexes.casesLength,
+    bookings: indexes.bookingsLength,
+  };
+}
+
+function getBookingRuntimeIndexes(bookings = state?.bookings) {
+  const list = Array.isArray(bookings) ? bookings : [];
+  if (list === state?.bookings) return getUiRuntimeIndexes();
+  const cached = ephemeralBookingRuntimeIndexes.get(list);
+  if (cached?.bookingsLength === list.length) return cached;
+  const indexes = buildBookingRuntimeIndexes(list);
+  ephemeralBookingRuntimeIndexes.set(list, indexes);
+  return indexes;
+}
+
+function getIndexedConflictCandidateBookings(slot, resourceIds, bookings = state?.bookings, caseId = "") {
+  const list = Array.isArray(bookings) ? bookings : [];
+  if (!list.length) return [];
+  const indexes = getBookingRuntimeIndexes(list);
+  const candidates = new Set();
+  const dayKeys = getRuntimeIndexDayKeysForSlot(slot);
+  new Set(resourceIds || []).forEach((resourceId) => {
+    dayKeys.forEach((dayKey) => {
+      (indexes.bookingsByResourceDayKey.get(runtimeResourceDayKey(resourceId, dayKey)) || [])
+        .forEach((booking) => candidates.add(booking));
+    });
+  });
+  if (caseId) {
+    (indexes.bookingsByCaseId.get(caseId) || []).forEach((booking) => candidates.add(booking));
+  }
+  return [...candidates].sort((left, right) => (
+    (indexes.bookingOrder.get(left) ?? Number.MAX_SAFE_INTEGER)
+    - (indexes.bookingOrder.get(right) ?? Number.MAX_SAFE_INTEGER)
+  ));
 }
 
 function getIndexedCaseById(caseId) {
@@ -156,7 +306,7 @@ function render() {
     }
   });
 
-  getUiRuntimeIndexes({ force: true });
+  getUiRuntimeIndexes();
 
   // La liste reste prête pour l'ouverture de l'onglet Dossiers, mais elle est
   // bornée à 50 cartes. Les vues lourdes cachées sont rendues à la demande.

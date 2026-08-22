@@ -1,9 +1,39 @@
 {
   "benchmark": "P0-008 entity-level IndexedDB persistence",
-  "generatedAt": "2026-08-22T09:37:11.932Z",
+  "generatedAt": "2026-08-22T11:22:28.976Z",
   "freshChildProcessPerScale": true,
   "browserIndexedDbMeasured": false,
   "adapterDisclosure": "Production partition/diff planner with deterministic in-memory record-store adapter; browser IndexedDB I/O latency is not measured.",
+  "concurrencyCorrectness": {
+    "sameStateCase": {
+      "finalVin": "C",
+      "secondSaveCaseWrites": 1
+    },
+    "sameStateBooking": {
+      "finalStart": "B",
+      "secondSaveBookingWrites": 1
+    },
+    "structuralAdd": {
+      "durableCount": 1,
+      "secondSaveCaseWrites": 1
+    },
+    "structuralDelete": {
+      "caseDurable": true,
+      "bookingDurable": true,
+      "secondSaveCaseDeletes": 1,
+      "secondSaveBookingDeletes": 1
+    },
+    "auditAppend": {
+      "durableOrder": [
+        "B",
+        "A"
+      ],
+      "secondSaveAuditWrites": 1
+    },
+    "commitClearsNewerMarkers": false,
+    "trackerUsesLivePostPlanLengths": false,
+    "allPass": true
+  },
   "scales": [
     {
       "caseCount": 10000,
@@ -11,9 +41,9 @@
       "adapter": "production partition/diff planner with deterministic in-memory record-store adapter",
       "browserIndexedDbMeasured": false,
       "initialPersistence": {
-        "milliseconds": 30.136899999999912,
-        "plannerMilliseconds": 25.842299999999966,
-        "adapterWriteMilliseconds": 4.294599999999946,
+        "milliseconds": 33.27029999999999,
+        "plannerMilliseconds": 28.85239999999999,
+        "adapterWriteMilliseconds": 4.417900000000003,
         "rootWrites": 1,
         "caseWrites": 10000,
         "caseDeletes": 0,
@@ -23,14 +53,14 @@
         "auditDeletes": 0
       },
       "hydration": {
-        "milliseconds": 3.074700000000007,
+        "milliseconds": 3.0634000000000015,
         "caseRecords": 10000,
         "bookingRecords": 30000
       },
       "updateOneCase": {
-        "milliseconds": 0.11269999999996116,
-        "plannerMilliseconds": 0.10719999999997754,
-        "adapterWriteMilliseconds": 0.005499999999983629,
+        "milliseconds": 0.13570000000004256,
+        "plannerMilliseconds": 0.13030000000003383,
+        "adapterWriteMilliseconds": 0.005400000000008731,
         "rootWrites": 1,
         "caseWrites": 1,
         "caseDeletes": 0,
@@ -40,9 +70,9 @@
         "auditDeletes": 0
       },
       "updateOneBooking": {
-        "milliseconds": 0.03550000000001319,
-        "plannerMilliseconds": 0.03190000000000737,
-        "adapterWriteMilliseconds": 0.0036000000000058208,
+        "milliseconds": 0.10489999999998645,
+        "plannerMilliseconds": 0.04610000000002401,
+        "adapterWriteMilliseconds": 0.05879999999996244,
         "rootWrites": 1,
         "caseWrites": 0,
         "caseDeletes": 0,
@@ -52,9 +82,9 @@
         "auditDeletes": 0
       },
       "addOneCase": {
-        "milliseconds": 10.5231,
-        "plannerMilliseconds": 10.511599999999987,
-        "adapterWriteMilliseconds": 0.011500000000012278,
+        "milliseconds": 9.141099999999994,
+        "plannerMilliseconds": 9.129700000000014,
+        "adapterWriteMilliseconds": 0.011399999999980537,
         "rootWrites": 1,
         "caseWrites": 1,
         "caseDeletes": 0,
@@ -64,9 +94,9 @@
         "auditDeletes": 0
       },
       "deleteOneCase": {
-        "milliseconds": 7.8308999999999855,
-        "plannerMilliseconds": 7.778599999999983,
-        "adapterWriteMilliseconds": 0.052300000000002456,
+        "milliseconds": 8.084699999999998,
+        "plannerMilliseconds": 8.033399999999972,
+        "adapterWriteMilliseconds": 0.0513000000000261,
         "rootWrites": 1,
         "caseWrites": 0,
         "caseDeletes": 1,
@@ -76,9 +106,9 @@
         "auditDeletes": 0
       },
       "addOneBooking": {
-        "milliseconds": 26.525800000000004,
-        "plannerMilliseconds": 26.520299999999963,
-        "adapterWriteMilliseconds": 0.0055000000000404725,
+        "milliseconds": 26.04610000000008,
+        "plannerMilliseconds": 26.040400000000034,
+        "adapterWriteMilliseconds": 0.005700000000047112,
         "rootWrites": 1,
         "caseWrites": 0,
         "caseDeletes": 0,
@@ -88,8 +118,8 @@
         "auditDeletes": 0
       },
       "deleteOneBooking": {
-        "milliseconds": 25.725199999999973,
-        "plannerMilliseconds": 25.7192,
+        "milliseconds": 25.74339999999995,
+        "plannerMilliseconds": 25.73739999999998,
         "adapterWriteMilliseconds": 0.005999999999971806,
         "rootWrites": 1,
         "caseWrites": 0,
@@ -100,9 +130,9 @@
         "auditDeletes": 0
       },
       "rootOnly": {
-        "milliseconds": 0.04949999999996635,
-        "plannerMilliseconds": 0.048399999999958254,
-        "adapterWriteMilliseconds": 0.0011000000000080945,
+        "milliseconds": 0.05769999999995434,
+        "plannerMilliseconds": 0.05679999999995289,
+        "adapterWriteMilliseconds": 0.0009000000000014552,
         "rootWrites": 1,
         "caseWrites": 0,
         "caseDeletes": 0,
@@ -112,9 +142,9 @@
         "auditDeletes": 0
       },
       "appendAudit": {
-        "milliseconds": 0.16769999999996799,
-        "plannerMilliseconds": 0.16499999999996362,
-        "adapterWriteMilliseconds": 0.0027000000000043656,
+        "milliseconds": 0.19599999999996953,
+        "plannerMilliseconds": 0.19259999999997035,
+        "adapterWriteMilliseconds": 0.0033999999999991815,
         "rootWrites": 1,
         "caseWrites": 0,
         "caseDeletes": 0,
@@ -124,9 +154,9 @@
         "auditDeletes": 0
       },
       "noChange": {
-        "milliseconds": 0.04070000000001528,
-        "plannerMilliseconds": 0.038000000000010914,
-        "adapterWriteMilliseconds": 0.0027000000000043656,
+        "milliseconds": 0.054100000000005366,
+        "plannerMilliseconds": 0.0513000000000261,
+        "adapterWriteMilliseconds": 0.0027999999999792635,
         "rootWrites": 1,
         "caseWrites": 0,
         "caseDeletes": 0,
@@ -153,29 +183,29 @@
       },
       "memory": {
         "beforeDataset": {
-          "rss": 43851776,
-          "heapUsed": 4664424,
+          "rss": 44412928,
+          "heapUsed": 4674208,
           "heapTotal": 7442432
         },
         "afterDataset": {
-          "rss": 88653824,
-          "heapUsed": 29204640,
+          "rss": 88850432,
+          "heapUsed": 29214424,
           "heapTotal": 64049152
         },
         "afterInitialSave": {
-          "rss": 104292352,
-          "heapUsed": 41005888,
-          "heapTotal": 76959744
+          "rss": 104439808,
+          "heapUsed": 41031432,
+          "heapTotal": 77230080
         },
         "afterHydration": {
-          "rss": 105058304,
-          "heapUsed": 41326992,
-          "heapTotal": 76943360
+          "rss": 104837120,
+          "heapUsed": 41350904,
+          "heapTotal": 76951552
         },
         "final": {
-          "rss": 117411840,
-          "heapUsed": 41566256,
-          "heapTotal": 77852672
+          "rss": 117731328,
+          "heapUsed": 41595816,
+          "heapTotal": 78123008
         }
       }
     },
@@ -185,9 +215,9 @@
       "adapter": "production partition/diff planner with deterministic in-memory record-store adapter",
       "browserIndexedDbMeasured": false,
       "initialPersistence": {
-        "milliseconds": 233.12630000000001,
-        "plannerMilliseconds": 191.10410000000002,
-        "adapterWriteMilliseconds": 42.0222,
+        "milliseconds": 211.2048000000001,
+        "plannerMilliseconds": 170.5223000000001,
+        "adapterWriteMilliseconds": 40.682500000000005,
         "rootWrites": 1,
         "caseWrites": 50000,
         "caseDeletes": 0,
@@ -197,14 +227,14 @@
         "auditDeletes": 0
       },
       "hydration": {
-        "milliseconds": 12.930700000000002,
+        "milliseconds": 12.597200000000043,
         "caseRecords": 50000,
         "bookingRecords": 150000
       },
       "updateOneCase": {
-        "milliseconds": 0.1533999999999196,
-        "plannerMilliseconds": 0.147499999999809,
-        "adapterWriteMilliseconds": 0.0059000000001105946,
+        "milliseconds": 0.15470000000004802,
+        "plannerMilliseconds": 0.1491000000000895,
+        "adapterWriteMilliseconds": 0.005599999999958527,
         "rootWrites": 1,
         "caseWrites": 1,
         "caseDeletes": 0,
@@ -214,9 +244,9 @@
         "auditDeletes": 0
       },
       "updateOneBooking": {
-        "milliseconds": 0.040500000000065484,
-        "plannerMilliseconds": 0.0362999999999829,
-        "adapterWriteMilliseconds": 0.004200000000082582,
+        "milliseconds": 0.06059999999979482,
+        "plannerMilliseconds": 0.05579999999986285,
+        "adapterWriteMilliseconds": 0.00479999999993197,
         "rootWrites": 1,
         "caseWrites": 0,
         "caseDeletes": 0,
@@ -226,9 +256,9 @@
         "auditDeletes": 0
       },
       "addOneCase": {
-        "milliseconds": 48.7331999999999,
-        "plannerMilliseconds": 48.71309999999994,
-        "adapterWriteMilliseconds": 0.020099999999956708,
+        "milliseconds": 47.619699999999966,
+        "plannerMilliseconds": 47.59909999999991,
+        "adapterWriteMilliseconds": 0.02060000000005857,
         "rootWrites": 1,
         "caseWrites": 1,
         "caseDeletes": 0,
@@ -238,9 +268,9 @@
         "auditDeletes": 0
       },
       "deleteOneCase": {
-        "milliseconds": 49.79359999999997,
-        "plannerMilliseconds": 49.719100000000026,
-        "adapterWriteMilliseconds": 0.07449999999994361,
+        "milliseconds": 45.14509999999973,
+        "plannerMilliseconds": 45.06219999999985,
+        "adapterWriteMilliseconds": 0.0828999999998814,
         "rootWrites": 1,
         "caseWrites": 0,
         "caseDeletes": 1,
@@ -250,9 +280,9 @@
         "auditDeletes": 0
       },
       "addOneBooking": {
-        "milliseconds": 198.82420000000002,
-        "plannerMilliseconds": 198.81870000000004,
-        "adapterWriteMilliseconds": 0.005499999999983629,
+        "milliseconds": 193.71579999999994,
+        "plannerMilliseconds": 193.71039999999994,
+        "adapterWriteMilliseconds": 0.005400000000008731,
         "rootWrites": 1,
         "caseWrites": 0,
         "caseDeletes": 0,
@@ -262,9 +292,9 @@
         "auditDeletes": 0
       },
       "deleteOneBooking": {
-        "milliseconds": 192.5992000000001,
-        "plannerMilliseconds": 192.5938000000001,
-        "adapterWriteMilliseconds": 0.005400000000008731,
+        "milliseconds": 189.16020000000003,
+        "plannerMilliseconds": 189.15460000000007,
+        "adapterWriteMilliseconds": 0.005599999999958527,
         "rootWrites": 1,
         "caseWrites": 0,
         "caseDeletes": 0,
@@ -274,8 +304,8 @@
         "auditDeletes": 0
       },
       "rootOnly": {
-        "milliseconds": 0.05009999999992942,
-        "plannerMilliseconds": 0.04899999999997817,
+        "milliseconds": 0.056100000000014916,
+        "plannerMilliseconds": 0.055000000000063665,
         "adapterWriteMilliseconds": 0.001099999999951251,
         "rootWrites": 1,
         "caseWrites": 0,
@@ -286,9 +316,9 @@
         "auditDeletes": 0
       },
       "appendAudit": {
-        "milliseconds": 0.15760000000000218,
-        "plannerMilliseconds": 0.15370000000007167,
-        "adapterWriteMilliseconds": 0.0038999999999305146,
+        "milliseconds": 0.20199999999999818,
+        "plannerMilliseconds": 0.1978999999998905,
+        "adapterWriteMilliseconds": 0.004100000000107684,
         "rootWrites": 1,
         "caseWrites": 0,
         "caseDeletes": 0,
@@ -298,9 +328,9 @@
         "auditDeletes": 0
       },
       "noChange": {
-        "milliseconds": 0.03829999999993561,
-        "plannerMilliseconds": 0.035399999999981446,
-        "adapterWriteMilliseconds": 0.0028999999999541615,
+        "milliseconds": 0.05869999999981701,
+        "plannerMilliseconds": 0.05569999999988795,
+        "adapterWriteMilliseconds": 0.0029999999999290594,
         "rootWrites": 1,
         "caseWrites": 0,
         "caseDeletes": 0,
@@ -327,29 +357,29 @@
       },
       "memory": {
         "beforeDataset": {
-          "rss": 43610112,
-          "heapUsed": 4664424,
+          "rss": 44236800,
+          "heapUsed": 4674208,
           "heapTotal": 7442432
         },
         "afterDataset": {
-          "rss": 198758400,
-          "heapUsed": 127967000,
+          "rss": 199221248,
+          "heapUsed": 127976784,
           "heapTotal": 164769792
         },
         "afterInitialSave": {
-          "rss": 244617216,
-          "heapUsed": 170406688,
-          "heapTotal": 211103744
+          "rss": 245215232,
+          "heapUsed": 170432280,
+          "heapTotal": 211111936
         },
         "afterHydration": {
-          "rss": 246673408,
-          "heapUsed": 172006880,
-          "heapTotal": 212979712
+          "rss": 247037952,
+          "heapUsed": 172032600,
+          "heapTotal": 212725760
         },
         "final": {
-          "rss": 303403008,
-          "heapUsed": 172881544,
-          "heapTotal": 222691328
+          "rss": 304373760,
+          "heapUsed": 172911888,
+          "heapTotal": 222175232
         }
       }
     },
@@ -359,9 +389,9 @@
       "adapter": "production partition/diff planner with deterministic in-memory record-store adapter",
       "browserIndexedDbMeasured": false,
       "initialPersistence": {
-        "milliseconds": 505.6105,
-        "plannerMilliseconds": 417.66769999999997,
-        "adapterWriteMilliseconds": 87.94280000000003,
+        "milliseconds": 497.5453,
+        "plannerMilliseconds": 405.3846000000001,
+        "adapterWriteMilliseconds": 92.1606999999999,
         "rootWrites": 1,
         "caseWrites": 100000,
         "caseDeletes": 0,
@@ -371,14 +401,14 @@
         "auditDeletes": 0
       },
       "hydration": {
-        "milliseconds": 29.848500000000058,
+        "milliseconds": 27.200799999999845,
         "caseRecords": 100000,
         "bookingRecords": 300000
       },
       "updateOneCase": {
-        "milliseconds": 0.1680000000005748,
-        "plannerMilliseconds": 0.15980000000035943,
-        "adapterWriteMilliseconds": 0.008200000000215368,
+        "milliseconds": 0.21570000000019718,
+        "plannerMilliseconds": 0.20719999999982974,
+        "adapterWriteMilliseconds": 0.008500000000367436,
         "rootWrites": 1,
         "caseWrites": 1,
         "caseDeletes": 0,
@@ -388,9 +418,9 @@
         "auditDeletes": 0
       },
       "updateOneBooking": {
-        "milliseconds": 0.047700000000077125,
-        "plannerMilliseconds": 0.03510000000005675,
-        "adapterWriteMilliseconds": 0.012600000000020373,
+        "milliseconds": 0.07760000000007494,
+        "plannerMilliseconds": 0.07250000000021828,
+        "adapterWriteMilliseconds": 0.005099999999856664,
         "rootWrites": 1,
         "caseWrites": 0,
         "caseDeletes": 0,
@@ -400,9 +430,9 @@
         "auditDeletes": 0
       },
       "addOneCase": {
-        "milliseconds": 121.91899999999987,
-        "plannerMilliseconds": 121.90149999999994,
-        "adapterWriteMilliseconds": 0.01749999999992724,
+        "milliseconds": 122.9969000000001,
+        "plannerMilliseconds": 122.98120000000017,
+        "adapterWriteMilliseconds": 0.01569999999992433,
         "rootWrites": 1,
         "caseWrites": 1,
         "caseDeletes": 0,
@@ -412,9 +442,9 @@
         "auditDeletes": 0
       },
       "deleteOneCase": {
-        "milliseconds": 102.14330000000018,
-        "plannerMilliseconds": 102.07450000000017,
-        "adapterWriteMilliseconds": 0.06880000000001019,
+        "milliseconds": 104.97839999999997,
+        "plannerMilliseconds": 104.90999999999985,
+        "adapterWriteMilliseconds": 0.0684000000001106,
         "rootWrites": 1,
         "caseWrites": 0,
         "caseDeletes": 1,
@@ -424,9 +454,9 @@
         "auditDeletes": 0
       },
       "addOneBooking": {
-        "milliseconds": 470.7033999999999,
-        "plannerMilliseconds": 470.69849999999997,
-        "adapterWriteMilliseconds": 0.004899999999906868,
+        "milliseconds": 446.59709999999995,
+        "plannerMilliseconds": 446.5929000000001,
+        "adapterWriteMilliseconds": 0.0041999999998552084,
         "rootWrites": 1,
         "caseWrites": 0,
         "caseDeletes": 0,
@@ -436,9 +466,9 @@
         "auditDeletes": 0
       },
       "deleteOneBooking": {
-        "milliseconds": 458.7156,
-        "plannerMilliseconds": 458.70859999999993,
-        "adapterWriteMilliseconds": 0.007000000000061846,
+        "milliseconds": 447.4216000000001,
+        "plannerMilliseconds": 447.4146999999998,
+        "adapterWriteMilliseconds": 0.006900000000314321,
         "rootWrites": 1,
         "caseWrites": 0,
         "caseDeletes": 0,
@@ -448,8 +478,8 @@
         "auditDeletes": 0
       },
       "rootOnly": {
-        "milliseconds": 0.05050000000028376,
-        "plannerMilliseconds": 0.04940000000033251,
+        "milliseconds": 0.06069999999999709,
+        "plannerMilliseconds": 0.05960000000004584,
         "adapterWriteMilliseconds": 0.001099999999951251,
         "rootWrites": 1,
         "caseWrites": 0,
@@ -460,9 +490,9 @@
         "auditDeletes": 0
       },
       "appendAudit": {
-        "milliseconds": 0.17840000000023792,
-        "plannerMilliseconds": 0.1748000000002321,
-        "adapterWriteMilliseconds": 0.0036000000000058208,
+        "milliseconds": 0.22330000000056316,
+        "plannerMilliseconds": 0.22020000000020445,
+        "adapterWriteMilliseconds": 0.0031000000003587047,
         "rootWrites": 1,
         "caseWrites": 0,
         "caseDeletes": 0,
@@ -472,9 +502,9 @@
         "auditDeletes": 0
       },
       "noChange": {
-        "milliseconds": 0.04460000000017317,
-        "plannerMilliseconds": 0.039900000000216096,
-        "adapterWriteMilliseconds": 0.004699999999957072,
+        "milliseconds": 0.056599999999889405,
+        "plannerMilliseconds": 0.05209999999988213,
+        "adapterWriteMilliseconds": 0.004500000000007276,
         "rootWrites": 1,
         "caseWrites": 0,
         "caseDeletes": 0,
@@ -501,29 +531,29 @@
       },
       "memory": {
         "beforeDataset": {
-          "rss": 43585536,
-          "heapUsed": 4664424,
+          "rss": 44187648,
+          "heapUsed": 4674208,
           "heapTotal": 7442432
         },
         "afterDataset": {
-          "rss": 325009408,
-          "heapUsed": 251421912,
+          "rss": 325738496,
+          "heapUsed": 251430568,
           "heapTotal": 290103296
         },
         "afterInitialSave": {
-          "rss": 406179840,
-          "heapUsed": 331011616,
-          "heapTotal": 377856000
+          "rss": 407306240,
+          "heapUsed": 331036216,
+          "heapTotal": 377864192
         },
         "afterHydration": {
-          "rss": 409423872,
-          "heapUsed": 334212040,
-          "heapTotal": 380809216
+          "rss": 410492928,
+          "heapUsed": 334236608,
+          "heapTotal": 380817408
         },
         "final": {
-          "rss": 554106880,
-          "heapUsed": 335886704,
-          "heapTotal": 426188800
+          "rss": 554782720,
+          "heapUsed": 335915592,
+          "heapTotal": 426196992
         }
       }
     }

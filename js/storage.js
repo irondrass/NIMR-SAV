@@ -142,6 +142,7 @@ function getEntityPersistenceKey(entity, prefix, index = 0) {
 let entityPersistenceTail = Promise.resolve();
 let entityPersistenceTracker = {
   initialized: false,
+  mutationVersion: 0,
   candidateSource: null,
   casesSource: null,
   bookingsSource: null,
@@ -154,49 +155,63 @@ let entityPersistenceTracker = {
   audit: new Map(),
   auditObjectKeys: new WeakMap(),
 };
+let entityPersistenceMutationVersion = 0;
 const dirtyEntityCases = new Map();
-const deletedEntityCaseIds = new Set();
+const deletedEntityCaseIds = new Map();
 const dirtyEntityBookings = new Map();
-const deletedEntityBookingIds = new Set();
-const dirtyEntityAuditEntries = new Set();
-let entityAuditStructureDirty = false;
+const deletedEntityBookingIds = new Map();
+const dirtyEntityAuditEntries = new Map();
+let entityAuditStructureGeneration = 0;
+let entityStateFullReplacementGeneration = 0;
 let lastEntityPersistenceStats = null;
+
+function nextEntityPersistenceMutationGeneration() {
+  entityPersistenceMutationVersion += 1;
+  return entityPersistenceMutationVersion;
+}
 
 function markEntityCaseDirty(caseOrId) {
   const caseItem = caseOrId && typeof caseOrId === "object" ? caseOrId : null;
   const id = String(caseItem?.id ?? caseOrId ?? "").trim();
-  if (id) dirtyEntityCases.set(id, caseItem);
+  if (id) {
+    deletedEntityCaseIds.delete(id);
+    dirtyEntityCases.set(id, { value: caseItem, generation: nextEntityPersistenceMutationGeneration() });
+  }
 }
 
 function markEntityCaseDeleted(caseId) {
   const id = String(caseId || "").trim();
   if (id) {
     dirtyEntityCases.delete(id);
-    deletedEntityCaseIds.add(id);
+    deletedEntityCaseIds.set(id, nextEntityPersistenceMutationGeneration());
   }
 }
 
 function markEntityBookingDirty(bookingOrId) {
   const booking = bookingOrId && typeof bookingOrId === "object" ? bookingOrId : null;
   const id = String(booking?.id ?? bookingOrId ?? "").trim();
-  if (id) dirtyEntityBookings.set(id, booking);
+  if (id) {
+    deletedEntityBookingIds.delete(id);
+    dirtyEntityBookings.set(id, { value: booking, generation: nextEntityPersistenceMutationGeneration() });
+  }
 }
 
 function markEntityBookingDeleted(bookingId) {
   const id = String(bookingId || "").trim();
   if (id) {
     dirtyEntityBookings.delete(id);
-    deletedEntityBookingIds.add(id);
+    deletedEntityBookingIds.set(id, nextEntityPersistenceMutationGeneration());
   }
 }
 
 function markEntityAuditEntryDirty(entry) {
-  if (entry && typeof entry === "object") dirtyEntityAuditEntries.add(entry);
-  entityAuditStructureDirty = true;
+  const generation = nextEntityPersistenceMutationGeneration();
+  if (entry && typeof entry === "object") dirtyEntityAuditEntries.set(entry, generation);
+  entityAuditStructureGeneration = generation;
 }
 
 function markEntityStateFullReplacement() {
-  entityPersistenceTracker.initialized = false;
+  entityStateFullReplacementGeneration = nextEntityPersistenceMutationGeneration();
 }
 
 function getEntityPersistenceStats() {
@@ -312,13 +327,38 @@ function makeEntityStateMeta(candidate, metadata, savedAt) {
   };
 }
 
+function snapshotEntityPersistenceMutations() {
+  return {
+    version: entityPersistenceMutationVersion,
+    dirtyCases: new Map(dirtyEntityCases),
+    deletedCaseIds: new Map(deletedEntityCaseIds),
+    dirtyBookings: new Map(dirtyEntityBookings),
+    deletedBookingIds: new Map(deletedEntityBookingIds),
+    dirtyAuditEntries: new Map(dirtyEntityAuditEntries),
+    auditStructureGeneration: entityAuditStructureGeneration,
+    fullReplacementGeneration: entityStateFullReplacementGeneration,
+  };
+}
+
 function buildEntityPersistencePlan(candidate, metadata, savedAt) {
   const cases = Array.isArray(candidate.cases) ? candidate.cases : [];
   const bookings = Array.isArray(candidate.bookings) ? candidate.bookings : [];
   const auditLog = Array.isArray(candidate.auditLog) ? candidate.auditLog : [];
+  const mutations = snapshotEntityPersistenceMutations();
+  const tracker = {
+    mutationVersion: mutations.version,
+    candidateSource: candidate,
+    casesSource: cases,
+    bookingsSource: bookings,
+    auditSource: auditLog,
+    casesLength: cases.length,
+    bookingsLength: bookings.length,
+    auditLength: auditLog.length,
+  };
   const full = metadata.forceFull === true
     || !entityPersistenceTracker.initialized
-    || entityPersistenceTracker.candidateSource !== candidate;
+    || entityPersistenceTracker.candidateSource !== candidate
+    || mutations.fullReplacementGeneration > 0;
   if (full) {
     const casePlan = buildFullEntityCollection(cases, "case");
     const bookingPlan = buildFullEntityCollection(bookings, "booking");
@@ -331,26 +371,31 @@ function buildEntityPersistencePlan(candidate, metadata, savedAt) {
       bookings: { clear: true, writes: bookingPlan.records, deletes: [], nextTracker: bookingPlan.tracker },
       audit: { clear: true, writes: auditPlan.records, deletes: [], nextTracker: auditPlan.tracker },
       auditObjectKeys,
+      mutations,
+      tracker,
     };
   }
 
   const caseStructureChanged = entityPersistenceTracker.casesSource !== cases
     || entityPersistenceTracker.casesLength !== cases.length
-    || deletedEntityCaseIds.size > 0;
+    || mutations.deletedCaseIds.size > 0;
   const bookingStructureChanged = entityPersistenceTracker.bookingsSource !== bookings
     || entityPersistenceTracker.bookingsLength !== bookings.length
-    || deletedEntityBookingIds.size > 0;
+    || mutations.deletedBookingIds.size > 0;
   const auditStructureChanged = entityPersistenceTracker.auditSource !== auditLog
     || entityPersistenceTracker.auditLength !== auditLog.length
-    || entityAuditStructureDirty;
+    || mutations.auditStructureGeneration > 0;
+  const dirtyCaseIds = new Set(mutations.dirtyCases.keys());
+  const dirtyBookingIds = new Set(mutations.dirtyBookings.keys());
+  const dirtyAuditEntries = new Set(mutations.dirtyAuditEntries.keys());
   const casePlan = caseStructureChanged
-    ? buildIncrementalCollectionPlan(cases, "case", entityPersistenceTracker.cases, dirtyEntityCases)
-    : buildDirtyOnlyPlan(entityPersistenceTracker.cases, dirtyEntityCases, (id, existing) => dirtyEntityCases.get(id) || findCaseForEntityPersistence(candidate, id) || existing?.valueRef);
+    ? buildIncrementalCollectionPlan(cases, "case", entityPersistenceTracker.cases, dirtyCaseIds)
+    : buildDirtyOnlyPlan(entityPersistenceTracker.cases, dirtyCaseIds, (id, existing) => mutations.dirtyCases.get(id)?.value || findCaseForEntityPersistence(candidate, id) || existing?.valueRef);
   const bookingPlan = bookingStructureChanged
-    ? buildIncrementalCollectionPlan(bookings, "booking", entityPersistenceTracker.bookings, new Set(dirtyEntityBookings.keys()))
-    : buildDirtyOnlyPlan(entityPersistenceTracker.bookings, new Set(dirtyEntityBookings.keys()), (id, existing) => dirtyEntityBookings.get(id) || existing?.valueRef);
+    ? buildIncrementalCollectionPlan(bookings, "booking", entityPersistenceTracker.bookings, dirtyBookingIds)
+    : buildDirtyOnlyPlan(entityPersistenceTracker.bookings, dirtyBookingIds, (id, existing) => mutations.dirtyBookings.get(id)?.value || existing?.valueRef);
   const auditPlan = auditStructureChanged
-    ? buildIncrementalCollectionPlan(auditLog, "audit", entityPersistenceTracker.audit, new Set(), dirtyEntityAuditEntries, entityPersistenceTracker.auditObjectKeys)
+    ? buildIncrementalCollectionPlan(auditLog, "audit", entityPersistenceTracker.audit, new Set(), dirtyAuditEntries, entityPersistenceTracker.auditObjectKeys)
     : { clear: false, writes: [], deletes: [], nextTracker: null };
   return {
     full: false,
@@ -359,6 +404,8 @@ function buildEntityPersistencePlan(candidate, metadata, savedAt) {
     bookings: bookingPlan,
     audit: auditPlan,
     auditObjectKeys: entityPersistenceTracker.auditObjectKeys,
+    mutations,
+    tracker,
   };
 }
 
@@ -366,6 +413,16 @@ function applyEntityStorePlan(store, plan) {
   if (plan.clear) store.clear();
   plan.deletes.forEach((id) => store.delete(id));
   plan.writes.forEach((record) => store.put(record));
+}
+
+function getEntityMutationGeneration(marker) {
+  return marker && typeof marker === "object" ? marker.generation : marker;
+}
+
+function acknowledgeEntityMutationMap(current, planned) {
+  planned.forEach((plannedMarker, key) => {
+    if (getEntityMutationGeneration(current.get(key)) === getEntityMutationGeneration(plannedMarker)) current.delete(key);
+  });
 }
 
 function commitEntityPersistenceTracker(candidate, plan) {
@@ -376,23 +433,25 @@ function commitEntityPersistenceTracker(candidate, plan) {
     return current;
   };
   entityPersistenceTracker.initialized = true;
-  entityPersistenceTracker.candidateSource = candidate;
-  entityPersistenceTracker.casesSource = candidate.cases;
-  entityPersistenceTracker.bookingsSource = candidate.bookings;
-  entityPersistenceTracker.auditSource = candidate.auditLog;
-  entityPersistenceTracker.casesLength = candidate.cases.length;
-  entityPersistenceTracker.bookingsLength = candidate.bookings.length;
-  entityPersistenceTracker.auditLength = candidate.auditLog.length;
+  entityPersistenceTracker.mutationVersion = plan.tracker.mutationVersion;
+  entityPersistenceTracker.candidateSource = plan.tracker.candidateSource;
+  entityPersistenceTracker.casesSource = plan.tracker.casesSource;
+  entityPersistenceTracker.bookingsSource = plan.tracker.bookingsSource;
+  entityPersistenceTracker.auditSource = plan.tracker.auditSource;
+  entityPersistenceTracker.casesLength = plan.tracker.casesLength;
+  entityPersistenceTracker.bookingsLength = plan.tracker.bookingsLength;
+  entityPersistenceTracker.auditLength = plan.tracker.auditLength;
   entityPersistenceTracker.cases = apply(entityPersistenceTracker.cases, plan.cases);
   entityPersistenceTracker.bookings = apply(entityPersistenceTracker.bookings, plan.bookings);
   entityPersistenceTracker.audit = apply(entityPersistenceTracker.audit, plan.audit);
   entityPersistenceTracker.auditObjectKeys = plan.auditObjectKeys;
-  dirtyEntityCases.clear();
-  deletedEntityCaseIds.clear();
-  dirtyEntityBookings.clear();
-  deletedEntityBookingIds.clear();
-  dirtyEntityAuditEntries.clear();
-  entityAuditStructureDirty = false;
+  acknowledgeEntityMutationMap(dirtyEntityCases, plan.mutations.dirtyCases);
+  acknowledgeEntityMutationMap(deletedEntityCaseIds, plan.mutations.deletedCaseIds);
+  acknowledgeEntityMutationMap(dirtyEntityBookings, plan.mutations.dirtyBookings);
+  acknowledgeEntityMutationMap(deletedEntityBookingIds, plan.mutations.deletedBookingIds);
+  acknowledgeEntityMutationMap(dirtyEntityAuditEntries, plan.mutations.dirtyAuditEntries);
+  if (entityAuditStructureGeneration === plan.mutations.auditStructureGeneration) entityAuditStructureGeneration = 0;
+  if (entityStateFullReplacementGeneration === plan.mutations.fullReplacementGeneration) entityStateFullReplacementGeneration = 0;
 }
 
 async function persistEntityState(candidate, metadata = {}) {
@@ -422,8 +481,8 @@ async function persistEntityState(candidate, metadata = {}) {
     auditWrites: plan.audit.writes.length,
     auditDeletes: plan.audit.deletes.length,
   };
-  window.NIMR_INDEXED_DB_STATUS = { ok: true, savedAt, casesCount: Number(candidate.cases?.length || 0), primary: true };
-  return { ...lastEntityPersistenceStats, casesCount: Number(candidate.cases?.length || 0), bookingsCount: Number(candidate.bookings?.length || 0) };
+  window.NIMR_INDEXED_DB_STATUS = { ok: true, savedAt, casesCount: plan.tracker.casesLength, primary: true };
+  return { ...lastEntityPersistenceStats, casesCount: plan.tracker.casesLength, bookingsCount: plan.tracker.bookingsLength };
 }
 
 function persistLargeStateSnapshot(candidate = state, metadata = {}) {
@@ -553,6 +612,7 @@ function adoptHydratedEntityState(candidate, entityPersistence) {
   });
   entityPersistenceTracker = {
     initialized: true,
+    mutationVersion: entityPersistenceMutationVersion,
     candidateSource: candidate,
     casesSource: candidate.cases,
     bookingsSource: candidate.bookings,

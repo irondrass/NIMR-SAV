@@ -10,6 +10,8 @@ function createMemoryIndexedDb() {
   let failNextTransaction = false;
   let failNextWriteTransaction = false;
   let delayNextTransactionMs = 0;
+  let delayedTransactionStarted = Promise.resolve();
+  let resolveDelayedTransactionStarted = null;
 
   function createDatabase(name, version) {
     const stores = new Map();
@@ -34,6 +36,10 @@ function createMemoryIndexedDb() {
         failNextTransaction = false;
         if (mode === "readwrite") failNextWriteTransaction = false;
         delayNextTransactionMs = 0;
+        if (mode === "readwrite" && completionDelay > 0) {
+          resolveDelayedTransactionStarted?.();
+          resolveDelayedTransactionStarted = null;
+        }
         const names = Array.isArray(storeNames) ? storeNames : [storeNames];
         const working = new Map(names.map((storeName) => {
           const definition = stores.get(storeName);
@@ -71,8 +77,8 @@ function createMemoryIndexedDb() {
             };
             return {
               put(value) {
+                const copy = clone(value);
                 return request(() => {
-                  const copy = clone(value);
                   const key = definition.keyPath ? copy[definition.keyPath] : undefined;
                   if (key === undefined || key === null || key === "") throw new Error(`Missing keyPath ${definition.keyPath}`);
                   entries.set(key, copy);
@@ -120,7 +126,13 @@ function createMemoryIndexedDb() {
     databases,
     failNextTransaction() { failNextTransaction = true; },
     failNextWriteTransaction() { failNextWriteTransaction = true; },
-    delayNextTransaction(milliseconds) { delayNextTransactionMs = milliseconds; },
+    delayNextTransaction(milliseconds) {
+      delayNextTransactionMs = milliseconds;
+      delayedTransactionStarted = new Promise((resolve) => {
+        resolveDelayedTransactionStarted = resolve;
+      });
+    },
+    waitForDelayedTransactionStart() { return delayedTransactionStarted; },
     open(name, version) {
       const request = {};
       setTimeout(() => {
@@ -336,15 +348,112 @@ smaller.cases[0].vin = "RETRIED-WRITE";
 await vm.run("persistLargeStateSnapshot(__p008Smaller, { reason: 'retry-after-failure' })");
 assert.equal((await vm.run("loadLargeStateSnapshot()")).state.cases[0].vin, "RETRIED-WRITE");
 
-const rapidA = { ...smaller, cases: [{ id: "rapid", vin: "A" }], bookings: [], auditLog: [] };
-const rapidB = { ...smaller, cases: [{ id: "rapid", vin: "B" }], bookings: [], auditLog: [] };
-vm.context.__p008RapidA = rapidA;
-vm.context.__p008RapidB = rapidB;
+const inFlightRaceSelection = process.env.P008_RACE_ONLY || "all";
+const shouldRunInFlightRace = (name) => inFlightRaceSelection === "all" || inFlightRaceSelection === name;
+const makeInFlightState = () => ({
+  ...smaller,
+  cases: [
+    { id: "in-flight-case", vin: "A" },
+    { id: "in-flight-case-delete", vin: "DELETE" },
+  ],
+  bookings: [
+    { id: "in-flight-booking", caseId: "in-flight-case", start: "2026-08-25T08:00:00.000Z", end: "2026-08-25T09:00:00.000Z", resourceIds: [], segments: [] },
+    { id: "in-flight-booking-delete", caseId: "in-flight-case-delete", start: "2026-08-26T08:00:00.000Z", end: "2026-08-26T09:00:00.000Z", resourceIds: [], segments: [] },
+  ],
+  auditLog: [{ id: "in-flight-audit-a", at: "2026-08-22T08:00:00.000Z", type: "A" }],
+});
+const installInFlightState = async (raceState, reason) => {
+  vm.context.__p008InFlightState = raceState;
+  await vm.run(`persistLargeStateSnapshot(__p008InFlightState, { reason: '${reason}-baseline', forceFull: true })`);
+};
+const startDelayedInFlightSave = async (reason) => {
+  memoryIndexedDb.delayNextTransaction(30);
+  const save = vm.run(`persistLargeStateSnapshot(__p008InFlightState, { reason: '${reason}' })`);
+  await memoryIndexedDb.waitForDelayedTransactionStart();
+  return { save };
+};
+
+if (shouldRunInFlightRace("case")) {
+  const sameStateCase = makeInFlightState();
+  await installInFlightState(sameStateCase, "in-flight-case");
+  sameStateCase.cases[0].vin = "B";
+  vm.context.__p008InFlightCase = sameStateCase.cases[0];
+  vm.run("markEntityCaseDirty(__p008InFlightCase)");
+  const { save: saveCaseB } = await startDelayedInFlightSave("in-flight-case-b");
+  sameStateCase.cases[0].vin = "C";
+  vm.run("markEntityCaseDirty(__p008InFlightCase)");
+  const saveCaseC = vm.run("persistLargeStateSnapshot(__p008InFlightState, { reason: 'in-flight-case-c' })");
+  const [, saveCaseCStats] = await Promise.all([saveCaseB, saveCaseC]);
+  assert.equal(saveCaseCStats.caseWrites, 1, "save #2 writes the same case dirtied again while save #1 was in flight");
+  assert.equal((await vm.run("loadLargeStateSnapshot()")).state.cases[0].vin, "C", "same-object A -> B -> C case update remains durable");
+}
+
+if (shouldRunInFlightRace("booking")) {
+  const sameStateBooking = makeInFlightState();
+  await installInFlightState(sameStateBooking, "in-flight-booking");
+  const { save: saveBookingA } = await startDelayedInFlightSave("in-flight-booking-a");
+  sameStateBooking.bookings[0].start = "2026-08-25T10:00:00.000Z";
+  vm.context.__p008InFlightBooking = sameStateBooking.bookings[0];
+  vm.run("markEntityBookingDirty(__p008InFlightBooking)");
+  const saveBookingB = vm.run("persistLargeStateSnapshot(__p008InFlightState, { reason: 'in-flight-booking-b' })");
+  const [, saveBookingBStats] = await Promise.all([saveBookingA, saveBookingB]);
+  assert.equal(saveBookingBStats.bookingWrites, 1, "save #2 writes the same booking dirtied while save #1 was in flight");
+  assert.equal((await vm.run("loadLargeStateSnapshot()")).state.bookings[0].start, "2026-08-25T10:00:00.000Z", "same-object booking update remains durable");
+}
+
+if (shouldRunInFlightRace("add")) {
+  const sameStateAdd = makeInFlightState();
+  await installInFlightState(sameStateAdd, "in-flight-add");
+  const { save: saveBeforeAdd } = await startDelayedInFlightSave("in-flight-before-add");
+  sameStateAdd.cases.push({ id: "in-flight-case-added", vin: "ADDED" });
+  const saveAfterAdd = vm.run("persistLargeStateSnapshot(__p008InFlightState, { reason: 'in-flight-after-add' })");
+  const [, saveAfterAddStats] = await Promise.all([saveBeforeAdd, saveAfterAdd]);
+  const addedState = (await vm.run("loadLargeStateSnapshot()")).state;
+  assert.equal(saveAfterAddStats.caseWrites, 1, "save #2 writes the structural case addition");
+  assert.equal(addedState.cases.filter((item) => item.id === "in-flight-case-added").length, 1, "in-flight structural add is durable exactly once");
+}
+
+if (shouldRunInFlightRace("delete")) {
+  const sameStateDelete = makeInFlightState();
+  await installInFlightState(sameStateDelete, "in-flight-delete");
+  const { save: saveBeforeDelete } = await startDelayedInFlightSave("in-flight-before-delete");
+  sameStateDelete.cases.splice(1, 1);
+  sameStateDelete.bookings.splice(1, 1);
+  vm.run("markEntityCaseDeleted('in-flight-case-delete'); markEntityBookingDeleted('in-flight-booking-delete')");
+  const saveAfterDelete = vm.run("persistLargeStateSnapshot(__p008InFlightState, { reason: 'in-flight-after-delete' })");
+  const [, saveAfterDeleteStats] = await Promise.all([saveBeforeDelete, saveAfterDelete]);
+  const deletedState = (await vm.run("loadLargeStateSnapshot()")).state;
+  assert.equal(saveAfterDeleteStats.caseDeletes, 1, "save #2 deletes the case removed while save #1 was in flight");
+  assert.equal(saveAfterDeleteStats.bookingDeletes, 1, "save #2 deletes the booking removed while save #1 was in flight");
+  assert.equal(deletedState.cases.some((item) => item.id === "in-flight-case-delete"), false, "in-flight case delete remains durable");
+  assert.equal(deletedState.bookings.some((item) => item.id === "in-flight-booking-delete"), false, "in-flight booking delete remains durable");
+}
+
+if (shouldRunInFlightRace("audit")) {
+  const sameStateAudit = makeInFlightState();
+  await installInFlightState(sameStateAudit, "in-flight-audit");
+  const { save: saveBeforeAudit } = await startDelayedInFlightSave("in-flight-before-audit");
+  const auditB = { id: "in-flight-audit-b", at: "2026-08-22T09:00:00.000Z", type: "B" };
+  sameStateAudit.auditLog.unshift(auditB);
+  vm.context.__p008InFlightAudit = auditB;
+  vm.run("markEntityAuditEntryDirty(__p008InFlightAudit)");
+  const saveAfterAudit = vm.run("persistLargeStateSnapshot(__p008InFlightState, { reason: 'in-flight-after-audit' })");
+  const [, saveAfterAuditStats] = await Promise.all([saveBeforeAudit, saveAfterAudit]);
+  const auditTypes = (await vm.run("loadLargeStateSnapshot()")).state.auditLog.map((entry) => entry.type);
+  assert.equal(saveAfterAuditStats.auditWrites, 1, "save #2 writes the audit event appended while save #1 was in flight");
+  assert.deepEqual(JSON.parse(JSON.stringify(auditTypes)), ["B", "A"], "in-flight audit append is durable with ordering preserved");
+}
+
+// Separate candidate objects intentionally exercise serialized full-replacement ordering.
+const fullReplacementRapidA = { ...smaller, cases: [{ id: "rapid", vin: "A" }], bookings: [], auditLog: [] };
+const fullReplacementRapidB = { ...smaller, cases: [{ id: "rapid", vin: "B" }], bookings: [], auditLog: [] };
+vm.context.__p008RapidA = fullReplacementRapidA;
+vm.context.__p008RapidB = fullReplacementRapidB;
 memoryIndexedDb.delayNextTransaction(30);
-const saveA = vm.run("persistLargeStateSnapshot(__p008RapidA, { reason: 'rapid-a', forceFull: true })");
-const saveB = vm.run("persistLargeStateSnapshot(__p008RapidB, { reason: 'rapid-b', forceFull: true })");
+const saveA = vm.run("persistLargeStateSnapshot(__p008RapidA, { reason: 'full-replacement-rapid-a', forceFull: true })");
+const saveB = vm.run("persistLargeStateSnapshot(__p008RapidB, { reason: 'full-replacement-rapid-b', forceFull: true })");
 await Promise.all([saveA, saveB]);
-assert.equal((await vm.run("loadLargeStateSnapshot()")).state.cases[0].vin, "B", "serialized queue leaves the newer rapid save durable");
+assert.equal((await vm.run("loadLargeStateSnapshot()")).state.cases[0].vin, "B", "serialized queue leaves the newer full replacement durable");
 
 await vm.run("runIndexedDbTransaction('outbox', 'readwrite', (store) => store.put({ operationId: 'keep-outbox', syncStatus: 'pending', createdAt: '2026-08-22' }))");
 await vm.run("runIndexedDbTransaction('sync_metadata', 'readwrite', (store) => store.put({ key: 'keep-sync', value: true }))");
@@ -389,6 +498,12 @@ let marker = JSON.parse(vm.localStorage.getItem("nimr-carrosserie-v1"));
 assert.equal(marker.entityState, true);
 assert.equal(marker.formatVersion, 1);
 assert.equal(Object.hasOwn(marker, "cases"), false, "large-state marker stays compact");
+const markerBeforeFailedSave = vm.localStorage.getItem("nimr-carrosserie-v1");
+vm.run("state.cases[0].vin = 'SAVE-FAILED'");
+memoryIndexedDb.failNextWriteTransaction();
+assert.equal(await vm.run("saveState({ skipCloud: true, skipSnapshot: true })"), false, "central save reports a failed IndexedDB commit");
+assert.equal(vm.localStorage.getItem("nimr-carrosserie-v1"), markerBeforeFailedSave, "failed IndexedDB commit does not publish a localStorage success marker");
+assert.equal((await vm.run("loadLargeStateSnapshot()")).state.cases[0].vin, "SAVE-A", "failed central save leaves the prior durable case value intact");
 vm.run("state.cases[0].vin = 'SAVE-B'");
 await vm.run("saveState({ skipCloud: true, skipSnapshot: true })");
 stats = vm.run("getEntityPersistenceStats()");

@@ -1,0 +1,535 @@
+{
+  "ticket": "P0-007",
+  "generatedAt": "2026-08-22T07:45:30.036Z",
+  "baselines": {
+    "idMsPerOperation": 0.012788235,
+    "vinMsPerOperation": 50.399495098,
+    "plateMsPerOperation": 54.044767647,
+    "orMsPerOperation": 67.688954902,
+    "conflictMs": 1612.7232,
+    "indexBuildMs": 1183.0827
+  },
+  "operationCounts": {
+    "identityLookupPerTypePerScale": 10000,
+    "collectionLookupPerHelperPerScale": 10000,
+    "warmIndexAccessPerPhasePerScale": 10000,
+    "conflictPerScale": 20
+  },
+  "results": [
+    {
+      "scale": 10000,
+      "cases": 10000,
+      "bookings": 30000,
+      "bookingPerCase": 3,
+      "operationCounts": {
+        "normalize": 1,
+        "coldIndexBuild": 1,
+        "warmIndexAccess": 10000,
+        "eachIdentityLookup": 10000,
+        "eachCollectionLookup": 10000,
+        "conflict": 20,
+        "rebuildAfterInvalidation": 1,
+        "warmAfterRebuild": 10000
+      },
+      "normalize": {
+        "label": "normalizeState",
+        "operations": 1,
+        "totalMs": 957.7962000000001
+      },
+      "coldIndexBuild": {
+        "label": "coldRuntimeIndexBuild",
+        "operations": 1,
+        "totalMs": 200.58889999999997
+      },
+      "warmIndexAccess": {
+        "label": "warmGetUiRuntimeIndexes",
+        "operations": 10000,
+        "warmupOperations": 100,
+        "totalMs": 27.612800000000107,
+        "msPerOperation": 0.0027612800000000105
+      },
+      "lookups": {
+        "id": {
+          "label": "idLookup",
+          "operations": 10000,
+          "warmupOperations": 100,
+          "totalMs": 23.084499999999935,
+          "msPerOperation": 0.0023084499999999936
+        },
+        "vin": {
+          "label": "vinLookup",
+          "operations": 10000,
+          "warmupOperations": 100,
+          "totalMs": 50.361000000000104,
+          "msPerOperation": 0.00503610000000001
+        },
+        "plate": {
+          "label": "plateLookup",
+          "operations": 10000,
+          "warmupOperations": 100,
+          "totalMs": 53.4054000000001,
+          "msPerOperation": 0.00534054000000001
+        },
+        "orNavNumber": {
+          "label": "orLookup",
+          "operations": 10000,
+          "warmupOperations": 100,
+          "totalMs": 49.37740000000008,
+          "msPerOperation": 0.004937740000000008
+        }
+      },
+      "bookingByCase": {
+        "label": "getIndexedCaseBookings",
+        "operations": 10000,
+        "warmupOperations": 100,
+        "totalMs": 24.02670000000012,
+        "msPerOperation": 0.0024026700000000117
+      },
+      "bookingByResource": {
+        "label": "getIndexedResourceBookings",
+        "operations": 10000,
+        "warmupOperations": 100,
+        "totalMs": 27.0308,
+        "msPerOperation": 0.00270308
+      },
+      "bookingByDay": {
+        "label": "getIndexedDayBookings",
+        "operations": 10000,
+        "warmupOperations": 100,
+        "totalMs": 28.8279,
+        "msPerOperation": 0.00288279
+      },
+      "conflict": {
+        "label": "findConflict",
+        "operations": 20,
+        "warmupOperations": 1,
+        "totalMs": 115.45630000000006,
+        "msPerOperation": 5.772815000000003
+      },
+      "conflictCandidates": {
+        "sourceCount": 30000,
+        "candidateCount": 252,
+        "indexed": true
+      },
+      "rebuildAfterInvalidation": {
+        "label": "rebuildAfterExplicitInvalidation",
+        "operations": 1,
+        "totalMs": 202.67150000000015
+      },
+      "warmAfterRebuild": {
+        "label": "warmAccessAfterRebuild",
+        "operations": 10000,
+        "warmupOperations": 100,
+        "totalMs": 24.671400000000176,
+        "msPerOperation": 0.0024671400000000174
+      },
+      "indexStats": {
+        "cold": {
+          "generation": 1,
+          "buildCount": 1,
+          "revision": 1,
+          "cases": 10000,
+          "bookings": 30000
+        },
+        "beforeRebuild": {
+          "generation": 1,
+          "buildCount": 1,
+          "revision": 1,
+          "cases": 10000,
+          "bookings": 30000
+        },
+        "afterRebuild": {
+          "generation": 2,
+          "buildCount": 2,
+          "revision": 2,
+          "cases": 10000,
+          "bookings": 30000
+        }
+      },
+      "memory": {
+        "afterNormalize": {
+          "rss": 212357120,
+          "heapUsed": 96966648,
+          "heapTotal": 160886784
+        },
+        "afterColdIndex": {
+          "rss": 215945216,
+          "heapUsed": 104417232,
+          "heapTotal": 148156416
+        },
+        "afterWarmReads": {
+          "rss": 219324416,
+          "heapUsed": 104781672,
+          "heapTotal": 150777856
+        },
+        "afterRebuild": {
+          "rss": 219615232,
+          "heapUsed": 104781688,
+          "heapTotal": 153661440
+        },
+        "indexDelta": {
+          "rss": 3588096,
+          "heapUsed": 7450584,
+          "heapTotal": -12730368
+        }
+      },
+      "validation": {
+        "id": true,
+        "vin": true,
+        "cases": 10000,
+        "bookings": 30000,
+        "warmDidNotRebuild": true,
+        "invalidationRebuiltExactlyOnce": true
+      }
+    },
+    {
+      "scale": 50000,
+      "cases": 50000,
+      "bookings": 150000,
+      "bookingPerCase": 3,
+      "operationCounts": {
+        "normalize": 1,
+        "coldIndexBuild": 1,
+        "warmIndexAccess": 10000,
+        "eachIdentityLookup": 10000,
+        "eachCollectionLookup": 10000,
+        "conflict": 20,
+        "rebuildAfterInvalidation": 1,
+        "warmAfterRebuild": 10000
+      },
+      "normalize": {
+        "label": "normalizeState",
+        "operations": 1,
+        "totalMs": 6296.071900000001
+      },
+      "coldIndexBuild": {
+        "label": "coldRuntimeIndexBuild",
+        "operations": 1,
+        "totalMs": 2214.5390000000007
+      },
+      "warmIndexAccess": {
+        "label": "warmGetUiRuntimeIndexes",
+        "operations": 10000,
+        "warmupOperations": 100,
+        "totalMs": 77.1187000000009,
+        "msPerOperation": 0.00771187000000009
+      },
+      "lookups": {
+        "id": {
+          "label": "idLookup",
+          "operations": 10000,
+          "warmupOperations": 100,
+          "totalMs": 56.1216000000004,
+          "msPerOperation": 0.00561216000000004
+        },
+        "vin": {
+          "label": "vinLookup",
+          "operations": 10000,
+          "warmupOperations": 100,
+          "totalMs": 93.74170000000049,
+          "msPerOperation": 0.00937417000000005
+        },
+        "plate": {
+          "label": "plateLookup",
+          "operations": 10000,
+          "warmupOperations": 100,
+          "totalMs": 148.33450000000084,
+          "msPerOperation": 0.014833450000000085
+        },
+        "orNavNumber": {
+          "label": "orLookup",
+          "operations": 10000,
+          "warmupOperations": 100,
+          "totalMs": 104.60499999999956,
+          "msPerOperation": 0.010460499999999956
+        }
+      },
+      "bookingByCase": {
+        "label": "getIndexedCaseBookings",
+        "operations": 10000,
+        "warmupOperations": 100,
+        "totalMs": 56.812299999999595,
+        "msPerOperation": 0.00568122999999996
+      },
+      "bookingByResource": {
+        "label": "getIndexedResourceBookings",
+        "operations": 10000,
+        "warmupOperations": 100,
+        "totalMs": 46.53330000000096,
+        "msPerOperation": 0.004653330000000096
+      },
+      "bookingByDay": {
+        "label": "getIndexedDayBookings",
+        "operations": 10000,
+        "warmupOperations": 100,
+        "totalMs": 31.292499999999563,
+        "msPerOperation": 0.0031292499999999563
+      },
+      "conflict": {
+        "label": "findConflict",
+        "operations": 20,
+        "warmupOperations": 1,
+        "totalMs": 1108.4568,
+        "msPerOperation": 55.422839999999994
+      },
+      "conflictCandidates": {
+        "sourceCount": 150000,
+        "candidateCount": 1326,
+        "indexed": true
+      },
+      "rebuildAfterInvalidation": {
+        "label": "rebuildAfterExplicitInvalidation",
+        "operations": 1,
+        "totalMs": 1829.0155000000013
+      },
+      "warmAfterRebuild": {
+        "label": "warmAccessAfterRebuild",
+        "operations": 10000,
+        "warmupOperations": 100,
+        "totalMs": 57.524600000000646,
+        "msPerOperation": 0.005752460000000064
+      },
+      "indexStats": {
+        "cold": {
+          "generation": 1,
+          "buildCount": 1,
+          "revision": 1,
+          "cases": 50000,
+          "bookings": 150000
+        },
+        "beforeRebuild": {
+          "generation": 1,
+          "buildCount": 1,
+          "revision": 1,
+          "cases": 50000,
+          "bookings": 150000
+        },
+        "afterRebuild": {
+          "generation": 2,
+          "buildCount": 2,
+          "revision": 2,
+          "cases": 50000,
+          "bookings": 150000
+        }
+      },
+      "memory": {
+        "afterNormalize": {
+          "rss": 742477824,
+          "heapUsed": 443494288,
+          "heapTotal": 626913280
+        },
+        "afterColdIndex": {
+          "rss": 760832000,
+          "heapUsed": 480912568,
+          "heapTotal": 563605504
+        },
+        "afterWarmReads": {
+          "rss": 764329984,
+          "heapUsed": 481284888,
+          "heapTotal": 562556928
+        },
+        "afterRebuild": {
+          "rss": 765652992,
+          "heapUsed": 481282104,
+          "heapTotal": 574877696
+        },
+        "indexDelta": {
+          "rss": 18354176,
+          "heapUsed": 37418280,
+          "heapTotal": -63307776
+        }
+      },
+      "validation": {
+        "id": true,
+        "vin": true,
+        "cases": 50000,
+        "bookings": 150000,
+        "warmDidNotRebuild": true,
+        "invalidationRebuiltExactlyOnce": true
+      }
+    },
+    {
+      "scale": 100000,
+      "cases": 100000,
+      "bookings": 300000,
+      "bookingPerCase": 3,
+      "operationCounts": {
+        "normalize": 1,
+        "coldIndexBuild": 1,
+        "warmIndexAccess": 10000,
+        "eachIdentityLookup": 10000,
+        "eachCollectionLookup": 10000,
+        "conflict": 20,
+        "rebuildAfterInvalidation": 1,
+        "warmAfterRebuild": 10000
+      },
+      "normalize": {
+        "label": "normalizeState",
+        "operations": 1,
+        "totalMs": 14442.2788
+      },
+      "coldIndexBuild": {
+        "label": "coldRuntimeIndexBuild",
+        "operations": 1,
+        "totalMs": 3603.729300000001
+      },
+      "warmIndexAccess": {
+        "label": "warmGetUiRuntimeIndexes",
+        "operations": 10000,
+        "warmupOperations": 100,
+        "totalMs": 88.71259999999893,
+        "msPerOperation": 0.008871259999999893
+      },
+      "lookups": {
+        "id": {
+          "label": "idLookup",
+          "operations": 10000,
+          "warmupOperations": 100,
+          "totalMs": 47.16649999999936,
+          "msPerOperation": 0.004716649999999936
+        },
+        "vin": {
+          "label": "vinLookup",
+          "operations": 10000,
+          "warmupOperations": 100,
+          "totalMs": 97.89940000000206,
+          "msPerOperation": 0.009789940000000207
+        },
+        "plate": {
+          "label": "plateLookup",
+          "operations": 10000,
+          "warmupOperations": 100,
+          "totalMs": 71.35330000000249,
+          "msPerOperation": 0.007135330000000249
+        },
+        "orNavNumber": {
+          "label": "orLookup",
+          "operations": 10000,
+          "warmupOperations": 100,
+          "totalMs": 81.90580000000045,
+          "msPerOperation": 0.008190580000000046
+        }
+      },
+      "bookingByCase": {
+        "label": "getIndexedCaseBookings",
+        "operations": 10000,
+        "warmupOperations": 100,
+        "totalMs": 59.852200000001176,
+        "msPerOperation": 0.005985220000000117
+      },
+      "bookingByResource": {
+        "label": "getIndexedResourceBookings",
+        "operations": 10000,
+        "warmupOperations": 100,
+        "totalMs": 49.1958999999988,
+        "msPerOperation": 0.00491958999999988
+      },
+      "bookingByDay": {
+        "label": "getIndexedDayBookings",
+        "operations": 10000,
+        "warmupOperations": 100,
+        "totalMs": 33.933499999999185,
+        "msPerOperation": 0.0033933499999999183
+      },
+      "conflict": {
+        "label": "findConflict",
+        "operations": 20,
+        "warmupOperations": 1,
+        "totalMs": 2157.8793000000005,
+        "msPerOperation": 107.89396500000002
+      },
+      "conflictCandidates": {
+        "sourceCount": 300000,
+        "candidateCount": 2652,
+        "indexed": true
+      },
+      "rebuildAfterInvalidation": {
+        "label": "rebuildAfterExplicitInvalidation",
+        "operations": 1,
+        "totalMs": 3851.5122999999985
+      },
+      "warmAfterRebuild": {
+        "label": "warmAccessAfterRebuild",
+        "operations": 10000,
+        "warmupOperations": 100,
+        "totalMs": 57.67740000000049,
+        "msPerOperation": 0.005767740000000049
+      },
+      "indexStats": {
+        "cold": {
+          "generation": 1,
+          "buildCount": 1,
+          "revision": 1,
+          "cases": 100000,
+          "bookings": 300000
+        },
+        "beforeRebuild": {
+          "generation": 1,
+          "buildCount": 1,
+          "revision": 1,
+          "cases": 100000,
+          "bookings": 300000
+        },
+        "afterRebuild": {
+          "generation": 2,
+          "buildCount": 2,
+          "revision": 2,
+          "cases": 100000,
+          "bookings": 300000
+        }
+      },
+      "memory": {
+        "afterNormalize": {
+          "rss": 1393512448,
+          "heapUsed": 877047672,
+          "heapTotal": 1232224256
+        },
+        "afterColdIndex": {
+          "rss": 1428697088,
+          "heapUsed": 950992744,
+          "heapTotal": 1113112576
+        },
+        "afterWarmReads": {
+          "rss": 1432354816,
+          "heapUsed": 951362448,
+          "heapTotal": 1091092480
+        },
+        "afterRebuild": {
+          "rss": 1433751552,
+          "heapUsed": 951361016,
+          "heapTotal": 1109442560
+        },
+        "indexDelta": {
+          "rss": 35184640,
+          "heapUsed": 73945072,
+          "heapTotal": -119111680
+        }
+      },
+      "validation": {
+        "id": true,
+        "vin": true,
+        "cases": 100000,
+        "bookings": 300000,
+        "warmDidNotRebuild": true,
+        "invalidationRebuiltExactlyOnce": true
+      }
+    }
+  ],
+  "ratios100k": {
+    "id": 2.7112961529899766,
+    "vin": 5148.090294526722,
+    "plate": 7574.249214401872,
+    "orNavNumber": 8264.244400518599,
+    "conflict": 14.94729756200914
+  },
+  "acceptance100k": {
+    "vin": true,
+    "plate": true,
+    "orNavNumber": true,
+    "id": true,
+    "bookingByCase": true,
+    "conflict": true,
+    "warmAccessNoRebuild": true
+  },
+  "overallPass": true
+}

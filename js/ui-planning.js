@@ -1,5 +1,5 @@
 function renderPlanning() {
-  if (typeof getUiRuntimeIndexes === "function") getUiRuntimeIndexes({ force: true });
+  if (typeof getUiRuntimeIndexes === "function") getUiRuntimeIndexes();
   const date = parseDateKey(state.planningDate);
   $("#planning-day-label").textContent = longDate(date);
   const alert = $("#day-alert");

@@ -1,11 +1,17 @@
 const PLAIN_JSON_EXPORT_CONFIRMATION = "EXPORT NON CHIFFRE";
 const RESTORE_BACKUP_CONFIRMATION = "RESTAURER";
 const LARGE_STATE_DB_NAME = "nimr-sav-large-state";
-const LARGE_STATE_DB_VERSION = 2;
+const LARGE_STATE_DB_VERSION = 3;
 const LARGE_STATE_STORE = "snapshots";
 const LARGE_STATE_KEY = "latest";
 const DURABLE_OUTBOX_STORE = "outbox";
 const SYNC_METADATA_STORE = "sync_metadata";
+const ENTITY_STATE_META_STORE = "state_meta";
+const ENTITY_CASE_STORE = "cases";
+const ENTITY_BOOKING_STORE = "bookings";
+const ENTITY_AUDIT_STORE = "audit_log";
+const ENTITY_STATE_FORMAT = "nimr-sav-entity-state";
+const ENTITY_STATE_FORMAT_VERSION = 1;
 const DURABLE_OUTBOX_MIRROR_KEY = "nimr-sav-outbox-mirror:v2";
 const DURABLE_OUTBOX_FALLBACK_KEY = "nimr-sav-outbox-fallback:v2";
 const LARGE_STATE_CASE_THRESHOLD = 250;
@@ -28,45 +34,87 @@ function openLargeStateDatabase() {
       if (!database.objectStoreNames.contains(SYNC_METADATA_STORE)) {
         database.createObjectStore(SYNC_METADATA_STORE, { keyPath: "key" });
       }
+      if (!database.objectStoreNames.contains(ENTITY_STATE_META_STORE)) {
+        database.createObjectStore(ENTITY_STATE_META_STORE, { keyPath: "id" });
+      }
+      if (!database.objectStoreNames.contains(ENTITY_CASE_STORE)) {
+        database.createObjectStore(ENTITY_CASE_STORE, { keyPath: "id" });
+      }
+      if (!database.objectStoreNames.contains(ENTITY_BOOKING_STORE)) {
+        database.createObjectStore(ENTITY_BOOKING_STORE, { keyPath: "id" });
+      }
+      if (!database.objectStoreNames.contains(ENTITY_AUDIT_STORE)) {
+        database.createObjectStore(ENTITY_AUDIT_STORE, { keyPath: "id" });
+      }
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error || new Error("Ouverture IndexedDB impossible."));
   });
 }
 
-function runIndexedDbTransaction(storeName, mode, operation) {
+function runIndexedDbStoresTransaction(storeNames, mode, operation) {
   return openLargeStateDatabase().then((database) => new Promise((resolve, reject) => {
-    const transaction = database.transaction(storeName, mode);
-    const store = transaction.objectStore(storeName);
-    let request;
-    try {
-      request = operation(store);
-    } catch (error) {
+    const names = [...new Set(Array.isArray(storeNames) ? storeNames : [storeNames])];
+    const transaction = database.transaction(names, mode);
+    const stores = Object.fromEntries(names.map((name) => [name, transaction.objectStore(name)]));
+    let operationResult;
+    let settled = false;
+    const rejectOnce = (error) => {
+      if (settled) return;
+      settled = true;
       database.close();
       reject(error);
+    };
+    try {
+      operationResult = operation(stores, transaction);
+    } catch (error) {
+      try { transaction.abort(); } catch { /* transaction may already be inactive */ }
+      rejectOnce(error);
       return;
     }
     transaction.oncomplete = () => {
-      const result = request?.result;
+      if (settled) return;
+      settled = true;
+      const result = typeof operationResult === "function"
+        ? operationResult()
+        : (operationResult && Object.hasOwn(operationResult, "result") ? operationResult.result : operationResult);
       database.close();
       resolve(result);
     };
     transaction.onerror = () => {
-      const error = transaction.error || request?.error || new Error("Transaction IndexedDB impossible.");
-      database.close();
-      reject(error);
+      rejectOnce(transaction.error || new Error("Transaction IndexedDB impossible."));
     };
     transaction.onabort = transaction.onerror;
   }));
+}
+
+function runIndexedDbTransaction(storeName, mode, operation) {
+  return runIndexedDbStoresTransaction([storeName], mode, (stores, transaction) => operation(stores[storeName], transaction));
 }
 
 function runLargeStateTransaction(mode, operation) {
   return runIndexedDbTransaction(LARGE_STATE_STORE, mode, operation);
 }
 
+function getEntityStateRoot(candidate) {
+  const root = {};
+  Object.keys(candidate || {}).forEach((key) => {
+    if (["cases", "bookings", "auditLog"].includes(key)) return;
+    root[key] = candidate[key];
+  });
+  return root;
+}
+
 function estimateStateJsonBytes(candidate = state) {
   try {
-    return new TextEncoder().encode(JSON.stringify(candidate || {})).byteLength;
+    const encoder = new TextEncoder();
+    let bytes = encoder.encode(JSON.stringify(getEntityStateRoot(candidate || {}))).byteLength;
+    [candidate?.cases, candidate?.bookings, candidate?.auditLog].forEach((collection) => {
+      (Array.isArray(collection) ? collection : []).forEach((entry) => {
+        bytes += encoder.encode(JSON.stringify(entry)).byteLength;
+      });
+    });
+    return bytes;
   } catch {
     return Number.POSITIVE_INFINITY;
   }
@@ -76,26 +124,427 @@ function shouldPersistStateInIndexedDb(candidate = state) {
   return typeof indexedDB !== "undefined" && Boolean(candidate && typeof candidate === "object");
 }
 
-async function persistLargeStateSnapshot(candidate = state, metadata = {}) {
-  if (!candidate || typeof candidate !== "object") throw new Error("État applicatif invalide.");
-  const savedAt = new Date().toISOString();
-  // IndexedDB applique un structured clone récursif aux objets. Sur plusieurs
-  // milliers de dossiers normalisés, ce clonage peut bloquer l'interface bien
-  // plus longtemps qu'une sérialisation JSON équivalente.
-  const stateJson = JSON.stringify(candidate);
-  await runLargeStateTransaction("readwrite", (store) => store.put({
-    id: LARGE_STATE_KEY,
-    savedAt,
-    schemaVersion: Number(candidate.schemaVersion || 0),
-    casesCount: Number(candidate.cases?.length || 0),
-    metadata: { ...metadata },
-    stateJson,
-  }));
-  window.NIMR_INDEXED_DB_STATUS = { ok: true, savedAt, casesCount: Number(candidate.cases?.length || 0), primary: true };
-  return { savedAt, casesCount: Number(candidate.cases?.length || 0) };
+function hashEntityPersistenceValue(value) {
+  const input = JSON.stringify(value ?? null);
+  let hash = 2166136261;
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
-async function loadLargeStateSnapshot() {
+function getEntityPersistenceKey(entity, prefix, index = 0) {
+  const id = String(entity?.id ?? "").trim();
+  return id || `${prefix}:fallback:${hashEntityPersistenceValue(entity)}:${index}`;
+}
+
+let entityPersistenceTail = Promise.resolve();
+let entityPersistenceTracker = {
+  initialized: false,
+  mutationVersion: 0,
+  candidateSource: null,
+  casesSource: null,
+  bookingsSource: null,
+  auditSource: null,
+  casesLength: -1,
+  bookingsLength: -1,
+  auditLength: -1,
+  cases: new Map(),
+  bookings: new Map(),
+  audit: new Map(),
+  auditObjectKeys: new WeakMap(),
+};
+let entityPersistenceMutationVersion = 0;
+const dirtyEntityCases = new Map();
+const deletedEntityCaseIds = new Map();
+const dirtyEntityBookings = new Map();
+const deletedEntityBookingIds = new Map();
+const dirtyEntityAuditEntries = new Map();
+let entityAuditStructureGeneration = 0;
+let entityStateFullReplacementGeneration = 0;
+let lastEntityPersistenceStats = null;
+
+function nextEntityPersistenceMutationGeneration() {
+  entityPersistenceMutationVersion += 1;
+  return entityPersistenceMutationVersion;
+}
+
+function markEntityCaseDirty(caseOrId) {
+  const caseItem = caseOrId && typeof caseOrId === "object" ? caseOrId : null;
+  const id = String(caseItem?.id ?? caseOrId ?? "").trim();
+  if (id) {
+    deletedEntityCaseIds.delete(id);
+    dirtyEntityCases.set(id, { value: caseItem, generation: nextEntityPersistenceMutationGeneration() });
+  }
+}
+
+function markEntityCaseDeleted(caseId) {
+  const id = String(caseId || "").trim();
+  if (id) {
+    dirtyEntityCases.delete(id);
+    deletedEntityCaseIds.set(id, nextEntityPersistenceMutationGeneration());
+  }
+}
+
+function markEntityBookingDirty(bookingOrId) {
+  const booking = bookingOrId && typeof bookingOrId === "object" ? bookingOrId : null;
+  const id = String(booking?.id ?? bookingOrId ?? "").trim();
+  if (id) {
+    deletedEntityBookingIds.delete(id);
+    dirtyEntityBookings.set(id, { value: booking, generation: nextEntityPersistenceMutationGeneration() });
+  }
+}
+
+function markEntityBookingDeleted(bookingId) {
+  const id = String(bookingId || "").trim();
+  if (id) {
+    dirtyEntityBookings.delete(id);
+    deletedEntityBookingIds.set(id, nextEntityPersistenceMutationGeneration());
+  }
+}
+
+function markEntityAuditEntryDirty(entry) {
+  const generation = nextEntityPersistenceMutationGeneration();
+  if (entry && typeof entry === "object") dirtyEntityAuditEntries.set(entry, generation);
+  entityAuditStructureGeneration = generation;
+}
+
+function markEntityStateFullReplacement() {
+  entityStateFullReplacementGeneration = nextEntityPersistenceMutationGeneration();
+}
+
+function getEntityPersistenceStats() {
+  return lastEntityPersistenceStats ? { ...lastEntityPersistenceStats } : null;
+}
+
+function makeEntityWrapper(id, order, value) {
+  return { id, order, value };
+}
+
+function buildFullEntityCollection(collection, prefix, objectKeyMap = null) {
+  const used = new Set();
+  const records = [];
+  const tracker = new Map();
+  collection.forEach((value, order) => {
+    let key = objectKeyMap?.get(value) || getEntityPersistenceKey(value, prefix, order);
+    while (used.has(key)) key = `${key}:duplicate:${order}`;
+    used.add(key);
+    if (objectKeyMap && value && typeof value === "object") objectKeyMap.set(value, key);
+    records.push(makeEntityWrapper(key, order, value));
+    tracker.set(key, { order, valueRef: value });
+  });
+  return { records, tracker };
+}
+
+function assignIncrementalOrders(items) {
+  const existing = items.filter((item) => item.existing);
+  for (let index = 1; index < existing.length; index += 1) {
+    if (existing[index].existing.order <= existing[index - 1].existing.order) return false;
+  }
+  let cursor = 0;
+  while (cursor < items.length) {
+    if (items[cursor].existing) {
+      items[cursor].order = items[cursor].existing.order;
+      cursor += 1;
+      continue;
+    }
+    const start = cursor;
+    while (cursor < items.length && !items[cursor].existing) cursor += 1;
+    const count = cursor - start;
+    const previous = start > 0 ? items[start - 1].order : null;
+    const next = cursor < items.length ? items[cursor].existing.order : null;
+    for (let offset = 0; offset < count; offset += 1) {
+      if (previous === null && next === null) items[start + offset].order = offset;
+      else if (previous === null) items[start + offset].order = next - (count - offset);
+      else if (next === null) items[start + offset].order = previous + offset + 1;
+      else items[start + offset].order = previous + ((next - previous) * (offset + 1)) / (count + 1);
+    }
+  }
+  return true;
+}
+
+function buildIncrementalCollectionPlan(collection, prefix, trackerMap, dirtyIds, dirtyValues = null, objectKeyMap = null) {
+  const used = new Set();
+  const items = collection.map((value, index) => {
+    let key = objectKeyMap?.get(value) || getEntityPersistenceKey(value, prefix, index);
+    while (used.has(key)) key = `${key}:duplicate:${index}`;
+    used.add(key);
+    if (objectKeyMap && value && typeof value === "object") objectKeyMap.set(value, key);
+    return { key, value, existing: trackerMap.get(key) || null, order: null };
+  });
+  const deleted = [...trackerMap.keys()].filter((key) => !used.has(key));
+  if (!assignIncrementalOrders(items)) {
+    items.forEach((item, index) => { item.order = index; });
+    return {
+      clear: true,
+      writes: items.map((item) => makeEntityWrapper(item.key, item.order, item.value)),
+      deletes: [],
+      nextTracker: new Map(items.map((item) => [item.key, { order: item.order, valueRef: item.value }])),
+    };
+  }
+  const writes = items
+    .filter((item) => !item.existing || item.existing.valueRef !== item.value || dirtyIds.has(item.key) || dirtyValues?.has(item.value))
+    .map((item) => makeEntityWrapper(item.key, item.order, item.value));
+  return {
+    clear: false,
+    writes,
+    deletes: deleted,
+    nextTracker: new Map(items.map((item) => [item.key, { order: item.order, valueRef: item.value }])),
+  };
+}
+
+function findCaseForEntityPersistence(candidate, id) {
+  if (candidate === state && typeof getIndexedCaseById === "function") return getIndexedCaseById(id);
+  return (candidate.cases || []).find((entry) => String(entry?.id || "") === id) || null;
+}
+
+function buildDirtyOnlyPlan(trackerMap, dirtyIds, findValue) {
+  const writes = [];
+  const ids = typeof dirtyIds?.keys === "function" ? dirtyIds.keys() : dirtyIds;
+  for (const id of ids) {
+    const existing = trackerMap.get(id);
+    const value = findValue(id, existing);
+    if (existing && value) writes.push(makeEntityWrapper(id, existing.order, value));
+  }
+  return { clear: false, writes, deletes: [], nextTracker: null };
+}
+
+function makeEntityStateMeta(candidate, metadata, savedAt) {
+  const { forceFull: _forceFull, ...storedMetadata } = metadata || {};
+  return {
+    id: LARGE_STATE_KEY,
+    format: ENTITY_STATE_FORMAT,
+    formatVersion: ENTITY_STATE_FORMAT_VERSION,
+    savedAt,
+    schemaVersion: Number(candidate.schemaVersion || 0),
+    dataSchemaVersion: Number(candidate.dataSchemaVersion || 0),
+    casesCount: Number(candidate.cases?.length || 0),
+    bookingsCount: Number(candidate.bookings?.length || 0),
+    auditCount: Number(candidate.auditLog?.length || 0),
+    metadata: storedMetadata,
+    root: getEntityStateRoot(candidate),
+  };
+}
+
+function snapshotEntityPersistenceMutations() {
+  return {
+    version: entityPersistenceMutationVersion,
+    dirtyCases: new Map(dirtyEntityCases),
+    deletedCaseIds: new Map(deletedEntityCaseIds),
+    dirtyBookings: new Map(dirtyEntityBookings),
+    deletedBookingIds: new Map(deletedEntityBookingIds),
+    dirtyAuditEntries: new Map(dirtyEntityAuditEntries),
+    auditStructureGeneration: entityAuditStructureGeneration,
+    fullReplacementGeneration: entityStateFullReplacementGeneration,
+  };
+}
+
+function buildEntityPersistencePlan(candidate, metadata, savedAt) {
+  const cases = Array.isArray(candidate.cases) ? candidate.cases : [];
+  const bookings = Array.isArray(candidate.bookings) ? candidate.bookings : [];
+  const auditLog = Array.isArray(candidate.auditLog) ? candidate.auditLog : [];
+  const mutations = snapshotEntityPersistenceMutations();
+  const tracker = {
+    mutationVersion: mutations.version,
+    candidateSource: candidate,
+    casesSource: cases,
+    bookingsSource: bookings,
+    auditSource: auditLog,
+    casesLength: cases.length,
+    bookingsLength: bookings.length,
+    auditLength: auditLog.length,
+  };
+  const full = metadata.forceFull === true
+    || !entityPersistenceTracker.initialized
+    || entityPersistenceTracker.candidateSource !== candidate
+    || mutations.fullReplacementGeneration > 0;
+  if (full) {
+    const casePlan = buildFullEntityCollection(cases, "case");
+    const bookingPlan = buildFullEntityCollection(bookings, "booking");
+    const auditObjectKeys = new WeakMap();
+    const auditPlan = buildFullEntityCollection(auditLog, "audit", auditObjectKeys);
+    return {
+      full: true,
+      meta: makeEntityStateMeta(candidate, metadata, savedAt),
+      cases: { clear: true, writes: casePlan.records, deletes: [], nextTracker: casePlan.tracker },
+      bookings: { clear: true, writes: bookingPlan.records, deletes: [], nextTracker: bookingPlan.tracker },
+      audit: { clear: true, writes: auditPlan.records, deletes: [], nextTracker: auditPlan.tracker },
+      auditObjectKeys,
+      mutations,
+      tracker,
+    };
+  }
+
+  const caseStructureChanged = entityPersistenceTracker.casesSource !== cases
+    || entityPersistenceTracker.casesLength !== cases.length
+    || mutations.deletedCaseIds.size > 0;
+  const bookingStructureChanged = entityPersistenceTracker.bookingsSource !== bookings
+    || entityPersistenceTracker.bookingsLength !== bookings.length
+    || mutations.deletedBookingIds.size > 0;
+  const auditStructureChanged = entityPersistenceTracker.auditSource !== auditLog
+    || entityPersistenceTracker.auditLength !== auditLog.length
+    || mutations.auditStructureGeneration > 0;
+  const dirtyCaseIds = new Set(mutations.dirtyCases.keys());
+  const dirtyBookingIds = new Set(mutations.dirtyBookings.keys());
+  const dirtyAuditEntries = new Set(mutations.dirtyAuditEntries.keys());
+  const casePlan = caseStructureChanged
+    ? buildIncrementalCollectionPlan(cases, "case", entityPersistenceTracker.cases, dirtyCaseIds)
+    : buildDirtyOnlyPlan(entityPersistenceTracker.cases, dirtyCaseIds, (id, existing) => mutations.dirtyCases.get(id)?.value || findCaseForEntityPersistence(candidate, id) || existing?.valueRef);
+  const bookingPlan = bookingStructureChanged
+    ? buildIncrementalCollectionPlan(bookings, "booking", entityPersistenceTracker.bookings, dirtyBookingIds)
+    : buildDirtyOnlyPlan(entityPersistenceTracker.bookings, dirtyBookingIds, (id, existing) => mutations.dirtyBookings.get(id)?.value || existing?.valueRef);
+  const auditPlan = auditStructureChanged
+    ? buildIncrementalCollectionPlan(auditLog, "audit", entityPersistenceTracker.audit, new Set(), dirtyAuditEntries, entityPersistenceTracker.auditObjectKeys)
+    : { clear: false, writes: [], deletes: [], nextTracker: null };
+  return {
+    full: false,
+    meta: makeEntityStateMeta(candidate, metadata, savedAt),
+    cases: casePlan,
+    bookings: bookingPlan,
+    audit: auditPlan,
+    auditObjectKeys: entityPersistenceTracker.auditObjectKeys,
+    mutations,
+    tracker,
+  };
+}
+
+function applyEntityStorePlan(store, plan) {
+  if (plan.clear) store.clear();
+  plan.deletes.forEach((id) => store.delete(id));
+  plan.writes.forEach((record) => store.put(record));
+}
+
+function getEntityMutationGeneration(marker) {
+  return marker && typeof marker === "object" ? marker.generation : marker;
+}
+
+function acknowledgeEntityMutationMap(current, planned) {
+  planned.forEach((plannedMarker, key) => {
+    if (getEntityMutationGeneration(current.get(key)) === getEntityMutationGeneration(plannedMarker)) current.delete(key);
+  });
+}
+
+function commitEntityPersistenceTracker(candidate, plan) {
+  const apply = (current, collectionPlan) => {
+    if (collectionPlan.nextTracker) return collectionPlan.nextTracker;
+    collectionPlan.deletes.forEach((id) => current.delete(id));
+    collectionPlan.writes.forEach((record) => current.set(record.id, { order: record.order, valueRef: record.value }));
+    return current;
+  };
+  entityPersistenceTracker.initialized = true;
+  entityPersistenceTracker.mutationVersion = plan.tracker.mutationVersion;
+  entityPersistenceTracker.candidateSource = plan.tracker.candidateSource;
+  entityPersistenceTracker.casesSource = plan.tracker.casesSource;
+  entityPersistenceTracker.bookingsSource = plan.tracker.bookingsSource;
+  entityPersistenceTracker.auditSource = plan.tracker.auditSource;
+  entityPersistenceTracker.casesLength = plan.tracker.casesLength;
+  entityPersistenceTracker.bookingsLength = plan.tracker.bookingsLength;
+  entityPersistenceTracker.auditLength = plan.tracker.auditLength;
+  entityPersistenceTracker.cases = apply(entityPersistenceTracker.cases, plan.cases);
+  entityPersistenceTracker.bookings = apply(entityPersistenceTracker.bookings, plan.bookings);
+  entityPersistenceTracker.audit = apply(entityPersistenceTracker.audit, plan.audit);
+  entityPersistenceTracker.auditObjectKeys = plan.auditObjectKeys;
+  acknowledgeEntityMutationMap(dirtyEntityCases, plan.mutations.dirtyCases);
+  acknowledgeEntityMutationMap(deletedEntityCaseIds, plan.mutations.deletedCaseIds);
+  acknowledgeEntityMutationMap(dirtyEntityBookings, plan.mutations.dirtyBookings);
+  acknowledgeEntityMutationMap(deletedEntityBookingIds, plan.mutations.deletedBookingIds);
+  acknowledgeEntityMutationMap(dirtyEntityAuditEntries, plan.mutations.dirtyAuditEntries);
+  if (entityAuditStructureGeneration === plan.mutations.auditStructureGeneration) entityAuditStructureGeneration = 0;
+  if (entityStateFullReplacementGeneration === plan.mutations.fullReplacementGeneration) entityStateFullReplacementGeneration = 0;
+}
+
+async function persistEntityState(candidate, metadata = {}) {
+  if (!candidate || typeof candidate !== "object") throw new Error("État applicatif invalide.");
+  const savedAt = new Date().toISOString();
+  const plan = buildEntityPersistencePlan(candidate, metadata, savedAt);
+  await runIndexedDbStoresTransaction(
+    [ENTITY_STATE_META_STORE, ENTITY_CASE_STORE, ENTITY_BOOKING_STORE, ENTITY_AUDIT_STORE],
+    "readwrite",
+    (stores) => {
+      applyEntityStorePlan(stores[ENTITY_CASE_STORE], plan.cases);
+      applyEntityStorePlan(stores[ENTITY_BOOKING_STORE], plan.bookings);
+      applyEntityStorePlan(stores[ENTITY_AUDIT_STORE], plan.audit);
+      stores[ENTITY_STATE_META_STORE].put(plan.meta);
+      return null;
+    },
+  );
+  commitEntityPersistenceTracker(candidate, plan);
+  lastEntityPersistenceStats = {
+    savedAt,
+    full: plan.full,
+    rootWrites: 1,
+    caseWrites: plan.cases.writes.length,
+    caseDeletes: plan.cases.deletes.length,
+    bookingWrites: plan.bookings.writes.length,
+    bookingDeletes: plan.bookings.deletes.length,
+    auditWrites: plan.audit.writes.length,
+    auditDeletes: plan.audit.deletes.length,
+  };
+  window.NIMR_INDEXED_DB_STATUS = { ok: true, savedAt, casesCount: plan.tracker.casesLength, primary: true };
+  return { ...lastEntityPersistenceStats, casesCount: plan.tracker.casesLength, bookingsCount: plan.tracker.bookingsLength };
+}
+
+function persistLargeStateSnapshot(candidate = state, metadata = {}) {
+  const run = entityPersistenceTail.then(
+    () => persistEntityState(candidate, metadata),
+    () => persistEntityState(candidate, metadata),
+  );
+  entityPersistenceTail = run.catch(() => null);
+  return run;
+}
+
+async function loadEntityStateSnapshot() {
+  const result = await runIndexedDbStoresTransaction(
+    [ENTITY_STATE_META_STORE, ENTITY_CASE_STORE, ENTITY_BOOKING_STORE, ENTITY_AUDIT_STORE],
+    "readonly",
+    (stores) => {
+      const metaRequest = stores[ENTITY_STATE_META_STORE].get(LARGE_STATE_KEY);
+      const caseRequest = stores[ENTITY_CASE_STORE].getAll();
+      const bookingRequest = stores[ENTITY_BOOKING_STORE].getAll();
+      const auditRequest = stores[ENTITY_AUDIT_STORE].getAll();
+      return () => ({
+        meta: metaRequest.result || null,
+        cases: caseRequest.result || [],
+        bookings: bookingRequest.result || [],
+        auditLog: auditRequest.result || [],
+      });
+    },
+  );
+  const meta = result?.meta;
+  if (meta?.format !== ENTITY_STATE_FORMAT || Number(meta.formatVersion) !== ENTITY_STATE_FORMAT_VERSION) return null;
+  const sortRecords = (records) => records.slice().sort((left, right) => Number(left.order || 0) - Number(right.order || 0));
+  const caseRecords = sortRecords(result.cases);
+  const bookingRecords = sortRecords(result.bookings);
+  const auditRecords = sortRecords(result.auditLog);
+  if (
+    caseRecords.length !== Number(meta.casesCount || 0)
+    || bookingRecords.length !== Number(meta.bookingsCount || 0)
+    || auditRecords.length !== Number(meta.auditCount || 0)
+  ) throw new Error("État IndexedDB incomplet : compteurs d'entités incohérents.");
+  const restoredState = {
+    ...(meta.root && typeof meta.root === "object" ? meta.root : {}),
+    cases: caseRecords.map((record) => record.value),
+    bookings: bookingRecords.map((record) => record.value),
+    auditLog: auditRecords.map((record) => record.value),
+  };
+  return {
+    id: meta.id,
+    format: meta.format,
+    formatVersion: meta.formatVersion,
+    savedAt: meta.savedAt,
+    schemaVersion: meta.schemaVersion,
+    dataSchemaVersion: meta.dataSchemaVersion,
+    casesCount: meta.casesCount,
+    bookingsCount: meta.bookingsCount,
+    auditCount: meta.auditCount,
+    metadata: meta.metadata,
+    state: restoredState,
+    entityPersistence: { caseRecords, bookingRecords, auditRecords },
+  };
+}
+
+async function loadLegacyLargeStateSnapshot() {
   const record = await runLargeStateTransaction("readonly", (store) => store.get(LARGE_STATE_KEY));
   if (!record) return null;
   let restoredState = record.state;
@@ -112,8 +561,70 @@ async function loadLargeStateSnapshot() {
   return { ...metadata, state: restoredState };
 }
 
+async function loadLargeStateSnapshot() {
+  const entityRecord = await loadEntityStateSnapshot();
+  if (entityRecord?.state) {
+    window.NIMR_INDEXED_DB_STATUS = { ok: true, savedAt: entityRecord.savedAt || "", casesCount: entityRecord.state.cases.length, primary: true, entityState: true };
+    return entityRecord;
+  }
+  const legacyRecord = await loadLegacyLargeStateSnapshot();
+  if (!legacyRecord?.state) return null;
+  try {
+    await persistLargeStateSnapshot(legacyRecord.state, { reason: "legacy-v2-migration", forceFull: true });
+    const migrated = await loadEntityStateSnapshot();
+    if (!migrated?.state
+      || migrated.state.cases.length !== legacyRecord.state.cases.length
+      || migrated.state.bookings.length !== (legacyRecord.state.bookings || []).length) {
+      throw new Error("Vérification de migration IndexedDB incomplète.");
+    }
+    return { ...migrated, migratedFromLegacy: true, legacyRetained: true };
+  } catch (error) {
+    return { ...legacyRecord, migrationFailed: true, migrationError: error?.message || String(error), legacyRetained: true };
+  }
+}
+
 async function removeLargeStateSnapshot() {
-  await runLargeStateTransaction("readwrite", (store) => store.delete(LARGE_STATE_KEY));
+  await runIndexedDbStoresTransaction(
+    [LARGE_STATE_STORE, ENTITY_STATE_META_STORE, ENTITY_CASE_STORE, ENTITY_BOOKING_STORE, ENTITY_AUDIT_STORE],
+    "readwrite",
+    (stores) => {
+      stores[LARGE_STATE_STORE].delete(LARGE_STATE_KEY);
+      stores[ENTITY_STATE_META_STORE].clear();
+      stores[ENTITY_CASE_STORE].clear();
+      stores[ENTITY_BOOKING_STORE].clear();
+      stores[ENTITY_AUDIT_STORE].clear();
+      return null;
+    },
+  );
+  markEntityStateFullReplacement();
+}
+
+function adoptHydratedEntityState(candidate, entityPersistence) {
+  if (!candidate || !entityPersistence) return;
+  const adopt = (values, records) => new Map(records.map((record, index) => [
+    record.id,
+    { order: record.order, valueRef: values[index] },
+  ]));
+  const auditObjectKeys = new WeakMap();
+  entityPersistence.auditRecords.forEach((record, index) => {
+    const value = candidate.auditLog[index];
+    if (value && typeof value === "object") auditObjectKeys.set(value, record.id);
+  });
+  entityPersistenceTracker = {
+    initialized: true,
+    mutationVersion: entityPersistenceMutationVersion,
+    candidateSource: candidate,
+    casesSource: candidate.cases,
+    bookingsSource: candidate.bookings,
+    auditSource: candidate.auditLog,
+    casesLength: candidate.cases.length,
+    bookingsLength: candidate.bookings.length,
+    auditLength: candidate.auditLog.length,
+    cases: adopt(candidate.cases, entityPersistence.caseRecords),
+    bookings: adopt(candidate.bookings, entityPersistence.bookingRecords),
+    audit: adopt(candidate.auditLog, entityPersistence.auditRecords),
+    auditObjectKeys,
+  };
 }
 
 async function hydrateLargeStateIfAvailable() {
@@ -126,6 +637,7 @@ async function hydrateLargeStateIfAvailable() {
     ? migrateLegacyState(record.state).state
     : record.state;
   state = normalizeState(migrated);
+  if (record.entityPersistence) adoptHydratedEntityState(state, record.entityPersistence);
   if (typeof reconcileActiveCaseSelection === "function") reconcileActiveCaseSelection(previousSelection);
   return { hydrated: true, record };
 }
@@ -534,10 +1046,23 @@ function getPendingOutboxCount() {
 
 window.estimateStateJsonBytes = estimateStateJsonBytes;
 window.shouldPersistStateInIndexedDb = shouldPersistStateInIndexedDb;
+window.runIndexedDbStoresTransaction = runIndexedDbStoresTransaction;
 window.persistLargeStateSnapshot = persistLargeStateSnapshot;
 window.loadLargeStateSnapshot = loadLargeStateSnapshot;
 window.removeLargeStateSnapshot = removeLargeStateSnapshot;
 window.hydrateLargeStateIfAvailable = hydrateLargeStateIfAvailable;
+window.markEntityCaseDirty = markEntityCaseDirty;
+window.markEntityCaseDeleted = markEntityCaseDeleted;
+window.markEntityBookingDirty = markEntityBookingDirty;
+window.markEntityBookingDeleted = markEntityBookingDeleted;
+window.markEntityAuditEntryDirty = markEntityAuditEntryDirty;
+window.markEntityStateFullReplacement = markEntityStateFullReplacement;
+window.getEntityPersistenceStats = getEntityPersistenceStats;
+window.NIMR_ENTITY_PERSISTENCE_TEST_API = Object.freeze({
+  buildEntityPersistencePlan,
+  commitEntityPersistenceTracker,
+  markEntityStateFullReplacement,
+});
 window.normalizeDurableOutboxOperation = normalizeDurableOutboxOperation;
 window.loadDurableOutboxOperations = loadDurableOutboxOperations;
 window.putDurableOutboxOperation = putDurableOutboxOperation;

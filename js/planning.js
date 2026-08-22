@@ -751,6 +751,10 @@ function invalidatePlanningRuntimeIndexes() {
   planningCaseIndex = new Map();
 }
 
+function markBookingEntityPersistenceDirty(booking) {
+  if (booking && typeof markEntityBookingDirty === "function") markEntityBookingDirty(booking);
+}
+
 function getPlanningCaseIndex() {
   if (typeof getUiRuntimeIndexes === "function") return getUiRuntimeIndexes().caseById;
   const cases = Array.isArray(state?.cases) ? state.cases : [];
@@ -1257,6 +1261,7 @@ function openBookingWorkSession(booking, startedAt, technicianId) {
   const last = sessions.at(-1);
   if (last && !last.completedAt && !last.pausedAt) return;
   sessions.push({ startedAt, startedBy: technicianId || "", pausedAt: "", pausedBy: "", completedAt: "", completedBy: "", pauseReason: "" });
+  markBookingEntityPersistenceDirty(booking);
 }
 
 function closeBookingWorkSession(booking, fields = {}) {
@@ -1267,6 +1272,7 @@ function closeBookingWorkSession(booking, fields = {}) {
     sessions.push(session);
   }
   Object.assign(session, fields);
+  markBookingEntityPersistenceDirty(booking);
 }
 
 function estimateBookingWorkedMinutes(booking, fallbackEnd = new Date()) {
@@ -1319,6 +1325,7 @@ function applySegmentsToBooking(booking, segments) {
   booking.segments = cleanSegments;
   booking.start = cleanSegments[0].start;
   booking.end = cleanSegments.at(-1).end;
+  markBookingEntityPersistenceDirty(booking);
   return true;
 }
 
@@ -1357,7 +1364,9 @@ function completeBookingReservationAt(booking, completedAt, options = {}) {
     applySegmentsToBooking(booking, keptSegments);
   } else if (options.removeIfEmpty !== false) {
     state.bookings = state.bookings.filter((candidate) => candidate.id !== booking.id);
+    if (typeof markEntityBookingDeleted === "function") markEntityBookingDeleted(booking.id);
   }
+  if (!removed) markBookingEntityPersistenceDirty(booking);
 
   return {
     removed,
@@ -1380,6 +1389,7 @@ function applySlotToBooking(booking, match, durationMinutes) {
   booking.plannedEnd = booking.end;
   booking.plannedSegments = clonePlanningSegments(segments);
   booking.plannedMinutes = durationMinutes || sumBookingSegmentsMinutes(segments);
+  markBookingEntityPersistenceDirty(booking);
 }
 
 function refreshCaseAppointmentFromBookings(item) {
@@ -1429,6 +1439,7 @@ function startCaseBookingTask(item, bookingId, meta = {}) {
   const label = meta.resumed || booking.remainingFromPaused ? "Tâche reprise" : "Tâche démarrée";
   const type = meta.resumed || booking.remainingFromPaused ? "planning.task.resumed" : "planning.task.started";
   addHistory(item, type, label, `${booking.title || getDurationLabel(booking.key)} ${label.toLowerCase()}${actor} à ${formatDateTime(now)}.`);
+  markBookingEntityPersistenceDirty(booking);
   refreshCaseAppointmentFromBookings(item);
   return { ok: true, message: meta.resumed || booking.remainingFromPaused ? "Tâche reprise." : "Tâche démarrée.", booking };
 }
@@ -1540,6 +1551,7 @@ function pauseCaseBookingTask(item, bookingId, reason, meta = {}) {
     `${booking.title || getDurationLabel(booking.key)} suspendue${meta.actorLabel ? ` par ${meta.actorLabel}` : ""}: ${cleanReason}. Temps travaillé: ${formatLocalizedDecimal(workedMinutes / 60)} h. Reliquat replanifié le ${formatDateTime(remainder.start)}.`
   );
   refreshCaseAppointmentFromBookings(item);
+  markBookingEntityPersistenceDirty(booking);
   return { ok: true, message: "Tâche mise en pause et reliquat replanifié.", booking, remainder };
 }
 
@@ -1739,6 +1751,7 @@ function blockTechnicianTask(item, bookingId, technicianId, reason, details = ""
   target.blockedBy = technicianId || "";
   target.blockReason = cleanReason;
   target.blockDetails = String(details || "").trim();
+  markBookingEntityPersistenceDirty(target);
   applyCaseBlockerFromTask(item, target, cleanReason, target.blockDetails);
   addHistory(
     item,
@@ -1779,6 +1792,7 @@ function clearTechnicianTaskBlock(item, bookingId, technicianId, options = {}) {
   if (hadBlock && !options.silent) {
     addHistory(item, "planning.task.unblocked", "Blocage tâche retiré", `${booking.title || getDurationLabel(booking.key)} débloquée par ${getTechnicianActorLabel(technicianId)}.`);
   }
+  markBookingEntityPersistenceDirty(booking);
   return { ok: true, message: "Blocage retiré.", booking };
 }
 
@@ -1828,6 +1842,7 @@ function addTechnicianTaskNote(item, bookingId, technicianId, note) {
   }
   booking.notes = Array.isArray(booking.notes) ? booking.notes : [];
   booking.notes.push({ id: uid("task-note"), at: new Date().toISOString(), by: technicianId || "", text: cleanNote });
+  markBookingEntityPersistenceDirty(booking);
   addHistory(item, "planning.task.note", "Note technicien ajoutée", `${booking.title || getDurationLabel(booking.key)} · ${getTechnicianActorLabel(technicianId)}: ${cleanNote}`);
   return { ok: true, message: "Note ajoutée.", booking };
 }
@@ -1844,6 +1859,7 @@ function attachTechnicianTaskPhoto(item, bookingId, technicianId, photoId) {
   }
   booking.photoIds = Array.isArray(booking.photoIds) ? booking.photoIds : [];
   if (!booking.photoIds.includes(photoId)) booking.photoIds.push(photoId);
+  markBookingEntityPersistenceDirty(booking);
   addHistory(item, "planning.task.photo", "Photo tâche ajoutée", `${booking.title || getDurationLabel(booking.key)} · photo ajoutée par ${getTechnicianActorLabel(technicianId)}.`);
   return { ok: true, message: "Photo rattachée à la tâche.", booking };
 }
@@ -2244,6 +2260,7 @@ function applyDependentBookingReschedule(item, previews, actor) {
     booking.plannedSegments = clonePlanningSegments(segments);
     booking.plannedMinutes = Number(preview.plannedMinutes || 0) || getBookingEffectivePlanningMinutes(booking, item);
     booking.rescheduledAt = new Date().toISOString();
+    markBookingEntityPersistenceDirty(booking);
 
     addHistory(
       item,
@@ -3309,6 +3326,7 @@ function updateSubcontractDelay(item, subcontractId, delayMinutes, reason, meta 
     booking.plannedEnd = booking.end;
     booking.plannedSegments = clonePlanningSegments(slot.segments);
     booking.rescheduledAt = new Date().toISOString();
+    markBookingEntityPersistenceDirty(booking);
     tempBookings.push(cloneBooking(booking));
     cursor = new Date(booking.end);
   });

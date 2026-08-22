@@ -1,0 +1,564 @@
+{
+  "benchmark": "P0-008 entity-level IndexedDB persistence",
+  "generatedAt": "2026-08-22T11:22:28.976Z",
+  "freshChildProcessPerScale": true,
+  "browserIndexedDbMeasured": false,
+  "adapterDisclosure": "Production partition/diff planner with deterministic in-memory record-store adapter; browser IndexedDB I/O latency is not measured.",
+  "concurrencyCorrectness": {
+    "sameStateCase": {
+      "finalVin": "C",
+      "secondSaveCaseWrites": 1
+    },
+    "sameStateBooking": {
+      "finalStart": "B",
+      "secondSaveBookingWrites": 1
+    },
+    "structuralAdd": {
+      "durableCount": 1,
+      "secondSaveCaseWrites": 1
+    },
+    "structuralDelete": {
+      "caseDurable": true,
+      "bookingDurable": true,
+      "secondSaveCaseDeletes": 1,
+      "secondSaveBookingDeletes": 1
+    },
+    "auditAppend": {
+      "durableOrder": [
+        "B",
+        "A"
+      ],
+      "secondSaveAuditWrites": 1
+    },
+    "commitClearsNewerMarkers": false,
+    "trackerUsesLivePostPlanLengths": false,
+    "allPass": true
+  },
+  "scales": [
+    {
+      "caseCount": 10000,
+      "bookingCount": 30000,
+      "adapter": "production partition/diff planner with deterministic in-memory record-store adapter",
+      "browserIndexedDbMeasured": false,
+      "initialPersistence": {
+        "milliseconds": 33.27029999999999,
+        "plannerMilliseconds": 28.85239999999999,
+        "adapterWriteMilliseconds": 4.417900000000003,
+        "rootWrites": 1,
+        "caseWrites": 10000,
+        "caseDeletes": 0,
+        "bookingWrites": 30000,
+        "bookingDeletes": 0,
+        "auditWrites": 0,
+        "auditDeletes": 0
+      },
+      "hydration": {
+        "milliseconds": 3.0634000000000015,
+        "caseRecords": 10000,
+        "bookingRecords": 30000
+      },
+      "updateOneCase": {
+        "milliseconds": 0.13570000000004256,
+        "plannerMilliseconds": 0.13030000000003383,
+        "adapterWriteMilliseconds": 0.005400000000008731,
+        "rootWrites": 1,
+        "caseWrites": 1,
+        "caseDeletes": 0,
+        "bookingWrites": 0,
+        "bookingDeletes": 0,
+        "auditWrites": 0,
+        "auditDeletes": 0
+      },
+      "updateOneBooking": {
+        "milliseconds": 0.10489999999998645,
+        "plannerMilliseconds": 0.04610000000002401,
+        "adapterWriteMilliseconds": 0.05879999999996244,
+        "rootWrites": 1,
+        "caseWrites": 0,
+        "caseDeletes": 0,
+        "bookingWrites": 1,
+        "bookingDeletes": 0,
+        "auditWrites": 0,
+        "auditDeletes": 0
+      },
+      "addOneCase": {
+        "milliseconds": 9.141099999999994,
+        "plannerMilliseconds": 9.129700000000014,
+        "adapterWriteMilliseconds": 0.011399999999980537,
+        "rootWrites": 1,
+        "caseWrites": 1,
+        "caseDeletes": 0,
+        "bookingWrites": 0,
+        "bookingDeletes": 0,
+        "auditWrites": 0,
+        "auditDeletes": 0
+      },
+      "deleteOneCase": {
+        "milliseconds": 8.084699999999998,
+        "plannerMilliseconds": 8.033399999999972,
+        "adapterWriteMilliseconds": 0.0513000000000261,
+        "rootWrites": 1,
+        "caseWrites": 0,
+        "caseDeletes": 1,
+        "bookingWrites": 0,
+        "bookingDeletes": 0,
+        "auditWrites": 0,
+        "auditDeletes": 0
+      },
+      "addOneBooking": {
+        "milliseconds": 26.04610000000008,
+        "plannerMilliseconds": 26.040400000000034,
+        "adapterWriteMilliseconds": 0.005700000000047112,
+        "rootWrites": 1,
+        "caseWrites": 0,
+        "caseDeletes": 0,
+        "bookingWrites": 1,
+        "bookingDeletes": 0,
+        "auditWrites": 0,
+        "auditDeletes": 0
+      },
+      "deleteOneBooking": {
+        "milliseconds": 25.74339999999995,
+        "plannerMilliseconds": 25.73739999999998,
+        "adapterWriteMilliseconds": 0.005999999999971806,
+        "rootWrites": 1,
+        "caseWrites": 0,
+        "caseDeletes": 0,
+        "bookingWrites": 0,
+        "bookingDeletes": 1,
+        "auditWrites": 0,
+        "auditDeletes": 0
+      },
+      "rootOnly": {
+        "milliseconds": 0.05769999999995434,
+        "plannerMilliseconds": 0.05679999999995289,
+        "adapterWriteMilliseconds": 0.0009000000000014552,
+        "rootWrites": 1,
+        "caseWrites": 0,
+        "caseDeletes": 0,
+        "bookingWrites": 0,
+        "bookingDeletes": 0,
+        "auditWrites": 0,
+        "auditDeletes": 0
+      },
+      "appendAudit": {
+        "milliseconds": 0.19599999999996953,
+        "plannerMilliseconds": 0.19259999999997035,
+        "adapterWriteMilliseconds": 0.0033999999999991815,
+        "rootWrites": 1,
+        "caseWrites": 0,
+        "caseDeletes": 0,
+        "bookingWrites": 0,
+        "bookingDeletes": 0,
+        "auditWrites": 1,
+        "auditDeletes": 0
+      },
+      "noChange": {
+        "milliseconds": 0.054100000000005366,
+        "plannerMilliseconds": 0.0513000000000261,
+        "adapterWriteMilliseconds": 0.0027999999999792635,
+        "rootWrites": 1,
+        "caseWrites": 0,
+        "caseDeletes": 0,
+        "bookingWrites": 0,
+        "bookingDeletes": 0,
+        "auditWrites": 0,
+        "auditDeletes": 0
+      },
+      "storedRecordCounts": {
+        "stateMeta": 1,
+        "cases": 10000,
+        "bookings": 30000,
+        "auditLog": 1
+      },
+      "correctness": {
+        "noRangeError": true,
+        "noFullStateJsonStringify": true,
+        "hydrationCountsExact": true,
+        "representativeEntitiesEqual": true,
+        "deleteDoesNotResurrect": true,
+        "oneEntityUpdatesSurviveHydration": true,
+        "rootSurvivesHydration": true,
+        "runtimeIndexesAbsent": true
+      },
+      "memory": {
+        "beforeDataset": {
+          "rss": 44412928,
+          "heapUsed": 4674208,
+          "heapTotal": 7442432
+        },
+        "afterDataset": {
+          "rss": 88850432,
+          "heapUsed": 29214424,
+          "heapTotal": 64049152
+        },
+        "afterInitialSave": {
+          "rss": 104439808,
+          "heapUsed": 41031432,
+          "heapTotal": 77230080
+        },
+        "afterHydration": {
+          "rss": 104837120,
+          "heapUsed": 41350904,
+          "heapTotal": 76951552
+        },
+        "final": {
+          "rss": 117731328,
+          "heapUsed": 41595816,
+          "heapTotal": 78123008
+        }
+      }
+    },
+    {
+      "caseCount": 50000,
+      "bookingCount": 150000,
+      "adapter": "production partition/diff planner with deterministic in-memory record-store adapter",
+      "browserIndexedDbMeasured": false,
+      "initialPersistence": {
+        "milliseconds": 211.2048000000001,
+        "plannerMilliseconds": 170.5223000000001,
+        "adapterWriteMilliseconds": 40.682500000000005,
+        "rootWrites": 1,
+        "caseWrites": 50000,
+        "caseDeletes": 0,
+        "bookingWrites": 150000,
+        "bookingDeletes": 0,
+        "auditWrites": 0,
+        "auditDeletes": 0
+      },
+      "hydration": {
+        "milliseconds": 12.597200000000043,
+        "caseRecords": 50000,
+        "bookingRecords": 150000
+      },
+      "updateOneCase": {
+        "milliseconds": 0.15470000000004802,
+        "plannerMilliseconds": 0.1491000000000895,
+        "adapterWriteMilliseconds": 0.005599999999958527,
+        "rootWrites": 1,
+        "caseWrites": 1,
+        "caseDeletes": 0,
+        "bookingWrites": 0,
+        "bookingDeletes": 0,
+        "auditWrites": 0,
+        "auditDeletes": 0
+      },
+      "updateOneBooking": {
+        "milliseconds": 0.06059999999979482,
+        "plannerMilliseconds": 0.05579999999986285,
+        "adapterWriteMilliseconds": 0.00479999999993197,
+        "rootWrites": 1,
+        "caseWrites": 0,
+        "caseDeletes": 0,
+        "bookingWrites": 1,
+        "bookingDeletes": 0,
+        "auditWrites": 0,
+        "auditDeletes": 0
+      },
+      "addOneCase": {
+        "milliseconds": 47.619699999999966,
+        "plannerMilliseconds": 47.59909999999991,
+        "adapterWriteMilliseconds": 0.02060000000005857,
+        "rootWrites": 1,
+        "caseWrites": 1,
+        "caseDeletes": 0,
+        "bookingWrites": 0,
+        "bookingDeletes": 0,
+        "auditWrites": 0,
+        "auditDeletes": 0
+      },
+      "deleteOneCase": {
+        "milliseconds": 45.14509999999973,
+        "plannerMilliseconds": 45.06219999999985,
+        "adapterWriteMilliseconds": 0.0828999999998814,
+        "rootWrites": 1,
+        "caseWrites": 0,
+        "caseDeletes": 1,
+        "bookingWrites": 0,
+        "bookingDeletes": 0,
+        "auditWrites": 0,
+        "auditDeletes": 0
+      },
+      "addOneBooking": {
+        "milliseconds": 193.71579999999994,
+        "plannerMilliseconds": 193.71039999999994,
+        "adapterWriteMilliseconds": 0.005400000000008731,
+        "rootWrites": 1,
+        "caseWrites": 0,
+        "caseDeletes": 0,
+        "bookingWrites": 1,
+        "bookingDeletes": 0,
+        "auditWrites": 0,
+        "auditDeletes": 0
+      },
+      "deleteOneBooking": {
+        "milliseconds": 189.16020000000003,
+        "plannerMilliseconds": 189.15460000000007,
+        "adapterWriteMilliseconds": 0.005599999999958527,
+        "rootWrites": 1,
+        "caseWrites": 0,
+        "caseDeletes": 0,
+        "bookingWrites": 0,
+        "bookingDeletes": 1,
+        "auditWrites": 0,
+        "auditDeletes": 0
+      },
+      "rootOnly": {
+        "milliseconds": 0.056100000000014916,
+        "plannerMilliseconds": 0.055000000000063665,
+        "adapterWriteMilliseconds": 0.001099999999951251,
+        "rootWrites": 1,
+        "caseWrites": 0,
+        "caseDeletes": 0,
+        "bookingWrites": 0,
+        "bookingDeletes": 0,
+        "auditWrites": 0,
+        "auditDeletes": 0
+      },
+      "appendAudit": {
+        "milliseconds": 0.20199999999999818,
+        "plannerMilliseconds": 0.1978999999998905,
+        "adapterWriteMilliseconds": 0.004100000000107684,
+        "rootWrites": 1,
+        "caseWrites": 0,
+        "caseDeletes": 0,
+        "bookingWrites": 0,
+        "bookingDeletes": 0,
+        "auditWrites": 1,
+        "auditDeletes": 0
+      },
+      "noChange": {
+        "milliseconds": 0.05869999999981701,
+        "plannerMilliseconds": 0.05569999999988795,
+        "adapterWriteMilliseconds": 0.0029999999999290594,
+        "rootWrites": 1,
+        "caseWrites": 0,
+        "caseDeletes": 0,
+        "bookingWrites": 0,
+        "bookingDeletes": 0,
+        "auditWrites": 0,
+        "auditDeletes": 0
+      },
+      "storedRecordCounts": {
+        "stateMeta": 1,
+        "cases": 50000,
+        "bookings": 150000,
+        "auditLog": 1
+      },
+      "correctness": {
+        "noRangeError": true,
+        "noFullStateJsonStringify": true,
+        "hydrationCountsExact": true,
+        "representativeEntitiesEqual": true,
+        "deleteDoesNotResurrect": true,
+        "oneEntityUpdatesSurviveHydration": true,
+        "rootSurvivesHydration": true,
+        "runtimeIndexesAbsent": true
+      },
+      "memory": {
+        "beforeDataset": {
+          "rss": 44236800,
+          "heapUsed": 4674208,
+          "heapTotal": 7442432
+        },
+        "afterDataset": {
+          "rss": 199221248,
+          "heapUsed": 127976784,
+          "heapTotal": 164769792
+        },
+        "afterInitialSave": {
+          "rss": 245215232,
+          "heapUsed": 170432280,
+          "heapTotal": 211111936
+        },
+        "afterHydration": {
+          "rss": 247037952,
+          "heapUsed": 172032600,
+          "heapTotal": 212725760
+        },
+        "final": {
+          "rss": 304373760,
+          "heapUsed": 172911888,
+          "heapTotal": 222175232
+        }
+      }
+    },
+    {
+      "caseCount": 100000,
+      "bookingCount": 300000,
+      "adapter": "production partition/diff planner with deterministic in-memory record-store adapter",
+      "browserIndexedDbMeasured": false,
+      "initialPersistence": {
+        "milliseconds": 497.5453,
+        "plannerMilliseconds": 405.3846000000001,
+        "adapterWriteMilliseconds": 92.1606999999999,
+        "rootWrites": 1,
+        "caseWrites": 100000,
+        "caseDeletes": 0,
+        "bookingWrites": 300000,
+        "bookingDeletes": 0,
+        "auditWrites": 0,
+        "auditDeletes": 0
+      },
+      "hydration": {
+        "milliseconds": 27.200799999999845,
+        "caseRecords": 100000,
+        "bookingRecords": 300000
+      },
+      "updateOneCase": {
+        "milliseconds": 0.21570000000019718,
+        "plannerMilliseconds": 0.20719999999982974,
+        "adapterWriteMilliseconds": 0.008500000000367436,
+        "rootWrites": 1,
+        "caseWrites": 1,
+        "caseDeletes": 0,
+        "bookingWrites": 0,
+        "bookingDeletes": 0,
+        "auditWrites": 0,
+        "auditDeletes": 0
+      },
+      "updateOneBooking": {
+        "milliseconds": 0.07760000000007494,
+        "plannerMilliseconds": 0.07250000000021828,
+        "adapterWriteMilliseconds": 0.005099999999856664,
+        "rootWrites": 1,
+        "caseWrites": 0,
+        "caseDeletes": 0,
+        "bookingWrites": 1,
+        "bookingDeletes": 0,
+        "auditWrites": 0,
+        "auditDeletes": 0
+      },
+      "addOneCase": {
+        "milliseconds": 122.9969000000001,
+        "plannerMilliseconds": 122.98120000000017,
+        "adapterWriteMilliseconds": 0.01569999999992433,
+        "rootWrites": 1,
+        "caseWrites": 1,
+        "caseDeletes": 0,
+        "bookingWrites": 0,
+        "bookingDeletes": 0,
+        "auditWrites": 0,
+        "auditDeletes": 0
+      },
+      "deleteOneCase": {
+        "milliseconds": 104.97839999999997,
+        "plannerMilliseconds": 104.90999999999985,
+        "adapterWriteMilliseconds": 0.0684000000001106,
+        "rootWrites": 1,
+        "caseWrites": 0,
+        "caseDeletes": 1,
+        "bookingWrites": 0,
+        "bookingDeletes": 0,
+        "auditWrites": 0,
+        "auditDeletes": 0
+      },
+      "addOneBooking": {
+        "milliseconds": 446.59709999999995,
+        "plannerMilliseconds": 446.5929000000001,
+        "adapterWriteMilliseconds": 0.0041999999998552084,
+        "rootWrites": 1,
+        "caseWrites": 0,
+        "caseDeletes": 0,
+        "bookingWrites": 1,
+        "bookingDeletes": 0,
+        "auditWrites": 0,
+        "auditDeletes": 0
+      },
+      "deleteOneBooking": {
+        "milliseconds": 447.4216000000001,
+        "plannerMilliseconds": 447.4146999999998,
+        "adapterWriteMilliseconds": 0.006900000000314321,
+        "rootWrites": 1,
+        "caseWrites": 0,
+        "caseDeletes": 0,
+        "bookingWrites": 0,
+        "bookingDeletes": 1,
+        "auditWrites": 0,
+        "auditDeletes": 0
+      },
+      "rootOnly": {
+        "milliseconds": 0.06069999999999709,
+        "plannerMilliseconds": 0.05960000000004584,
+        "adapterWriteMilliseconds": 0.001099999999951251,
+        "rootWrites": 1,
+        "caseWrites": 0,
+        "caseDeletes": 0,
+        "bookingWrites": 0,
+        "bookingDeletes": 0,
+        "auditWrites": 0,
+        "auditDeletes": 0
+      },
+      "appendAudit": {
+        "milliseconds": 0.22330000000056316,
+        "plannerMilliseconds": 0.22020000000020445,
+        "adapterWriteMilliseconds": 0.0031000000003587047,
+        "rootWrites": 1,
+        "caseWrites": 0,
+        "caseDeletes": 0,
+        "bookingWrites": 0,
+        "bookingDeletes": 0,
+        "auditWrites": 1,
+        "auditDeletes": 0
+      },
+      "noChange": {
+        "milliseconds": 0.056599999999889405,
+        "plannerMilliseconds": 0.05209999999988213,
+        "adapterWriteMilliseconds": 0.004500000000007276,
+        "rootWrites": 1,
+        "caseWrites": 0,
+        "caseDeletes": 0,
+        "bookingWrites": 0,
+        "bookingDeletes": 0,
+        "auditWrites": 0,
+        "auditDeletes": 0
+      },
+      "storedRecordCounts": {
+        "stateMeta": 1,
+        "cases": 100000,
+        "bookings": 300000,
+        "auditLog": 1
+      },
+      "correctness": {
+        "noRangeError": true,
+        "noFullStateJsonStringify": true,
+        "hydrationCountsExact": true,
+        "representativeEntitiesEqual": true,
+        "deleteDoesNotResurrect": true,
+        "oneEntityUpdatesSurviveHydration": true,
+        "rootSurvivesHydration": true,
+        "runtimeIndexesAbsent": true
+      },
+      "memory": {
+        "beforeDataset": {
+          "rss": 44187648,
+          "heapUsed": 4674208,
+          "heapTotal": 7442432
+        },
+        "afterDataset": {
+          "rss": 325738496,
+          "heapUsed": 251430568,
+          "heapTotal": 290103296
+        },
+        "afterInitialSave": {
+          "rss": 407306240,
+          "heapUsed": 331036216,
+          "heapTotal": 377864192
+        },
+        "afterHydration": {
+          "rss": 410492928,
+          "heapUsed": 334236608,
+          "heapTotal": 380817408
+        },
+        "final": {
+          "rss": 554782720,
+          "heapUsed": 335915592,
+          "heapTotal": 426196992
+        }
+      }
+    }
+  ],
+  "correctnessPass": true,
+  "scalabilityPass": true,
+  "overallPass": true
+}

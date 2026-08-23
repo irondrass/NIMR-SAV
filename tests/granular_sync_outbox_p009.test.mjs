@@ -187,6 +187,158 @@ adapter.send(durableDelete);
 adapter.send(caseOperation("adapter-delete", 7));
 assert.equal(adapter.entities.get("workshop-a|case|adapter-delete").deleted, true, "stale upsert must not resurrect a newer tombstone");
 
+// The deterministic Supabase client models the production order: canonical
+// RPC first, then repair_orders projection reconciliation.
+const projectionVm = createNimrVmContext({ filename: "p0-009-canonical-projection.js" });
+projectionVm.context.getSupabaseWorkshopId = () => "workshop-a";
+vm.runInContext(fs.readFileSync(new URL("../js/supabase-sync.js", import.meta.url), "utf8"), projectionVm.context, { filename: "supabase-sync-projection-p009.js" });
+const expectedProjectionLocalId = "case-or:or-90001";
+const projectionOperation = (id, version, marker, action = "upsert", operationId = `projection-${id}-${version}-${action}`) => ({
+  ...caseOperation(id, version, marker, action),
+  operationId,
+  payload: action === "delete" ? { projectionLocalId: expectedProjectionLocalId } : {
+    entity: {
+      id,
+      orNavNumber: "OR-90001",
+      localRevision: version,
+      nextAction: marker,
+      durations: {},
+    },
+  },
+});
+const sendProjectionOperation = (adapterInstance, operation) => projectionVm.context.sendGranularOutboxOperation(
+  adapterInstance.client,
+  { id: "user-a" },
+  operation,
+);
+const projectionAt = (adapterInstance, localId) => adapterInstance.projection("workshop-a", localId);
+const projectionCount = (adapterInstance) => adapterInstance.projectionCount("workshop-a");
+
+const identityExample = projectionOperation("application-case-X", 100, "A");
+assert.equal(projectionVm.context.caseSyncLocalId(identityExample.payload.entity), expectedProjectionLocalId);
+assert.notEqual(identityExample.entityId, expectedProjectionLocalId, "canonical and reporting projection identities must differ in this characterization");
+
+// Accepted active projection must use the existing structured projection ID,
+// while all projected values still come from the canonical payload.
+const acceptedIdentityAdapter = createGranularSupabaseAdapter();
+const acceptedIdentityResult = await sendProjectionOperation(acceptedIdentityAdapter, identityExample);
+
+// Characterize accepted deletion of a correctly keyed historical projection.
+// Establish canonical U100, project it through the existing identity rule, then
+// accept D200. Deleting by canonical entity_id would orphan the reporting row.
+const acceptedDeleteAdapter = createGranularSupabaseAdapter();
+const acceptedDeleteUpsert = projectionOperation("accepted-delete-X", 100, "A");
+await projectionVm.context.applyCanonicalSyncEntity(acceptedDeleteAdapter.client, acceptedDeleteUpsert);
+await projectionVm.context.syncCaseProjectionToSupabase(acceptedDeleteAdapter.client, acceptedDeleteUpsert.payload.entity);
+assert.equal(projectionAt(acceptedDeleteAdapter, expectedProjectionLocalId)?.next_action, "A", "accepted-delete precondition must use the real projection identity");
+const acceptedDeleteResult = await sendProjectionOperation(
+  acceptedDeleteAdapter,
+  projectionOperation("accepted-delete-X", 200, "delete-200", "delete"),
+);
+
+// Stale DELETE after a newer recreation must rebuild/preserve the active
+// projection from canonical version 200, never delete it from local intent.
+const staleDeleteAdapter = createGranularSupabaseAdapter();
+const staleDelete100 = projectionOperation("stale-delete-X", 100, "delete-100", "delete");
+await sendProjectionOperation(staleDeleteAdapter, staleDelete100);
+await sendProjectionOperation(staleDeleteAdapter, projectionOperation("stale-delete-X", 200, "B"));
+const staleDeleteResult = await sendProjectionOperation(staleDeleteAdapter, staleDelete100);
+
+// Stale UPSERT after a newer UPSERT must leave both canonical and projection B.
+const staleUpsertAdapter = createGranularSupabaseAdapter();
+const acceptedUpsertResult = await sendProjectionOperation(staleUpsertAdapter, projectionOperation("stale-upsert-X", 200, "B"));
+const staleUpsertResult = await sendProjectionOperation(staleUpsertAdapter, projectionOperation("stale-upsert-X", 100, "A"));
+
+// Stale UPSERT after a newer tombstone must not recreate repair_orders.
+const tombstoneAdapter = createGranularSupabaseAdapter();
+const tombstoneUpsert = projectionOperation("tombstone-X", 100, "A");
+await projectionVm.context.applyCanonicalSyncEntity(tombstoneAdapter.client, tombstoneUpsert);
+await projectionVm.context.syncCaseProjectionToSupabase(tombstoneAdapter.client, tombstoneUpsert.payload.entity);
+await sendProjectionOperation(tombstoneAdapter, projectionOperation("tombstone-X", 200, "delete-200", "delete"));
+const tombstoneRetryResult = await sendProjectionOperation(tombstoneAdapter, projectionOperation("tombstone-X", 100, "A"));
+
+assert.deepEqual(
+  {
+    acceptedUpsert: {
+      projectionCount: projectionCount(acceptedIdentityAdapter),
+      projectionMarker: projectionAt(acceptedIdentityAdapter, expectedProjectionLocalId)?.next_action || null,
+      projectionUnderCanonicalId: Boolean(projectionAt(acceptedIdentityAdapter, identityExample.entityId)),
+    },
+    acceptedDelete: {
+      canonicalDeleted: Boolean(acceptedDeleteAdapter.canonical("workshop-a", "case", "accepted-delete-X")?.deleted_at),
+      canonicalProjectionLocalId: acceptedDeleteAdapter.canonical("workshop-a", "case", "accepted-delete-X")?.payload?.projectionLocalId,
+      projectionCount: projectionCount(acceptedDeleteAdapter),
+      projectionPresent: Boolean(projectionAt(acceptedDeleteAdapter, expectedProjectionLocalId)),
+    },
+    staleDelete: {
+      canonicalVersion: staleDeleteAdapter.canonical("workshop-a", "case", "stale-delete-X")?.entity_version,
+      canonicalDeleted: Boolean(staleDeleteAdapter.canonical("workshop-a", "case", "stale-delete-X")?.deleted_at),
+      projectionCount: projectionCount(staleDeleteAdapter),
+      projectionMarker: projectionAt(staleDeleteAdapter, expectedProjectionLocalId)?.next_action || null,
+      projectionVersion: projectionAt(staleDeleteAdapter, expectedProjectionLocalId)?.planning_version,
+      projectionUnderCanonicalId: Boolean(projectionAt(staleDeleteAdapter, "stale-delete-X")),
+    },
+    staleUpsert: {
+      canonicalMarker: staleUpsertAdapter.canonical("workshop-a", "case", "stale-upsert-X")?.payload?.nextAction,
+      projectionCount: projectionCount(staleUpsertAdapter),
+      projectionMarker: projectionAt(staleUpsertAdapter, expectedProjectionLocalId)?.next_action || null,
+      projectionVersion: projectionAt(staleUpsertAdapter, expectedProjectionLocalId)?.planning_version,
+      projectionUnderCanonicalId: Boolean(projectionAt(staleUpsertAdapter, "stale-upsert-X")),
+    },
+    tombstone: {
+      canonicalDeleted: Boolean(tombstoneAdapter.canonical("workshop-a", "case", "tombstone-X")?.deleted_at),
+      canonicalProjectionLocalId: tombstoneAdapter.canonical("workshop-a", "case", "tombstone-X")?.payload?.projectionLocalId,
+      projectionCount: projectionCount(tombstoneAdapter),
+      projectionPresent: Boolean(projectionAt(tombstoneAdapter, expectedProjectionLocalId)),
+      projectionUnderCanonicalId: Boolean(projectionAt(tombstoneAdapter, "tombstone-X")),
+    },
+  },
+  {
+    acceptedUpsert: { projectionCount: 1, projectionMarker: "A", projectionUnderCanonicalId: false },
+    acceptedDelete: { canonicalDeleted: true, canonicalProjectionLocalId: expectedProjectionLocalId, projectionCount: 0, projectionPresent: false },
+    staleDelete: { canonicalVersion: 200, canonicalDeleted: false, projectionCount: 1, projectionMarker: "B", projectionVersion: 200, projectionUnderCanonicalId: false },
+    staleUpsert: { canonicalMarker: "B", projectionCount: 1, projectionMarker: "B", projectionVersion: 200, projectionUnderCanonicalId: false },
+    tombstone: { canonicalDeleted: true, canonicalProjectionLocalId: expectedProjectionLocalId, projectionCount: 0, projectionPresent: false, projectionUnderCanonicalId: false },
+  },
+  "repair_orders must converge from the canonical RPC row under caseSyncLocalId identity without orphans or duplicates",
+);
+assert.equal(acceptedIdentityResult.serverAcceptedCurrentOperation, true);
+assert.equal(acceptedDeleteResult.serverAcceptedCurrentOperation, true);
+const acceptedDeleteRpc = acceptedDeleteAdapter.calls.find((call) => call.operation === "rpc" && call.operationId === "projection-accepted-delete-X-200-delete");
+assert.deepEqual(acceptedDeleteRpc.rows[0].p_payload, { projectionLocalId: expectedProjectionLocalId }, "DELETE RPC must carry only bounded projection identity metadata");
+assert.equal(acceptedUpsertResult.serverAcceptedCurrentOperation, true);
+assert.equal(staleDeleteResult.serverAcceptedCurrentOperation, false);
+assert.equal(staleUpsertResult.serverAcceptedCurrentOperation, false);
+assert.equal(tombstoneRetryResult.serverAcceptedCurrentOperation, false);
+
+// If canonical U200 succeeds but projection fails, the exact same operation
+// remains failed and retries projection from the idempotently returned row.
+const projectionRetryAdapter = createGranularSupabaseAdapter();
+const projectionRetry = projectionOperation("projection-retry-X", 200, "B", "upsert", "projection-retry-U200");
+await projectionVm.context.enqueueDurableOutboxOperation(projectionRetry);
+projectionRetryAdapter.injectProjectionFailure({ message: "injected repair_orders failure" });
+let projectionRetryResult = await projectionVm.context.processGranularOutboxOperation(
+  projectionRetryAdapter.client,
+  { id: "user-a" },
+  projectionRetry,
+);
+assert.equal(projectionRetryResult.acknowledged, false);
+let retainedProjectionRetry = (await projectionVm.context.loadDurableOutboxOperations())
+  .find((entry) => entry.operationId === projectionRetry.operationId);
+assert.equal(retainedProjectionRetry.syncStatus, "failed");
+assert.equal(projectionRetryAdapter.canonical("workshop-a", "case", "projection-retry-X")?.last_operation_id, projectionRetry.operationId);
+assert.equal(projectionAt(projectionRetryAdapter, expectedProjectionLocalId), null);
+projectionRetryResult = await projectionVm.context.processGranularOutboxOperation(
+  projectionRetryAdapter.client,
+  { id: "user-a" },
+  retainedProjectionRetry,
+);
+assert.equal(projectionRetryResult.acknowledged, true);
+assert.equal(projectionAt(projectionRetryAdapter, expectedProjectionLocalId)?.next_action, "B");
+assert.equal(projectionAt(projectionRetryAdapter, "projection-retry-X"), null);
+assert.equal(projectionCount(projectionRetryAdapter), 1);
+assert.equal((await projectionVm.context.loadDurableOutboxOperations()).some((entry) => entry.operationId === projectionRetry.operationId), false);
+
 // Injected network and RLS failures keep the durable operation recoverable.
 const retainedOnFailure = caseOperation("retained-failure", 1);
 await context.enqueueDurableOutboxOperation(retainedOnFailure);
@@ -621,5 +773,11 @@ assert.match(migrationSource, /on conflict \(workshop_id, entity_type, entity_id
 assert.match(migrationSource, /on conflict \(workshop_id, local_id\) do nothing/iu);
 assert.match(migrationSource, /insert into public\.app_settings/iu);
 assert.match(migrationSource, /on conflict \(workshop_id, setting_key\) do nothing/iu);
+assert.match(migrationSource, /existing\.last_operation_id\s*=\s*p_operation_id[\s\S]*?return existing/iu, "same operationId must return the existing canonical row");
+assert.match(migrationSource, /existing\.entity_version\s*>\s*greatest\(0, p_entity_version\)[\s\S]*?return existing/iu, "older versions must return the newer canonical row");
+assert.match(migrationSource, /existing\.entity_version\s*=\s*greatest\(0, p_entity_version\)[\s\S]*?existing\.deleted_at is not null[\s\S]*?not p_deleted[\s\S]*?return existing/iu, "same-version tombstone must reject a different upsert");
+assert.doesNotMatch(migrationSource, /case\s+when p_deleted\s+then '\{\}'::jsonb\s+else/iu, "DELETE must not unconditionally erase tombstone metadata");
+assert.match(migrationSource, /when p_deleted and p_entity_type = 'case'[\s\S]*?jsonb_build_object\('projectionLocalId', p_payload ->> 'projectionLocalId'\)/iu, "case tombstone must retain only bounded projectionLocalId metadata");
+assert.match(migrationSource, /nimr_has_workshop_role\([\s\S]*?p_workshop_id/iu, "RPC workshop role guard must remain present");
 
 console.log("P0-009 GRANULAR SYNC OUTBOX OK");

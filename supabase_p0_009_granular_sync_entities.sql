@@ -256,7 +256,12 @@ begin
     p_workshop_id,
     p_entity_type,
     p_entity_id,
-    case when p_deleted then '{}'::jsonb else coalesce(p_payload, '{}'::jsonb) end,
+    case
+      when p_deleted and p_entity_type = 'case' and nullif(p_payload ->> 'projectionLocalId', '') is not null
+        then jsonb_build_object('projectionLocalId', p_payload ->> 'projectionLocalId')
+      when p_deleted then '{}'::jsonb
+      else coalesce(p_payload, '{}'::jsonb)
+    end,
     greatest(0, p_entity_version),
     p_operation_id,
     case when p_deleted then clock_timestamp() else null end,

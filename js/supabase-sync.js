@@ -3084,11 +3084,14 @@ async function appendAuditEntityToSupabase(client, operation) {
 }
 
 async function applyCanonicalSyncEntity(client, operation) {
+  const projectionLocalId = String(operation.payload?.projectionLocalId || "").trim();
   const { data, error } = await client.rpc("nimr_apply_sync_entity", {
     p_workshop_id: operation.workshopId,
     p_entity_type: operation.entityType,
     p_entity_id: operation.entityId,
-    p_payload: operation.action === "delete" ? {} : (operation.payload?.entity || {}),
+    p_payload: operation.action === "delete"
+      ? (projectionLocalId ? { projectionLocalId } : {})
+      : (operation.payload?.entity || {}),
     p_entity_version: Math.max(0, Number(operation.entityVersion || 0)),
     p_operation_id: operation.operationId,
     p_deleted: operation.action === "delete",
@@ -3097,12 +3100,19 @@ async function applyCanonicalSyncEntity(client, operation) {
   return Array.isArray(data) ? data[0] : data;
 }
 
-async function deleteCaseProjectionFromSupabase(client, operation) {
+async function deleteCaseProjectionFromSupabase(client, canonical, fallbackWorkshopId = "") {
+  const workshopId = String(canonical?.workshop_id || fallbackWorkshopId || "").trim();
+  const entityId = String(canonical?.entity_id || "").trim();
+  if (!workshopId || !entityId) throw new Error("Projection dossier: identité canonique absente.");
+  // Pre-metadata tombstones may contain no projection identity. Falling back
+  // to the application ID keeps those historical rows retryable without
+  // changing the structured caseSyncLocalId contract for new tombstones.
+  const projectionLocalId = String(canonical?.payload?.projectionLocalId || entityId).trim();
   const { error } = await client
     .from("repair_orders")
     .delete()
-    .eq("workshop_id", operation.workshopId)
-    .eq("local_id", operation.payload?.projectionLocalId || operation.entityId);
+    .eq("workshop_id", workshopId)
+    .eq("local_id", projectionLocalId);
   if (error) throw error;
 }
 
@@ -3154,6 +3164,28 @@ async function syncCaseProjectionToSupabase(client, item) {
   return { rows: 3 };
 }
 
+async function reconcileCaseProjectionFromCanonical(client, operation, canonical) {
+  const canonicalEntityId = String(canonical?.entity_id || "").trim();
+  if (!canonicalEntityId) throw new Error("Projection dossier: ligne canonique absente.");
+  if (canonical.deleted_at) {
+    await deleteCaseProjectionFromSupabase(client, canonical, operation.workshopId);
+    return { deleted: true, entityId: canonicalEntityId };
+  }
+  const canonicalPayload = canonical.payload && typeof canonical.payload === "object"
+    ? canonical.payload
+    : {};
+  const canonicalCase = {
+    ...canonicalPayload,
+    id: canonicalEntityId,
+  };
+  await syncCaseProjectionToSupabase(client, canonicalCase);
+  return {
+    deleted: false,
+    entityId: canonicalEntityId,
+    projectionLocalId: caseSyncLocalId(canonicalCase),
+  };
+}
+
 async function sendGranularOutboxOperation(client, user, operation) {
   if (operation.entityType === "workshop_state" && operation.action === "upsert_snapshot") {
     return legacyAutoBackupToSupabase("legacy-outbox-migration", {
@@ -3165,11 +3197,15 @@ async function sendGranularOutboxOperation(client, user, operation) {
   }
   if (["case", "booking"].includes(operation.entityType)) {
     const canonical = await applyCanonicalSyncEntity(client, operation);
+    const serverAcceptedCurrentOperation = canonical?.last_operation_id === operation.operationId;
     if (operation.entityType === "case") {
-      if (operation.action === "delete") await deleteCaseProjectionFromSupabase(client, operation);
-      else await syncCaseProjectionToSupabase(client, operation.payload?.entity);
+      await reconcileCaseProjectionFromCanonical(client, operation, canonical);
     }
-    return { acknowledged: true, updatedAt: canonical?.updated_at || new Date().toISOString() };
+    return {
+      acknowledged: true,
+      updatedAt: canonical?.updated_at || new Date().toISOString(),
+      serverAcceptedCurrentOperation,
+    };
   }
   if (operation.entityType === "audit" && operation.action === "append") {
     const result = await appendAuditEntityToSupabase(client, operation);

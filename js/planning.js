@@ -655,7 +655,7 @@ function acceptProposal(item, proposal) {
   );
   generatedProposals[item.id] = [];
   state.planningDate = todayKey(new Date(acceptedProposal.start));
-  saveState({ flushCloud: true, cloudReason: "appointment-accepted" });
+  saveState({ changedCase: item, flushCloud: true, cloudReason: "appointment-accepted" });
   activeTab = "planning";
   setActiveTab("planning");
   render();
@@ -1395,6 +1395,7 @@ function applySlotToBooking(booking, match, durationMinutes) {
 function refreshCaseAppointmentFromBookings(item) {
   const bookings = getCaseWorkBookings(item);
   if (!bookings.length) return;
+  if (typeof noteCaseRevisionCandidate === "function") noteCaseRevisionCandidate(item);
   const start = bookings.reduce((earliest, booking) => minDate(earliest, new Date(booking.start)), new Date(bookings[0].start));
   const end = bookings.reduce((latest, booking) => maxDate(latest, new Date(booking.end)), new Date(bookings[0].end));
   const totalMinutes = bookings.reduce((sum, booking) => {
@@ -1421,6 +1422,7 @@ function startCaseBookingTask(item, bookingId, meta = {}) {
   if (status === "completed") return { ok: false, message: "Cette tâche est déjà terminée." };
   if (status === "paused") return { ok: false, message: "Cette tâche est en pause. Reprenez le reliquat planifié." };
   if (status === "started") return { ok: false, message: "Cette tâche est déjà en cours." };
+  if (typeof noteCaseRevisionCandidate === "function") noteCaseRevisionCandidate(item);
   const now = new Date().toISOString();
   booking.status = "started";
   booking.actualStart = now;
@@ -1456,6 +1458,7 @@ function completeCaseBookingTaskNow(item, bookingId, completedAt = new Date(), m
   if (now < start && status !== "started") {
     return { ok: false, message: "Cette tâche n'a pas encore démarré. Utilisez Replanifier si le créneau doit changer." };
   }
+  if (typeof noteCaseRevisionCandidate === "function") noteCaseRevisionCandidate(item);
   const title = booking.title || getDurationLabel(booking.key);
   if (meta.note) {
     booking.notes = Array.isArray(booking.notes) ? booking.notes : [];
@@ -1487,6 +1490,7 @@ function completeCaseWorkBookingsNow(item, completedAt = new Date(), meta = {}) 
   const now = new Date(completedAt);
   const bookings = getCaseProductionBookings(item).filter((booking) => getBookingOperationalStatus(booking) !== "completed");
   if (!bookings.length) return { completed: 0, freedMinutes: 0, removed: 0 };
+  if (typeof noteCaseRevisionCandidate === "function") noteCaseRevisionCandidate(item);
   let freedMinutes = 0;
   let removed = 0;
   bookings.forEach((booking) => {
@@ -1525,6 +1529,7 @@ function pauseCaseBookingTask(item, bookingId, reason, meta = {}) {
   const workedMinutes = Math.min(plannedMinutes, countWorkedMinutesUntil(originalSegments, now));
   const remainingMinutes = Math.max(0, plannedMinutes - workedMinutes);
   if (workedMinutes <= 0) return { ok: false, message: "Aucune portion réalisée à conserver. Utilisez Replanifier pour déplacer toute la tâche." };
+  if (typeof noteCaseRevisionCandidate === "function") noteCaseRevisionCandidate(item);
 
   const clippedSegments = truncateSegmentsAt(originalSegments, now);
   if (!applySegmentsToBooking(booking, clippedSegments)) {
@@ -1927,8 +1932,7 @@ function migratePlanningLogicV28() {
   const plannedCaseIds = [...new Set(state.bookings.map((booking) => booking.caseId).filter(Boolean))];
   if (!plannedCaseIds.length) {
     state.settings.planningLogicVersion = 28;
-    saveState();
-    return;
+    return saveState();
   }
   const originalBookings = [...state.bookings];
   const earliestByCase = new Map();
@@ -1949,6 +1953,7 @@ function migratePlanningLogicV28() {
     });
   const newBookings = originalBookings.filter((booking) => !plannedCaseIds.includes(booking.caseId));
   let changed = false;
+  const changedCaseIds = [];
   try {
     plannedCases.forEach((item) => {
       const startAfter = earliestByCase.get(item.id) || new Date(item.appointment?.start || new Date());
@@ -1962,6 +1967,7 @@ function migratePlanningLogicV28() {
         marginMinutes: proposal.marginMinutes,
       };
       item.appointmentStatus = "scheduled";
+      changedCaseIds.push(item.id);
       addHistory(
         item,
         "planning.migrated_v28",
@@ -1976,10 +1982,11 @@ function migratePlanningLogicV28() {
     state.bookings = originalBookings;
   }
   state.settings.planningLogicVersion = 28;
-  saveState();
+  const saveCompletion = saveState({ changedCaseIds });
   if (changed) {
     notifyUser("Planning recalculé : continuité technicien corrigée et zones/cabines visibles.", "success");
   }
+  return saveCompletion;
 }
 
 
@@ -2067,8 +2074,7 @@ function migratePlanningLogicV36() {
   const plannedCaseIds = [...new Set(state.bookings.map((booking) => booking.caseId).filter(Boolean))];
   if (!plannedCaseIds.length) {
     state.settings.planningLogicVersion = 36;
-    saveState();
-    return;
+    return saveState();
   }
   const originalBookings = [...state.bookings];
   const earliestByCase = new Map();
@@ -2086,6 +2092,7 @@ function migratePlanningLogicV36() {
       return aStart - bStart || String(a.id).localeCompare(String(b.id));
     });
   const baseBookings = originalBookings.filter((booking) => !plannedCaseIds.includes(booking.caseId));
+  const changedCaseIds = [];
   try {
     const proposalsByCase = schedulePlannedCasesInterleaved(plannedCases, earliestByCase, baseBookings.map(cloneBooking));
     const newBookings = [...baseBookings];
@@ -2100,6 +2107,7 @@ function migratePlanningLogicV36() {
         marginMinutes: proposal.marginMinutes,
       };
       item.appointmentStatus = "scheduled";
+      changedCaseIds.push(item.id);
       addHistory(
         item,
         "planning.migrated_v36",
@@ -2109,13 +2117,14 @@ function migratePlanningLogicV36() {
     });
     state.bookings = newBookings;
     state.settings.planningLogicVersion = 36;
-    saveState();
+    const saveCompletion = saveState({ changedCaseIds });
     notifyUser("Planning recalculé : priorité au véhicule prêt le plus tôt, continuité technicien et équipements visibles.", "success");
+    return saveCompletion;
   } catch (error) {
     console.warn("Migration planning v21.36 impossible, conservation du planning existant", error);
     state.bookings = originalBookings;
     state.settings.planningLogicVersion = 36;
-    saveState();
+    return saveState({ changedCaseIds });
   }
 }
 
@@ -2273,7 +2282,7 @@ function applyDependentBookingReschedule(item, previews, actor) {
 
   if (count > 0) {
     refreshCaseAppointmentFromBookings(item);
-    saveState({ flushCloud: true, cloudReason: "reschedule-dependent-tasks" });
+    saveState({ changedCase: item, flushCloud: true, cloudReason: "reschedule-dependent-tasks" });
   }
   return { ok: true, rescheduled: count };
 }
@@ -3069,14 +3078,21 @@ function buildSubcontractPlan(item, rawTask, providerOrId, startAfter, bookings 
 }
 
 function ensureCaseSubcontracting(item) {
+  let normalized = false;
   if (!item.subcontracting || typeof item.subcontracting !== "object" || Array.isArray(item.subcontracting)) {
     const legacyAssignments = Array.isArray(item.subcontracting)
       ? item.subcontracting
       : (Array.isArray(item.subcontracts) ? item.subcontracts : []);
     item.subcontracting = { enabled: legacyAssignments.length > 0, assignments: legacyAssignments };
+    normalized = true;
   }
-  if (!Array.isArray(item.subcontracting.assignments)) item.subcontracting.assignments = [];
+  if (!Array.isArray(item.subcontracting.assignments)) {
+    item.subcontracting.assignments = [];
+    normalized = true;
+  }
+  if (item.subcontracts !== item.subcontracting.assignments) normalized = true;
   item.subcontracts = item.subcontracting.assignments;
+  if (normalized && typeof noteCaseRevisionCandidate === "function") noteCaseRevisionCandidate(item);
   return item.subcontracting;
 }
 
@@ -3427,6 +3443,7 @@ function collectEstimatedDeliveryReasons(item, bookings, referenceDate) {
 
 function recalculateEstimatedDelivery(item, reason = "Recalcul automatique du planning", actor = null, options = {}) {
   if (!item) return { ok: false, status: "to_confirm", current: "", reasons: ["Dossier introuvable."] };
+  if (typeof noteCaseRevisionCandidate === "function") noteCaseRevisionCandidate(item);
   const estimate = ensureDeliveryEstimateState(item);
   const referenceDate = new Date(options.referenceDate || new Date());
   const bookings = (state.bookings || [])

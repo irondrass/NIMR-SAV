@@ -1,0 +1,302 @@
+{
+  "benchmark": "P0-009 granular durable entity outbox",
+  "generatedAt": "2026-08-23T16:04:11.624Z",
+  "adapter": "deterministic recording Supabase adapter",
+  "networkCalls": 0,
+  "scales": [
+    {
+      "caseCount": 10000,
+      "bookingCount": 30000,
+      "saveStateOneCase": {
+        "milliseconds": 222.5788,
+        "operationCount": 1,
+        "candidateCount": 1,
+        "visitedCount": 1,
+        "fullCaseRevisionScan": false,
+        "forbiddenFullStateCalls": 0
+      },
+      "enqueueOneCase": {
+        "milliseconds": 0.26019999999999754,
+        "operationCount": 1
+      },
+      "enqueueSameCaseAgain": {
+        "milliseconds": 0.3716999999999757,
+        "resultingPendingCount": 1
+      },
+      "enqueueOneBooking": {
+        "milliseconds": 0.17270000000002028,
+        "operationCount": 1
+      },
+      "enqueueCaseDelete": {
+        "milliseconds": 0.1309999999999718,
+        "operationCount": 1
+      },
+      "enqueueBookingDelete": {
+        "milliseconds": 0.1963000000000079,
+        "operationCount": 1
+      },
+      "appendAudit": {
+        "milliseconds": 0.22140000000001692,
+        "operationCount": 1
+      },
+      "rootSettingsUpdate": {
+        "milliseconds": 0.34190000000000964,
+        "operationCount": 1
+      },
+      "acknowledgeUnrelated": {
+        "milliseconds": 0.27120000000002165,
+        "unrelatedRetained": true
+      },
+      "processBatchOf100": {
+        "milliseconds": 295.7787,
+        "operationCount": 100,
+        "adapterCalls": 100
+      },
+      "coalesce10k": {
+        "milliseconds": 1107.4903999999997,
+        "finalPendingCount": 1
+      },
+      "incrementalPullPage": {
+        "milliseconds": 1.2238000000002103,
+        "rowCount": 500
+      },
+      "sameTimestampBoundary": {
+        "milliseconds": 2.045900000000074,
+        "uniqueRows": 1001,
+        "expectedRows": 1001
+      },
+      "payloadBytes": {
+        "case": 1424,
+        "booking": 1032
+      },
+      "bootstrap": {
+        "casePageSize": 500,
+        "bookingPageSize": 500,
+        "auditPageSize": 250,
+        "casePages": 20,
+        "bookingPages": 60
+      },
+      "memory": {
+        "beforeDataset": {
+          "rss": 46833664,
+          "heapUsed": 4689296,
+          "heapTotal": 7442432
+        },
+        "afterDataset": {
+          "rss": 91942912,
+          "heapUsed": 29231464,
+          "heapTotal": 64573440
+        },
+        "final": {
+          "rss": 138674176,
+          "heapUsed": 49665880,
+          "heapTotal": 91295744
+        },
+        "heapDeltaBytes": 44976584
+      },
+      "workCounts": {
+        "oneCaseEntitiesVisited": 1,
+        "oneBookingEntitiesVisited": 1
+      },
+      "noRangeError": true,
+      "overallPass": true
+    },
+    {
+      "caseCount": 50000,
+      "bookingCount": 150000,
+      "saveStateOneCase": {
+        "milliseconds": 1087.4314000000002,
+        "operationCount": 1,
+        "candidateCount": 1,
+        "visitedCount": 1,
+        "fullCaseRevisionScan": false,
+        "forbiddenFullStateCalls": 0
+      },
+      "enqueueOneCase": {
+        "milliseconds": 0.2759000000000924,
+        "operationCount": 1
+      },
+      "enqueueSameCaseAgain": {
+        "milliseconds": 0.3765000000003056,
+        "resultingPendingCount": 1
+      },
+      "enqueueOneBooking": {
+        "milliseconds": 0.17489999999997963,
+        "operationCount": 1
+      },
+      "enqueueCaseDelete": {
+        "milliseconds": 0.12760000000025684,
+        "operationCount": 1
+      },
+      "enqueueBookingDelete": {
+        "milliseconds": 0.0945000000001528,
+        "operationCount": 1
+      },
+      "appendAudit": {
+        "milliseconds": 0.1281000000003587,
+        "operationCount": 1
+      },
+      "rootSettingsUpdate": {
+        "milliseconds": 0.3589000000001761,
+        "operationCount": 1
+      },
+      "acknowledgeUnrelated": {
+        "milliseconds": 0.27309999999988577,
+        "unrelatedRetained": true
+      },
+      "processBatchOf100": {
+        "milliseconds": 310.9237999999996,
+        "operationCount": 100,
+        "adapterCalls": 100
+      },
+      "coalesce10k": {
+        "milliseconds": 1091.5315,
+        "finalPendingCount": 1
+      },
+      "incrementalPullPage": {
+        "milliseconds": 1.2817000000000007,
+        "rowCount": 500
+      },
+      "sameTimestampBoundary": {
+        "milliseconds": 2.1152000000001863,
+        "uniqueRows": 1001,
+        "expectedRows": 1001
+      },
+      "payloadBytes": {
+        "case": 1426,
+        "booking": 1032
+      },
+      "bootstrap": {
+        "casePageSize": 500,
+        "bookingPageSize": 500,
+        "auditPageSize": 250,
+        "casePages": 100,
+        "bookingPages": 300
+      },
+      "memory": {
+        "beforeDataset": {
+          "rss": 46997504,
+          "heapUsed": 4689296,
+          "heapTotal": 7442432
+        },
+        "afterDataset": {
+          "rss": 202002432,
+          "heapUsed": 127993824,
+          "heapTotal": 164769792
+        },
+        "final": {
+          "rss": 311431168,
+          "heapUsed": 205940272,
+          "heapTotal": 262680576
+        },
+        "heapDeltaBytes": 201250976
+      },
+      "workCounts": {
+        "oneCaseEntitiesVisited": 1,
+        "oneBookingEntitiesVisited": 1
+      },
+      "noRangeError": true,
+      "overallPass": true
+    },
+    {
+      "caseCount": 100000,
+      "bookingCount": 300000,
+      "saveStateOneCase": {
+        "milliseconds": 2288.7362000000003,
+        "operationCount": 1,
+        "candidateCount": 1,
+        "visitedCount": 1,
+        "fullCaseRevisionScan": false,
+        "forbiddenFullStateCalls": 0
+      },
+      "enqueueOneCase": {
+        "milliseconds": 0.7467999999998938,
+        "operationCount": 1
+      },
+      "enqueueSameCaseAgain": {
+        "milliseconds": 0.5069999999996071,
+        "resultingPendingCount": 1
+      },
+      "enqueueOneBooking": {
+        "milliseconds": 0.19869999999991705,
+        "operationCount": 1
+      },
+      "enqueueCaseDelete": {
+        "milliseconds": 0.14050000000042928,
+        "operationCount": 1
+      },
+      "enqueueBookingDelete": {
+        "milliseconds": 0.0955999999996493,
+        "operationCount": 1
+      },
+      "appendAudit": {
+        "milliseconds": 0.13320000000021537,
+        "operationCount": 1
+      },
+      "rootSettingsUpdate": {
+        "milliseconds": 0.38000000000010914,
+        "operationCount": 1
+      },
+      "acknowledgeUnrelated": {
+        "milliseconds": 0.41669999999976426,
+        "unrelatedRetained": true
+      },
+      "processBatchOf100": {
+        "milliseconds": 311.53629999999976,
+        "operationCount": 100,
+        "adapterCalls": 100
+      },
+      "coalesce10k": {
+        "milliseconds": 1122.7483000000002,
+        "finalPendingCount": 1
+      },
+      "incrementalPullPage": {
+        "milliseconds": 1.2208000000000538,
+        "rowCount": 500
+      },
+      "sameTimestampBoundary": {
+        "milliseconds": 2.300100000000384,
+        "uniqueRows": 1001,
+        "expectedRows": 1001
+      },
+      "payloadBytes": {
+        "case": 1426,
+        "booking": 1033
+      },
+      "bootstrap": {
+        "casePageSize": 500,
+        "bookingPageSize": 500,
+        "auditPageSize": 250,
+        "casePages": 200,
+        "bookingPages": 600
+      },
+      "memory": {
+        "beforeDataset": {
+          "rss": 46784512,
+          "heapUsed": 4689296,
+          "heapTotal": 7442432
+        },
+        "afterDataset": {
+          "rss": 328048640,
+          "heapUsed": 251448016,
+          "heapTotal": 290365440
+        },
+        "final": {
+          "rss": 522780672,
+          "heapUsed": 400064808,
+          "heapTotal": 471932928
+        },
+        "heapDeltaBytes": 395375512
+      },
+      "workCounts": {
+        "oneCaseEntitiesVisited": 1,
+        "oneBookingEntitiesVisited": 1
+      },
+      "noRangeError": true,
+      "overallPass": true
+    }
+  ],
+  "correctnessPass": true,
+  "scalabilityPass": true,
+  "overallPass": true
+}

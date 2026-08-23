@@ -249,7 +249,7 @@ function bindCaseCreation() {
           duplicate.updatedAt = new Date().toISOString();
           addHistory(duplicate, "claim.supplement", "Complément ajouté via import PDF");
           
-          saveState();
+          saveState({ changedCase: duplicate });
           activeCaseId = duplicate.id;
           activeCaseDetailTab = "claims";
           resetPdfEstimateCreation(form);
@@ -275,7 +275,7 @@ function bindCaseCreation() {
     }
     try {
       const result = await createCaseFromPdfEstimate(quickEstimateCreationDraft, estimateFile, overrides);
-      saveState();
+      saveState({ changedCase: result.item });
       activeCaseId = result.item.id;
       activeCaseDetailTab = "planning";
       resetPdfEstimateCreation(form);
@@ -561,6 +561,7 @@ async function createCaseFromPdfEstimate(draft, estimateFile = null, overrides =
   addHistory(item, "claim.estimate.imported", "Devis PDF importé automatiquement", `${formatLocalizedDecimal(preview.detectedHours)} h MO · ${item.pdfImportTaskCount} tâche(s) prête(s) pour validation.`);
 
   state.cases.unshift(item);
+  if (typeof noteCaseRevisionCandidate === "function") noteCaseRevisionCandidate(item);
   let planningPreparation = null;
   if (draft.hasDetailedLabor && hasVehicleIdentity(item)) {
     planningPreparation = generateAppointmentOptions(item);

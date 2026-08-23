@@ -1116,7 +1116,7 @@ async function handleReceptionFormSubmit(e) {
     const caseId = form.dataset.caseId;
     const comment = form.querySelector("[name=planningComment]")?.value || "";
     const result = advanceReceptionWorkflow(caseId, "request_planning", { comment });
-    if (result.ok) { saveState({ flushCloud: true, cloudReason: "reception-planning-request" }); notifyUser("Demande de planning envoyée.", "success"); renderReceptionWorkspace(); }
+    if (result.ok) { saveState({ changedCaseIds: [caseId], flushCloud: true, cloudReason: "reception-planning-request" }); notifyUser("Demande de planning envoyée.", "success"); renderReceptionWorkspace(); }
     else notifyUser(result.message, "error");
     return;
   }
@@ -1134,11 +1134,11 @@ async function handleReceptionFormSubmit(e) {
       const r1 = advanceReceptionWorkflow(caseId, "receive_planning", { startDate, deliveryDate, workshopNote });
       if (!r1.ok) { notifyUser(r1.message, "error"); return; }
       const r2 = advanceReceptionWorkflow(caseId, "accept_planning");
-      if (r2.ok) { saveState({ flushCloud: true, cloudReason: "reception-planning-accepted" }); notifyUser("Proposition planning acceptée.", "success"); renderReceptionWorkspace(); }
+      if (r2.ok) { saveState({ changedCaseIds: [caseId], flushCloud: true, cloudReason: "reception-planning-accepted" }); notifyUser("Proposition planning acceptée.", "success"); renderReceptionWorkspace(); }
       else notifyUser(r2.message, "error");
     } else {
       const result = advanceReceptionWorkflow(caseId, "request_planning_revision", {});
-      if (result.ok) { saveState({ flushCloud: true, cloudReason: "reception-planning-revision" }); notifyUser("Révision demandée. Retour à l'étape 2.", "info"); renderReceptionWorkspace(); }
+      if (result.ok) { saveState({ changedCaseIds: [caseId], flushCloud: true, cloudReason: "reception-planning-revision" }); notifyUser("Révision demandée. Retour à l'étape 2.", "info"); renderReceptionWorkspace(); }
       else notifyUser(result.message, "error");
     }
     return;
@@ -1151,7 +1151,7 @@ async function handleReceptionFormSubmit(e) {
     const outcome = form.querySelector("[name=contactOutcome]")?.value || "contacted";
     const note = form.querySelector("[name=contactNote]")?.value || "";
     const result = advanceReceptionWorkflow(caseId, "contact_customer", { outcome, note });
-    if (result.ok) { saveState({ flushCloud: true, cloudReason: "reception-contact-customer" }); notifyUser("Contact client enregistré.", "success"); renderReceptionWorkspace(); }
+    if (result.ok) { saveState({ changedCaseIds: [caseId], flushCloud: true, cloudReason: "reception-contact-customer" }); notifyUser("Contact client enregistré.", "success"); renderReceptionWorkspace(); }
     else notifyUser(result.message, "error");
     return;
   }
@@ -1164,7 +1164,7 @@ async function handleReceptionFormSubmit(e) {
     const newDate = form.querySelector("[name=newDate]")?.value || "";
     const note = form.querySelector("[name=decisionNote]")?.value || "";
     const result = advanceReceptionWorkflow(caseId, "set_customer_decision", { decision, newDate, note });
-    if (result.ok) { saveState({ flushCloud: true, cloudReason: "reception-customer-decision" }); notifyUser(`Décision client enregistrée : ${decision}.`, "success"); renderReceptionWorkspace(); }
+    if (result.ok) { saveState({ changedCaseIds: [caseId], flushCloud: true, cloudReason: "reception-customer-decision" }); notifyUser(`Décision client enregistrée : ${decision}.`, "success"); renderReceptionWorkspace(); }
     else notifyUser(result.message, "error");
     return;
   }
@@ -1177,7 +1177,7 @@ async function handleReceptionFormSubmit(e) {
     const reminderSent = form.querySelector("[name=reminderSent]")?.checked || false;
     const note = form.querySelector("[name=rdvNote]")?.value || "";
     const result = advanceReceptionWorkflow(caseId, "confirm_rdv", { channel, reminderSent, note });
-    if (result.ok) { saveState({ flushCloud: true, cloudReason: "reception-confirm-rdv" }); notifyUser("Rendez-vous confirmé.", "success"); renderReceptionWorkspace(); }
+    if (result.ok) { saveState({ changedCaseIds: [caseId], flushCloud: true, cloudReason: "reception-confirm-rdv" }); notifyUser("Rendez-vous confirmé.", "success"); renderReceptionWorkspace(); }
     else notifyUser(result.message, "error");
     return;
   }
@@ -1191,7 +1191,7 @@ async function handleReceptionFormSubmit(e) {
     const documents = form.querySelector("[name=documents]")?.value || "";
     const conditionNote = form.querySelector("[name=conditionNote]")?.value || "";
     const result = advanceReceptionWorkflow(caseId, "receive_vehicle", { mileage, accessories, documents, conditionNote });
-    if (result.ok) { saveState({ flushCloud: true, cloudReason: "reception-vehicle-received" }); notifyUser("Véhicule réceptionné.", "success"); renderReceptionWorkspace(); if (typeof renderCases === "function") renderCases(); }
+    if (result.ok) { saveState({ changedCaseIds: [caseId], flushCloud: true, cloudReason: "reception-vehicle-received" }); notifyUser("Véhicule réceptionné.", "success"); renderReceptionWorkspace(); if (typeof renderCases === "function") renderCases(); }
     else notifyUser(result.message, "error");
     return;
   }
@@ -1202,7 +1202,7 @@ async function handleReceptionFormSubmit(e) {
     const caseId = form.dataset.caseId;
     const note = form.querySelector("[name=workshopNote]")?.value || "";
     const result = advanceReceptionWorkflow(caseId, "send_to_workshop", { note });
-    if (result.ok) { saveState({ flushCloud: true, cloudReason: "reception-send-workshop" }); notifyUser("Dossier envoyé en atelier.", "success"); renderReceptionWorkspace(); if (typeof renderCases === "function") renderCases(); }
+    if (result.ok) { saveState({ changedCaseIds: [caseId], flushCloud: true, cloudReason: "reception-send-workshop" }); notifyUser("Dossier envoyé en atelier.", "success"); renderReceptionWorkspace(); if (typeof renderCases === "function") renderCases(); }
     else notifyUser(result.message, "error");
     return;
   }
@@ -1213,7 +1213,7 @@ async function handleReceptionFormSubmit(e) {
     const caseId = form.dataset.caseId;
     const text = form.querySelector("[name=followupText]")?.value || "";
     const result = advanceReceptionWorkflow(caseId, "add_followup_note", { text });
-    if (result.ok) { form.querySelector("[name=followupText]").value = ""; saveState({ flushCloud: true, cloudReason: "reception-followup" }); notifyUser("Note de suivi ajoutée.", "success"); renderReceptionWorkspace(); }
+    if (result.ok) { form.querySelector("[name=followupText]").value = ""; saveState({ changedCaseIds: [caseId], flushCloud: true, cloudReason: "reception-followup" }); notifyUser("Note de suivi ajoutée.", "success"); renderReceptionWorkspace(); }
     else notifyUser(result.message, "error");
     return;
   }
@@ -1225,7 +1225,7 @@ async function handleReceptionFormSubmit(e) {
     const status = form.querySelector("[name=qualityStatus]")?.value || "not_started";
     const reason = form.querySelector("[name=qualityReason]")?.value || "";
     const result = advanceReceptionWorkflow(caseId, "update_quality_status", { status, reason });
-    if (result.ok) { saveState({ flushCloud: true, cloudReason: "reception-quality-update" }); notifyUser("Statut qualité mis à jour.", "success"); renderReceptionWorkspace(); if (typeof renderCases === "function") renderCases(); }
+    if (result.ok) { saveState({ changedCaseIds: [caseId], flushCloud: true, cloudReason: "reception-quality-update" }); notifyUser("Statut qualité mis à jour.", "success"); renderReceptionWorkspace(); if (typeof renderCases === "function") renderCases(); }
     else notifyUser(result.message, "error");
     return;
   }
@@ -1236,7 +1236,7 @@ async function handleReceptionFormSubmit(e) {
     const caseId = form.dataset.caseId;
     const clientName = form.querySelector("[name=clientSignatureName]")?.value || "";
     const result = advanceReceptionWorkflow(caseId, "mark_sheet_signed", { clientName });
-    if (result.ok) { saveState({ flushCloud: true, cloudReason: "reception-sheet-signed" }); notifyUser("Signature enregistrée.", "success"); renderReceptionWorkspace(); }
+    if (result.ok) { saveState({ changedCaseIds: [caseId], flushCloud: true, cloudReason: "reception-sheet-signed" }); notifyUser("Signature enregistrée.", "success"); renderReceptionWorkspace(); }
     else notifyUser(result.message, "error");
     return;
   }
@@ -1293,7 +1293,7 @@ async function handleReceptionClick(e) {
     if (item) {
       printDeliverySheet(item);
       advanceReceptionWorkflow(caseId, "mark_delivery_sheet_printed");
-      saveState({ flushCloud: true, cloudReason: "delivery-sheet-printed" });
+      saveState({ changedCase: item, flushCloud: true, cloudReason: "delivery-sheet-printed" });
       renderReceptionWorkspace();
     }
     return;
@@ -1436,11 +1436,12 @@ async function handleCreateCase(form) {
   }
 
   state.cases.unshift(item);
+  if (typeof noteCaseRevisionCandidate === "function") noteCaseRevisionCandidate(item);
   activeCaseId = item.id;
   isReceptionCreationMode = false;
 
   addAuditLog("reception.case_created", "Dossier créé", `Dossier créé depuis l'espace réception pour ${item.clientName}`, { caseId: item.id });
-  saveState({ flushCloud: true, cloudReason: "reception-case-create" });
+  saveState({ changedCase: item, flushCloud: true, cloudReason: "reception-case-create" });
   notifyUser("Dossier créé avec succès.", "success");
   renderReceptionWorkspace();
   if (typeof renderCases === "function") renderCases();
@@ -1489,7 +1490,7 @@ async function handleEditCase(form) {
   }
 
   addAuditLog("case.edit", "Dossier modifié", "Dossier modifié depuis l'espace réception", { caseId: item.id });
-  saveState({ flushCloud: true, cloudReason: "reception-case-edit" });
+  saveState({ changedCase: item, flushCloud: true, cloudReason: "reception-case-edit" });
   notifyUser("Dossier mis à jour.", "success");
   renderReceptionWorkspace();
   if (typeof renderCases === "function") renderCases();
@@ -1638,7 +1639,7 @@ function handleAddCustomerClaim(caseId, text, priority, type) {
   item.customerClaims = Array.isArray(item.customerClaims) ? item.customerClaims : [];
   item.customerClaims.push(claim);
   addAuditLog("customer_claim.created", "Réclamation créée", `Nouvelle ${type === "request" ? "demande" : "réclamation"} ajoutée : "${text}" (priorité: ${priority})`, { caseId: item.id });
-  saveState({ flushCloud: true, cloudReason: "claim-created" });
+  saveState({ changedCase: item, flushCloud: true, cloudReason: "claim-created" });
   notifyUser("Réclamation ajoutée.", "success");
   renderReceptionWorkspace();
 }
@@ -1654,7 +1655,7 @@ function handleClaimStatusChange(caseId, claimId, newStatus) {
   const actor = getCurrentActor();
   claim.resolvedBy = ["resolved", "explained_to_customer"].includes(newStatus) ? (actor.userName || actor.userId) : "";
   addAuditLog("customer_claim.status_changed", "Statut réclamation changé", `Réclamation "${claim.text}" passée au statut : ${newStatus} (ancien: ${oldStatus})`, { caseId: item.id });
-  saveState({ flushCloud: true, cloudReason: "claim-status-changed" });
+  saveState({ changedCase: item, flushCloud: true, cloudReason: "claim-status-changed" });
   notifyUser("Statut réclamation mis à jour.", "success");
   renderReceptionWorkspace();
 }
@@ -1674,7 +1675,7 @@ function handleExplainClaim(caseId, claimId) {
   claim.comments.push(comment);
   addAuditLog("customer_claim.status_changed", "Statut réclamation changé", `Réclamation "${claim.text}" passée au statut : explained_to_customer`, { caseId: item.id });
   addAuditLog("customer_claim.comment_added", "Commentaire réclamation", `Commentaire ajouté : "${commentText}"`, { caseId: item.id });
-  saveState({ flushCloud: true, cloudReason: "claim-explained" });
+  saveState({ changedCase: item, flushCloud: true, cloudReason: "claim-explained" });
   notifyUser("Réclamation marquée expliquée au client.", "success");
   renderReceptionWorkspace();
 }
@@ -1689,7 +1690,7 @@ function handleAddClaimComment(caseId, claimId, commentText) {
   claim.comments = Array.isArray(claim.comments) ? claim.comments : [];
   claim.comments.push(comment);
   addAuditLog("customer_claim.comment_added", "Commentaire réclamation", `Commentaire ajouté : "${commentText}"`, { caseId: item.id });
-  saveState({ flushCloud: true, cloudReason: "claim-comment-added" });
+  saveState({ changedCase: item, flushCloud: true, cloudReason: "claim-comment-added" });
   notifyUser("Commentaire ajouté.", "success");
   renderReceptionWorkspace();
 }
@@ -1769,7 +1770,7 @@ async function handleDeliveryAction(item) {
   const warnings = getBusinessRuleWarnings(item, "delivered");
   if (warnings.length) { const confirmed = await showConfirmModal(warnings.join("<br>") + "<br><br>Voulez-vous vraiment continuer ?"); if (!confirmed) return false; }
   const result = advanceReceptionWorkflow(item.id, "deliver_vehicle");
-  if (result && result.ok) { saveState({ flushCloud: true, cloudReason: "reception-delivery" }); notifyUser("Véhicule marqué comme livré.", "success"); renderReceptionWorkspace(); if (typeof renderCases === "function") renderCases(); return true; }
+  if (result && result.ok) { saveState({ changedCase: item, flushCloud: true, cloudReason: "reception-delivery" }); notifyUser("Véhicule marqué comme livré.", "success"); renderReceptionWorkspace(); if (typeof renderCases === "function") renderCases(); return true; }
   else { notifyUser(result?.message || "Erreur lors de la livraison.", "error"); return false; }
 }
 

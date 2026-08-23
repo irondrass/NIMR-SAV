@@ -42,7 +42,7 @@ async function markAppointmentNoShow(item) {
   state.bookings = state.bookings.filter((booking) => booking.caseId !== item.id);
   item.appointmentStatus = "no_show";
   addHistory(item, "appointment.no_show", "Client absent au RDV", `RDV initial: ${formatDateTime(item.appointment.start)}`);
-  saveState();
+  saveState({ changedCase: item });
   render();
 }
 
@@ -63,7 +63,7 @@ async function rescheduleAppointment(item) {
   clearCasePlanning(item, `RDV reporté: ancien RDV ${formatDateTime(oldStart)} libéré`);
   item.appointmentStatus = "reschedule_pending";
   addHistory(item, "appointment.reschedule_pending", "Report de RDV demandé", `Ancien RDV: ${formatDateTime(oldStart)}`);
-  saveState();
+  saveState({ changedCase: item });
   renderCaseDetail();
 }
 
@@ -207,7 +207,7 @@ async function exportCaseFolderZip(item, { clientOnly = false } = {}) {
     downloadBlob(zip, `${folder}.zip`, "application/zip");
     const label = clientOnly ? "Dossier client exporté" : "Dossier Windows exporté";
     addHistory(item, clientOnly ? "case.client_folder.exported" : "case.folder.exported", label, `${files.length} fichier${files.length > 1 ? "s" : ""} généré${files.length > 1 ? "s" : ""}`);
-    saveState();
+    saveState({ changedCase: item });
     renderCaseDetail();
   } catch (error) {
     console.error(error);
@@ -276,6 +276,10 @@ async function deleteActiveCase(item) {
     }
 
     revokePhotoUrlsForCase(item);
+    if (typeof markEntityCaseDeleted === "function") markEntityCaseDeleted(item);
+    state.bookings.filter((booking) => booking.caseId === item.id).forEach((booking) => {
+      if (typeof markEntityBookingDeleted === "function") markEntityBookingDeleted(booking.id);
+    });
     state.bookings = state.bookings.filter((booking) => booking.caseId !== item.id);
     state.cases = state.cases.filter((caseItem) => caseItem.id !== item.id);
     if (activeCaseId === item.id) activeCaseId = state.cases[0]?.id || null;
@@ -1632,7 +1636,7 @@ function printSupplementWorkOrders(item, supplementId = null) {
   `);
   popup.document.close();
   addHistory(item, 'supplement.printed', 'Ordre complémentaire imprimé', `${supplements.length} complément(s)`);
-  saveState();
+  saveState({ changedCase: item });
 }
 
 function getBookingEquipmentNames(booking) {
@@ -1787,7 +1791,7 @@ function printTechnicianTaskSheet(item, bookingId, technicianId = "") {
   `);
   popup.document.close();
   addHistory(item, "planning.task.printed", "Fiche tâche imprimée", `${booking.title || getDurationLabel(booking.key)} · ${technicianName}`);
-  saveState();
+  saveState({ changedCase: item });
 }
 
 function printPauseBlockSheet(item, bookingId, technicianId = "") {
@@ -2032,7 +2036,7 @@ function printTechnicianWorkOrders(item) {
   popup.document.close();
 
   addHistory(item, "work_orders.printed", "Ordres de travail techniciens imprimés", `${grouped.size} technicien${grouped.size > 1 ? "s" : ""}`);
-  saveState();
+  saveState({ changedCase: item });
 }
 
 function buildTechnicianEstimateRows(item, taskPhases) {

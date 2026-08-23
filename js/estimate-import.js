@@ -477,7 +477,7 @@ async function applyEstimateImportToCase(item, preview) {
     .filter(Boolean)
     .join(" ");
   addHistory(item, "expert.estimate.imported", "Devis validé importé", details);
-  saveState();
+  saveState({ changedCase: item });
   quietNotify("Répartition appliquée aux durées estimées.", "info");
   renderCaseDetail();
 }
@@ -543,7 +543,7 @@ async function applyEstimateImportToClaim(item, claim, preview, options = {}) {
   generatedProposals[item.id] = null;
   if (!options.silent) {
     addHistory(item, "claim.estimate.imported", "Devis ordre de réparation importé", `${getClaimLabel(claim)} - ${formatLocalizedDecimal(preview.detectedHours)} h MO`);
-    saveState();
+    saveState({ changedCase: item });
   }
 }
 

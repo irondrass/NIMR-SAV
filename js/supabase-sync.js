@@ -959,6 +959,7 @@ async function restoreLocalFromSupabase() {
     if (typeof initializeLastKnownCasesComparable === "function") {
       initializeLastKnownCasesComparable();
     }
+    if (typeof markEntityStateFullReplacement === "function") markEntityStateFullReplacement();
     let settingsRestored = false;
     try {
       const settingsBackup = await restoreWorkshopSettingsFromSupabase(client);
@@ -987,7 +988,7 @@ async function restoreLocalFromSupabase() {
     lastKnownCloudUpdatedAt = new Date(data.updated_at || 0).getTime() || lastKnownCloudUpdatedAt;
     if (typeof rememberKnownCloudUpdatedAt === "function" && lastKnownCloudUpdatedAt) rememberKnownCloudUpdatedAt(lastKnownCloudUpdatedAt);
     if (typeof clearLocalUserChangeAt === "function") clearLocalUserChangeAt();
-    saveState({ skipCloud: true });
+    await saveState({ skipCloud: true, boundedEntityDetection: true, cloudReason: "manual-cloud-restore" });
     render();
     setSupabaseStatus("Restauration Supabase terminée.", "ok");
     setSupabaseDetails(`${state.cases.length} dossier(s), ${restoredPhotos} photo(s) restauré(s). Réglages structurés ${settingsRestored ? "restaurés depuis app_settings" : "restaurés depuis cloud_backups"}. Dernière sauvegarde cloud : ${data.updated_at || "date inconnue"}.`);
@@ -1032,7 +1033,7 @@ function getWorkHoursOutboundBlock(
   const message = [
     "Synchronisation cloud bloquée : un conflit",
     "non résolu existe sur les horaires atelier.",
-    "Le snapshot local complet ne sera pas envoyé.",
+    "Les opérations granulaires restent durablement en attente.",
   ].join(" ");
 
   if (options.requireAck) {
@@ -1071,13 +1072,16 @@ async function flushSupabaseBackup(reason = "manual") {
   return autoBackupToSupabase(reason, { force: true });
 }
 
-async function autoBackupToSupabase(reason = "autosave", options = {}) {
+// Compatibility path used only to drain durable pre-P0-009 snapshot records.
+// New local mutations never call this whole-state serializer.
+async function legacyAutoBackupToSupabase(reason = "legacy-outbox", options = {}) {
+  const isolatedLegacyRun = options.legacyCompatibility === true;
   const initialWorkHoursBlock =
     getWorkHoursOutboundBlock(options);
   if (initialWorkHoursBlock) {
     return initialWorkHoursBlock;
   }
-  if (autoSupabaseBackupPromise) {
+  if (autoSupabaseBackupPromise && !isolatedLegacyRun) {
     pendingAutoSupabaseBackupReason = reason;
     return autoSupabaseBackupPromise;
   }
@@ -1251,6 +1255,7 @@ async function autoBackupToSupabase(reason = "autosave", options = {}) {
     }
   })();
 
+  if (isolatedLegacyRun) return run;
   autoSupabaseBackupPromise = run;
   try {
     return await run;
@@ -2330,6 +2335,7 @@ async function applyRemoteSupabaseBackup(data, reason = "cloud") {
     if (typeof initializeLastKnownCasesComparable === "function") {
       initializeLastKnownCasesComparable();
     }
+    if (typeof markEntityStateFullReplacement === "function") markEntityStateFullReplacement();
     if (typeof reconcileActiveCaseSelection === "function") reconcileActiveCaseSelection(previousSelection);
     else activeCaseId = state.cases[0]?.id ?? null;
     activeCaseDetailTab = previousTab || "resume";
@@ -2345,7 +2351,7 @@ async function applyRemoteSupabaseBackup(data, reason = "cloud") {
     } else if (!openConflicts && typeof clearLocalUserChangeAt === "function") {
       clearLocalUserChangeAt();
     }
-    saveState({ skipCloud: true });
+    await saveState({ skipCloud: true, boundedEntityDetection: true, cloudReason: `legacy-remote-merge:${reason}` });
     render();
     if (mergeResult.stats.newConflicts > 0) {
       setSupabaseStatus("Conflit de synchronisation détecté.", "warn");
@@ -2369,7 +2375,7 @@ async function applyRemoteSupabaseBackup(data, reason = "cloud") {
   }
 }
 
-async function pullLatestSupabaseBackup(reason = "poll") {
+async function legacyPullLatestSupabaseBackup(reason = "legacy-bootstrap") {
   if (supabaseLivePullPromise) return supabaseLivePullPromise;
 
   const run = (async () => {
@@ -2436,12 +2442,28 @@ function startSupabaseLiveSync() {
         ? guardSensitiveAction("supabase.sync.use", {}, { notify: false })
         : { ok: false };
       if (!currentPermission.ok) return;
-      // Si c'est un dossier qui change, on le met à jour directement dans l'état local
-      if (payload.table === "repair_orders") {
-        handleRemoteCaseChange(payload.new, payload.eventType);
+      if (payload.table === "sync_entities") {
+        if (row.entity_type === "case") await handleRemoteCaseChange(row, payload.eventType);
+        else if (row.entity_type === "booking") await handleRemoteBookingChange(row, payload.eventType);
+      } else if (payload.table === "app_settings" && row.setting_key === "workshop_settings") {
+        applyingRemoteSupabaseState = true;
+        try {
+          if (applyWorkshopSettingsToState(row.value)) {
+            await saveState({ skipCloud: true, skipSnapshot: true, boundedEntityDetection: true, cloudReason: "realtime:settings" });
+          }
+        } finally {
+          applyingRemoteSupabaseState = false;
+        }
+      } else if (payload.table === "audit_logs" && row.entity_type === "application_audit") {
+        const entry = row.after_data;
+        if (entry && !state.auditLog.some((candidate) => candidate?.id === entry.id)) {
+          state.auditLog.unshift(entry);
+          if (typeof markEntityAuditEntryDirty === "function") markEntityAuditEntryDirty(entry, { skipCloud: true });
+          await saveState({ skipCloud: true, skipSnapshot: true, boundedEntityDetection: true, cloudReason: "realtime:audit" });
+        }
       } else {
-        // Pour les autres tables, on force un rafraîchissement léger
-        if (typeof pullLatestSupabaseBackup === "function") await pullLatestSupabaseBackup(`realtime:${payload.table}`);
+        // Unknown/projection notifications reconcile through cursors; no full restore.
+        await pullLatestSupabaseBackup(`realtime-reconcile:${payload.table}`);
       }
       if (typeof processOfflineQueue === "function") await processOfflineQueue();
     }, 200);
@@ -2450,11 +2472,12 @@ function startSupabaseLiveSync() {
   try {
     supabaseLiveSyncChannel = client
       .channel(`nimr-sav-live-${workshopId}`)
-      // On écoute la table des dossiers
-      .on("postgres_changes", { event: "*", schema: "public", table: "repair_orders", filter: `workshop_id=eq.${workshopId}` }, handleGranularChange)
-      // On écoute la table du planning
+      .on("postgres_changes", { event: "*", schema: "public", table: "sync_entities", filter: `workshop_id=eq.${workshopId}` }, handleGranularChange)
+      .on("postgres_changes", { event: "*", schema: "public", table: "app_settings", filter: `workshop_id=eq.${workshopId}` }, handleGranularChange)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "audit_logs", filter: `workshop_id=eq.${workshopId}` }, handleGranularChange)
+      // Legacy structured planning tables remain projections. Their events only
+      // schedule bounded granular reconciliation; they never restore a snapshot.
       .on("postgres_changes", { event: "*", schema: "public", table: "planning_slots", filter: `workshop_id=eq.${workshopId}` }, handleGranularChange)
-      // On écoute les ressources
       .on("postgres_changes", { event: "*", schema: "public", table: "planning_resources", filter: `workshop_id=eq.${workshopId}` }, handleGranularChange)
       .subscribe((status) => {
         if (status === "SUBSCRIBED") {
@@ -2480,45 +2503,70 @@ function startSupabaseLiveSync() {
   }, 15000); 
 }
 
-// AJOUTER cette nouvelle fonction pour mettre à jour un dossier sans tout recharger
-function handleRemoteCaseChange(remoteCase, eventType) {
-  if (!remoteCase || !remoteCase.id) return;
-  if (typeof invalidateStateReplacementIndexes === "function") invalidateStateReplacementIndexes();
-  
-  // Si le dossier a été supprimé sur un autre poste
-  if (eventType === "DELETE") {
-    state.cases = state.cases.filter(c => c.id !== remoteCase.id);
-    if (typeof render === "function") render();
-    return;
-  }
-  
-  // Chercher si le dossier existe déjà localement
-  const localIndex = state.cases.findIndex(c => c.id === remoteCase.id);
-  
-  if (localIndex !== -1) {
-    // Le dossier existe : on ne l'écrase que si la version distante est plus récente
-    const localRev = Number(state.cases[localIndex].localRevision || 0);
-    const remoteRev = Number(remoteCase.version || 0);
-    
-    if (remoteRev >= localRev) {
-      // Fusion basique : on garde les données locales non synchronisées si besoin, 
-      // mais on prend les champs principaux du distant
-      state.cases[localIndex] = {
-        ...state.cases[localIndex],
+async function handleRemoteCaseChange(remoteCase, eventType) {
+  if (!remoteCase) return false;
+  let changed = false;
+  applyingRemoteSupabaseState = true;
+  try {
+    if (remoteCase.entity_type === "case") {
+      changed = applyRemoteEntityRow({
         ...remoteCase,
-        syncRevision: remoteRev,
-        localRevision: remoteRev // On aligne la révision locale
-      };
+        deleted_at: eventType === "DELETE" ? (remoteCase.deleted_at || new Date().toISOString()) : remoteCase.deleted_at,
+      });
+    } else {
+      const stableId = String(remoteCase.local_id || remoteCase.id || "");
+      if (!stableId) return false;
+      const localIndex = state.cases.findIndex((item) => (
+        String(item?.id || "") === stableId
+        || String(item?.local_id || "") === stableId
+        || caseSyncLocalId(item) === stableId
+      ));
+      if (eventType === "DELETE") {
+        if (localIndex >= 0) {
+          const localId = state.cases[localIndex].id;
+          state.cases.splice(localIndex, 1);
+          if (typeof markEntityCaseDeleted === "function") markEntityCaseDeleted(localId, { skipCloud: true });
+          rememberRemoteCaseComparable(localId);
+          changed = true;
+        }
+      } else if (localIndex >= 0) {
+        const local = state.cases[localIndex];
+        local.orNavNumber = remoteCase.order_number || local.orNavNumber;
+        local.status = remoteCase.status || local.status;
+        local.updatedAt = remoteCase.updated_at || local.updatedAt;
+        if (typeof markEntityCaseDirty === "function") markEntityCaseDirty(local, { skipCloud: true });
+        rememberRemoteCaseComparable(local.id, local);
+        changed = true;
+      }
+    }
+    if (changed) {
+      if (typeof invalidateStateReplacementIndexes === "function") invalidateStateReplacementIndexes();
+      await saveState({ skipCloud: true, skipSnapshot: true, boundedEntityDetection: true, cloudReason: "realtime:case" });
       if (typeof render === "function") render();
     }
-  } else {
-    // Nouveau dossier créé sur un autre poste : on l'ajoute localement
-    state.cases.push({
-      ...remoteCase,
-      syncRevision: Number(remoteCase.version || 0),
-      localRevision: Number(remoteCase.version || 0)
+    return changed;
+  } finally {
+    applyingRemoteSupabaseState = false;
+  }
+}
+
+async function handleRemoteBookingChange(remoteBooking, eventType) {
+  if (!remoteBooking) return false;
+  applyingRemoteSupabaseState = true;
+  try {
+    const changed = applyRemoteEntityRow({
+      ...remoteBooking,
+      entity_type: "booking",
+      deleted_at: eventType === "DELETE" ? (remoteBooking.deleted_at || new Date().toISOString()) : remoteBooking.deleted_at,
     });
-    if (typeof render === "function") render();
+    if (changed) {
+      if (typeof invalidateStateReplacementIndexes === "function") invalidateStateReplacementIndexes();
+      await saveState({ skipCloud: true, skipSnapshot: true, boundedEntityDetection: true, cloudReason: "realtime:booking" });
+      if (typeof render === "function") render();
+    }
+    return changed;
+  } finally {
+    applyingRemoteSupabaseState = false;
   }
 }
 
@@ -2767,6 +2815,496 @@ function bindSupabaseSyncHealthActions() {
   $("#supabase-sync-export-backup")?.addEventListener("click", () => exportSafetySnapshotNow());
 }
 
+const GRANULAR_CASE_PAGE_SIZE = 500;
+const GRANULAR_BOOKING_PAGE_SIZE = 500;
+const GRANULAR_AUDIT_PAGE_SIZE = 250;
+
+function getGranularSyncMetadataKey(workshopId, group) {
+  return `granular-sync:${workshopId}:${group}`;
+}
+
+function buildGranularCursorFilter(cursor, idColumn) {
+  if (!cursor?.updatedAt) return "";
+  const updatedAt = String(cursor.updatedAt).replace(/[(),]/g, "");
+  const entityId = String(cursor.entityId || "").replace(/[(),]/g, "");
+  return `updated_at.gt.${updatedAt},and(updated_at.eq.${updatedAt},${idColumn}.gt.${entityId})`;
+}
+
+async function fetchGranularEntityPage(client, entityType, cursor = null, pageSize = 500) {
+  let query = client
+    .from("sync_entities")
+    .select("workshop_id,entity_type,entity_id,payload,entity_version,last_operation_id,deleted_at,updated_at")
+    .eq("workshop_id", getSupabaseWorkshopId())
+    .eq("entity_type", entityType)
+    .order("updated_at", { ascending: true })
+    .order("entity_id", { ascending: true })
+    .limit(pageSize);
+  const cursorFilter = buildGranularCursorFilter(cursor, "entity_id");
+  if (cursorFilter) query = query.or(cursorFilter);
+  const { data, error } = await query;
+  if (error) throw error;
+  const rows = Array.isArray(data) ? data : [];
+  const last = rows.at(-1);
+  return {
+    rows,
+    cursor: last ? { updatedAt: last.updated_at, entityId: last.entity_id } : cursor,
+    hasMore: rows.length === pageSize,
+  };
+}
+
+async function fetchGranularAuditPage(client, cursor = null, pageSize = GRANULAR_AUDIT_PAGE_SIZE) {
+  let query = client
+    .from("audit_logs")
+    .select("workshop_id,local_id,after_data,created_at,updated_at")
+    .eq("workshop_id", getSupabaseWorkshopId())
+    .eq("entity_type", "application_audit")
+    .order("updated_at", { ascending: true })
+    .order("local_id", { ascending: true })
+    .limit(pageSize);
+  const cursorFilter = buildGranularCursorFilter(cursor, "local_id");
+  if (cursorFilter) query = query.or(cursorFilter);
+  const { data, error } = await query;
+  if (error) throw error;
+  const rows = Array.isArray(data) ? data : [];
+  const last = rows.at(-1);
+  return {
+    rows,
+    cursor: last ? { updatedAt: last.updated_at, entityId: last.local_id } : cursor,
+    hasMore: rows.length === pageSize,
+  };
+}
+
+const appliedGranularEntityEnvelopes = new Map();
+
+function rememberRemoteCaseComparable(entityId, caseItem = null) {
+  if (typeof getComparableRuntimeScope !== "function") return;
+  const runtimeScope = getComparableRuntimeScope();
+  if (!runtimeScope.lastKnownCasesComparable) runtimeScope.lastKnownCasesComparable = Object.create(null);
+  if (!caseItem) {
+    delete runtimeScope.lastKnownCasesComparable[entityId];
+    return;
+  }
+  if (typeof getComparableCaseJSON === "function") {
+    runtimeScope.lastKnownCasesComparable[entityId] = getComparableCaseJSON(caseItem);
+  }
+}
+
+function applyRemoteEntityRow(row) {
+  const entityType = String(row?.entity_type || "");
+  const entityId = String(row?.entity_id || "");
+  if (!entityId || !["case", "booking"].includes(entityType)) return false;
+  const remoteVersion = Math.max(0, Number(row.entity_version || 0));
+  const envelopeKey = `${row.workshop_id || getSupabaseWorkshopId()}\u0000${entityType}\u0000${entityId}`;
+  const priorEnvelope = appliedGranularEntityEnvelopes.get(envelopeKey);
+  if (priorEnvelope?.version > remoteVersion) return false;
+  if (priorEnvelope?.version === remoteVersion) {
+    if (priorEnvelope.deleted && !row.deleted_at) return false;
+    if (priorEnvelope.deleted === Boolean(row.deleted_at)) return false;
+  }
+  const collectionName = entityType === "case" ? "cases" : "bookings";
+  const collection = Array.isArray(state[collectionName]) ? state[collectionName] : [];
+  const existingIndex = collection.findIndex((entry) => String(entry?.id || "") === entityId);
+  if (row.deleted_at) {
+    if (existingIndex >= 0) collection.splice(existingIndex, 1);
+    if (entityType === "case" && typeof markEntityCaseDeleted === "function") markEntityCaseDeleted(entityId, { skipCloud: true });
+    if (entityType === "booking" && typeof markEntityBookingDeleted === "function") markEntityBookingDeleted(entityId, { skipCloud: true });
+    if (entityType === "case") rememberRemoteCaseComparable(entityId);
+    appliedGranularEntityEnvelopes.set(envelopeKey, { version: remoteVersion, deleted: true });
+    return existingIndex >= 0;
+  }
+  const remoteEntity = { ...(row.payload || {}), id: entityId };
+  if (existingIndex >= 0) collection[existingIndex] = remoteEntity;
+  else collection.push(remoteEntity);
+  if (entityType === "case" && typeof markEntityCaseDirty === "function") markEntityCaseDirty(remoteEntity, { skipCloud: true });
+  if (entityType === "booking" && typeof markEntityBookingDirty === "function") markEntityBookingDirty(remoteEntity, { skipCloud: true });
+  if (entityType === "case") rememberRemoteCaseComparable(entityId, remoteEntity);
+  appliedGranularEntityEnvelopes.set(envelopeKey, { version: remoteVersion, deleted: false });
+  return true;
+}
+
+async function persistRemoteGranularPage(rows, reason = "incremental-pull") {
+  let changed = false;
+  applyingRemoteSupabaseState = true;
+  try {
+    rows.forEach((row) => { changed = applyRemoteEntityRow(row) || changed; });
+    if (!changed) return false;
+    if (typeof invalidateStateReplacementIndexes === "function") invalidateStateReplacementIndexes();
+    await saveState({ skipCloud: true, skipSnapshot: true, boundedEntityDetection: true, cloudReason: reason });
+    return true;
+  } finally {
+    applyingRemoteSupabaseState = false;
+  }
+}
+
+async function pullGranularEntityGroup(client, entityType, pageSize, bootstrap = false) {
+  const workshopId = getSupabaseWorkshopId();
+  const metadataKey = getGranularSyncMetadataKey(workshopId, entityType);
+  const metadata = bootstrap ? null : await loadSyncMetadata(metadataKey);
+  let cursor = metadata?.cursor || null;
+  let pulled = 0;
+  while (true) {
+    const page = await fetchGranularEntityPage(client, entityType, cursor, pageSize);
+    if (!page.rows.length) break;
+    await persistRemoteGranularPage(page.rows, `${bootstrap ? "bootstrap" : "incremental"}:${entityType}`);
+    cursor = page.cursor;
+    pulled += page.rows.length;
+    await putSyncMetadata(metadataKey, { cursor, initialized: true });
+    if (!page.hasMore) break;
+  }
+  return pulled;
+}
+
+async function pullGranularAuditGroup(client, bootstrap = false) {
+  const workshopId = getSupabaseWorkshopId();
+  const metadataKey = getGranularSyncMetadataKey(workshopId, "audit");
+  const metadata = bootstrap ? null : await loadSyncMetadata(metadataKey);
+  let cursor = metadata?.cursor || null;
+  let pulled = 0;
+  while (true) {
+    const page = await fetchGranularAuditPage(client, cursor);
+    if (!page.rows.length) break;
+    let changed = false;
+    page.rows.forEach((row) => {
+      const entry = row.after_data;
+      if (!entry || state.auditLog.some((candidate) => candidate?.id === entry.id)) return;
+      state.auditLog.push(entry);
+      if (typeof markEntityAuditEntryDirty === "function") markEntityAuditEntryDirty(entry, { skipCloud: true });
+      changed = true;
+    });
+    if (changed) {
+      state.auditLog.sort((left, right) => String(right.at || "").localeCompare(String(left.at || "")));
+      await saveState({ skipCloud: true, skipSnapshot: true, boundedEntityDetection: true, cloudReason: "incremental:audit" });
+    }
+    cursor = page.cursor;
+    pulled += page.rows.length;
+    await putSyncMetadata(metadataKey, { cursor, initialized: true });
+    if (!page.hasMore) break;
+  }
+  return pulled;
+}
+
+async function restoreGranularWorkshopSettings(client) {
+  const settingsBackup = await restoreWorkshopSettingsFromSupabase(client);
+  if (!settingsBackup?.value) return false;
+  applyingRemoteSupabaseState = true;
+  try {
+    const changed = applyWorkshopSettingsToState(settingsBackup.value);
+    if (changed) await saveState({ skipCloud: true, skipSnapshot: true, boundedEntityDetection: true, cloudReason: "incremental:settings" });
+    return changed;
+  } finally {
+    applyingRemoteSupabaseState = false;
+  }
+}
+
+async function performLegacyCloudBootstrapOnce(client, reason) {
+  const data = await fetchLatestCloudBackup(client);
+  return applyRemoteSupabaseBackup(data, reason);
+}
+
+async function pullLatestSupabaseBackup(reason = "poll") {
+  if (supabaseLivePullPromise) return supabaseLivePullPromise;
+  const run = (async () => {
+    const permissionGuard = typeof guardSensitiveAction === "function"
+      ? guardSensitiveAction("supabase.sync.use", {}, { notify: false })
+      : { ok: false };
+    if (!permissionGuard.ok || navigator.onLine === false) return false;
+    const client = getSupabaseClient();
+    const user = await getSupabaseUser();
+    if (!client || !user) return false;
+    const workshopId = getSupabaseWorkshopId();
+    const bootstrapKey = getGranularSyncMetadataKey(workshopId, "bootstrap");
+    const bootstrapMeta = await loadSyncMetadata(bootstrapKey);
+    const bootstrap = bootstrapMeta?.initialized !== true;
+    try {
+      const cases = await pullGranularEntityGroup(client, "case", GRANULAR_CASE_PAGE_SIZE, bootstrap);
+      const bookings = await pullGranularEntityGroup(client, "booking", GRANULAR_BOOKING_PAGE_SIZE, bootstrap);
+      const audit = await pullGranularAuditGroup(client, bootstrap);
+      await restoreGranularWorkshopSettings(client);
+      if (bootstrap && cases + bookings === 0 && !bootstrapMeta?.legacyAttempted) {
+        await performLegacyCloudBootstrapOnce(client, "legacy-bootstrap-once");
+      }
+      await putSyncMetadata(bootstrapKey, {
+        initialized: true,
+        legacyAttempted: Boolean(bootstrapMeta?.legacyAttempted || (bootstrap && cases + bookings === 0)),
+      });
+      return { granular: true, reason, cases, bookings, audit, bootstrap };
+    } catch (error) {
+      if (bootstrap && !bootstrapMeta?.legacyAttempted) {
+        const restored = await performLegacyCloudBootstrapOnce(client, "legacy-schema-fallback-once");
+        await putSyncMetadata(bootstrapKey, { initialized: false, legacyAttempted: true, lastError: String(error?.message || error) });
+        return restored;
+      }
+      console.warn("Réconciliation granulaire impossible", error?.message || error);
+      return false;
+    }
+  })();
+  supabaseLivePullPromise = run;
+  try {
+    return await run;
+  } finally {
+    if (supabaseLivePullPromise === run) supabaseLivePullPromise = null;
+  }
+}
+
+const GRANULAR_OUTBOX_BATCH_SIZE = 100;
+const GRANULAR_OUTBOX_MAX_CONCURRENCY = 4;
+
+async function upsertWorkshopSettingsEntity(client, payload, user) {
+  const now = new Date().toISOString();
+  const row = withWorkshopId({
+    setting_key: "workshop_settings",
+    value: payload || {},
+    description: "Réglages atelier granulaires P0-009",
+    updated_by: user?.id || null,
+    updated_at: now,
+  });
+  const { error } = await client.from("app_settings").upsert(row, { onConflict: "workshop_id,setting_key" });
+  if (error) throw error;
+  return {
+    updatedAt: now,
+    workHoursFingerprint: payload?.workHoursSync?.fingerprint || "",
+  };
+}
+
+async function appendAuditEntityToSupabase(client, operation) {
+  const entity = operation.payload?.entity || {};
+  const row = withWorkshopId({
+    local_id: operation.entityId,
+    repair_order_id: null,
+    action: entity.label || entity.type || "Audit atelier",
+    entity_type: "application_audit",
+    entity_id: null,
+    before_data: null,
+    after_data: entity,
+    created_at: safeIso(entity.at) || new Date().toISOString(),
+  });
+  const { error } = await client.from("audit_logs").insert(row);
+  if (error && String(error.code || "") !== "23505") throw error;
+  return { updatedAt: row.created_at };
+}
+
+async function applyCanonicalSyncEntity(client, operation) {
+  const { data, error } = await client.rpc("nimr_apply_sync_entity", {
+    p_workshop_id: operation.workshopId,
+    p_entity_type: operation.entityType,
+    p_entity_id: operation.entityId,
+    p_payload: operation.action === "delete" ? {} : (operation.payload?.entity || {}),
+    p_entity_version: Math.max(0, Number(operation.entityVersion || 0)),
+    p_operation_id: operation.operationId,
+    p_deleted: operation.action === "delete",
+  });
+  if (error) throw error;
+  return Array.isArray(data) ? data[0] : data;
+}
+
+async function deleteCaseProjectionFromSupabase(client, operation) {
+  const { error } = await client
+    .from("repair_orders")
+    .delete()
+    .eq("workshop_id", operation.workshopId)
+    .eq("local_id", operation.payload?.projectionLocalId || operation.entityId);
+  if (error) throw error;
+}
+
+async function syncCaseProjectionToSupabase(client, item) {
+  if (!item?.id) return { rows: 0 };
+  const now = new Date().toISOString();
+  const projectionLocalId = caseSyncLocalId(item);
+  const clientMap = await upsertAndMap(client, "clients", [{
+    local_id: caseClientLocalId(item),
+    full_name: item.clientName || "Client",
+    phone: item.phone || null,
+    email: null,
+    address: null,
+    updated_at: now,
+  }]);
+  const parsedVehicle = splitVehicleLabel(item.vehicle);
+  const vehicleMap = await upsertAndMap(client, "vehicles", [{
+    local_id: caseVehicleLocalId(item),
+    client_id: clientMap.get(caseClientLocalId(item)) || null,
+    vin: item.vin || null,
+    registration: item.plate || null,
+    brand: parsedVehicle.brand,
+    model: parsedVehicle.model,
+    mileage: item.mileage ? Number(String(item.mileage).replace(/\D/g, "")) || null : null,
+    color: item.color || null,
+    energy: null,
+    updated_at: now,
+  }]);
+  await upsertAndMap(client, "repair_orders", [{
+    local_id: projectionLocalId,
+    order_number: item.orNavNumber || item.id,
+    estimate_number: item.estimateNumber || null,
+    client_id: clientMap.get(caseClientLocalId(item)) || null,
+    vehicle_id: vehicleMap.get(caseVehicleLocalId(item)) || null,
+    status: buildRepairStatus(item),
+    repair_planned_start_at: getAppointmentIso(item),
+    repair_actual_start_at: getHistoryIso(item, "work.started"),
+    initial_estimated_delivery_at: safeIso(item.initialEstimatedDelivery || item.deliveryEstimate?.initial),
+    revised_estimated_delivery_at: safeIso(item.revisedEstimatedDelivery || item.deliveryEstimate?.current),
+    planned_duration_minutes: Math.round(Object.values(item.durations || {}).reduce((sum, value) => sum + Number(value || 0), 0) * 60),
+    actual_duration_minutes: 0,
+    planning_version: Math.max(0, Number(item.localRevision || 0)),
+    next_action: item.nextAction || null,
+    closed_at: safeIso(item.closedAt),
+    archived_at: safeIso(item.archivedAt),
+    notes: buildRepairOrderNotesForSync(item),
+    updated_at: now,
+  }]);
+  return { rows: 3 };
+}
+
+async function sendGranularOutboxOperation(client, user, operation) {
+  if (operation.entityType === "workshop_state" && operation.action === "upsert_snapshot") {
+    return legacyAutoBackupToSupabase("legacy-outbox-migration", {
+      force: true,
+      requireAck: true,
+      legacyCompatibility: true,
+      currentRetryCount: operation.retryCount,
+    });
+  }
+  if (["case", "booking"].includes(operation.entityType)) {
+    const canonical = await applyCanonicalSyncEntity(client, operation);
+    if (operation.entityType === "case") {
+      if (operation.action === "delete") await deleteCaseProjectionFromSupabase(client, operation);
+      else await syncCaseProjectionToSupabase(client, operation.payload?.entity);
+    }
+    return { acknowledged: true, updatedAt: canonical?.updated_at || new Date().toISOString() };
+  }
+  if (operation.entityType === "audit" && operation.action === "append") {
+    const result = await appendAuditEntityToSupabase(client, operation);
+    return { acknowledged: true, ...result };
+  }
+  if (operation.entityType === "workshop_settings" && operation.action === "upsert") {
+    const result = await upsertWorkshopSettingsEntity(client, operation.payload?.entity, user);
+    if (typeof acknowledgeWorkHoursSync === "function" && result.workHoursFingerprint) {
+      acknowledgeWorkHoursSync(state.workHours, {
+        cloudBackupFingerprint: result.workHoursFingerprint,
+        appSettingsFingerprint: result.workHoursFingerprint,
+        updatedAt: result.updatedAt,
+      });
+    }
+    return { acknowledged: true, ...result };
+  }
+  throw new Error(`Opération outbox non prise en charge: ${operation.entityType}/${operation.action}`);
+}
+
+async function processGranularOutboxOperation(client, user, operation) {
+  const processing = await updateDurableOutboxOperation(operation.operationId, {
+    syncStatus: "processing",
+    lastError: "",
+  });
+  if (!processing) return { acknowledged: false, missing: true };
+  try {
+    const acknowledgement = await sendGranularOutboxOperation(client, user, processing);
+    await acknowledgeDurableOutboxOperation(processing.operationId, acknowledgement);
+    return { acknowledged: true, operationId: processing.operationId };
+  } catch (error) {
+    await updateDurableOutboxOperation(processing.operationId, {
+      syncStatus: "failed",
+      retryCount: Math.min(10, Number(processing.retryCount || 0) + 1),
+      lastError: String(error?.message || error),
+    });
+    return { acknowledged: false, operationId: processing.operationId, error: String(error?.message || error) };
+  }
+}
+
+async function processGranularOutboxBatch(client, user, operations) {
+  const ordered = typeof sortDurableOutboxOperationsForSend === "function"
+    ? sortDurableOutboxOperationsForSend(operations)
+    : operations.slice();
+  const results = [];
+  const ranks = [...new Set(ordered.map((operation) => {
+    if (operation.action === "delete") return operation.entityType === "booking" ? 40 : 50;
+    return operation.entityType === "case" ? 10 : operation.entityType === "booking" ? 20 : 30;
+  }))];
+  for (const rank of ranks) {
+    const stage = ordered.filter((operation) => {
+      if (operation.action === "delete") return (operation.entityType === "booking" ? 40 : 50) === rank;
+      return (operation.entityType === "case" ? 10 : operation.entityType === "booking" ? 20 : 30) === rank;
+    });
+    const entityGroups = new Map();
+    for (const operation of stage) {
+      const entityKey = `${operation.workshopId}\u0000${operation.entityType}\u0000${operation.entityId}`;
+      if (!entityGroups.has(entityKey)) entityGroups.set(entityKey, []);
+      entityGroups.get(entityKey).push(operation);
+    }
+    const groups = [...entityGroups.values()];
+    for (let offset = 0; offset < groups.length; offset += GRANULAR_OUTBOX_MAX_CONCURRENCY) {
+      const groupResults = await Promise.all(
+        groups.slice(offset, offset + GRANULAR_OUTBOX_MAX_CONCURRENCY).map(async (group) => {
+          const orderedGroupResults = [];
+          for (const operation of group) {
+            orderedGroupResults.push(await processGranularOutboxOperation(client, user, operation));
+          }
+          return orderedGroupResults;
+        }),
+      );
+      results.push(...groupResults.flat());
+    }
+  }
+  return results;
+}
+
+// Historical public name retained: its automatic meaning is now "drain the
+// bounded granular outbox". It never builds or fingerprints application state.
+async function autoBackupToSupabase(reason = "autosave", options = {}) {
+  // Compatibility for legacy hosts that did not load the durable outbox module.
+  // The production application always has loadDurableOutboxOperations.
+  if (typeof loadDurableOutboxOperations !== "function") {
+    return legacyAutoBackupToSupabase(reason, options);
+  }
+  const workHoursBlock = getWorkHoursOutboundBlock(options);
+  if (workHoursBlock) return workHoursBlock;
+  if (autoSupabaseBackupPromise) {
+    pendingAutoSupabaseBackupReason = reason;
+    return autoSupabaseBackupPromise;
+  }
+  if (!shouldAutoBackupToSupabase()) {
+    if (options.requireAck) throw new Error("Synchronisation serveur indisponible ; l'opération reste dans l'outbox.");
+    return { acknowledged: false, reason: "unavailable" };
+  }
+  const run = (async () => {
+    autoSupabaseBackupRunning = true;
+    const client = getSupabaseClient();
+    const user = await getSupabaseUser();
+    if (!client || !user) {
+      if (options.requireAck) throw new Error("Session Supabase requise ; l'opération reste dans l'outbox.");
+      return { acknowledged: false, reason: "authentication-required" };
+    }
+    const records = typeof loadDurableOutboxOperations === "function"
+      ? await loadDurableOutboxOperations()
+      : [];
+    const pending = records
+      .filter((entry) => ["pending", "failed"].includes(entry.syncStatus))
+      .slice(0, GRANULAR_OUTBOX_BATCH_SIZE);
+    const results = await processGranularOutboxBatch(client, user, pending);
+    const failures = results.filter((result) => !result.acknowledged);
+    lastAutoSupabaseBackupAt = Date.now();
+    if (typeof renderSyncStatusStrip === "function") renderSyncStatusStrip();
+    return {
+      acknowledged: failures.length === 0,
+      reason,
+      processed: results.length,
+      failed: failures.length,
+      batchSize: GRANULAR_OUTBOX_BATCH_SIZE,
+      maxConcurrency: GRANULAR_OUTBOX_MAX_CONCURRENCY,
+    };
+  })();
+  autoSupabaseBackupPromise = run;
+  try {
+    return await run;
+  } finally {
+    autoSupabaseBackupRunning = false;
+    if (autoSupabaseBackupPromise === run) autoSupabaseBackupPromise = null;
+    if (pendingAutoSupabaseBackupReason) {
+      const pendingReason = pendingAutoSupabaseBackupReason;
+      pendingAutoSupabaseBackupReason = "";
+      scheduleAutoSupabaseBackup(pendingReason);
+    }
+  }
+}
+
 function refreshSupabasePermissionState(reason = "session-change") {
   const getGuard = (permission, message) => typeof guardSensitiveAction === "function"
     ? guardSensitiveAction(permission, {}, { notify: false })
@@ -2960,7 +3498,12 @@ function areOfflineSnapshotOperationsSameTarget(left = {}, right = {}) {
     && String(left.action || "") === "upsert_snapshot";
 }
 
-function enqueueOfflineAction(type = "sync_push", description = "Mise à jour des données") {
+function legacyEnqueueOfflineAction(type = "sync_push", description = "Mise à jour des données") {
+  // Retained only so older extracted scripts can resolve the symbol. New and
+  // legacy callers both use the durable-outbox facade below; no snapshot can
+  // be created through this compatibility name.
+  return { type, description, facade: true, legacy: true };
+  /* c8 ignore start -- unreachable pre-P0-009 reference implementation */
   loadOfflineQueue();
   const expectedVersion = Math.max(
     0,
@@ -3103,7 +3646,7 @@ let isProcessingOfflineQueue = false;
 
 let offlineQueueProcessingPromise = null;
 
-async function processOfflineQueue() {
+async function legacyProcessOfflineQueue() {
   if (offlineQueueProcessingPromise) return offlineQueueProcessingPromise;
   const run = (async () => {
     if (typeof guardSensitiveAction === "function") {
@@ -3283,6 +3826,85 @@ async function processOfflineQueue() {
   }
 }
 
+function enqueueOfflineAction(type = "sync_push", description = "Mise à jour des données") {
+  if (type === "sync_push") {
+    if (typeof loadDurableOutboxOperations === "function") {
+      loadDurableOutboxOperations().then((records) => {
+        offlineQueue = records;
+        window.offlineQueue = records;
+        if (typeof renderSyncStatusStrip === "function") renderSyncStatusStrip();
+      }).catch(() => null);
+    }
+    return { type, description, facade: true };
+  }
+  const operationId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? `operation-${crypto.randomUUID()}`
+    : uid("operation");
+  const action = {
+    operationId,
+    id: operationId,
+    type,
+    entityType: "application_event",
+    entityId: operationId,
+    action: type,
+    workshopId: getSupabaseWorkshopId(),
+    payload: { description },
+    description,
+    syncStatus: "pending",
+    retryCount: 0,
+    createdAt: new Date().toISOString(),
+  };
+  if (typeof enqueueDurableOutboxOperation === "function") {
+    enqueueDurableOutboxOperation(action).catch((error) => {
+      console.warn("Écriture outbox IndexedDB impossible", error?.message || error);
+    });
+  }
+  return action;
+}
+
+// The historical offlineQueue API is now a facade over the IndexedDB outbox.
+// It has no independent sender and cannot duplicate a logical mutation.
+async function processOfflineQueue() {
+  if (offlineQueueProcessingPromise) return offlineQueueProcessingPromise;
+  const run = (async () => {
+    const permissionGuard = typeof guardSensitiveAction === "function"
+      ? guardSensitiveAction("supabase.sync.use", {}, { notify: false })
+      : { ok: false };
+    if (!permissionGuard.ok) return { processed: 0, reason: "permission-denied" };
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      return { processed: 0, reason: "offline" };
+    }
+    const records = typeof loadDurableOutboxOperations === "function"
+      ? await loadDurableOutboxOperations()
+      : [];
+    for (const operation of records.filter((entry) => entry.syncStatus === "processing")) {
+      await updateDurableOutboxOperation(operation.operationId, {
+        syncStatus: "failed",
+        lastError: operation.lastError || "Traitement interrompu avant acquittement.",
+      });
+    }
+    isProcessingOfflineQueue = true;
+    try {
+      const result = await autoBackupToSupabase("offline-outbox-retry", { force: true });
+      offlineQueue = typeof loadDurableOutboxOperations === "function"
+        ? await loadDurableOutboxOperations()
+        : [];
+      window.offlineQueue = offlineQueue;
+      return result;
+    } finally {
+      isProcessingOfflineQueue = false;
+      if (typeof renderSyncStatusStrip === "function") renderSyncStatusStrip();
+      if (typeof renderSupabaseSyncHealth === "function") renderSupabaseSyncHealth();
+    }
+  })();
+  offlineQueueProcessingPromise = run;
+  try {
+    return await run;
+  } finally {
+    if (offlineQueueProcessingPromise === run) offlineQueueProcessingPromise = null;
+  }
+}
+
 function logSyncSuccess(action) {
   if (!state.syncLog) state.syncLog = [];
   const entry = {
@@ -3334,6 +3956,15 @@ if (typeof window !== "undefined") {
   window.markLocalCasesAsSynced = markLocalCasesAsSynced;
   window.enqueueOfflineAction = enqueueOfflineAction;
   window.processOfflineQueue = processOfflineQueue;
+  window.handleRemoteCaseChange = handleRemoteCaseChange;
+  window.handleRemoteBookingChange = handleRemoteBookingChange;
+  window.NIMR_GRANULAR_SYNC_TEST_API = Object.freeze({
+    applyRemoteEntityRow,
+    buildGranularCursorFilter,
+    fetchGranularEntityPage,
+    processGranularOutboxBatch,
+    sendGranularOutboxOperation,
+  });
   window.logSyncConflict = logSyncConflict;
   window.offlineQueue = offlineQueue;
 }

@@ -534,6 +534,7 @@
 
   const originalRecompute = typeof recomputeCaseDurationsFromClaims === 'function' ? recomputeCaseDurationsFromClaims : null;
   window.recomputeCaseDurationsFromClaims = function recomputeCaseDurationsFromClaimsV2187(item) {
+    if (item && typeof noteCaseRevisionCandidate === 'function') noteCaseRevisionCandidate(item);
     (item?.claims || []).forEach((claim) => {
       if (claim.estimate?.originalLines?.length) syncClaimEstimateLinesFromOriginal(claim);
     });
@@ -549,6 +550,7 @@
 
   window.recalculateImportedLaborForCase = function recalculateImportedLaborForCase(item) {
     if (!item) return;
+    if (typeof noteCaseRevisionCandidate === 'function') noteCaseRevisionCandidate(item);
     (item.claims || []).forEach(syncClaimEstimateLinesFromOriginal);
     if (typeof recomputeCaseDurationsFromClaims === 'function') recomputeCaseDurationsFromClaims(item);
     if (typeof invalidatePdfChiefValidationAfterLaborChange === 'function') {
@@ -556,7 +558,7 @@
     }
     if (typeof clearPlanningIfNeeded === 'function') clearPlanningIfNeeded(item, 'Planning annulé après modification du paramétrage main-d’œuvre. Recalculez un RDV.');
     generatedProposals[item.id] = null;
-    saveState();
+    return saveState({ changedCase: item });
   };
 
   window.updateImportedLaborLineAllocation = function updateImportedLaborLineAllocation(item, claimId, lineId, selectedPhases, options = {}) {
@@ -573,7 +575,7 @@
     if (!line.pieceKind) line.pieceKind = inferPieceKind(line.operation);
     if (!line.paintFaces) line.paintFaces = inferPaintFaces(line.operation, line.pieceKind);
     if (!line.paintGroup) line.paintGroup = inferPaintGroup(line.operation);
-    recalculateImportedLaborForCase(item);
+    return recalculateImportedLaborForCase(item);
   };
 
   function renderPaintOptimizationSummary(item) {

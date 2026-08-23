@@ -164,50 +164,243 @@ const dirtyEntityAuditEntries = new Map();
 let entityAuditStructureGeneration = 0;
 let entityStateFullReplacementGeneration = 0;
 let lastEntityPersistenceStats = null;
+let cloudEntityMutationVersion = 0;
+let lastCloudEntityVersion = 0;
+const cloudCaseMutations = new Map();
+const cloudBookingMutations = new Map();
+const cloudAuditMutations = new Map();
+let cloudWorkshopSettingsMutation = null;
+let durableWorkshopSettingsFingerprint = "";
+
+function cloneGranularSyncValue(value) {
+  if (value === undefined) return undefined;
+  if (typeof structuredClone === "function") {
+    try { return structuredClone(value); } catch { /* JSON-safe fallback below */ }
+  }
+  return JSON.parse(JSON.stringify(value));
+}
+
+function nextCloudEntityMutationGeneration() {
+  cloudEntityMutationVersion += 1;
+  return cloudEntityMutationVersion;
+}
+
+function markCloudEntityMutation(collection, entityId, action, value = null) {
+  const id = String(entityId || "").trim();
+  if (!id) return null;
+  const marker = {
+    entityId: id,
+    action,
+    value,
+    generation: nextCloudEntityMutationGeneration(),
+    updatedAt: new Date().toISOString(),
+  };
+  collection.set(id, marker);
+  return marker;
+}
 
 function nextEntityPersistenceMutationGeneration() {
   entityPersistenceMutationVersion += 1;
   return entityPersistenceMutationVersion;
 }
 
-function markEntityCaseDirty(caseOrId) {
+function markEntityCaseDirty(caseOrId, options = {}) {
   const caseItem = caseOrId && typeof caseOrId === "object" ? caseOrId : null;
   const id = String(caseItem?.id ?? caseOrId ?? "").trim();
   if (id) {
     deletedEntityCaseIds.delete(id);
     dirtyEntityCases.set(id, { value: caseItem, generation: nextEntityPersistenceMutationGeneration() });
+    if (!options.skipCloud) markCloudEntityMutation(cloudCaseMutations, id, "upsert", caseItem);
   }
 }
 
-function markEntityCaseDeleted(caseId) {
-  const id = String(caseId || "").trim();
+function markEntityCaseDeleted(caseOrId, options = {}) {
+  const caseItem = caseOrId && typeof caseOrId === "object" ? caseOrId : null;
+  const id = String(caseItem?.id ?? caseOrId ?? "").trim();
   if (id) {
     dirtyEntityCases.delete(id);
     deletedEntityCaseIds.set(id, nextEntityPersistenceMutationGeneration());
+    if (!options.skipCloud) markCloudEntityMutation(cloudCaseMutations, id, "delete", caseItem);
   }
 }
 
-function markEntityBookingDirty(bookingOrId) {
+function markEntityBookingDirty(bookingOrId, options = {}) {
   const booking = bookingOrId && typeof bookingOrId === "object" ? bookingOrId : null;
   const id = String(booking?.id ?? bookingOrId ?? "").trim();
   if (id) {
     deletedEntityBookingIds.delete(id);
     dirtyEntityBookings.set(id, { value: booking, generation: nextEntityPersistenceMutationGeneration() });
+    if (!options.skipCloud) markCloudEntityMutation(cloudBookingMutations, id, "upsert", booking);
   }
 }
 
-function markEntityBookingDeleted(bookingId) {
+function markEntityBookingDeleted(bookingId, options = {}) {
   const id = String(bookingId || "").trim();
   if (id) {
     dirtyEntityBookings.delete(id);
     deletedEntityBookingIds.set(id, nextEntityPersistenceMutationGeneration());
+    if (!options.skipCloud) markCloudEntityMutation(cloudBookingMutations, id, "delete");
   }
 }
 
-function markEntityAuditEntryDirty(entry) {
+function markEntityAuditEntryDirty(entry, options = {}) {
   const generation = nextEntityPersistenceMutationGeneration();
   if (entry && typeof entry === "object") dirtyEntityAuditEntries.set(entry, generation);
   entityAuditStructureGeneration = generation;
+  if (!options.skipCloud && entry && typeof entry === "object") {
+    const id = String(entry.id || `audit:${entry.type || "event"}:${entry.at || generation}`);
+    markCloudEntityMutation(cloudAuditMutations, id, "append", entry);
+  }
+}
+
+function markWorkshopSettingsCloudDirty(settingsPayload) {
+  if (!settingsPayload || typeof settingsPayload !== "object") return null;
+  const snapshot = cloneGranularSyncValue(settingsPayload);
+  const fingerprintValue = cloneGranularSyncValue(snapshot);
+  delete fingerprintValue.exportedAt;
+  if (fingerprintValue.workHoursSync) {
+    delete fingerprintValue.workHoursSync.acknowledgedAt;
+    delete fingerprintValue.workHoursSync.pending;
+  }
+  const fingerprint = hashEntityPersistenceValue(fingerprintValue);
+  if (fingerprint === durableWorkshopSettingsFingerprint) return null;
+  cloudWorkshopSettingsMutation = {
+    entityId: "workshop_settings",
+    action: "upsert",
+    value: snapshot,
+    fingerprint,
+    generation: nextCloudEntityMutationGeneration(),
+    updatedAt: new Date().toISOString(),
+  };
+  return cloudWorkshopSettingsMutation;
+}
+
+function findCloudMutationValue(candidate, entityType, marker) {
+  if (marker.action === "delete") return null;
+  if (marker.value && typeof marker.value === "object") return marker.value;
+  const collection = entityType === "case" ? candidate?.cases : candidate?.bookings;
+  return (Array.isArray(collection) ? collection : []).find((entry) => String(entry?.id || "") === marker.entityId) || null;
+}
+
+function getCloudMutationEntityVersion(marker, value) {
+  if (Number.isSafeInteger(marker.entityVersion) && marker.entityVersion > 0) return marker.entityVersion;
+  const valueTimestamp = Date.parse(value?.updatedAt || "");
+  const markerTimestamp = Date.parse(marker.updatedAt || "");
+  const milliseconds = Math.max(
+    Number.isFinite(valueTimestamp) ? Math.max(0, valueTimestamp) : 0,
+    Number.isFinite(markerTimestamp) ? Math.max(0, markerTimestamp) : Date.now(),
+  );
+  // Millisecond time gives versions continuity across reloads; the bounded
+  // generation suffix deterministically orders mutations captured in one tick.
+  const candidate = (milliseconds * 1000) + (Math.max(0, Number(marker.generation || 0)) % 1000);
+  lastCloudEntityVersion = Math.max(candidate, lastCloudEntityVersion + 1);
+  marker.entityVersion = lastCloudEntityVersion;
+  return marker.entityVersion;
+}
+
+function captureEntityMutationBatch(candidate = state, options = {}) {
+  if (options.workshopSettings) markWorkshopSettingsCloudDirty(options.workshopSettings);
+  const captured = [];
+  const captureMap = (entityType, collection) => {
+    collection.forEach((marker) => {
+      const value = findCloudMutationValue(candidate, entityType, marker);
+      if (marker.action !== "delete" && !value) return;
+      const versionValue = value || marker.value;
+      const entityVersion = getCloudMutationEntityVersion(marker, versionValue);
+      const localBaseVersion = Math.max(0, Number(value?.localRevision || value?.version || 0));
+      const deletePayload = entityType === "case" && marker.value
+        ? {
+          projectionLocalId: typeof caseSyncLocalId === "function"
+            ? caseSyncLocalId(marker.value)
+            : marker.entityId,
+        }
+        : {};
+      captured.push({
+        entityType,
+        entityId: marker.entityId,
+        action: marker.action,
+        entityVersion,
+        expectedVersion: marker.action === "upsert" && localBaseVersion > 0 ? localBaseVersion - 1 : null,
+        updatedAt: value?.updatedAt || marker.updatedAt,
+        generation: marker.generation,
+        payload: marker.action === "delete" ? deletePayload : { entity: cloneGranularSyncValue(value) },
+      });
+    });
+  };
+  captureMap("case", cloudCaseMutations);
+  captureMap("booking", cloudBookingMutations);
+  cloudAuditMutations.forEach((marker) => {
+    captured.push({
+      entityType: "audit",
+      entityId: marker.entityId,
+      action: "append",
+      entityVersion: marker.generation,
+      expectedVersion: null,
+      updatedAt: marker.value?.at || marker.updatedAt,
+      generation: marker.generation,
+      payload: { entity: cloneGranularSyncValue(marker.value) },
+    });
+  });
+  if (cloudWorkshopSettingsMutation) {
+    captured.push({
+      entityType: "workshop_settings",
+      entityId: options.workshopId || getOutboxWorkshopId(),
+      action: "upsert",
+      entityVersion: cloudWorkshopSettingsMutation.generation,
+      expectedVersion: null,
+      updatedAt: cloudWorkshopSettingsMutation.updatedAt,
+      generation: cloudWorkshopSettingsMutation.generation,
+      settingsFingerprint: cloudWorkshopSettingsMutation.fingerprint,
+      payload: { entity: cloneGranularSyncValue(cloudWorkshopSettingsMutation.value) },
+    });
+  }
+  return captured.sort((left, right) => {
+    const typeOrder = { case: 1, booking: 2, audit: 3, workshop_settings: 4 };
+    return (typeOrder[left.entityType] || 99) - (typeOrder[right.entityType] || 99)
+      || String(left.entityId).localeCompare(String(right.entityId));
+  });
+}
+
+function buildDurableOperationFromEntityMutation(mutation, options = {}) {
+  const workshopId = String(options.workshopId || getOutboxWorkshopId());
+  const versionToken = mutation.entityVersion ?? mutation.generation ?? 0;
+  const stableToken = [workshopId, mutation.entityType, mutation.entityId, mutation.action, versionToken]
+    .map((part) => String(part || "0").replace(/[^a-zA-Z0-9:_-]/g, "-"))
+    .join(":");
+  return normalizeDurableOutboxOperation({
+    operationId: `operation:${stableToken}`,
+    idempotencyKey: stableToken,
+    workshopId,
+    userId: options.userId || getOutboxUserId(),
+    entityType: mutation.entityType,
+    entityId: mutation.entityId,
+    action: mutation.action,
+    entityVersion: mutation.entityVersion,
+    expectedVersion: mutation.expectedVersion,
+    payload: mutation.payload,
+    updatedAt: mutation.updatedAt,
+    syncStatus: "pending",
+    description: `${mutation.entityType} ${mutation.action} à synchroniser`,
+  });
+}
+
+function acknowledgeEntityMutationBatch(batch = []) {
+  const acknowledgeMap = (collection, descriptor) => {
+    const current = collection.get(descriptor.entityId);
+    if (current?.generation === descriptor.generation) collection.delete(descriptor.entityId);
+  };
+  batch.forEach((descriptor) => {
+    if (descriptor.entityType === "case") acknowledgeMap(cloudCaseMutations, descriptor);
+    if (descriptor.entityType === "booking") acknowledgeMap(cloudBookingMutations, descriptor);
+    if (descriptor.entityType === "audit") acknowledgeMap(cloudAuditMutations, descriptor);
+    if (
+      descriptor.entityType === "workshop_settings"
+      && cloudWorkshopSettingsMutation?.generation === descriptor.generation
+    ) {
+      durableWorkshopSettingsFingerprint = descriptor.settingsFingerprint || durableWorkshopSettingsFingerprint;
+      cloudWorkshopSettingsMutation = null;
+    }
+  });
 }
 
 function markEntityStateFullReplacement() {
@@ -717,6 +910,17 @@ function getDurableOutboxEquivalenceKey(input = {}) {
   ].join("|");
 }
 
+function isGranularCoalescibleOperation(operation = {}) {
+  return ["case", "booking", "workshop_settings"].includes(String(operation.entityType || ""))
+    && ["upsert", "delete"].includes(String(operation.action || ""));
+}
+
+function getDurableOutboxEntityKey(operation = {}) {
+  return [operation.workshopId, operation.entityType, operation.entityId]
+    .map((part) => String(part || ""))
+    .join("|");
+}
+
 function areDurableOutboxOperationsEquivalent(left, right) {
   return getDurableOutboxEquivalenceKey(left) === getDurableOutboxEquivalenceKey(right);
 }
@@ -791,10 +995,12 @@ function mergeEquivalentOutboxOperations(entries, candidate) {
     operationId: keeper.operationId,
     idempotencyKey: keeper.idempotencyKey,
     createdAt: keeper.createdAt,
-    payload: {
-      ...(keeper.payload || {}),
-      ...(candidate.payload || {}),
-    },
+    payload: isGranularCoalescibleOperation(candidate)
+      ? cloneGranularSyncValue(candidate.payload || {})
+      : {
+        ...(keeper.payload || {}),
+        ...(candidate.payload || {}),
+      },
     syncStatus,
     retryCount,
     lastError: syncStatus === "pending" || syncStatus === "processing" ? "" : String(candidate.lastError || keeper.lastError || ""),
@@ -873,10 +1079,11 @@ function normalizeDurableOutboxOperation(input = {}) {
     entityType: String(input.entityType || "workshop_state"),
     entityId: String(input.entityId || input.workshopId || getOutboxWorkshopId()),
     action: String(input.action || "upsert_snapshot"),
-    payload: input.payload && typeof input.payload === "object" ? input.payload : {},
+    payload: input.payload && typeof input.payload === "object" ? cloneGranularSyncValue(input.payload) : {},
     workshopId: String(input.workshopId || getOutboxWorkshopId()),
     userId: String(input.userId || getOutboxUserId()),
     expectedVersion: normalizeOutboxExpectedVersion(input.expectedVersion),
+    entityVersion: normalizeOutboxExpectedVersion(input.entityVersion),
     snapshotFingerprint: normalizeOutboxSnapshotFingerprint(
       input.snapshotFingerprint || input.payload?.snapshotFingerprint,
     ),
@@ -924,7 +1131,9 @@ function publishDurableOutboxMirror(records = []) {
     localStorage.setItem("nimr-sav-offline-queue", JSON.stringify(compact.map((entry) => ({
       id: entry.operationId,
       operationId: entry.operationId,
-      type: entry.entityType === "workshop_state" ? "sync_push" : entry.action,
+      type: ["case", "booking", "workshop_settings", "workshop_state"].includes(entry.entityType)
+        ? "sync_push"
+        : entry.action,
       entityType: entry.entityType,
       entityId: entry.entityId,
       action: entry.action,
@@ -981,28 +1190,143 @@ async function deleteDurableOutboxOperation(operationId) {
   });
 }
 
-async function enqueueDurableOutboxOperation(input = {}) {
-  const candidate = normalizeDurableOutboxOperation(input);
-  return runDurableOutboxMutation(async () => {
-    const records = await loadDurableOutboxOperations();
+function mergeDurableOutboxCandidate(records, candidate) {
+    const sameOperation = records.find((entry) => entry.operationId === candidate.operationId);
+    if (sameOperation) {
+      const replacement = normalizeDurableOutboxOperation({
+        ...sameOperation,
+        ...candidate,
+        operationId: sameOperation.operationId,
+        idempotencyKey: sameOperation.idempotencyKey,
+        createdAt: sameOperation.createdAt,
+      });
+      return {
+        operation: replacement,
+        records: [...records.filter((entry) => entry.operationId !== sameOperation.operationId), replacement],
+      };
+    }
     const mergeable = records.filter((entry) => (
       DURABLE_OUTBOX_ACTIVE_STATUSES.has(entry.syncStatus)
       && (
-        areDurableOutboxOperationsEquivalent(entry, candidate)
+        (
+          entry.syncStatus === "pending"
+          && isGranularCoalescibleOperation(entry)
+          && isGranularCoalescibleOperation(candidate)
+          && getDurableOutboxEntityKey(entry) === getDurableOutboxEntityKey(candidate)
+        )
+        || areDurableOutboxOperationsEquivalent(entry, candidate)
         || areDurableOutboxOperationsSameSnapshotTarget(entry, candidate)
       )
     ));
     if (!mergeable.length) {
-      await replaceDurableOutboxOperations([...records, candidate]);
-      return candidate;
+      return { operation: candidate, records: [...records, candidate] };
     }
     const mergeableIds = new Set(mergeable.map((entry) => entry.operationId));
     const merged = mergeEquivalentOutboxOperations(mergeable, candidate);
     const retained = records.filter((entry) => !mergeableIds.has(entry.operationId));
     retained.push(merged);
-    await replaceDurableOutboxOperations(retained);
-    return merged;
+    return { operation: merged, records: retained };
+}
+
+async function enqueueDurableOutboxOperation(input = {}) {
+  const candidate = normalizeDurableOutboxOperation(input);
+  if (typeof indexedDB === "undefined") {
+    const merged = mergeDurableOutboxCandidate(readOutboxFallback(), candidate);
+    const normalized = merged.records.map(normalizeDurableOutboxOperation)
+      .sort((left, right) => String(left.createdAt).localeCompare(String(right.createdAt)));
+    writeOutboxFallback(normalized);
+    publishDurableOutboxMirror(normalized);
+    return merged.operation;
+  }
+  return runDurableOutboxMutation(async () => {
+    const records = await loadDurableOutboxOperations();
+    const merged = mergeDurableOutboxCandidate(records, candidate);
+    await replaceDurableOutboxOperations(merged.records);
+    return merged.operation;
   });
+}
+
+async function acknowledgeDurableOutboxOperation(operationId, acknowledgement = {}) {
+  return runDurableOutboxMutation(async () => {
+    const records = await loadDurableOutboxOperations();
+    const matched = records.find((entry) => entry.operationId === String(operationId || ""));
+    if (!matched) return { acknowledged: null, remaining: records };
+    const retained = records.filter((entry) => entry.operationId !== matched.operationId);
+    await replaceDurableOutboxOperations(retained);
+    return {
+      acknowledged: {
+        ...matched,
+        syncStatus: "acknowledged",
+        lastError: "",
+        acknowledgedAt: acknowledgement.updatedAt || new Date().toISOString(),
+      },
+      remaining: retained,
+    };
+  });
+}
+
+function getDurableOutboxDependencyRank(operation = {}) {
+  if (operation.action === "delete") {
+    if (operation.entityType === "booking") return 40;
+    if (operation.entityType === "case") return 50;
+    return 60;
+  }
+  if (operation.entityType === "case") return 10;
+  if (operation.entityType === "booking") return 20;
+  if (operation.entityType === "workshop_settings") return 30;
+  if (operation.entityType === "audit") return 35;
+  return 70;
+}
+
+function sortDurableOutboxOperationsForSend(operations = []) {
+  return operations.slice().sort((left, right) => (
+    getDurableOutboxDependencyRank(left) - getDurableOutboxDependencyRank(right)
+    || String(left.createdAt || "").localeCompare(String(right.createdAt || ""))
+    || String(left.operationId || "").localeCompare(String(right.operationId || ""))
+  ));
+}
+
+function getGranularCursorRowId(row = {}) {
+  return String(row.entity_id || row.local_id || row.id || "");
+}
+
+function selectGranularRowsAfterCursor(rows = [], cursor = null, pageSize = 500) {
+  const size = Math.max(1, Math.min(1000, Number(pageSize || 500)));
+  const sorted = rows.slice().sort((left, right) => (
+    String(left.updated_at || "").localeCompare(String(right.updated_at || ""))
+    || getGranularCursorRowId(left).localeCompare(getGranularCursorRowId(right))
+  ));
+  const filtered = cursor ? sorted.filter((row) => {
+    const timeCompare = String(row.updated_at || "").localeCompare(String(cursor.updatedAt || ""));
+    return timeCompare > 0 || (timeCompare === 0 && getGranularCursorRowId(row) > String(cursor.entityId || ""));
+  }) : sorted;
+  const pageRows = filtered.slice(0, size);
+  const last = pageRows.at(-1);
+  return {
+    rows: pageRows,
+    cursor: last ? { updatedAt: String(last.updated_at || ""), entityId: getGranularCursorRowId(last) } : cursor,
+    hasMore: filtered.length > pageRows.length,
+  };
+}
+
+async function loadSyncMetadata(key) {
+  const normalizedKey = String(key || "");
+  if (!normalizedKey) return null;
+  if (typeof indexedDB === "undefined") {
+    try { return JSON.parse(localStorage.getItem(`nimr-sav-sync-metadata:${normalizedKey}`) || "null"); } catch { return null; }
+  }
+  return runIndexedDbTransaction(SYNC_METADATA_STORE, "readonly", (store) => store.get(normalizedKey));
+}
+
+async function putSyncMetadata(key, value = {}) {
+  const record = { key: String(key || ""), ...cloneGranularSyncValue(value), updatedAt: new Date().toISOString() };
+  if (!record.key) throw new Error("Clé sync_metadata requise.");
+  if (typeof indexedDB === "undefined") {
+    localStorage.setItem(`nimr-sav-sync-metadata:${record.key}`, JSON.stringify(record));
+    return record;
+  }
+  await runIndexedDbTransaction(SYNC_METADATA_STORE, "readwrite", (store) => store.put(record));
+  return record;
 }
 
 async function updateDurableOutboxOperation(operationId, changes = {}) {
@@ -1057,6 +1381,10 @@ window.markEntityBookingDirty = markEntityBookingDirty;
 window.markEntityBookingDeleted = markEntityBookingDeleted;
 window.markEntityAuditEntryDirty = markEntityAuditEntryDirty;
 window.markEntityStateFullReplacement = markEntityStateFullReplacement;
+window.markWorkshopSettingsCloudDirty = markWorkshopSettingsCloudDirty;
+window.captureEntityMutationBatch = captureEntityMutationBatch;
+window.acknowledgeEntityMutationBatch = acknowledgeEntityMutationBatch;
+window.buildDurableOperationFromEntityMutation = buildDurableOperationFromEntityMutation;
 window.getEntityPersistenceStats = getEntityPersistenceStats;
 window.NIMR_ENTITY_PERSISTENCE_TEST_API = Object.freeze({
   buildEntityPersistencePlan,
@@ -1069,6 +1397,11 @@ window.putDurableOutboxOperation = putDurableOutboxOperation;
 window.deleteDurableOutboxOperation = deleteDurableOutboxOperation;
 window.enqueueDurableOutboxOperation = enqueueDurableOutboxOperation;
 window.updateDurableOutboxOperation = updateDurableOutboxOperation;
+window.acknowledgeDurableOutboxOperation = acknowledgeDurableOutboxOperation;
+window.sortDurableOutboxOperationsForSend = sortDurableOutboxOperationsForSend;
+window.selectGranularRowsAfterCursor = selectGranularRowsAfterCursor;
+window.loadSyncMetadata = loadSyncMetadata;
+window.putSyncMetadata = putSyncMetadata;
 
 window.getDurableOutboxEquivalenceKey = getDurableOutboxEquivalenceKey;
 window.areDurableOutboxOperationsEquivalent = areDurableOutboxOperationsEquivalent;
@@ -1242,6 +1575,24 @@ function formatBackupDate(value) {
   return date.toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" });
 }
 
+function replaceStateFromImportedBackup(importedState) {
+  const previousCases = Array.isArray(state?.cases) ? [...state.cases] : [];
+  const previousBookings = Array.isArray(state?.bookings) ? [...state.bookings] : [];
+  state = normalizeState(importedState);
+  const importedCaseIds = new Set(state.cases.map((item) => String(item?.id || "")).filter(Boolean));
+  const importedBookingIds = new Set(state.bookings.map((booking) => String(booking?.id || "")).filter(Boolean));
+  previousCases
+    .filter((item) => item?.id && !importedCaseIds.has(String(item.id)))
+    .forEach((item) => markEntityCaseDeleted(item));
+  previousBookings
+    .filter((booking) => booking?.id && !importedBookingIds.has(String(booking.id)))
+    .forEach((booking) => markEntityBookingDeleted(booking.id));
+  markEntityStateFullReplacement();
+  return state;
+}
+
+if (typeof window !== "undefined") window.replaceStateFromImportedBackup = replaceStateFromImportedBackup;
+
 function getAutosaveHealth() {
   const result = { principal: false, mirror: false, indexedDb: Boolean(window.NIMR_INDEXED_DB_STATUS?.ok), snapshots: 0, lastSavedAt: "", appVersion: APP_VERSION, casesCount: state.cases.length, errors: [] };
   try {
@@ -1378,6 +1729,7 @@ async function restoreLatestAutomaticSnapshot() {
     if (typeof initializeLastKnownCasesComparable === "function") {
       initializeLastKnownCasesComparable();
     }
+    markEntityStateFullReplacement();
     if (typeof reconcileActiveCaseSelection === "function") reconcileActiveCaseSelection(previousSelection);
     else activeCaseId = state.cases[0]?.id ?? null;
     generatedProposals = {};
@@ -1385,7 +1737,7 @@ async function restoreLatestAutomaticSnapshot() {
       snapshotAt: chosen.savedAt || "inconnu",
       cases: state.cases.length,
     }, restoreActor), { actor: restoreActor });
-    saveState({ skipCloud: true });
+    await saveState({ skipCloud: true, boundedEntityDetection: true, cloudReason: "restore-automatic-snapshot" });
     render();
     showBackupStatus(`Restauration automatique effectuée depuis ${formatBackupDate(chosen.savedAt)}.`, "ok");
     notifyUser("Point de restauration automatique restauré.", "success");
@@ -1709,10 +2061,7 @@ async function importBackup(event) {
     const previousSelection = typeof captureCaseSelectionIdentity === "function"
       ? captureCaseSelectionIdentity()
       : { id: activeCaseId };
-    state = normalizeState(importedState);
-    if (typeof initializeLastKnownCasesComparable === "function") {
-      initializeLastKnownCasesComparable();
-    }
+    replaceStateFromImportedBackup(importedState);
     if (typeof reconcileActiveCaseSelection === "function") reconcileActiveCaseSelection(previousSelection);
     else activeCaseId = state.cases[0]?.id ?? null;
     generatedProposals = {};
@@ -1737,7 +2086,7 @@ async function importBackup(event) {
       documents: restoredDocuments,
       sourceVersion: metadata.appVersion || "inconnue",
     }, importActor), { actor: importActor });
-    saveState();
+    await saveState({ fullCaseRevisionScan: true, cloudReason: "backup-import" });
     render();
     showBackupStatus(`Sauvegarde importée: ${state.cases.length} dossier(s), ${restoredPhotos} photo(s), ${restoredDocuments} document(s).`, "ok");
   } catch (error) {
@@ -1929,7 +2278,7 @@ function applyVehicleLookup(item, root) {
   }
   applyVehicleRecord(item, record);
   addHistory(item, "vehicle.lookup", `Véhicule renseigné depuis la base: ${record.plate || record.vin}`);
-  saveState();
+  saveState({ changedCase: item });
   renderCaseDetail();
 }
 
@@ -1938,7 +2287,7 @@ function autoFillVehicleFromCurrentFields(item, root) {
   const record = findVehicleRecord(item.plate) || findVehicleRecord(item.vin);
   if (!record) return;
   applyVehicleRecord(item, record);
-  saveState();
+  saveState({ changedCase: item });
   updateCaseHeader(root, item);
   syncCaseInputs(root, item);
   renderCases();

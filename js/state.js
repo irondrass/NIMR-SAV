@@ -635,6 +635,8 @@ let photoDbPromise = null;
 const photoObjectUrls = new Map();
 const legacyPhotoPayloads = new Map();
 
+const pendingCaseRevisionIds = new Set();
+
 let state = loadState();
 initializeLastKnownCasesComparable();
 let activeTab = "reception-workspace";
@@ -3029,6 +3031,7 @@ function recomputeCaseDurationsFromClaims(item) {
   const claims = normalizeRepairClaims(item.claims, item);
   const hasClaimLabor = claims.some((claim) => claim.includeInPlanning !== false && getClaimPlanningLaborLines(claim).some((line) => Number(line.laborHours || 0) > 0));
   if (!hasClaimLabor) return false;
+  noteCaseRevisionCandidate(item);
   const totals = Object.fromEntries(ESTIMATE_ALLOWED_KEYS.map((key) => [key, 0]));
   const includedClaims = claims.filter((claim) => claim.includeInPlanning !== false);
   includedClaims.forEach((claim) => {
@@ -3519,6 +3522,8 @@ function resolveSyncConflict(conflictIdOrKey, action = "mark_resolved") {
   if (index < 0) return { ok: false, message: "Conflit introuvable." };
   const conflict = { ...conflicts[index] };
   const actor = typeof getCurrentActor === "function" ? getCurrentActor() : { userName: "Atelier", userRole: "", resourceId: "" };
+  const conflictCaseId = conflict.caseId || conflict.entityId || "";
+  if (conflictCaseId) noteCaseRevisionCandidate(conflictCaseId);
 
   if (conflict.type === "case_conflict") {
     const caseId = conflict.caseId || conflict.entityId;
@@ -3577,6 +3582,7 @@ function resolveSyncConflict(conflictIdOrKey, action = "mark_resolved") {
       localCase.localRevision = (Number(localCase.localRevision) || 0) + 1;
       localCase.updatedAt = new Date().toISOString();
       localCase.updatedBy = actor.userName || "Atelier";
+      if (typeof markEntityCaseDirty === "function") markEntityCaseDirty(localCase);
 
       addHistoryWithActor(localCase, "sync.conflict.keep_local", "Conflit synchronisation résolu", "Version locale conservée et révision incrémentée.", actor);
 
@@ -3656,6 +3662,7 @@ function addAuditLog(type, label, details = "", context = {}) {
     ...makeHistoryEntry(type, label, new Date().toISOString(), details, context.actor || getCurrentActor()),
     caseId: context.caseId || context.item?.id || "",
   };
+  if (entry.caseId) noteCaseRevisionCandidate(entry.caseId);
   state.auditLog.unshift(entry);
   state.auditLog = state.auditLog.slice(0, 500);
   if (typeof markEntityAuditEntryDirty === "function") markEntityAuditEntryDirty(entry);
@@ -3664,6 +3671,7 @@ function addAuditLog(type, label, details = "", context = {}) {
 
 function addHistoryWithActor(item, type, label, details = "", actor = null) {
   if (!item) return;
+  noteCaseRevisionCandidate(item);
   item.history = Array.isArray(item.history) ? item.history : normalizeHistory([], item.createdAt);
   item.history.unshift(makeHistoryEntry(type, label, new Date().toISOString(), details, actor || getCurrentActor()));
   item.history = item.history.slice(0, 200);
@@ -3797,6 +3805,7 @@ function getComparableRuntimeScope() {
 function initializeLastKnownCasesComparable() {
   const runtimeScope = getComparableRuntimeScope();
   runtimeScope.lastKnownCasesComparable = {};
+  pendingCaseRevisionIds.clear();
   if (typeof state !== "undefined" && state && Array.isArray(state.cases)) {
     state.cases.forEach((caseItem) => {
       runtimeScope.lastKnownCasesComparable[caseItem.id] = getComparableCaseJSON(caseItem);
@@ -3804,7 +3813,13 @@ function initializeLastKnownCasesComparable() {
   }
 }
 
-function detectAndIncrementCaseRevisions() {
+function noteCaseRevisionCandidate(caseOrId) {
+  const id = String(caseOrId && typeof caseOrId === "object" ? caseOrId.id : caseOrId || "").trim();
+  if (id) pendingCaseRevisionIds.add(id);
+  return id;
+}
+
+function detectAndIncrementCaseRevisions(options = {}) {
   const runtimeScope = getComparableRuntimeScope();
   if (!runtimeScope.lastKnownCasesComparable) {
     initializeLastKnownCasesComparable();
@@ -3812,36 +3827,64 @@ function detectAndIncrementCaseRevisions() {
   const actor = getCurrentActor();
   const now = new Date().toISOString();
   let anyIncremented = false;
-  const currentCaseIds = new Set();
+  const candidateIds = new Set(pendingCaseRevisionIds);
+  const explicitIds = Array.isArray(options.changedCaseIds) ? options.changedCaseIds : [];
+  explicitIds.forEach((caseId) => noteCaseRevisionCandidate(caseId) && candidateIds.add(String(caseId)));
+  if (options.changedCase) {
+    const changedCaseId = noteCaseRevisionCandidate(options.changedCase);
+    if (changedCaseId) candidateIds.add(changedCaseId);
+  }
+  if (typeof activeCaseId !== "undefined" && activeCaseId) candidateIds.add(String(activeCaseId));
+  if (candidateIds.size === 0 && Array.isArray(state?.cases) && state.cases.length === 1) {
+    candidateIds.add(String(state.cases[0]?.id || ""));
+  }
+  const fullCaseRevisionScan = options.fullCaseRevisionScan === true;
+  if (fullCaseRevisionScan && Array.isArray(state?.cases)) {
+    state.cases.forEach((caseItem) => candidateIds.add(String(caseItem?.id || "")));
+    Object.keys(runtimeScope.lastKnownCasesComparable).forEach((caseId) => candidateIds.add(caseId));
+  }
+  let visitedCount = 0;
 
-  if (typeof state !== "undefined" && state && Array.isArray(state.cases)) {
-    state.cases.forEach((caseItem) => {
-      currentCaseIds.add(caseItem.id);
-      const currentJSON = getComparableCaseJSON(caseItem);
-      const previousJSON = runtimeScope.lastKnownCasesComparable[caseItem.id];
-
-      if (previousJSON === undefined) {
-        caseItem.localRevision = (Number(caseItem.localRevision) || 0) + 1;
-        caseItem.updatedAt = caseItem.updatedAt || now;
-        caseItem.updatedBy = caseItem.updatedBy || actor.userName || "Atelier";
-        runtimeScope.lastKnownCasesComparable[caseItem.id] = currentJSON;
-        if (typeof markEntityCaseDirty === "function") markEntityCaseDirty(caseItem);
-        anyIncremented = true;
-      } else if (previousJSON !== currentJSON) {
-        caseItem.localRevision = (Number(caseItem.localRevision) || 0) + 1;
-        caseItem.updatedAt = now;
-        caseItem.updatedBy = actor.userName || "Atelier";
-        runtimeScope.lastKnownCasesComparable[caseItem.id] = currentJSON;
-        if (typeof markEntityCaseDirty === "function") markEntityCaseDirty(caseItem);
+  candidateIds.forEach((caseId) => {
+    if (!caseId) return;
+    visitedCount += 1;
+    const caseItem = typeof getIndexedCaseById === "function"
+      ? getIndexedCaseById(caseId)
+      : (state?.cases || []).find((entry) => String(entry?.id || "") === caseId);
+    const previousJSON = runtimeScope.lastKnownCasesComparable[caseId];
+    if (!caseItem) {
+      if (previousJSON !== undefined) {
+        let deletedCase = caseId;
+        try {
+          const previous = JSON.parse(previousJSON);
+          if (previous && typeof previous === "object") deletedCase = previous;
+        } catch { /* the stable ID remains a safe tombstone fallback */ }
+        delete runtimeScope.lastKnownCasesComparable[caseId];
+        if (typeof markEntityCaseDeleted === "function") markEntityCaseDeleted(deletedCase, { skipCloud: options.skipCloud === true });
         anyIncremented = true;
       }
-    });
-    Object.keys(runtimeScope.lastKnownCasesComparable).forEach((caseId) => {
-      if (currentCaseIds.has(caseId)) return;
-      delete runtimeScope.lastKnownCasesComparable[caseId];
-      if (typeof markEntityCaseDeleted === "function") markEntityCaseDeleted(caseId);
+      pendingCaseRevisionIds.delete(caseId);
+      return;
+    }
+    const currentJSON = getComparableCaseJSON(caseItem);
+    if (previousJSON === undefined || previousJSON !== currentJSON) {
+      caseItem.localRevision = (Number(caseItem.localRevision) || 0) + 1;
+      caseItem.updatedAt = previousJSON === undefined ? (caseItem.updatedAt || now) : now;
+      caseItem.updatedBy = caseItem.updatedBy || actor.userName || "Atelier";
+      runtimeScope.lastKnownCasesComparable[caseId] = getComparableCaseJSON(caseItem);
+      if (typeof markEntityCaseDirty === "function") markEntityCaseDirty(caseItem, { skipCloud: options.skipCloud === true });
       anyIncremented = true;
-    });
+    }
+    pendingCaseRevisionIds.delete(caseId);
+  });
+  if (typeof window !== "undefined") {
+    window.NIMR_CASE_REVISION_SCAN = {
+      candidateCount: candidateIds.size,
+      visitedCount,
+      pendingCount: pendingCaseRevisionIds.size,
+      fullScan: fullCaseRevisionScan,
+      updatedAt: now,
+    };
   }
   return anyIncremented;
 }
@@ -3850,14 +3893,17 @@ if (typeof window !== "undefined") {
   window.getComparableCaseJSON = getComparableCaseJSON;
   window.initializeLastKnownCasesComparable = initializeLastKnownCasesComparable;
   window.detectAndIncrementCaseRevisions = detectAndIncrementCaseRevisions;
+  window.noteCaseRevisionCandidate = noteCaseRevisionCandidate;
 }
 
 function recordFlagHistory(item, flag, checked) {
+  noteCaseRevisionCandidate(item);
   const event = FLAG_HISTORY_EVENTS[flag]?.[checked ? "on" : "off"];
   if (event) addHistory(item, event[0], event[1]);
 }
 
 function clearCasePlanning(item, reason = "Planning atelier annulé") {
+  noteCaseRevisionCandidate(item);
   const hadPlanning = Boolean(item.appointment) || state.bookings.some((booking) => booking.caseId === item.id);
   state.bookings = state.bookings.filter((booking) => booking.caseId !== item.id);
   item.appointment = null;
@@ -3952,15 +3998,39 @@ function handleLargeStatePersistenceFailure(error) {
   return false;
 }
 
+async function enqueueGranularCloudMutationsAfterPersistence(options = {}) {
+  if (options.skipCloud || typeof captureEntityMutationBatch !== "function") return [];
+  const workshopId = typeof getSupabaseWorkshopId === "function" ? getSupabaseWorkshopId() : "local-workshop";
+  const workshopSettings = typeof buildWorkshopSettingsPayload === "function"
+    ? buildWorkshopSettingsPayload(state)
+    : null;
+  const batch = captureEntityMutationBatch(state, { workshopId, workshopSettings });
+  if (!batch.length) return [];
+  if (typeof enqueueDurableOutboxOperation !== "function") {
+    throw new Error("Outbox durable indisponible.");
+  }
+  const queued = [];
+  for (const mutation of batch) {
+    const operation = typeof buildDurableOperationFromEntityMutation === "function"
+      ? buildDurableOperationFromEntityMutation(mutation, { workshopId })
+      : mutation;
+    queued.push(await enqueueDurableOutboxOperation(operation));
+  }
+  if (typeof acknowledgeEntityMutationBatch === "function") acknowledgeEntityMutationBatch(batch);
+  window.NIMR_CLOUD_DURABILITY = {
+    durable: true,
+    operationCount: queued.length,
+    updatedAt: new Date().toISOString(),
+  };
+  return queued;
+}
+
 function saveState(options = {}) {
-  invalidateStateReplacementIndexes();
   let saveCompletion = Promise.resolve(true);
   try {
-    const modified = detectAndIncrementCaseRevisions();
+    const modified = detectAndIncrementCaseRevisions(options);
+    invalidateStateReplacementIndexes();
     const offline = typeof navigator !== "undefined" && navigator.onLine === false;
-    if (modified && !options.skipCloud && offline && typeof enqueueOfflineAction === "function") {
-      enqueueOfflineAction("sync_push", "Modification locale hors ligne");
-    }
     const largeState = typeof shouldPersistStateInIndexedDb === "function" && shouldPersistStateInIndexedDb(state);
     const envelope = largeState ? null : buildAutosaveEnvelope();
     let indexedDbWrite = Promise.resolve(true);
@@ -3999,37 +4069,31 @@ function saveState(options = {}) {
     if (!options.skipCloud) rememberLocalUserChangeAt(envelope.savedAt);
       if (typeof removeLargeStateSnapshot === "function") removeLargeStateSnapshot().catch(() => null);
     }
-    if (modified && !options.skipCloud && !offline && typeof enqueueDurableOutboxOperation === "function") {
-      const expectedVersion = Math.max(0, ...(state.cases || []).map((item) => Number(item.localRevision || 0)));
-      indexedDbWrite.then((persisted) => {
-        if (largeState && !persisted) throw new Error("Le snapshot IndexedDB n'a pas été confirmé.");
-        return enqueueDurableOutboxOperation({
-        entityType: "workshop_state",
-        entityId: typeof getSupabaseWorkshopId === "function" ? getSupabaseWorkshopId() : "local-workshop",
-        action: "upsert_snapshot",
-        expectedVersion,
-        payload: {
-          snapshotKey: "latest",
-          appVersion: APP_VERSION,
-          casesCount: Number(state.cases?.length || 0),
-          bookingsCount: Number(state.bookings?.length || 0),
-          resourcesCount: Number(state.resources?.length || 0),
-          reason: options.cloudReason || "local-save",
-        },
-        syncStatus: "pending",
-        description: typeof navigator !== "undefined" && navigator.onLine === false
-          ? "Modification locale hors ligne"
-          : "Modification locale à confirmer par le serveur",
-        });
-      }).then(() => {
+    if (!options.skipCloud) {
+      const persistAndQueue = async (persisted) => {
+        if (!persisted) throw new Error("La persistance locale n'a pas été confirmée.");
+        const queued = await enqueueGranularCloudMutationsAfterPersistence(options);
+        if (queued.length && typeof scheduleAutoSupabaseBackup === "function") {
+          scheduleAutoSupabaseBackup(options.cloudReason || (offline ? "local-save-offline" : "local-save"));
+        }
+        if (queued.length && options.flushCloud && typeof flushSupabaseBackup === "function") {
+          await flushSupabaseBackup(options.cloudReason || "local-save-now");
+        }
         if (typeof renderSyncStatusStrip === "function") renderSyncStatusStrip();
-      }).catch((error) => console.warn("Mise en file durable impossible", error?.message || error));
-    }
-    if (!options.skipCloud && typeof scheduleAutoSupabaseBackup === "function") {
-      scheduleAutoSupabaseBackup(options.cloudReason || "local-save");
-    }
-    if (!options.skipCloud && options.flushCloud && typeof flushSupabaseBackup === "function") {
-      flushSupabaseBackup(options.cloudReason || "local-save-now");
+        return true;
+      };
+      const cloudDurability = largeState
+        ? indexedDbWrite.then(persistAndQueue)
+        : persistAndQueue(true);
+      saveCompletion = cloudDurability.catch((error) => {
+        window.NIMR_CLOUD_DURABILITY = {
+          durable: false,
+          error: String(error?.message || error),
+          updatedAt: new Date().toISOString(),
+        };
+        console.warn("Mise en file durable impossible", error?.message || error);
+        return false;
+      });
     }
     if (typeof renderSyncStatusStrip === "function") renderSyncStatusStrip();
     if (!largeState) {
@@ -4500,17 +4564,15 @@ function updateCaseNote(caseId, noteType, content) {
   if (!item.notes || typeof item.notes !== "object") {
     item.notes = { reception: "", technique: "", qualite: "", direction: "" };
   }
+  noteCaseRevisionCandidate(item);
   item.notes[noteType] = String(content || "");
-  item.localRevision = (Number(item.localRevision) || 0) + 1;
-  item.updatedAt = new Date().toISOString();
-  item.updatedBy = user ? user.id : "";
 
   // Audit : journaliser l'action sans exposer le contenu pour les notes direction
   const auditContent = noteType === "direction" ? "[contenu confidentiel]" : String(content || "").slice(0, 100);
   if (typeof addAuditLog === "function") {
     addAuditLog("case.note_updated", `Note ${noteType} mise à jour`, auditContent, { caseId });
   }
-  if (typeof saveState === "function") saveState({ flushCloud: true, cloudReason: "case-note" });
+  if (typeof saveState === "function") saveState({ changedCase: item, flushCloud: true, cloudReason: "case-note" });
   return { ok: true };
 }
 
@@ -4609,6 +4671,7 @@ function canAdvanceReceptionStep(caseItem, stepKey, actor) {
 function advanceReceptionWorkflow(caseId, action, payload = {}) {
   const item = (typeof state !== "undefined" ? state.cases : []).find((c) => c.id === caseId);
   if (!item) return { ok: false, message: "Dossier introuvable." };
+  noteCaseRevisionCandidate(item);
   item.receptionWorkflow = normalizeReceptionWorkflow(item.receptionWorkflow);
   const rw = item.receptionWorkflow;
   const actor = typeof getCurrentActor === "function" ? getCurrentActor() : { userId: "", userName: "Système", role: "" };

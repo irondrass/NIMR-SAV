@@ -1912,7 +1912,7 @@ async function handleTechnicianTaskAction(action, bookingId, technicianId) {
       notifyUser(result?.message || "Action impossible.", "error");
       return;
     }
-    saveState({ flushCloud: true, cloudReason: `technician-${action}` });
+    saveState({ changedCase: item, flushCloud: true, cloudReason: `technician-${action}` });
     quietNotify(result.message || "Action enregistrée.", "success");
     render();
   } finally {
@@ -1942,7 +1942,7 @@ async function addTechnicianTaskPhotoFromInput(item, bookingId, technicianId) {
       await savePhotoRecord(item.id, photo, prepared.blob);
       item.photos.push(photo);
       const result = attachTechnicianTaskPhoto(item, bookingId, technicianId, photo.id);
-      saveState({ flushCloud: true, cloudReason: "technician-photo" });
+      saveState({ changedCase: item, flushCloud: true, cloudReason: "technician-photo" });
       quietNotify(result.message || "Photo ajoutée à la tâche.", "success");
       render();
     } catch (error) {
@@ -2340,7 +2340,7 @@ function renderClaims(root, item) {
 
       refreshCaseApprovalFlagsFromClaims(item);
       addHistory(item, 'claim.updated', 'Ordre de réparation modifié', getClaimLabel(claim));
-      saveState();
+      saveState({ changedCase: item });
       renderCaseDetail();
     });
   });
@@ -2406,6 +2406,7 @@ function markPdfLaborLineReadyForValidation(line = {}) {
 
 function invalidatePdfChiefValidationAfterLaborChange(item, reason = "Les travaux ou durées importés ont été modifiés.") {
   if (!item || item.source !== "pdf_estimate") return false;
+  if (typeof noteCaseRevisionCandidate === "function") noteCaseRevisionCandidate(item);
   const wasValidated = item.pdfImportStatus === "ready_for_planning" || Boolean(item.pdfValidatedAt || item.pdfValidatedBy);
   item.pdfImportStatus = "chief_validation_pending";
   item.pdfValidatedAt = "";
@@ -2446,6 +2447,7 @@ function claimHasLaborEstimate(claim) {
 }
 
 function refreshCaseApprovalFlagsFromClaims(item) {
+  if (typeof noteCaseRevisionCandidate === "function") noteCaseRevisionCandidate(item);
   const claims = getWorkflowClaims(item).filter((claim) => claim.includeInPlanning !== false || claimHasLaborEstimate(claim));
   if (!claims.length) {
     item.flags.expertApproved = false;
@@ -2618,7 +2620,7 @@ function handleClaimLaborSubmit(event, item) {
   clearPlanningIfNeeded(item, "Planning annulé après ajout manuel de main-d'œuvre. Recalculez un RDV.");
   refreshCaseApprovalFlagsFromClaims(item);
   addHistory(item, "claim.labor.added", "Main-d'œuvre ajoutée à l'ordre", `${getClaimLabel(claim)} - ${operation}: ${formatLocalizedDecimal(laborHours)} h`);
-  saveState();
+  saveState({ changedCase: item });
   renderCaseDetail();
 }
 
@@ -2642,7 +2644,7 @@ async function removeClaimLaborLine(item, claimId, lineId) {
   clearPlanningIfNeeded(item, "Planning annulé après suppression de main-d'œuvre. Recalculez un RDV.");
   refreshCaseApprovalFlagsFromClaims(item);
   addHistory(item, "claim.labor.removed", "Main-d'œuvre supprimée de l'ordre", getClaimLabel(claim));
-  saveState();
+  saveState({ changedCase: item });
   renderCaseDetail();
 }
 
@@ -2688,7 +2690,7 @@ function handleClaimSubmit(event, item) {
   refreshCaseApprovalFlagsFromClaims(item);
   const savedClaim = item.claims.find((candidate) => candidate.id === payload.id) || payload;
   addHistory(item, reusableClaim ? 'claim.reused' : 'claim.created', reusableClaim ? 'Premier ordre de réparation renseigné' : 'Ordre de réparation ajouté', getClaimLabel(savedClaim));
-  saveState();
+  saveState({ changedCase: item });
   form.reset();
   renderCaseDetail();
 }
@@ -2740,7 +2742,7 @@ async function deleteClaim(item, claimId) {
     clearPlanningIfNeeded(item, "Planning annulé après suppression d'un ordre avec main-d'œuvre. Recalculez un RDV.");
   }
   addHistory(item, 'claim.deleted', 'Ordre de réparation supprimé', getClaimLabel(claim));
-  saveState();
+  saveState({ changedCase: item });
   renderCaseDetail();
 }
 
@@ -2811,7 +2813,7 @@ function renderSupplements(root, item) {
       supplement.status = normalizeSupplementStatus(select.value);
       supplement.updatedAt = new Date().toISOString();
       addHistory(item, 'supplement.status', 'Statut complément modifié', `${supplement.number || supplement.title}: ${SUPPLEMENT_STATUS_LABELS[supplement.status]}`);
-      saveState();
+      saveState({ changedCase: item });
       renderCaseDetail();
     });
   });
@@ -2885,7 +2887,7 @@ async function handleSupplementSubmit(event, item) {
   item.supplements = normalizeRepairSupplements(item.supplements);
   item.supplements.push(supplement);
   addHistory(item, 'supplement.created', 'Réparation complémentaire ajoutée', `${supplement.number} - ${supplement.title}`);
-  saveState();
+  saveState({ changedCase: item });
   form.reset();
   renderCaseDetail();
 }
@@ -2925,7 +2927,7 @@ async function integrateSupplementDurations(item, supplementId) {
   if (total > 0) {
     invalidatePdfChiefValidationAfterLaborChange(item, "Les durées d'un complément ont été intégrées après la validation Chef Atelier.");
   }
-  saveState();
+  saveState({ changedCase: item });
   generatedProposals[item.id] = null;
   render();
   quietNotify('Durées complémentaires intégrées. Recalculez le RDV/planning si nécessaire.', 'success');
@@ -2940,7 +2942,7 @@ async function deleteSupplement(item, supplementId) {
   if (!confirmed) return;
   item.supplements = item.supplements.filter((candidate) => candidate.id !== supplementId);
   addHistory(item, 'supplement.deleted', 'Réparation complémentaire supprimée', supplement.number || supplement.title);
-  saveState();
+  saveState({ changedCase: item });
   renderCaseDetail();
 }
 
@@ -3032,7 +3034,7 @@ function renderCaseDetail() {
         return;
       }
       item[field] = input.value;
-      saveState();
+      saveState({ changedCase: item });
       renderMetrics();
       renderCases();
       renderWorkflow(detail, item);
@@ -3108,7 +3110,7 @@ function renderCaseDetail() {
           clearCasePlanning(item, "Planning annulé après retrait de la validation client/interne");
           recordFlagHistory(item, "clientApproved", false);
         }
-        saveState();
+        saveState({ changedCase: item });
         render();
         return;
       }
@@ -3123,7 +3125,7 @@ function renderCaseDetail() {
         if (wasDelivered) recordFlagHistory(item, "delivered", false);
       }
       recordFlagHistory(item, field, checked);
-      saveState();
+      saveState({ changedCase: item });
       render();
     });
   });
@@ -3201,12 +3203,12 @@ function renderCaseDetail() {
         }
         recordReleasedCapacityIfNeeded(item, result.freedMinutes);
         notifyUser(result.message || "Travaux terminés.", "success");
-        saveState({ flushCloud: true, cloudReason: `workflow-${flag}` });
+        saveState({ changedCase: item, flushCloud: true, cloudReason: `workflow-${flag}` });
         render();
         return;
       }
       applyWorkflowAction(item, flag);
-      saveState({ flushCloud: true, cloudReason: `workflow-${flag}` });
+      saveState({ changedCase: item, flushCloud: true, cloudReason: `workflow-${flag}` });
       render();
     });
   });
@@ -3329,6 +3331,7 @@ function applyWorkflowAction(item, action) {
   if (issues.length) {
     return { ok: false, message: issues.join("\n") };
   }
+  if (typeof noteCaseRevisionCandidate === "function") noteCaseRevisionCandidate(item);
 
   const workflowClaimIds = new Set(getWorkflowClaims(item).map((claim) => claim.id));
   const claims = Array.isArray(item.claims) ? item.claims : [];
@@ -3722,7 +3725,7 @@ function renderCaseBlockerControls(root, item) {
       nextBlocked ? "Dossier marqué bloqué" : previousBlocked ? "Blocage retiré" : "Statut pièces mis à jour",
       `${sourceLabel}: ${getCaseBlockerLabel(item) || PARTS_STATUS_LABELS[item.partsStatus] || "Aucun blocage"}`,
     );
-    saveState({ flushCloud: true, cloudReason: "case-blocker" });
+    saveState({ changedCase: item, flushCloud: true, cloudReason: "case-blocker" });
     render();
   };
   target.querySelector("[data-case-parts-status]")?.addEventListener("change", () => updateBlocker("Statut pièces"));
@@ -3737,7 +3740,7 @@ function renderCaseBlockerControls(root, item) {
     item.blockerSource = "";
     item.blockerSourceBookingIds = [];
     addHistory(item, "case.blocker.cleared", "Blocage retiré", "Le dossier est de nouveau exploitable.");
-    saveState({ flushCloud: true, cloudReason: "case-blocker-cleared" });
+    saveState({ changedCase: item, flushCloud: true, cloudReason: "case-blocker-cleared" });
     render();
   });
 }
@@ -4100,7 +4103,7 @@ function renderPhotos(root, item) {
         revokePhotoUrl(removed.id);
       }
       if (removed) addHistory(item, "photo.removed", `Photo supprimée: ${removed.name || "Photo"}`);
-      saveState();
+      saveState({ changedCase: item });
       renderCaseDetail();
     });
   });
@@ -4626,7 +4629,7 @@ async function handleBookingTaskAction(item, action, bookingId, options = {}) {
     if (!result) return;
     if (!options.silent) quietNotify(result.message, result.ok ? "success" : "info");
     if (result.ok) {
-      if (options.persist !== false) saveState({ flushCloud: true, cloudReason: `booking-${action}` });
+      if (options.persist !== false) saveState({ changedCase: item, flushCloud: true, cloudReason: `booking-${action}` });
       if (!options.skipRender) render();
     }
     return result;
@@ -4740,7 +4743,7 @@ function renderPdfImportValidation(root, item) {
       planningPreparation = generateAppointmentOptions(item);
       generatedProposals[item.id] = planningPreparation;
     }
-    saveState();
+    saveState({ changedCase: item });
     activeCaseDetailTab = "planning";
     render();
     const planningReady = Boolean(planningPreparation?.proposal?.steps?.length);
@@ -4874,7 +4877,7 @@ function renderDurations(root, item) {
       item.durations[input.dataset.duration] = parsed || 0;
       generatedProposals[item.id] = null;
       invalidatePdfChiefValidationAfterLaborChange(item, "Une durée atelier a été modifiée après la validation Chef Atelier.");
-      saveState();
+      saveState({ changedCase: item });
       if (item.source === "pdf_estimate") renderPdfImportValidation(root, item);
       $("[data-field='total-duration']", root).textContent = `${sumDurations(item)} h`;
       refreshCaseActionAvailability(root, item);
@@ -4885,7 +4888,7 @@ function renderDurations(root, item) {
       input.value = formatLocalizedDecimal(current);
       if (previous !== current) {
         clearPlanningIfNeeded(item, 'Planning annulé après modification des durées atelier. Recalculez un RDV.');
-        saveState();
+        saveState({ changedCase: item });
         renderCases();
         renderPlanning();
         renderMetrics();
@@ -4946,7 +4949,7 @@ function renderDurations(root, item) {
       select.dataset.previousPreferredTechnician = next;
       generatedProposals[item.id] = null;
       clearPlanningIfNeeded(item, 'Planning annulé après changement de technicien. Recalculez un RDV.');
-      saveState();
+      saveState({ changedCase: item });
       renderCases();
       renderPlanning();
       renderMetrics();
@@ -4972,7 +4975,7 @@ function renderDurations(root, item) {
       generatedProposals[item.id] = null;
       clearPlanningIfNeeded(item, 'Planning annulé après changement du mode interne/externe. Recalculez un RDV.');
       addHistory(item, "planning.execution_mode.changed", "Mode d'exécution modifié", `${getDurationLabel(key)} : ${next === "external" ? "sous-traitant externe" : "interne atelier"}.`);
-      saveState();
+      saveState({ changedCase: item });
       render();
     });
   });
@@ -4990,7 +4993,7 @@ function renderDurations(root, item) {
       generatedProposals[item.id] = null;
       clearPlanningIfNeeded(item, 'Planning annulé après changement de sous-traitant. Recalculez un RDV.');
       addHistory(item, "planning.subcontractor.changed", "Sous-traitant modifié", `${getDurationLabel(key)} : ${getResource(select.value)?.name || select.value}.`);
-      saveState();
+      saveState({ changedCase: item });
       renderCases();
       renderPlanning();
       renderMetrics();
@@ -5013,7 +5016,7 @@ function renderDurations(root, item) {
       item.stepServiceTypes[key] = next;
       generatedProposals[item.id] = null;
       clearPlanningIfNeeded(item, 'Planning annulé après modification du type de service. Recalculez un RDV.');
-      saveState();
+      saveState({ changedCase: item });
       renderCases();
       renderPlanning();
       renderMetrics();
@@ -5094,7 +5097,7 @@ function renderExpertEstimate(root, item) {
 
   $("[data-estimate-reference]", target).addEventListener("input", (event) => {
     estimate.reference = event.target.value;
-    saveState();
+    saveState({ changedCase: item });
   });
 
   $("[data-estimate-line-form]", target).addEventListener("submit", (event) => {
@@ -5112,7 +5115,7 @@ function renderExpertEstimate(root, item) {
     generatedProposals[item.id] = null;
     invalidatePdfChiefValidationAfterLaborChange(item, "Une ligne de main-d’œuvre a été ajoutée au devis après la validation Chef Atelier.");
     addHistory(item, "expert.estimate.line_added", "Ligne MO devis importé ajoutée", `${getDurationLabel(phase)}: ${formatLocalizedDecimal(laborHours)} h`);
-    saveState();
+    saveState({ changedCase: item });
     renderCaseDetail();
   });
 
@@ -5125,7 +5128,7 @@ function renderExpertEstimate(root, item) {
       generatedProposals[item.id] = null;
       invalidatePdfChiefValidationAfterLaborChange(item, "Une ligne de main-d’œuvre a été supprimée du devis après la validation Chef Atelier.");
       if (line) addHistory(item, "expert.estimate.line_removed", "Ligne MO devis importé supprimée", line.operation || getDurationLabel(line.phase));
-      saveState();
+      saveState({ changedCase: item });
       renderCaseDetail();
     });
   });
@@ -5135,14 +5138,14 @@ function renderExpertEstimate(root, item) {
     estimate.confirmed = true;
     estimate.confirmedAt = new Date().toISOString();
     addHistory(item, "expert.estimate.confirmed", "Devis de réparation expert confirmé", `Total MO: ${formatLocalizedDecimal(total)} h`);
-    saveState();
+    saveState({ changedCase: item });
     renderCaseDetail();
   });
 
   $("[data-apply-expert-estimate]", target).addEventListener("click", () => {
     applyExpertEstimateToDurations(item);
     invalidatePdfChiefValidationAfterLaborChange(item, "Les quantités de main-d’œuvre du devis ont été réappliquées après la validation Chef Atelier.");
-    saveState();
+    saveState({ changedCase: item });
     renderCaseDetail();
   });
 }

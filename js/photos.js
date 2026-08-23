@@ -79,7 +79,7 @@ async function handlePhotos(event, item, category = "before") {
     item.photos.push(...loaded);
     addHistory(item, "photos.added", `${loaded.length} photo${loaded.length > 1 ? "s" : ""} ajoutée${loaded.length > 1 ? "s" : ""}`, getPhotoCategoryLabel(category));
   }
-  saveState();
+  saveState(loaded.length ? { changedCase: item } : {});
   renderCaseDetail();
   event.target.value = "";
 }

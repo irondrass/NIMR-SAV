@@ -4,6 +4,9 @@ export function createGranularSupabaseAdapter(options = {}) {
   const repairOrders = new Map();
   const audits = new Map();
   const settings = new Map();
+  const receipts = new Map();
+  const conflicts = new Map();
+  let serverVersion = 0;
   let failure = options.failure || null;
   let projectionFailure = options.projectionFailure || null;
 
@@ -50,6 +53,60 @@ export function createGranularSupabaseAdapter(options = {}) {
     return structuredClone(canonical);
   }
 
+  function applyCasOperation(operation) {
+    const receiptKey = `${operation.workshopId}|${operation.operationId}`;
+    const receipt = receipts.get(receiptKey);
+    const key = entityKey(operation);
+    const current = entities.get(key) || null;
+    if (receipt) {
+      return {
+        status: "idempotent", accepted: true, idempotent: true, conflict: false,
+        accepted_version: receipt.version,
+        server_version: current?.entity_version ?? null,
+        canonical: structuredClone(current),
+      };
+    }
+    const priorConflict = conflicts.get(receiptKey);
+    if (priorConflict) return structuredClone({ ...priorConflict, idempotent: true });
+    const baseMatches = current
+      ? operation.baseVersion === current.entity_version
+      : operation.baseVersion === null;
+    if (!baseMatches) {
+      const conflict = {
+        status: "conflict", accepted: false, idempotent: false, conflict: true,
+        conflict_id: `conflict:${operation.operationId}`,
+        server_version: current?.entity_version ?? null,
+        canonical: structuredClone(current),
+      };
+      conflicts.set(receiptKey, conflict);
+      return structuredClone(conflict);
+    }
+    serverVersion = Math.max(serverVersion, current?.entity_version || 0) + 1;
+    const updatedAt = operation.updatedAt || new Date().toISOString();
+    const canonical = {
+      workshop_id: operation.workshopId,
+      entity_type: operation.entityType,
+      entity_id: operation.entityId,
+      payload: operation.action === "delete"
+        ? structuredClone(operation.payload || {})
+        : structuredClone(operation.payload?.entity || {}),
+      entity_version: serverVersion,
+      last_operation_id: operation.operationId,
+      deleted_at: operation.action === "delete" ? updatedAt : null,
+      updated_at: updatedAt,
+      entityVersion: serverVersion,
+      operationId: operation.operationId,
+      deleted: operation.action === "delete",
+    };
+    entities.set(key, canonical);
+    receipts.set(receiptKey, { version: serverVersion });
+    return {
+      status: "accepted", accepted: true, idempotent: false, conflict: false,
+      accepted_version: serverVersion,
+      server_version: serverVersion, canonical: structuredClone(canonical),
+    };
+  }
+
   function consumeProjectionFailure() {
     if (!projectionFailure) return null;
     const current = projectionFailure;
@@ -82,17 +139,20 @@ export function createGranularSupabaseAdapter(options = {}) {
   const client = {
     async rpc(name, args) {
       recordCall({ table: name, operation: "rpc", rows: [args], filters: {}, ordering: [], pagination: null, operationId: args.p_operation_id });
-      if (name !== "nimr_apply_sync_entity") return { data: null, error: new Error(`Unsupported RPC: ${name}`) };
-      const canonical = applyCanonicalOperation({
+      if (name === "nimr_apply_workshop_settings_v2") {
+        return { data: { status: "accepted", accepted: true, idempotent: false, conflict: false, server_version: ++serverVersion, canonical: { workshop_id: args.p_workshop_id, setting_key: "workshop_settings", value: args.p_payload, entity_version: serverVersion, last_operation_id: args.p_operation_id, updated_at: new Date().toISOString() } }, error: null };
+      }
+      if (name !== "nimr_apply_sync_entity_v2") return { data: null, error: new Error(`Unsupported RPC: ${name}`) };
+      const outcome = applyCasOperation({
         workshopId: args.p_workshop_id,
         entityType: args.p_entity_type,
         entityId: args.p_entity_id,
-        entityVersion: args.p_entity_version,
+        baseVersion: args.p_base_version == null ? null : Number(args.p_base_version),
         operationId: args.p_operation_id,
         action: args.p_deleted ? "delete" : "upsert",
         payload: args.p_deleted ? (args.p_payload || {}) : { entity: args.p_payload || {} },
       });
-      return { data: canonical, error: null };
+      return { data: outcome, error: null };
     },
     from(table) {
       return {
@@ -180,6 +240,8 @@ export function createGranularSupabaseAdapter(options = {}) {
     repairOrders,
     audits,
     settings,
+    receipts,
+    conflicts,
     send,
     page,
     injectFailure(nextFailure) { failure = nextFailure; },

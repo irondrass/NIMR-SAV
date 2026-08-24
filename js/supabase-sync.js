@@ -225,19 +225,33 @@ function buildWorkshopSettingsPayload(localState) {
 
 async function syncWorkshopSettingsToSupabase(client, localState, user) {
   const payload = buildWorkshopSettingsPayload(localState);
-  const now = new Date().toISOString();
-  const row = withWorkshopId({
-    setting_key: "workshop_settings",
-    value: payload,
-    description: "Réglages atelier: ressources, horaires, jours fériés, Fast Lane et paramètres planning",
-    updated_by: user?.id || null,
-    updated_at: now,
+  const workshopId = getSupabaseWorkshopId();
+  const operationId = `manual-settings-${typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`}`;
+  const { data, error } = await client.rpc("nimr_apply_workshop_settings_v2", {
+    p_workshop_id: workshopId,
+    p_payload: payload,
+    p_base_version: typeof getObservedGranularServerVersion === "function"
+      ? getObservedGranularServerVersion(workshopId, "workshop_settings", "workshop_settings")
+      : null,
+    p_operation_id: operationId,
   });
-  const { error } = await client.from("app_settings").upsert(row, { onConflict: "workshop_id,setting_key" });
   if (error && isWorkshopSchemaUnavailable(error)) {
     throwWorkshopIsolationRequired("app_settings", error);
   }
   if (error) throw new Error(`app_settings: ${error.message}`);
+  const outcome = normalizeCanonicalCasOutcome(Array.isArray(data) ? data[0] : data);
+  if (outcome.conflict || !outcome.accepted) {
+    const conflictError = new Error("Conflit de réglages atelier: réconciliez la version serveur avant la sauvegarde manuelle.");
+    conflictError.name = "SupabaseSettingsConflictError";
+    throw conflictError;
+  }
+  if (typeof rememberObservedGranularEntityMetadata === "function") {
+    await rememberObservedGranularEntityMetadata(observedMetadataFromCasOutcome({
+      workshopId, entityType: "workshop_settings", entityId: "workshop_settings",
+    }, outcome));
+  }
   return {
     settings: Object.keys(payload.settings || {}).length,
     workHoursDays: Object.keys(payload.workHours || {}).length,
@@ -278,7 +292,7 @@ function applyWorkshopSettingsToState(settingsPayload) {
 async function restoreWorkshopSettingsFromSupabase(client) {
   const { data, error } = await client
     .from("app_settings")
-    .select("value, updated_at")
+    .select("value, updated_at, entity_version, last_operation_id")
     .eq("workshop_id", getSupabaseWorkshopId())
     .eq("setting_key", "workshop_settings")
     .maybeSingle();
@@ -287,7 +301,12 @@ async function restoreWorkshopSettingsFromSupabase(client) {
   }
   if (error) throw new Error(`app_settings: ${error.message}`);
   if (!data?.value) return null;
-  return { value: data.value, updatedAt: data.updated_at };
+  return {
+    value: data.value,
+    updatedAt: data.updated_at,
+    entityVersion: data.entity_version ?? null,
+    lastOperationId: data.last_operation_id || "",
+  };
 }
 
 function isSchemaCacheTableError(error) {
@@ -2413,7 +2432,7 @@ async function legacyPullLatestSupabaseBackup(reason = "legacy-bootstrap") {
 }
 
 // REMPLACER l'ancienne fonction startSupabaseLiveSync par celle-ci
-function startSupabaseLiveSync() {
+async function startSupabaseLiveSync() {
   const permissionGuard = typeof guardSensitiveAction === "function"
     ? guardSensitiveAction("supabase.sync.use", {}, { notify: false })
     : { ok: false };
@@ -2421,8 +2440,14 @@ function startSupabaseLiveSync() {
   
   const client = getSupabaseClient();
   if (!client || supabaseLiveSyncChannel) return;
-  
   const workshopId = getSupabaseWorkshopId();
+  // Persisted server-version guards are authoritative after restart. Hydrate
+  // and reconcile before opening realtime so a delayed V10 cannot beat V12.
+  if (typeof hydrateObservedGranularEntityMetadata === "function") {
+    await hydrateObservedGranularEntityMetadata(workshopId);
+  }
+  await pullLatestSupabaseBackup("startup-before-realtime");
+  if (supabaseLiveSyncChannel) return;
   
   // Nouvelle fonction pour gérer les changements en temps réel de manière granulaire
   const handleGranularChange = (payload) => {
@@ -2446,6 +2471,26 @@ function startSupabaseLiveSync() {
         if (row.entity_type === "case") await handleRemoteCaseChange(row, payload.eventType);
         else if (row.entity_type === "booking") await handleRemoteBookingChange(row, payload.eventType);
       } else if (payload.table === "app_settings" && row.setting_key === "workshop_settings") {
+        const prior = typeof getObservedGranularEntityMetadata === "function"
+          ? getObservedGranularEntityMetadata(workshopId, "workshop_settings", "workshop_settings")
+          : null;
+        const remoteVersion = Number(row.entity_version ?? -1);
+        if (Number(prior?.serverVersion ?? -1) > remoteVersion) return;
+        const localSettingsOperation = typeof findActiveDurableOutboxOperationForEntity === "function"
+          ? await findActiveDurableOutboxOperationForEntity(workshopId, "workshop_settings", "workshop_settings")
+          : null;
+        if (typeof rememberObservedGranularEntityMetadata === "function") {
+          await rememberObservedGranularEntityMetadata({
+            workshopId,
+            entityType: "workshop_settings",
+            entityId: "workshop_settings",
+            serverVersion: row.entity_version,
+            lastOperationId: row.last_operation_id || "",
+            deleted: false,
+            updatedAt: row.updated_at,
+          });
+        }
+        if (localSettingsOperation && row.last_operation_id !== localSettingsOperation.operationId) return;
         applyingRemoteSupabaseState = true;
         try {
           if (applyWorkshopSettingsToState(row.value)) {
@@ -2509,7 +2554,7 @@ async function handleRemoteCaseChange(remoteCase, eventType) {
   applyingRemoteSupabaseState = true;
   try {
     if (remoteCase.entity_type === "case") {
-      changed = applyRemoteEntityRow({
+      changed = await applyRemoteEntityRow({
         ...remoteCase,
         deleted_at: eventType === "DELETE" ? (remoteCase.deleted_at || new Date().toISOString()) : remoteCase.deleted_at,
       });
@@ -2554,7 +2599,7 @@ async function handleRemoteBookingChange(remoteBooking, eventType) {
   if (!remoteBooking) return false;
   applyingRemoteSupabaseState = true;
   try {
-    const changed = applyRemoteEntityRow({
+    const changed = await applyRemoteEntityRow({
       ...remoteBooking,
       entity_type: "booking",
       deleted_at: eventType === "DELETE" ? (remoteBooking.deleted_at || new Date().toISOString()) : remoteBooking.deleted_at,
@@ -2742,8 +2787,8 @@ async function renderSupabaseSyncHealth() {
   const client = getSupabaseClient();
   const user = client ? await getSupabaseUser() : null;
   const operations = typeof loadDurableOutboxOperations === "function" ? await loadDurableOutboxOperations() : [];
-  const pending = operations.filter((entry) => ["pending", "processing", "failed", "conflict"].includes(entry.syncStatus)).length;
-  const outboxConflicts = operations.filter((entry) => entry.syncStatus === "conflict").length;
+  const pending = operations.filter((entry) => ["pending", "processing", "failed", "conflicted"].includes(entry.syncStatus)).length;
+  const outboxConflicts = operations.filter((entry) => entry.syncStatus === "conflicted").length;
   const stateConflicts = typeof getOpenSyncConflicts === "function" ? getOpenSyncConflicts().length : 0;
   const actor = typeof getCurrentActor === "function" ? getCurrentActor() : {};
   const realtime = window.NIMR_REALTIME_STATUS || { connected: false };
@@ -2889,17 +2934,64 @@ function rememberRemoteCaseComparable(entityId, caseItem = null) {
   }
 }
 
-function applyRemoteEntityRow(row) {
+function observedMetadataFromCanonicalRow(row) {
+  return {
+    workshopId: String(row?.workshop_id || getSupabaseWorkshopId()),
+    entityType: String(row?.entity_type || ""),
+    entityId: String(row?.entity_id || ""),
+    serverVersion: row?.entity_version ?? null,
+    lastOperationId: String(row?.last_operation_id || ""),
+    deleted: Boolean(row?.deleted_at),
+    updatedAt: row?.updated_at || new Date().toISOString(),
+  };
+}
+
+async function applyRemoteEntityRow(row, options = {}) {
   const entityType = String(row?.entity_type || "");
   const entityId = String(row?.entity_id || "");
   if (!entityId || !["case", "booking"].includes(entityType)) return false;
   const remoteVersion = Math.max(0, Number(row.entity_version || 0));
-  const envelopeKey = `${row.workshop_id || getSupabaseWorkshopId()}\u0000${entityType}\u0000${entityId}`;
-  const priorEnvelope = appliedGranularEntityEnvelopes.get(envelopeKey);
+  const workshopId = String(row.workshop_id || getSupabaseWorkshopId());
+  const envelopeKey = `${workshopId}\u0000${entityType}\u0000${entityId}`;
+  const persistedPrior = typeof getObservedGranularEntityMetadata === "function"
+    ? getObservedGranularEntityMetadata(workshopId, entityType, entityId)
+    : null;
+  const priorEnvelope = persistedPrior || appliedGranularEntityEnvelopes.get(envelopeKey);
   if (priorEnvelope?.version > remoteVersion) return false;
-  if (priorEnvelope?.version === remoteVersion) {
-    if (priorEnvelope.deleted && !row.deleted_at) return false;
-    if (priorEnvelope.deleted === Boolean(row.deleted_at)) return false;
+  const priorVersion = Number(priorEnvelope?.serverVersion ?? priorEnvelope?.version ?? -1);
+  const priorOperationId = String(priorEnvelope?.lastOperationId || "");
+  const remoteOperationId = String(row.last_operation_id || "");
+  if (!options.force && priorVersion > remoteVersion) return false;
+  if (!options.force && priorVersion === remoteVersion) {
+    if (priorOperationId === remoteOperationId && priorEnvelope.deleted === Boolean(row.deleted_at)) return false;
+    // A server sequence cannot legitimately produce the same version for two
+    // different operations or contradictory tombstone state. Never guess.
+    window.NIMR_GRANULAR_RECONCILE_REQUIRED = {
+      workshopId, entityType, entityId, remoteVersion,
+      reason: "equal-version-contradiction",
+      detectedAt: new Date().toISOString(),
+    };
+    return false;
+  }
+  const localOperation = typeof findActiveDurableOutboxOperationForEntity === "function"
+    ? await findActiveDurableOutboxOperationForEntity(workshopId, entityType, entityId)
+    : null;
+  const observed = observedMetadataFromCanonicalRow(row);
+  if (!options.force && localOperation && remoteOperationId !== localOperation.operationId) {
+    // Another workstation advanced the canonical row while local intent is
+    // pending. Preserve the local entity/payload and advance only its observed
+    // base. The unchanged durable operation will then fail CAS explicitly.
+    if (typeof rememberObservedGranularEntityMetadata === "function") {
+      await rememberObservedGranularEntityMetadata(observed);
+    }
+    appliedGranularEntityEnvelopes.set(envelopeKey, {
+      version: remoteVersion,
+      serverVersion: remoteVersion,
+      lastOperationId: remoteOperationId,
+      deleted: Boolean(row.deleted_at),
+      pendingLocalOperationId: localOperation.operationId,
+    });
+    return false;
   }
   const collectionName = entityType === "case" ? "cases" : "bookings";
   const collection = Array.isArray(state[collectionName]) ? state[collectionName] : [];
@@ -2909,7 +3001,8 @@ function applyRemoteEntityRow(row) {
     if (entityType === "case" && typeof markEntityCaseDeleted === "function") markEntityCaseDeleted(entityId, { skipCloud: true });
     if (entityType === "booking" && typeof markEntityBookingDeleted === "function") markEntityBookingDeleted(entityId, { skipCloud: true });
     if (entityType === "case") rememberRemoteCaseComparable(entityId);
-    appliedGranularEntityEnvelopes.set(envelopeKey, { version: remoteVersion, deleted: true });
+    appliedGranularEntityEnvelopes.set(envelopeKey, { version: remoteVersion, serverVersion: remoteVersion, lastOperationId: remoteOperationId, deleted: true });
+    if (typeof rememberObservedGranularEntityMetadata === "function") await rememberObservedGranularEntityMetadata(observed);
     return existingIndex >= 0;
   }
   const remoteEntity = { ...(row.payload || {}), id: entityId };
@@ -2918,7 +3011,8 @@ function applyRemoteEntityRow(row) {
   if (entityType === "case" && typeof markEntityCaseDirty === "function") markEntityCaseDirty(remoteEntity, { skipCloud: true });
   if (entityType === "booking" && typeof markEntityBookingDirty === "function") markEntityBookingDirty(remoteEntity, { skipCloud: true });
   if (entityType === "case") rememberRemoteCaseComparable(entityId, remoteEntity);
-  appliedGranularEntityEnvelopes.set(envelopeKey, { version: remoteVersion, deleted: false });
+  appliedGranularEntityEnvelopes.set(envelopeKey, { version: remoteVersion, serverVersion: remoteVersion, lastOperationId: remoteOperationId, deleted: false });
+  if (typeof rememberObservedGranularEntityMetadata === "function") await rememberObservedGranularEntityMetadata(observed);
   return true;
 }
 
@@ -2926,7 +3020,7 @@ async function persistRemoteGranularPage(rows, reason = "incremental-pull") {
   let changed = false;
   applyingRemoteSupabaseState = true;
   try {
-    rows.forEach((row) => { changed = applyRemoteEntityRow(row) || changed; });
+    for (const row of rows) changed = (await applyRemoteEntityRow(row)) || changed;
     if (!changed) return false;
     if (typeof invalidateStateReplacementIndexes === "function") invalidateStateReplacementIndexes();
     await saveState({ skipCloud: true, skipSnapshot: true, boundedEntityDetection: true, cloudReason: reason });
@@ -2990,6 +3084,17 @@ async function restoreGranularWorkshopSettings(client) {
   try {
     const changed = applyWorkshopSettingsToState(settingsBackup.value);
     if (changed) await saveState({ skipCloud: true, skipSnapshot: true, boundedEntityDetection: true, cloudReason: "incremental:settings" });
+    if (typeof rememberObservedGranularEntityMetadata === "function") {
+      await rememberObservedGranularEntityMetadata({
+        workshopId: getSupabaseWorkshopId(),
+        entityType: "workshop_settings",
+        entityId: "workshop_settings",
+        serverVersion: settingsBackup.entityVersion,
+        lastOperationId: settingsBackup.lastOperationId,
+        deleted: false,
+        updatedAt: settingsBackup.updatedAt,
+      });
+    }
     return changed;
   } finally {
     applyingRemoteSupabaseState = false;
@@ -3049,21 +3154,16 @@ async function pullLatestSupabaseBackup(reason = "poll") {
 const GRANULAR_OUTBOX_BATCH_SIZE = 100;
 const GRANULAR_OUTBOX_MAX_CONCURRENCY = 4;
 
-async function upsertWorkshopSettingsEntity(client, payload, user) {
-  const now = new Date().toISOString();
-  const row = withWorkshopId({
-    setting_key: "workshop_settings",
-    value: payload || {},
-    description: "Réglages atelier granulaires P0-009",
-    updated_by: user?.id || null,
-    updated_at: now,
+async function upsertWorkshopSettingsEntity(client, payload, user, operation = {}) {
+  const { data, error } = await client.rpc("nimr_apply_workshop_settings_v2", {
+    p_workshop_id: operation.workshopId || getSupabaseWorkshopId(),
+    p_payload: payload || {},
+    p_base_version: operation.baseVersion,
+    p_operation_id: operation.operationId,
   });
-  const { error } = await client.from("app_settings").upsert(row, { onConflict: "workshop_id,setting_key" });
   if (error) throw error;
-  return {
-    updatedAt: now,
-    workHoursFingerprint: payload?.workHoursSync?.fingerprint || "",
-  };
+  const outcome = Array.isArray(data) ? data[0] : data;
+  return { ...outcome, workHoursFingerprint: payload?.workHoursSync?.fingerprint || "" };
 }
 
 async function appendAuditEntityToSupabase(client, operation) {
@@ -3085,19 +3185,170 @@ async function appendAuditEntityToSupabase(client, operation) {
 
 async function applyCanonicalSyncEntity(client, operation) {
   const projectionLocalId = String(operation.payload?.projectionLocalId || "").trim();
-  const { data, error } = await client.rpc("nimr_apply_sync_entity", {
+  const { data, error } = await client.rpc("nimr_apply_sync_entity_v2", {
     p_workshop_id: operation.workshopId,
     p_entity_type: operation.entityType,
     p_entity_id: operation.entityId,
     p_payload: operation.action === "delete"
       ? (projectionLocalId ? { projectionLocalId } : {})
       : (operation.payload?.entity || {}),
-    p_entity_version: Math.max(0, Number(operation.entityVersion || 0)),
+    p_base_version: operation.baseVersion,
     p_operation_id: operation.operationId,
     p_deleted: operation.action === "delete",
   });
   if (error) throw error;
   return Array.isArray(data) ? data[0] : data;
+}
+
+function normalizeCanonicalCasOutcome(value = {}) {
+  const status = String(value?.status || "");
+  const canonical = value?.canonical || null;
+  return {
+    status,
+    accepted: value?.accepted === true,
+    idempotent: value?.idempotent === true,
+    conflict: value?.conflict === true || status === "conflict",
+    conflictId: String(value?.conflict_id || value?.conflictId || ""),
+    acceptedVersion: value?.accepted_version ?? value?.acceptedVersion ?? null,
+    // The canonical row is the authority for the entity's current version.
+    // acceptedVersion is only the historical receipt version for this operation.
+    serverVersion: canonical?.entity_version ?? canonical?.server_version ?? value?.server_version ?? value?.serverVersion ?? null,
+    canonical,
+  };
+}
+
+function observedMetadataFromCasOutcome(operation, outcome) {
+  const canonical = outcome?.canonical || {};
+  return {
+    workshopId: String(canonical.workshop_id || operation.workshopId),
+    entityType: operation.entityType,
+    entityId: operation.entityType === "workshop_settings" ? "workshop_settings" : String(canonical.entity_id || operation.entityId),
+    serverVersion: canonical.entity_version ?? canonical.server_version ?? outcome.serverVersion ?? null,
+    lastOperationId: String(canonical.last_operation_id || ""),
+    deleted: Boolean(canonical.deleted_at),
+    updatedAt: canonical.updated_at || new Date().toISOString(),
+  };
+}
+
+async function registerCanonicalConcurrencyConflict(operation, outcome) {
+  if (!state || typeof state !== "object") return null;
+  state.syncConflicts = Array.isArray(state.syncConflicts) ? state.syncConflicts : [];
+  const stableId = outcome.conflictId || `operation:${operation.operationId}`;
+  const existingIndex = state.syncConflicts.findIndex((entry) => (
+    entry?.serverConflictId === outcome.conflictId
+    || entry?.localOperationId === operation.operationId
+    || entry?.id === stableId
+  ));
+  const canonical = outcome.canonical || null;
+  const conflict = {
+    ...(existingIndex >= 0 ? state.syncConflicts[existingIndex] : {}),
+    id: stableId,
+    conflictKey: `server-cas:${operation.workshopId}:${operation.operationId}`,
+    type: "server_entity_conflict",
+    status: "open",
+    at: existingIndex >= 0 ? state.syncConflicts[existingIndex].at : new Date().toISOString(),
+    workshopId: operation.workshopId,
+    entityType: operation.entityType,
+    entityId: operation.entityId,
+    caseId: operation.entityType === "case" ? operation.entityId : "",
+    action: operation.action,
+    baseVersion: operation.baseVersion,
+    serverVersion: outcome.serverVersion,
+    serverConflictId: outcome.conflictId,
+    localOperationId: operation.operationId,
+    localValue: cloneGranularSyncValue(operation.payload?.entity || operation.payload || {}),
+    localPayload: cloneGranularSyncValue(operation.payload || {}),
+    remoteValue: canonical?.payload
+      ? { ...cloneGranularSyncValue(canonical.payload), id: canonical.entity_id }
+      : (canonical?.value ? cloneGranularSyncValue(canonical.value) : null),
+    canonical: canonical ? cloneGranularSyncValue(canonical) : null,
+    message: "Une autre station a modifié cette entité. La version locale est conservée dans un conflit durable.",
+  };
+  if (existingIndex >= 0) state.syncConflicts[existingIndex] = conflict;
+  else state.syncConflicts.unshift(conflict);
+  if (typeof addAuditLog === "function") {
+    addAuditLog("sync.concurrency.conflict", "Conflit de concurrence", conflict.message, { caseId: conflict.caseId });
+  }
+  await saveState({ skipCloud: true, skipSnapshot: true, boundedEntityDetection: true, cloudReason: "cas-conflict" });
+  if (typeof renderSyncStatusStrip === "function") renderSyncStatusStrip();
+  return conflict;
+}
+
+async function resolveCanonicalConcurrencyConflict(conflict, action) {
+  const operationId = String(conflict?.localOperationId || "");
+  const operations = typeof loadDurableOutboxOperations === "function" ? await loadDurableOutboxOperations() : [];
+  const oldOperation = operations.find((entry) => entry.operationId === operationId);
+  if (!oldOperation || oldOperation.syncStatus !== "conflicted") {
+    throw new Error("Opération conflictuelle durable introuvable.");
+  }
+  const canonical = conflict.canonical || oldOperation.canonical || null;
+  const serverVersion = canonical?.entity_version ?? conflict.serverVersion ?? oldOperation.serverVersion ?? null;
+  const observed = {
+    workshopId: oldOperation.workshopId,
+    entityType: oldOperation.entityType,
+    entityId: oldOperation.entityId,
+    serverVersion,
+    lastOperationId: String(canonical?.last_operation_id || ""),
+    deleted: Boolean(canonical?.deleted_at),
+    updatedAt: canonical?.updated_at || new Date().toISOString(),
+  };
+  let replacement = null;
+  if (action === "keep_local") {
+    const operationIdSuffix = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+    replacement = normalizeDurableOutboxOperation({
+      ...oldOperation,
+      operationId: `operation-${operationIdSuffix}`,
+      idempotencyKey: `${oldOperation.workshopId}:operation-${operationIdSuffix}`,
+      baseVersion: serverVersion,
+      expectedVersion: serverVersion,
+      entityVersion: null,
+      syncStatus: "pending",
+      retryCount: 0,
+      lastError: "",
+      conflictId: "",
+      serverVersion: null,
+      canonical: null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+  } else if (action !== "accept_cloud") {
+    throw new Error("Résolution de conflit serveur non prise en charge.");
+  }
+  await resolveConflictedOutboxOperationAtomically(operationId, observed, replacement);
+  if (action === "accept_cloud" && canonical && ["case", "booking"].includes(oldOperation.entityType)) {
+    applyingRemoteSupabaseState = true;
+    try {
+      const changed = await applyRemoteEntityRow(canonical, { force: true });
+      if (changed) {
+        if (typeof invalidateStateReplacementIndexes === "function") invalidateStateReplacementIndexes();
+        await saveState({ skipCloud: true, skipSnapshot: true, boundedEntityDetection: true, cloudReason: "conflict:accept-server" });
+      }
+    } finally {
+      applyingRemoteSupabaseState = false;
+    }
+  }
+  if (action === "accept_cloud" && canonical && oldOperation.entityType === "workshop_settings") {
+    applyingRemoteSupabaseState = true;
+    try {
+      if (applyWorkshopSettingsToState(canonical.value || canonical.payload || {})) {
+        await saveState({ skipCloud: true, skipSnapshot: true, boundedEntityDetection: true, cloudReason: "conflict:accept-server-settings" });
+      }
+    } finally {
+      applyingRemoteSupabaseState = false;
+    }
+  }
+  const client = getSupabaseClient();
+  if (client && conflict.serverConflictId) {
+    const { error } = await client.rpc("nimr_resolve_sync_entity_conflict", {
+      p_workshop_id: oldOperation.workshopId,
+      p_conflict_id: conflict.serverConflictId,
+      p_resolution: action === "accept_cloud" ? "accept_server" : "keep_local",
+    });
+    if (error) console.warn("Résolution du conflit serveur à réconcilier", error);
+  }
+  return { ok: true, replacementOperationId: replacement?.operationId || "", serverVersion };
 }
 
 async function deleteCaseProjectionFromSupabase(client, canonical, fallbackWorkshopId = "") {
@@ -3196,15 +3447,15 @@ async function sendGranularOutboxOperation(client, user, operation) {
     });
   }
   if (["case", "booking"].includes(operation.entityType)) {
-    const canonical = await applyCanonicalSyncEntity(client, operation);
-    const serverAcceptedCurrentOperation = canonical?.last_operation_id === operation.operationId;
-    if (operation.entityType === "case") {
-      await reconcileCaseProjectionFromCanonical(client, operation, canonical);
+    const outcome = normalizeCanonicalCasOutcome(await applyCanonicalSyncEntity(client, operation));
+    if (operation.entityType === "case" && outcome.canonical) {
+      await reconcileCaseProjectionFromCanonical(client, operation, outcome.canonical);
     }
     return {
-      acknowledged: true,
-      updatedAt: canonical?.updated_at || new Date().toISOString(),
-      serverAcceptedCurrentOperation,
+      cas: true,
+      acknowledged: outcome.accepted,
+      updatedAt: outcome.canonical?.updated_at || new Date().toISOString(),
+      ...outcome,
     };
   }
   if (operation.entityType === "audit" && operation.action === "append") {
@@ -3212,15 +3463,17 @@ async function sendGranularOutboxOperation(client, user, operation) {
     return { acknowledged: true, ...result };
   }
   if (operation.entityType === "workshop_settings" && operation.action === "upsert") {
-    const result = await upsertWorkshopSettingsEntity(client, operation.payload?.entity, user);
-    if (typeof acknowledgeWorkHoursSync === "function" && result.workHoursFingerprint) {
+    const result = normalizeCanonicalCasOutcome(
+      await upsertWorkshopSettingsEntity(client, operation.payload?.entity, user, operation),
+    );
+    if (result.accepted && typeof acknowledgeWorkHoursSync === "function" && operation.payload?.entity?.workHoursSync?.fingerprint) {
       acknowledgeWorkHoursSync(state.workHours, {
-        cloudBackupFingerprint: result.workHoursFingerprint,
-        appSettingsFingerprint: result.workHoursFingerprint,
-        updatedAt: result.updatedAt,
+        cloudBackupFingerprint: operation.payload.entity.workHoursSync.fingerprint,
+        appSettingsFingerprint: operation.payload.entity.workHoursSync.fingerprint,
+        updatedAt: result.canonical?.updated_at || new Date().toISOString(),
       });
     }
-    return { acknowledged: true, ...result };
+    return { cas: true, acknowledged: result.accepted, ...result };
   }
   throw new Error(`Opération outbox non prise en charge: ${operation.entityType}/${operation.action}`);
 }
@@ -3233,8 +3486,24 @@ async function processGranularOutboxOperation(client, user, operation) {
   if (!processing) return { acknowledged: false, missing: true };
   try {
     const acknowledgement = await sendGranularOutboxOperation(client, user, processing);
-    await acknowledgeDurableOutboxOperation(processing.operationId, acknowledgement);
-    return { acknowledged: true, operationId: processing.operationId };
+    if (acknowledgement.cas) {
+      const observed = observedMetadataFromCasOutcome(processing, acknowledgement);
+      if (acknowledgement.conflict) {
+        await conflictDurableOutboxOperationAtomically(processing.operationId, observed, {
+          conflictId: acknowledgement.conflictId,
+          serverVersion: acknowledgement.serverVersion,
+          canonical: acknowledgement.canonical,
+          message: "Conflit CAS: la version serveur a changé depuis la dernière observation.",
+        });
+        await registerCanonicalConcurrencyConflict(processing, acknowledgement);
+        return { acknowledged: false, conflicted: true, operationId: processing.operationId, conflictId: acknowledgement.conflictId };
+      }
+      if (!acknowledgement.accepted) throw new Error("Résultat CAS serveur invalide: ni accepté ni conflit.");
+      await completeDurableOutboxOperationAtomically(processing.operationId, observed, acknowledgement);
+    } else {
+      await acknowledgeDurableOutboxOperation(processing.operationId, acknowledgement);
+    }
+    return { acknowledged: true, operationId: processing.operationId, idempotent: acknowledgement.idempotent === true };
   } catch (error) {
     await updateDurableOutboxOperation(processing.operationId, {
       syncStatus: "failed",
@@ -3312,7 +3581,9 @@ async function autoBackupToSupabase(reason = "autosave", options = {}) {
       ? await loadDurableOutboxOperations()
       : [];
     const pending = records
-      .filter((entry) => ["pending", "failed"].includes(entry.syncStatus))
+      // A processing envelope can survive a workstation crash. Replaying its
+      // immutable operationId is safe and required for restart recovery.
+      .filter((entry) => ["pending", "processing", "failed"].includes(entry.syncStatus))
       .slice(0, GRANULAR_OUTBOX_BATCH_SIZE);
     const results = await processGranularOutboxBatch(client, user, pending);
     const failures = results.filter((result) => !result.acknowledged);
@@ -3572,7 +3843,7 @@ function legacyEnqueueOfflineAction(type = "sync_push", description = "Mise à j
             || action.payload?.snapshotFingerprint
             || "",
         };
-        return ["pending", "processing", "failed", "conflict"].includes(action.status || action.syncStatus)
+        return ["pending", "processing", "failed", "conflicted", "conflict"].includes(action.status || action.syncStatus)
           && (
             areOfflineSnapshotOperationsSameTarget(candidate, reference)
             || (typeof areDurableOutboxOperationsEquivalent === "function"
@@ -3819,7 +4090,7 @@ async function legacyProcessOfflineQueue() {
           
           if (typeof updateDurableOutboxOperation === "function") {
             await updateDurableOutboxOperation(operationId, {
-              syncStatus: isConflict ? "conflict" : "failed",
+              syncStatus: isConflict ? "conflicted" : "failed",
               retryCount,
               lastError: String(err?.message || err).slice(0, 250),
             });
@@ -3994,12 +4265,15 @@ if (typeof window !== "undefined") {
   window.processOfflineQueue = processOfflineQueue;
   window.handleRemoteCaseChange = handleRemoteCaseChange;
   window.handleRemoteBookingChange = handleRemoteBookingChange;
+  window.resolveCanonicalConcurrencyConflict = resolveCanonicalConcurrencyConflict;
   window.NIMR_GRANULAR_SYNC_TEST_API = Object.freeze({
     applyRemoteEntityRow,
     buildGranularCursorFilter,
     fetchGranularEntityPage,
     processGranularOutboxBatch,
     sendGranularOutboxOperation,
+    normalizeCanonicalCasOutcome,
+    resolveCanonicalConcurrencyConflict,
   });
   window.logSyncConflict = logSyncConflict;
   window.offlineQueue = offlineQueue;

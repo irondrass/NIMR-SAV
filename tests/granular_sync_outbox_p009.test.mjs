@@ -131,21 +131,25 @@ assert.equal(transition.action, "upsert");
 assert.equal(transition.entityVersion, 3);
 assert.equal(transition.payload.entity.localRevision, 3);
 
-// Production capture versions advance across delete and same-ID recreation.
+// P0-010 mutable captures no longer manufacture a target server version.
+// Until a canonical row is observed, create/update/delete carry an unknown
+// base and the server decides whether creation is admissible or conflicts.
 const versionedEntity = { id: "captured-transition", localRevision: 7, updatedAt: "2026-08-22T10:00:00.000Z" };
 context.markEntityCaseDirty(versionedEntity);
 let capturedTransition = context.captureEntityMutationBatch({ cases: [versionedEntity], bookings: [] })
   .find((entry) => entry.entityId === versionedEntity.id);
-const capturedUpsertVersion = capturedTransition.entityVersion;
+assert.equal(capturedTransition.entityVersion, null);
+assert.equal(capturedTransition.baseVersion, null);
 context.markEntityCaseDeleted(versionedEntity.id);
 capturedTransition = context.captureEntityMutationBatch({ cases: [], bookings: [] })
   .find((entry) => entry.entityId === versionedEntity.id);
-const capturedDeleteVersion = capturedTransition.entityVersion;
+assert.equal(capturedTransition.entityVersion, null);
+assert.equal(capturedTransition.baseVersion, null);
 context.markEntityCaseDirty({ ...versionedEntity, localRevision: 1 });
 capturedTransition = context.captureEntityMutationBatch({ cases: [{ ...versionedEntity, localRevision: 1 }], bookings: [] })
   .find((entry) => entry.entityId === versionedEntity.id);
-assert.ok(capturedDeleteVersion > capturedUpsertVersion, "delete must advance the entity version");
-assert.ok(capturedTransition.entityVersion > capturedDeleteVersion, "recreation must advance beyond its tombstone");
+assert.equal(capturedTransition.entityVersion, null);
+assert.equal(capturedTransition.baseVersion, null);
 context.acknowledgeEntityMutationBatch([capturedTransition]);
 
 // Booking update/delete follows the same bounded rules.
@@ -193,9 +197,10 @@ const projectionVm = createNimrVmContext({ filename: "p0-009-canonical-projectio
 projectionVm.context.getSupabaseWorkshopId = () => "workshop-a";
 vm.runInContext(fs.readFileSync(new URL("../js/supabase-sync.js", import.meta.url), "utf8"), projectionVm.context, { filename: "supabase-sync-projection-p009.js" });
 const expectedProjectionLocalId = "case-or:or-90001";
-const projectionOperation = (id, version, marker, action = "upsert", operationId = `projection-${id}-${version}-${action}`) => ({
+const projectionOperation = (id, version, marker, action = "upsert", operationId = `projection-${id}-${version}-${action}`, baseVersion = null) => ({
   ...caseOperation(id, version, marker, action),
   operationId,
+  baseVersion,
   payload: action === "delete" ? { projectionLocalId: expectedProjectionLocalId } : {
     entity: {
       id,
@@ -228,34 +233,37 @@ const acceptedIdentityResult = await sendProjectionOperation(acceptedIdentityAda
 // accept D200. Deleting by canonical entity_id would orphan the reporting row.
 const acceptedDeleteAdapter = createGranularSupabaseAdapter();
 const acceptedDeleteUpsert = projectionOperation("accepted-delete-X", 100, "A");
-await projectionVm.context.applyCanonicalSyncEntity(acceptedDeleteAdapter.client, acceptedDeleteUpsert);
+const acceptedDeleteSeed = await projectionVm.context.applyCanonicalSyncEntity(acceptedDeleteAdapter.client, acceptedDeleteUpsert);
 await projectionVm.context.syncCaseProjectionToSupabase(acceptedDeleteAdapter.client, acceptedDeleteUpsert.payload.entity);
 assert.equal(projectionAt(acceptedDeleteAdapter, expectedProjectionLocalId)?.next_action, "A", "accepted-delete precondition must use the real projection identity");
 const acceptedDeleteResult = await sendProjectionOperation(
   acceptedDeleteAdapter,
-  projectionOperation("accepted-delete-X", 200, "delete-200", "delete"),
+  projectionOperation("accepted-delete-X", 200, "delete-200", "delete", undefined, acceptedDeleteSeed.server_version),
 );
 
 // Stale DELETE after a newer recreation must rebuild/preserve the active
 // projection from canonical version 200, never delete it from local intent.
 const staleDeleteAdapter = createGranularSupabaseAdapter();
-const staleDelete100 = projectionOperation("stale-delete-X", 100, "delete-100", "delete");
-await sendProjectionOperation(staleDeleteAdapter, staleDelete100);
-await sendProjectionOperation(staleDeleteAdapter, projectionOperation("stale-delete-X", 200, "B"));
+const staleDeleteSeed = await sendProjectionOperation(staleDeleteAdapter, projectionOperation("stale-delete-X", 50, "A"));
+const staleDeleteBase = staleDeleteSeed.serverVersion;
+const staleDelete100 = projectionOperation("stale-delete-X", 100, "delete-100", "delete", undefined, staleDeleteBase);
+await sendProjectionOperation(staleDeleteAdapter, projectionOperation("stale-delete-X", 200, "B", "upsert", undefined, staleDeleteBase));
 const staleDeleteResult = await sendProjectionOperation(staleDeleteAdapter, staleDelete100);
 
 // Stale UPSERT after a newer UPSERT must leave both canonical and projection B.
 const staleUpsertAdapter = createGranularSupabaseAdapter();
-const acceptedUpsertResult = await sendProjectionOperation(staleUpsertAdapter, projectionOperation("stale-upsert-X", 200, "B"));
-const staleUpsertResult = await sendProjectionOperation(staleUpsertAdapter, projectionOperation("stale-upsert-X", 100, "A"));
+const staleUpsertSeed = await sendProjectionOperation(staleUpsertAdapter, projectionOperation("stale-upsert-X", 50, "seed"));
+const staleUpsertBase = staleUpsertSeed.serverVersion;
+const acceptedUpsertResult = await sendProjectionOperation(staleUpsertAdapter, projectionOperation("stale-upsert-X", 200, "B", "upsert", undefined, staleUpsertBase));
+const staleUpsertResult = await sendProjectionOperation(staleUpsertAdapter, projectionOperation("stale-upsert-X", 100, "A", "upsert", undefined, staleUpsertBase));
 
 // Stale UPSERT after a newer tombstone must not recreate repair_orders.
 const tombstoneAdapter = createGranularSupabaseAdapter();
 const tombstoneUpsert = projectionOperation("tombstone-X", 100, "A");
-await projectionVm.context.applyCanonicalSyncEntity(tombstoneAdapter.client, tombstoneUpsert);
+const tombstoneSeed = await projectionVm.context.applyCanonicalSyncEntity(tombstoneAdapter.client, tombstoneUpsert);
 await projectionVm.context.syncCaseProjectionToSupabase(tombstoneAdapter.client, tombstoneUpsert.payload.entity);
-await sendProjectionOperation(tombstoneAdapter, projectionOperation("tombstone-X", 200, "delete-200", "delete"));
-const tombstoneRetryResult = await sendProjectionOperation(tombstoneAdapter, projectionOperation("tombstone-X", 100, "A"));
+await sendProjectionOperation(tombstoneAdapter, projectionOperation("tombstone-X", 200, "delete-200", "delete", undefined, tombstoneSeed.server_version));
+const tombstoneRetryResult = await sendProjectionOperation(tombstoneAdapter, projectionOperation("tombstone-X", 100, "A", "upsert", "tombstone-stale-U100", tombstoneSeed.server_version));
 
 assert.deepEqual(
   {
@@ -296,20 +304,20 @@ assert.deepEqual(
   {
     acceptedUpsert: { projectionCount: 1, projectionMarker: "A", projectionUnderCanonicalId: false },
     acceptedDelete: { canonicalDeleted: true, canonicalProjectionLocalId: expectedProjectionLocalId, projectionCount: 0, projectionPresent: false },
-    staleDelete: { canonicalVersion: 200, canonicalDeleted: false, projectionCount: 1, projectionMarker: "B", projectionVersion: 200, projectionUnderCanonicalId: false },
+    staleDelete: { canonicalVersion: staleDeleteBase + 1, canonicalDeleted: false, projectionCount: 1, projectionMarker: "B", projectionVersion: 200, projectionUnderCanonicalId: false },
     staleUpsert: { canonicalMarker: "B", projectionCount: 1, projectionMarker: "B", projectionVersion: 200, projectionUnderCanonicalId: false },
     tombstone: { canonicalDeleted: true, canonicalProjectionLocalId: expectedProjectionLocalId, projectionCount: 0, projectionPresent: false, projectionUnderCanonicalId: false },
   },
   "repair_orders must converge from the canonical RPC row under caseSyncLocalId identity without orphans or duplicates",
 );
-assert.equal(acceptedIdentityResult.serverAcceptedCurrentOperation, true);
-assert.equal(acceptedDeleteResult.serverAcceptedCurrentOperation, true);
+assert.equal(acceptedIdentityResult.accepted, true);
+assert.equal(acceptedDeleteResult.accepted, true);
 const acceptedDeleteRpc = acceptedDeleteAdapter.calls.find((call) => call.operation === "rpc" && call.operationId === "projection-accepted-delete-X-200-delete");
 assert.deepEqual(acceptedDeleteRpc.rows[0].p_payload, { projectionLocalId: expectedProjectionLocalId }, "DELETE RPC must carry only bounded projection identity metadata");
-assert.equal(acceptedUpsertResult.serverAcceptedCurrentOperation, true);
-assert.equal(staleDeleteResult.serverAcceptedCurrentOperation, false);
-assert.equal(staleUpsertResult.serverAcceptedCurrentOperation, false);
-assert.equal(tombstoneRetryResult.serverAcceptedCurrentOperation, false);
+assert.equal(acceptedUpsertResult.accepted, true);
+assert.equal(staleDeleteResult.conflict, true);
+assert.equal(staleUpsertResult.conflict, true);
+assert.equal(tombstoneRetryResult.conflict, true);
 
 // If canonical U200 succeeds but projection fails, the exact same operation
 // remains failed and retries projection from the idempotently returned row.

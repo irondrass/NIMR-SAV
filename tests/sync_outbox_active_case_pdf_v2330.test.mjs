@@ -56,10 +56,14 @@ await context.enqueueDurableOutboxOperation({
   retryCount: 0,
 });
 operations = await context.loadDurableOutboxOperations();
-assert.equal(operations.length, 1, "une synchronisation active ne doit pas créer une seconde opération");
-assert.equal(operations[0].syncStatus, "processing", "une opération saine en cours doit rester processing");
-assert.equal(operations[0].retryCount, 5, "la réutilisation pendant une synchronisation ne doit pas augmenter retryCount");
-assert.equal(operations[0].lastError, "", "une opération saine ne doit pas recevoir une erreur artificielle");
+assert.equal(operations.length, 2, "une enveloppe processing potentiellement envoyée doit rester immutable et la nouvelle mutation doit avoir sa propre opération");
+const processingSnapshot = operations.find((entry) => entry.syncStatus === "processing");
+const pendingDuringProcessing = operations.find((entry) => entry.syncStatus === "pending");
+assert.equal(processingSnapshot.operationId, "operation-first");
+assert.equal(processingSnapshot.retryCount, 5);
+assert.equal(processingSnapshot.payload.marker, "latest");
+assert.equal(pendingDuringProcessing.operationId, "operation-during-active-sync");
+assert.equal(pendingDuringProcessing.payload.marker, "during-processing");
 
 await context.enqueueDurableOutboxOperation({
   ...baseOperation,
@@ -76,16 +80,16 @@ await context.enqueueDurableOutboxOperation({
 operations = await context.loadDurableOutboxOperations();
 assert.equal(
   operations.length,
-  1,
-  "la modification plus récente doit réutiliser la même cible",
+  2,
+  "la modification plus récente peut coalescer uniquement l'enveloppe pending non envoyée",
 );
 assert.equal(
-  operations[0].syncStatus,
+  operations.find((entry) => entry.syncStatus === "pending").syncStatus,
   "pending",
   "une modification plus récente pendant le traitement doit rester pending",
 );
-assert.equal(operations[0].snapshotFingerprint, "snapshot:v2");
-assert.equal(operations[0].retryCount, 0);
+assert.equal(operations.find((entry) => entry.syncStatus === "pending").snapshotFingerprint, "snapshot:v2");
+assert.equal(operations.find((entry) => entry.syncStatus === "pending").retryCount, 0);
 
 await context.acknowledgeEquivalentDurableOutboxOperations(
   baseOperation,
@@ -143,11 +147,10 @@ await context.putDurableOutboxOperation({
 });
 await context.consolidateDurableOutboxOperations();
 operations = await context.loadDurableOutboxOperations();
-assert.equal(operations.length, 1, "les doublons historiques doivent être consolidés");
-assert.equal(operations[0].syncStatus, "pending");
-assert.equal(operations[0].retryCount, 0, "un doublon pending sain doit neutraliser le retryCount historique");
-assert.equal(operations[0].lastError, "");
-assert.equal(operations[0].payload.marker, "pending-newer");
+assert.equal(operations.length, 2, "une enveloppe failed potentiellement envoyée ne doit pas être réécrite par consolidation");
+assert.equal(operations.find((entry) => entry.syncStatus === "failed").retryCount, 10);
+assert.equal(operations.find((entry) => entry.syncStatus === "failed").lastError, "ancienne erreur RLS");
+assert.equal(operations.find((entry) => entry.syncStatus === "pending").payload.marker, "pending-newer");
 
 const fingerprintResult = JSON.parse(run(`(() => {
   state.cases = [

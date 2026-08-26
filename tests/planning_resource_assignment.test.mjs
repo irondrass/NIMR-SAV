@@ -278,7 +278,7 @@ const normalizedManualLock = context.normalizeCase({
 assert.equal(normalizedManualLock.resourceId, "tolier-2", "le verrou manuel doit survivre à la normalisation/sauvegarde");
 assert.equal(normalizedManualLock.reason, "Continuité souhaitée", "le motif de verrouillage doit rester auditable");
 
-// Acceptation atomique : une proposition obsolète est recalculée contre les réservations courantes.
+// Le recalcul brut reste capable de proposer un créneau sans collision.
 resetState(tolierResources);
 const staleItem = { id: "pdf-stale-a", durations: { body: 2 } };
 const currentItem = { id: "pdf-stale-b", durations: { body: 2 } };
@@ -305,19 +305,19 @@ const validCaseSeed = (id) => ({
   }],
 });
 resetState(tolierResources, [], [validCaseSeed("case-accept-a"), validCaseSeed("case-accept-b")]);
+run(`state.users = [normalizeUser({ id: "chief", name: "Chef", role: "chef_atelier", active: true }, state.resources)]; state.currentUserId = "chief";`);
 const acceptedCaseA = run(`state.cases.find((item) => item.id === "case-accept-a")`);
 const acceptedCaseB = run(`state.cases.find((item) => item.id === "case-accept-b")`);
 const cachedProposal = context.generateSingleProposal(acceptedCaseA, mondayStart);
 run(`state.bookings = proposalToBookings(state.cases.find((item) => item.id === "case-accept-a"), ${JSON.stringify(cachedProposal)}, false);`);
-context.acceptProposal(acceptedCaseB, cachedProposal);
+const staleCrossCaseAccepted = context.acceptProposal(acceptedCaseB, cachedProposal);
 const acceptedCaseBState = JSON.parse(run(`JSON.stringify({
   appointment: state.cases.find((item) => item.id === "case-accept-b").appointment,
   bookings: state.bookings.filter((booking) => booking.caseId === "case-accept-b")
 })`));
-assert.ok(acceptedCaseBState.appointment?.start, "acceptProposal doit enregistrer le rendez-vous recalculé");
-assert.ok(acceptedCaseBState.bookings.length > 0, "acceptProposal doit enregistrer les réservations recalculées");
-const acceptedCaseBProposal = { steps: acceptedCaseBState.bookings.map((bookingRow) => ({ ...bookingRow, segments: bookingRow.segments, resourceIds: bookingRow.resourceIds })) };
-assertNoResourceOverlap([cachedProposal, acceptedCaseBProposal], "mutation finale acceptProposal");
+assert.equal(staleCrossCaseAccepted, false, "une proposition affichée pour un autre dossier doit être rejetée comme obsolète");
+assert.equal(acceptedCaseBState.appointment, null, "aucun rendez-vous silencieusement recalculé ne doit être appliqué");
+assert.equal(acceptedCaseBState.bookings.length, 0, "aucun booking ne doit être créé après rejet de l'identité de proposition");
 
 // 10 — 4 000 dossiers : performance, exploitation des ressources et zéro double réservation.
 const largeCases = Array.from({ length: 4000 }, (_, index) => ({

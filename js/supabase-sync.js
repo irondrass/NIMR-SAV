@@ -2676,6 +2676,23 @@ async function resolveAtomicPlanningResourceIds(client, requestedIds = []) {
   return resourceMap;
 }
 
+function getObservedPlanningCasVersion(item) {
+  const versions = [
+    item?.serverPlanningVersion,
+    item?.planningVersion,
+    item?.planning_version,
+  ].map(Number).filter(Number.isFinite);
+  return Math.max(0, ...versions);
+}
+
+function rememberMonotonicPlanningVersion(item, observedVersion) {
+  const receivedPlanningVersion = Number(observedVersion);
+  const currentPlanningVersion = getObservedPlanningCasVersion(item);
+  if (!Number.isFinite(receivedPlanningVersion)) return currentPlanningVersion;
+  item.serverPlanningVersion = Math.max(currentPlanningVersion, receivedPlanningVersion);
+  return item.serverPlanningVersion;
+}
+
 async function reservePlanningProposalAtomically(item, proposal) {
   if (!isSupabaseConfigured()) return { skipped: true, reason: "supabase-not-configured" };
   if (navigator.onLine === false) throw new Error("Réservation serveur impossible hors ligne. La proposition reste non validée.");
@@ -2689,13 +2706,19 @@ async function reservePlanningProposalAtomically(item, proposal) {
   ]);
   const resourceMap = await resolveAtomicPlanningResourceIds(client, requestedResourceIds);
   const planningCaseReference = caseSyncLocalId(item) || item.orNavNumber || item.id;
-  let expectedPlanningVersion = Number(
-    item.serverPlanningVersion
-    ?? item.planningVersion
-    ?? item.planning_version
-    ?? item.serverVersion
-    ?? 0
-  );
+  const acceptanceMetadata = proposal?.acceptance;
+  const currentProposalSignature = typeof getProposalReservationSignature === "function"
+    ? getProposalReservationSignature(proposal)
+    : "";
+  if (!acceptanceMetadata
+    || acceptanceMetadata.caseId !== String(item?.id || "")
+    || !acceptanceMetadata.proposalId
+    || (currentProposalSignature && acceptanceMetadata.proposalSignature !== currentProposalSignature)) {
+    const error = new Error("Identité de proposition planning absente ou invalide. Recalculez le planning.");
+    error.name = "StalePlanningProposalError";
+    throw error;
+  }
+  const expectedPlanningVersion = Math.max(0, Number(acceptanceMetadata.baseServerPlanningVersion || 0) || 0);
 
   const {
     data: currentOrder,
@@ -2714,15 +2737,19 @@ async function reservePlanningProposalAtomically(item, proposal) {
       }`,
     );
   }
-
-  if (currentOrder?.planning_version != null) {
-    expectedPlanningVersion = Number(
-      currentOrder.planning_version || 0,
-    );
-    item.serverPlanningVersion = expectedPlanningVersion;
-    item.serverVersion = expectedPlanningVersion;
+  if (!currentOrder) {
+    throw new Error("Le dossier planning est introuvable dans cet atelier Supabase.");
   }
-  const idempotencyKey = `planning:${getSupabaseWorkshopId()}:${planningCaseReference}:${Number(item.localRevision || 0)}:${makeSupabaseConflictHash({ start: proposal.start, steps })}`;
+  const observedBeforeRpc = getObservedPlanningCasVersion(item);
+  const currentOrderPlanningVersion = Number(currentOrder.planning_version);
+  if (Number.isFinite(currentOrderPlanningVersion)) {
+    rememberMonotonicPlanningVersion(item, currentOrderPlanningVersion);
+  }
+
+  // Do not upgrade the proposal base from this observation. The RPC receives
+  // the displayed base unchanged so it can authoritatively return either a CAS
+  // conflict or the exact idempotent replay of an earlier successful request.
+  const idempotencyKey = `planning:${getSupabaseWorkshopId()}:${planningCaseReference}:${expectedPlanningVersion}:${acceptanceMetadata.proposalId}`;
   const bookings = steps.flatMap((step) => {
     const taskId = step.taskId || step.key || "";
     const resourceIds = [...new Set((step.resourceIds || []).map((resourceId) => resourceMap.get(String(resourceId))).filter(Boolean))];
@@ -2766,16 +2793,90 @@ async function reservePlanningProposalAtomically(item, proposal) {
     wrapped.name = conflict ? "PlanningConflictError" : "SupabaseAtomicBookingError";
     throw wrapped;
   }
-  if (!data || data.ok === false) {
+  const acceptedPlanningVersion = Number(
+    data?.acceptedPlanningVersion ?? data?.planningVersion ?? data?.version ?? data?.new_version,
+  );
+  const currentAuthoritativePlanningVersion = Number(
+    data?.planningVersion ?? data?.version ?? data?.new_version,
+  );
+  const observedAuthorityBeforeResponse = getObservedPlanningCasVersion(item);
+  if (Number.isFinite(currentAuthoritativePlanningVersion)) {
+    rememberMonotonicPlanningVersion(item, currentAuthoritativePlanningVersion);
+  }
+  const responseRegressesObservedAuthority = Number.isFinite(currentAuthoritativePlanningVersion)
+    && currentAuthoritativePlanningVersion < Math.max(observedBeforeRpc, observedAuthorityBeforeResponse);
+  const historicalReplayIsSuperseded = data?.superseded === true
+    || data?.code === "idempotent_replay_superseded"
+    || data?.code === "idempotent_replay_productive_history";
+  if (!data || data.ok !== true || data.acknowledged !== true || data.status !== "applied") {
     const wrapped = new Error(data?.message || "La réservation atomique n'a pas été confirmée par le serveur.");
     wrapped.name = data?.conflict || data?.status === "conflict" || /conflict|overlap|version/i.test(String(data?.code || ""))
       ? "PlanningConflictError"
       : "SupabaseAtomicBookingError";
+    wrapped.code = data?.code || "planning_reservation_rejected";
+    wrapped.idempotentReplay = data?.idempotentReplay === true;
+    wrapped.superseded = historicalReplayIsSuperseded;
+    wrapped.historicalAcknowledged = data?.acknowledged === true && data?.idempotentReplay === true;
+    wrapped.acceptedPlanningVersion = Number.isFinite(acceptedPlanningVersion) ? acceptedPlanningVersion : null;
+    wrapped.planningVersion = Number.isFinite(currentAuthoritativePlanningVersion)
+      ? currentAuthoritativePlanningVersion
+      : null;
+    wrapped.requiresPlanningReconciliation = historicalReplayIsSuperseded;
     throw wrapped;
   }
-  item.serverPlanningVersion = Number(data.planningVersion ?? data.version ?? data.new_version ?? item.serverPlanningVersion ?? item.serverVersion ?? 0);
-  item.serverVersion = item.serverPlanningVersion;
-  return { ...data, acknowledged: true, idempotencyKey };
+  if (historicalReplayIsSuperseded || responseRegressesObservedAuthority) {
+    const wrapped = new Error(
+      "Cet accusé planning est historique ou obsolète ; l'autorité serveur courante doit être réconciliée.",
+    );
+    wrapped.name = "PlanningConflictError";
+    wrapped.code = data?.code || "planning_authority_regression";
+    wrapped.idempotentReplay = data?.idempotentReplay === true;
+    wrapped.superseded = true;
+    wrapped.historicalAcknowledged = data?.acknowledged === true;
+    wrapped.acceptedPlanningVersion = Number.isFinite(acceptedPlanningVersion) ? acceptedPlanningVersion : null;
+    wrapped.planningVersion = Number.isFinite(currentAuthoritativePlanningVersion)
+      ? currentAuthoritativePlanningVersion
+      : getObservedPlanningCasVersion(item);
+    wrapped.requiresPlanningReconciliation = true;
+    throw wrapped;
+  }
+  if (!Number.isFinite(acceptedPlanningVersion)
+    || !Number.isFinite(currentAuthoritativePlanningVersion)
+    || acceptedPlanningVersion !== currentAuthoritativePlanningVersion) {
+    const wrapped = new Error("Le reçu historique ne correspond pas à l'autorité planning courante.");
+    wrapped.name = "PlanningConflictError";
+    wrapped.code = "planning_ack_not_current";
+    wrapped.serverAcknowledged = true;
+    wrapped.requiresPlanningReconciliation = true;
+    throw wrapped;
+  }
+  const acknowledgedSlots = Array.isArray(data.slots) ? data.slots : [];
+  const submittedByLocalId = new Map(bookings.map((booking) => [booking.localId, booking]));
+  const acknowledgedPlanMatches = acknowledgedSlots.length === bookings.length
+    && acknowledgedSlots.every((slot) => {
+      const submitted = submittedByLocalId.get(slot.localId);
+      if (!submitted) return false;
+      const sameStart = new Date(slot.startAt).getTime() === new Date(submitted.startAt).getTime();
+      const sameEnd = new Date(slot.endAt).getTime() === new Date(submitted.endAt).getTime();
+      const acknowledgedResources = (slot.resourceIds || []).map(String).sort();
+      const submittedResources = (submitted.resourceIds || []).map(String).sort();
+      return sameStart && sameEnd && JSON.stringify(acknowledgedResources) === JSON.stringify(submittedResources);
+    });
+  if (!acknowledgedPlanMatches) {
+    const wrapped = new Error("Le serveur n'a pas acquitté exactement les créneaux soumis. Réconciliation planning requise.");
+    wrapped.name = "SupabaseAtomicBookingError";
+    wrapped.code = "acknowledged_plan_mismatch";
+    wrapped.serverAcknowledged = true;
+    throw wrapped;
+  }
+  if (acceptedPlanningVersion !== expectedPlanningVersion + 1) {
+    const wrapped = new Error("Version planning absente ou invalide dans l'accusé serveur.");
+    wrapped.name = "SupabaseAtomicBookingError";
+    wrapped.serverAcknowledged = true;
+    throw wrapped;
+  }
+  rememberMonotonicPlanningVersion(item, currentAuthoritativePlanningVersion);
+  return { ...data, acknowledged: true, idempotencyKey, submittedProposalId: acceptanceMetadata.proposalId };
 }
 
 if (typeof window !== "undefined") window.reservePlanningProposalAtomically = reservePlanningProposalAtomically;
@@ -3485,7 +3586,17 @@ async function syncCaseProjectionToSupabase(client, item) {
     revised_estimated_delivery_at: safeIso(item.revisedEstimatedDelivery || item.deliveryEstimate?.current),
     planned_duration_minutes: Math.round(Object.values(item.durations || {}).reduce((sum, value) => sum + Number(value || 0), 0) * 60),
     actual_duration_minutes: 0,
-    planning_version: Math.max(0, Number(item.localRevision || 0)),
+    // Planning CAS is independent from granular entity revisions. Preserve the
+    // exact version acknowledged by nimr_reserve_planning_atomic so a later
+    // projection flush cannot silently advance or regress the next proposal base.
+    planning_version: Math.max(0, Number(
+      item.serverPlanningVersion
+      ?? item.planningVersion
+      ?? item.planning_version
+      ?? item.serverVersion
+      ?? item.localRevision
+      ?? 0,
+    ) || 0),
     next_action: item.nextAction || null,
     closed_at: safeIso(item.closedAt),
     archived_at: safeIso(item.archivedAt),

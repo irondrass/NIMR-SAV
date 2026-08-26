@@ -13,7 +13,7 @@ function generateAppointmentOptions(item) {
 function generateSingleProposal(item, startAfter) {
   const bookings = state.bookings.filter((booking) => booking.caseId !== item.id).map(cloneBooking);
   bookings.push(...getPendingProposalBookings(item.id));
-  return schedulePipeline(item, startAfter, bookings);
+  return attachProposalAcceptanceMetadata(item, schedulePipeline(item, startAfter, bookings));
 }
 
 function getPendingProposalBookings(excludedCaseId = "") {
@@ -610,55 +610,373 @@ function recalculateProposalForAcceptance(item, proposal) {
   return generateSingleProposal(item, Number.isNaN(requestedStart.getTime()) ? new Date() : requestedStart);
 }
 
-function acceptProposal(item, proposal) {
-  if (!proposal || proposal.error) return;
-  if (isCaseReadonlyArchive(item)) {
-    notifyUser(getArchivedCaseMessage(item), "error");
-    return;
+function stablePlanningAcceptanceValue(value) {
+  if (Array.isArray(value)) return value.map(stablePlanningAcceptanceValue);
+  if (!value || typeof value !== "object") return value;
+  return Object.keys(value).sort().reduce((result, key) => {
+    const child = value[key];
+    if (child !== undefined) result[key] = stablePlanningAcceptanceValue(child);
+    return result;
+  }, {});
+}
+
+function planningAcceptanceHash(value) {
+  const input = typeof value === "string" ? value : JSON.stringify(stablePlanningAcceptanceValue(value));
+  let hash = 2166136261;
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
   }
-  const issues = getBusinessRuleIssues(item, "appointment");
-  if (issues.length) {
-    notifyUser(issues.join("\n"));
-    return;
-  }
-  let acceptedProposal;
-  try {
-    acceptedProposal = recalculateProposalForAcceptance(item, proposal);
-  } catch (error) {
-    generatedProposals[item.id] = null;
-    notifyUser(error.message || "Le planning a changé. Recalculez la proposition avant de la valider.", "error");
-    renderCaseDetail();
-    return;
-  }
-  const previousSignature = (proposal.steps || []).map((step) => `${step.start}:${(step.resourceIds || []).join(",")}`).join("|");
-  const acceptedSignature = (acceptedProposal.steps || []).map((step) => `${step.start}:${(step.resourceIds || []).join(",")}`).join("|");
-  state.bookings = state.bookings.filter((booking) => booking.caseId !== item.id);
-  state.bookings.push(...proposalToBookings(item, acceptedProposal, false));
-  item.appointment = {
-    start: acceptedProposal.start,
-    end: acceptedProposal.end,
-    delivery: acceptedProposal.delivery,
-    marginMinutes: acceptedProposal.marginMinutes,
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+function getReservationSignificantStep(step = {}) {
+  const resourceUnits = step.resourceUnits && typeof step.resourceUnits === "object"
+    ? stablePlanningAcceptanceValue(step.resourceUnits)
+    : {};
+  return {
+    taskId: String(step.taskId || step.key || ""),
+    key: String(step.key || ""),
+    start: String(step.start || ""),
+    end: String(step.end || ""),
+    segments: clonePlanningSegments(step.segments?.length ? step.segments : [{ start: step.start, end: step.end }]),
+    resourceIds: (step.resourceIds || []).map(String),
+    primaryResourceId: String(step.primaryResourceId || step.resourceIds?.[0] || ""),
+    equipmentResourceIds: (step.equipmentResourceIds || step.resourceIds?.slice(1) || []).map(String).sort(),
+    dependencies: (step.dependencies || []).map(String).sort(),
+    vehicleExclusive: step.vehicleExclusive !== false,
+    vehicleLocation: String(step.vehicleLocation || "internal"),
+    requiredRole: String(step.requiredRole || ""),
+    requiredCategory: String(step.requiredCategory || ""),
+    serviceMode: String(step.serviceMode || "internal"),
+    subcontractId: String(step.subcontractId || step.subcontractorId || ""),
+    subcontractPhase: String(step.subcontractPhase || ""),
+    capacityUnits: Number(step.capacityUnits || 1),
+    resourceUnits,
+    planningMode: String(step.planningMode || "standard"),
   };
-  item.flags.received = false;
-  item.flags.workStarted = false;
-  item.flags.workCompleted = false;
-  item.flags.qualityApproved = false;
-  item.flags.delivered = false;
-  item.appointmentStatus = "scheduled";
-  item.qualityChecklist = createEmptyQualityChecklist();
-  addHistory(
-    item,
-    "appointment.accepted",
-    `RDV choisi: ${formatDateTime(acceptedProposal.start)}`,
-    `Livraison estimée ${formatDateTime(acceptedProposal.delivery)}${previousSignature !== acceptedSignature ? " · Ressources recalculées selon les disponibilités courantes" : ""}`,
+}
+
+function getProposalReservationSignature(proposal = {}) {
+  return JSON.stringify(stablePlanningAcceptanceValue({
+    start: String(proposal.start || ""),
+    end: String(proposal.end || ""),
+    delivery: String(proposal.delivery || ""),
+    marginMinutes: Number(proposal.marginMinutes || 0),
+    steps: (proposal.steps || []).map(getReservationSignificantStep),
+  }));
+}
+
+function getPlanningAcceptanceCaseBookings(caseId) {
+  if (!caseId) return [];
+  if (typeof getIndexedCaseBookings === "function") return getIndexedCaseBookings(caseId);
+  return (state.bookings || []).filter((booking) => booking.caseId === caseId);
+}
+
+function getCasePlanningBaseSignature(item) {
+  const bookings = getPlanningAcceptanceCaseBookings(item?.id).map((booking) => ({
+    id: String(booking.id || ""),
+    reservation: getReservationSignificantStep(booking),
+    status: String(booking.status || "planned"),
+    temporary: booking.temporary === true,
+    needsScheduling: booking.needsScheduling === true,
+    actualWorkedMinutes: Math.max(0, Number(booking.actualWorkedMinutes || 0) || 0),
+    actualStart: String(booking.actualStart || booking.startedAt || ""),
+    actualEnd: String(booking.actualEnd || booking.completedAt || ""),
+    pausedAt: String(booking.pausedAt || ""),
+    resumedAt: String(booking.resumedAt || ""),
+    blockedAt: String(booking.blockedAt || ""),
+    blockedBy: String(booking.blockedBy || ""),
+    blockReason: String(booking.blockReason || ""),
+    blockDetails: String(booking.blockDetails || ""),
+    remainingMinutes: Math.max(0, Number(booking.remainingMinutes || 0) || 0),
+    remainingFromPaused: booking.remainingFromPaused === true,
+    workSessions: stablePlanningAcceptanceValue(booking.workSessions || []),
+    deletedAt: String(booking.deletedAt || ""),
+  })).sort((left, right) => (
+    left.id.localeCompare(right.id)
+    || JSON.stringify(left).localeCompare(JSON.stringify(right))
+  ));
+  // Keep the full canonical base material for collision-free stale-state
+  // comparison. Only the compact proposal ID uses a hash; the server also
+  // rejects any idempotency-key collision whose submitted payload differs.
+  return JSON.stringify(stablePlanningAcceptanceValue(bookings));
+}
+
+function getCaseServerPlanningVersion(item) {
+  return Math.max(0, Number(
+    item?.serverPlanningVersion
+    ?? item?.planningVersion
+    ?? item?.planning_version
+    ?? item?.serverVersion
+    ?? 0
+  ) || 0);
+}
+
+function attachProposalAcceptanceMetadata(item, proposal) {
+  if (!item || !proposal || proposal.error || !Array.isArray(proposal.steps)) return proposal;
+  const proposalSignature = getProposalReservationSignature(proposal);
+  const baseCasePlanningSignature = getCasePlanningBaseSignature(item);
+  const baseServerPlanningVersion = getCaseServerPlanningVersion(item);
+  const identity = {
+    caseId: String(item.id || ""),
+    proposalSignature,
+    baseCasePlanningSignature,
+    baseServerPlanningVersion,
+  };
+  return {
+    ...proposal,
+    acceptance: {
+      ...identity,
+      proposalId: `proposal-${planningAcceptanceHash(identity)}`,
+    },
+  };
+}
+
+function makePlanningAcceptanceError(name, message, code = "") {
+  const error = new Error(message);
+  error.name = name;
+  if (code) error.code = code;
+  return error;
+}
+
+function getPlanningBookingReplacementAssessment(booking = {}) {
+  const aliases = { in_progress: "started", done: "completed" };
+  const rawStatus = String(booking.status || "").trim().toLowerCase();
+  const status = aliases[rawStatus] || rawStatus || "unknown";
+  const actualWorkedMinutes = Math.max(0, Number(booking.actualWorkedMinutes || 0) || 0);
+  const workSessions = Array.isArray(booking.workSessions) ? booking.workSessions : [];
+  const malformedWorkSessions = booking.workSessions != null && !Array.isArray(booking.workSessions);
+  const hasProductiveTimestamps = Boolean(
+    booking.actualStart
+    || booking.startedAt
+    || booking.actualEnd
+    || booking.completedAt
+    || booking.pausedAt
+    || booking.resumedAt
+    || workSessions.some((session) => (
+      session?.startedAt || session?.pausedAt || session?.completedAt
+    ))
   );
-  generatedProposals[item.id] = [];
-  state.planningDate = todayKey(new Date(acceptedProposal.start));
-  saveState({ changedCase: item, flushCloud: true, cloudReason: "appointment-accepted" });
-  activeTab = "planning";
-  setActiveTab("planning");
-  render();
+  if (["started", "paused", "completed"].includes(status)
+    || actualWorkedMinutes > 0
+    || hasProductiveTimestamps) {
+    return { replaceable: false, productive: true, status, reason: "productive_history" };
+  }
+  const hasBlockingMetadata = Boolean(
+    booking.blockedAt
+    || booking.blockedBy
+    || booking.blockReason
+    || booking.blockDetails
+    || booking.remainingFromPaused === true
+    || Math.max(0, Number(booking.remainingMinutes || 0) || 0) > 0
+    || malformedWorkSessions
+  );
+  const replaceable = status === "planned"
+    && booking.temporary !== true
+    && booking.needsScheduling !== true
+    && !booking.deletedAt
+    && !hasBlockingMetadata;
+  return {
+    replaceable,
+    productive: false,
+    status,
+    reason: replaceable ? "" : (hasBlockingMetadata ? "operational_block" : `status:${status}`),
+  };
+}
+
+function getReplaceableCasePlanningBookings(item) {
+  const flags = item?.flags || {};
+  const productiveFlag = ["workStarted", "workCompleted", "qualityApproved", "delivered"]
+    .find((key) => flags[key] === true);
+  if (productiveFlag) {
+    throw makePlanningAcceptanceError(
+      "ProductivePlanningHistoryError",
+      "Le travail atelier a déjà commencé ou est terminé. Le planning productif existant ne peut pas être remplacé par une acceptation de RDV.",
+      `workflow:${productiveFlag}`,
+    );
+  }
+  const bookings = [...getPlanningAcceptanceCaseBookings(item?.id)];
+  const assessed = bookings.map((booking) => ({
+    booking,
+    assessment: getPlanningBookingReplacementAssessment(booking),
+  }));
+  const nonReplaceable = assessed.find(({ assessment }) => !assessment.replaceable);
+  if (nonReplaceable) {
+    const { booking, assessment } = nonReplaceable;
+    const productive = assessment.productive === true;
+    throw makePlanningAcceptanceError(
+      productive ? "ProductivePlanningHistoryError" : "NonReplaceablePlanningBookingError",
+      productive
+        ? "Le travail atelier a déjà commencé ou est terminé. Le planning productif existant ne peut pas être remplacé par une acceptation de RDV."
+        : `La réservation ${booking.title || booking.id || "atelier"} est dans un état opérationnel non remplaçable (${assessment.status}).`,
+      assessment.reason || "non_replaceable_booking",
+    );
+  }
+  const ids = bookings.map((booking) => String(booking.id || ""));
+  if (ids.some((id) => !id) || new Set(ids).size !== ids.length) {
+    throw makePlanningAcceptanceError(
+      "NonReplaceablePlanningBookingError",
+      "Les réservations existantes ne possèdent pas une identité unique sûre pour leur remplacement.",
+      "invalid_booking_identity",
+    );
+  }
+  return bookings;
+}
+
+function validateProposalAcceptanceIdentity(item, proposal, options = {}) {
+  if (!item || !proposal || proposal.error || !Array.isArray(proposal.steps) || !proposal.steps.length) {
+    throw makePlanningAcceptanceError("StalePlanningProposalError", "Proposition planning invalide. Recalculez le planning.", "invalid_proposal");
+  }
+  const metadata = proposal.acceptance;
+  const actualSignature = getProposalReservationSignature(proposal);
+  if (!metadata
+    || metadata.caseId !== String(item.id || "")
+    || metadata.proposalSignature !== actualSignature
+    || metadata.proposalId !== `proposal-${planningAcceptanceHash({
+      caseId: metadata.caseId,
+      proposalSignature: metadata.proposalSignature,
+      baseCasePlanningSignature: metadata.baseCasePlanningSignature,
+      baseServerPlanningVersion: Number(metadata.baseServerPlanningVersion || 0),
+    })}`) {
+    throw makePlanningAcceptanceError(
+      "StalePlanningProposalError",
+      "Cette proposition ne correspond plus au dossier affiché. Recalculez le planning.",
+      "proposal_identity_mismatch",
+    );
+  }
+  if (options.checkBase !== false) {
+    if (metadata.baseCasePlanningSignature !== getCasePlanningBaseSignature(item)) {
+      throw makePlanningAcceptanceError(
+        "StalePlanningProposalError",
+        "Le planning de ce dossier a changé. Recalculez la proposition avant de la valider.",
+        "case_planning_base_changed",
+      );
+    }
+    if (Number(metadata.baseServerPlanningVersion || 0) !== getCaseServerPlanningVersion(item)) {
+      throw makePlanningAcceptanceError(
+        "PlanningConflictError",
+        "La version serveur du planning a changé. Recalculez la proposition avant de la valider.",
+        "server_planning_base_changed",
+      );
+    }
+  }
+  return metadata;
+}
+
+function prepareProposalForAcceptance(item, displayedProposal) {
+  const displayedMetadata = validateProposalAcceptanceIdentity(item, displayedProposal);
+  getReplaceableCasePlanningBookings(item);
+  const recalculatedProposal = recalculateProposalForAcceptance(item, displayedProposal);
+  if (getProposalReservationSignature(recalculatedProposal) !== displayedMetadata.proposalSignature) {
+    throw makePlanningAcceptanceError(
+      "StalePlanningProposalError",
+      "Les ressources ou horaires disponibles ont changé. Recalculez et affichez la nouvelle proposition avant de la valider.",
+      "proposal_reservation_changed",
+    );
+  }
+  const recalculatedMetadata = validateProposalAcceptanceIdentity(item, recalculatedProposal);
+  if (recalculatedMetadata.baseCasePlanningSignature !== displayedMetadata.baseCasePlanningSignature
+    || Number(recalculatedMetadata.baseServerPlanningVersion || 0) !== Number(displayedMetadata.baseServerPlanningVersion || 0)) {
+    throw makePlanningAcceptanceError(
+      "StalePlanningProposalError",
+      "La base du planning a changé pendant la validation. Recalculez la proposition.",
+      "proposal_base_changed",
+    );
+  }
+  return {
+    proposal: recalculatedProposal,
+    baseCasePlanningSignature: displayedMetadata.baseCasePlanningSignature,
+    baseServerPlanningVersion: Number(displayedMetadata.baseServerPlanningVersion || 0),
+    proposalId: displayedMetadata.proposalId,
+  };
+}
+
+function applyAcceptedPlanningProposal(item, acceptedProposal, options = {}) {
+  try {
+    const permissionGuard = guardAppointmentSchedule(item, { notify: options.notify !== false });
+    if (!permissionGuard.ok) {
+      if (options.throwOnError) {
+        throw makePlanningAcceptanceError(
+          "PlanningPermissionError",
+          permissionGuard.message || "Vous n'êtes pas autorisé à valider ce planning.",
+          "appointment_schedule_denied",
+        );
+      }
+      return false;
+    }
+    validateProposalAcceptanceIdentity(item, acceptedProposal, { checkBase: false });
+    const previousBookings = getReplaceableCasePlanningBookings(item);
+    if (options.expectedBaseCasePlanningSignature
+      && options.expectedBaseCasePlanningSignature !== getCasePlanningBaseSignature(item)) {
+      throw makePlanningAcceptanceError(
+        "PlanningReconciliationRequiredError",
+        "Le planning local a changé après l'accusé serveur. Aucune réservation productive locale n'a été supprimée ; une réconciliation est requise.",
+        "local_base_changed_after_ack",
+      );
+    }
+    const acceptedBookings = proposalToBookings(item, acceptedProposal, false);
+    const replaceableBookingIds = new Set(previousBookings.map((booking) => String(booking.id)));
+    const retainedBookings = state.bookings.filter((booking) => !(
+      booking.caseId === item.id
+      && replaceableBookingIds.has(String(booking.id || ""))
+    ));
+    if (state.bookings.length - retainedBookings.length !== previousBookings.length) {
+      throw makePlanningAcceptanceError(
+        "PlanningReconciliationRequiredError",
+        "L'ensemble exact des réservations remplaçables a changé avant l'application locale.",
+        "replaceable_booking_set_changed",
+      );
+    }
+    previousBookings.forEach((booking) => {
+      if (typeof markEntityBookingDeleted === "function") markEntityBookingDeleted(booking.id);
+    });
+    acceptedBookings.forEach(markBookingEntityPersistenceDirty);
+    state.bookings = retainedBookings;
+    state.bookings.push(...acceptedBookings);
+    if (typeof invalidateUiRuntimeIndexes === "function") invalidateUiRuntimeIndexes();
+    else if (typeof invalidateBookingRuntimeIndexes === "function") invalidateBookingRuntimeIndexes(state.bookings);
+    item.appointment = {
+      start: acceptedProposal.start,
+      end: acceptedProposal.end,
+      delivery: acceptedProposal.delivery,
+      marginMinutes: acceptedProposal.marginMinutes,
+    };
+    item.appointmentStatus = "scheduled";
+    addHistory(
+      item,
+      "appointment.accepted",
+      `RDV choisi: ${formatDateTime(acceptedProposal.start)}`,
+      `Livraison estimée ${formatDateTime(acceptedProposal.delivery)}`,
+    );
+    generatedProposals[item.id] = [];
+    state.planningDate = todayKey(new Date(acceptedProposal.start));
+    saveState({ changedCase: item, flushCloud: true, cloudReason: "appointment-accepted" });
+    activeTab = "planning";
+    setActiveTab("planning");
+    render();
+    return true;
+  } catch (error) {
+    if (options.throwOnError) throw error;
+    notifyUser(error.message || "La proposition planning ne peut pas être appliquée.", "error");
+    return false;
+  }
+}
+
+function acceptProposal(item, proposal) {
+  const permissionGuard = guardAppointmentSchedule(item);
+  if (!permissionGuard.ok) return false;
+  try {
+    const prepared = prepareProposalForAcceptance(item, proposal);
+    return applyAcceptedPlanningProposal(item, prepared.proposal, {
+      expectedBaseCasePlanningSignature: prepared.baseCasePlanningSignature,
+      throwOnError: true,
+    });
+  } catch (error) {
+    generatedProposals[item?.id] = null;
+    notifyUser(error.message || "Le planning a changé. Recalculez la proposition avant de la valider.", "error");
+    return false;
+  }
 }
 
 function proposalToBookings(item, proposal, temporary) {
@@ -766,6 +1084,8 @@ function getPlanningCaseIndex() {
   return planningCaseIndex;
 }
 
+const planningAcceptanceInFlightCaseIds = new Set();
+
 async function acceptProposalAtomically(item, proposal) {
   const currentItem = typeof resolveCaseInCurrentState === "function"
     ? resolveCaseInCurrentState(item)
@@ -774,25 +1094,63 @@ async function acceptProposalAtomically(item, proposal) {
     notifyUser("Le dossier sélectionné n'existe plus après synchronisation. Actualisez la liste.", "error");
     return false;
   }
+  const permissionGuard = guardAppointmentSchedule(currentItem);
+  if (!permissionGuard.ok) return false;
   if (currentItem.source === "pdf_estimate" && !isPdfCaseReadyForPlanning(currentItem)) {
     notifyUser("Validation Chef Atelier du devis PDF absente ou invalide.", "error");
     return false;
   }
   if (!proposal || proposal.error) return false;
-  let serverProposal;
-  try {
-    serverProposal = recalculateProposalForAcceptance(currentItem, proposal);
-    if (typeof reservePlanningProposalAtomically === "function") {
-      await reservePlanningProposalAtomically(currentItem, serverProposal);
-    }
-  } catch (error) {
-    generatedProposals[currentItem.id] = null;
-    notifyUser(error.message || "Le planning a changé. Recalculez la proposition avant de la valider.", "error");
-    renderCaseDetail();
+  if (planningAcceptanceInFlightCaseIds.has(currentItem.id)) {
+    notifyUser("Une validation de planning est déjà en cours pour ce dossier.", "info");
     return false;
   }
-  acceptProposal(currentItem, serverProposal);
-  return Boolean(currentItem.appointment && state.bookings.some((booking) => booking.caseId === currentItem.id));
+  planningAcceptanceInFlightCaseIds.add(currentItem.id);
+  let serverAcknowledged = false;
+  try {
+    const issues = typeof getPlanningBusinessRuleIssues === "function"
+      ? getPlanningBusinessRuleIssues(currentItem)
+      : getBusinessRuleIssues(currentItem, "appointment");
+    if (issues.length) throw new Error(issues.join("\n"));
+    const prepared = prepareProposalForAcceptance(currentItem, proposal);
+    if (typeof reservePlanningProposalAtomically === "function") {
+      const acknowledgement = await reservePlanningProposalAtomically(currentItem, prepared.proposal);
+      serverAcknowledged = acknowledgement?.skipped !== true && acknowledgement?.acknowledged === true;
+    }
+    const applied = applyAcceptedPlanningProposal(currentItem, prepared.proposal, {
+      expectedBaseCasePlanningSignature: prepared.baseCasePlanningSignature,
+      throwOnError: true,
+    });
+    return applied === true;
+  } catch (error) {
+    if (error?.serverAcknowledged === true) serverAcknowledged = true;
+    generatedProposals[currentItem.id] = null;
+    const reconciliationRequired = serverAcknowledged || error?.requiresPlanningReconciliation === true;
+    if (reconciliationRequired) {
+      window.NIMR_PLANNING_RECONCILIATION_REQUIRED = {
+        caseId: currentItem.id,
+        proposalId: proposal?.acceptance?.proposalId || "",
+        message: error.message || "Application locale bloquée après réservation serveur.",
+        planningVersion: Number.isFinite(Number(error?.planningVersion))
+          ? Number(error.planningVersion)
+          : getCaseServerPlanningVersion(currentItem),
+        historicalAcknowledged: error?.historicalAcknowledged === true,
+        detectedAt: new Date().toISOString(),
+      };
+      notifyUser(
+        serverAcknowledged
+          ? `Réservation serveur confirmée, mais application locale bloquée : ${error.message || "réconciliation requise"}`
+          : `Planning serveur plus récent ou productif : ${error.message || "réconciliation requise"}`,
+        "error",
+      );
+    } else {
+      notifyUser(error.message || "Le planning a changé. Recalculez la proposition avant de la valider.", "error");
+    }
+    renderCaseDetail();
+    return false;
+  } finally {
+    planningAcceptanceInFlightCaseIds.delete(currentItem.id);
+  }
 }
 
 window.acceptProposalAtomically = acceptProposalAtomically;

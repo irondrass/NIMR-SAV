@@ -67,7 +67,15 @@ export function createGranularSupabaseAdapter(options = {}) {
       };
     }
     const priorConflict = conflicts.get(receiptKey);
-    if (priorConflict) return structuredClone({ ...priorConflict, idempotent: true });
+    if (priorConflict) {
+      const replayCurrent = entities.get(key) || null;
+      return structuredClone({
+        ...priorConflict,
+        idempotent: true,
+        server_version: replayCurrent?.entity_version ?? null,
+        canonical: replayCurrent,
+      });
+    }
     const baseMatches = current
       ? operation.baseVersion === current.entity_version
       : operation.baseVersion === null;
@@ -75,10 +83,22 @@ export function createGranularSupabaseAdapter(options = {}) {
       const conflict = {
         status: "conflict", accepted: false, idempotent: false, conflict: true,
         conflict_id: `conflict:${operation.operationId}`,
+        base_version: operation.baseVersion,
+        local_payload: structuredClone(operation.payload || {}),
+        server_payload: structuredClone(current?.payload || {}),
+        detected_at: new Date().toISOString(),
+        conflict_server_version: current?.entity_version ?? null,
+        conflict_canonical: structuredClone(current),
         server_version: current?.entity_version ?? null,
         canonical: structuredClone(current),
       };
-      conflicts.set(receiptKey, conflict);
+      conflicts.set(receiptKey, {
+        ...conflict,
+        server_version: undefined,
+        canonical: undefined,
+        entityType: operation.entityType,
+        entityId: operation.entityId,
+      });
       return structuredClone(conflict);
     }
     serverVersion = Math.max(serverVersion, current?.entity_version || 0) + 1;
@@ -104,6 +124,71 @@ export function createGranularSupabaseAdapter(options = {}) {
       status: "accepted", accepted: true, idempotent: false, conflict: false,
       accepted_version: serverVersion,
       server_version: serverVersion, canonical: structuredClone(canonical),
+    };
+  }
+
+  function applySettingsCasOperation(operation) {
+    const receiptKey = `${operation.workshopId}|${operation.operationId}`;
+    const current = settings.get(operation.workshopId) || null;
+    const receipt = receipts.get(receiptKey);
+    if (receipt) {
+      return {
+        status: "idempotent", accepted: true, idempotent: true, conflict: false,
+        accepted_version: receipt.version,
+        server_version: current?.entity_version ?? null,
+        canonical: structuredClone(current),
+      };
+    }
+    const priorConflict = conflicts.get(receiptKey);
+    if (priorConflict) {
+      return structuredClone({
+        ...priorConflict,
+        idempotent: true,
+        server_version: current?.entity_version ?? null,
+        canonical: current,
+      });
+    }
+    const baseMatches = current
+      ? operation.baseVersion === current.entity_version
+      : operation.baseVersion === null;
+    if (!baseMatches) {
+      const conflict = {
+        status: "conflict", accepted: false, idempotent: false, conflict: true,
+        conflict_id: `conflict:${operation.operationId}`,
+        base_version: operation.baseVersion,
+        local_payload: structuredClone(operation.payload || {}),
+        server_payload: structuredClone(current?.value || {}),
+        detected_at: new Date().toISOString(),
+        conflict_server_version: current?.entity_version ?? null,
+        conflict_canonical: structuredClone(current),
+        server_version: current?.entity_version ?? null,
+        canonical: structuredClone(current),
+      };
+      conflicts.set(receiptKey, {
+        ...conflict,
+        server_version: undefined,
+        canonical: undefined,
+        entityType: "workshop_settings",
+        entityId: "workshop_settings",
+      });
+      return structuredClone(conflict);
+    }
+    serverVersion = Math.max(serverVersion, current?.entity_version || 0) + 1;
+    const canonical = {
+      workshop_id: operation.workshopId,
+      setting_key: "workshop_settings",
+      value: structuredClone(operation.payload || {}),
+      entity_version: serverVersion,
+      last_operation_id: operation.operationId,
+      updated_at: new Date().toISOString(),
+    };
+    settings.set(operation.workshopId, canonical);
+    receipts.set(receiptKey, { version: serverVersion, entityType: "workshop_settings", entityId: "workshop_settings" });
+    return {
+      status: "accepted", accepted: true, idempotent: false, conflict: false,
+      accepted_version: serverVersion,
+      server_version: serverVersion,
+      canonical: structuredClone(canonical),
     };
   }
 
@@ -136,12 +221,40 @@ export function createGranularSupabaseAdapter(options = {}) {
     return query;
   }
 
+  function createSelectQuery(table, columns) {
+    const filters = {};
+    let rowLimit = null;
+    const selectedRows = () => {
+      if (table === "sync_entities") {
+        return [...entities.values()].filter((row) => Object.entries(filters).every(([column, value]) => row[column] === value));
+      }
+      if (table === "app_settings") {
+        return [...settings.values()].filter((row) => Object.entries(filters).every(([column, value]) => row[column] === value));
+      }
+      return [];
+    };
+    const execute = (single = false) => {
+      recordCall({ table, operation: "select", rows: [], filters, columns, ordering: [], pagination: rowLimit == null ? null : { pageSize: rowLimit } });
+      const rows = selectedRows();
+      const limited = rowLimit == null ? rows : rows.slice(0, rowLimit);
+      return { data: single ? structuredClone(limited[0] || null) : structuredClone(limited), error: null };
+    };
+    const query = {
+      eq(column, value) { filters[column] = value; return query; },
+      limit(value) { rowLimit = Number(value); return query; },
+      maybeSingle() { return Promise.resolve(execute(true)); },
+      then(resolve, reject) { return Promise.resolve().then(() => execute(false)).then(resolve, reject); },
+    };
+    return query;
+  }
+
   const client = {
     async rpc(name, args) {
       recordCall({ table: name, operation: "rpc", rows: [args], filters: {}, ordering: [], pagination: null, operationId: args.p_operation_id });
       if (name === "nimr_apply_workshop_settings_v2") {
-        return { data: { status: "accepted", accepted: true, idempotent: false, conflict: false, server_version: ++serverVersion, canonical: { workshop_id: args.p_workshop_id, setting_key: "workshop_settings", value: args.p_payload, entity_version: serverVersion, last_operation_id: args.p_operation_id, updated_at: new Date().toISOString() } }, error: null };
+        return { data: applySettingsCasOperation({ workshopId: args.p_workshop_id, entityType: "workshop_settings", entityId: "workshop_settings", baseVersion: args.p_base_version == null ? null : Number(args.p_base_version), operationId: args.p_operation_id, payload: args.p_payload || {} }), error: null };
       }
+      if (name === "nimr_resolve_sync_entity_conflict") return { data: { status: "resolved" }, error: null };
       if (name !== "nimr_apply_sync_entity_v2") return { data: null, error: new Error(`Unsupported RPC: ${name}`) };
       const outcome = applyCasOperation({
         workshopId: args.p_workshop_id,
@@ -156,6 +269,9 @@ export function createGranularSupabaseAdapter(options = {}) {
     },
     from(table) {
       return {
+        select(columns) {
+          return createSelectQuery(table, columns);
+        },
         upsert(rows) {
           return {
             async select() {

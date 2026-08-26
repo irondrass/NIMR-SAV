@@ -1164,6 +1164,12 @@ function normalizeDurableOutboxOperation(input = {}) {
     conflictId: String(input.conflictId || ""),
     serverVersion: normalizeOutboxExpectedVersion(input.serverVersion),
     canonical: input.canonical && typeof input.canonical === "object" ? cloneGranularSyncValue(input.canonical) : null,
+    conflictServerVersion: normalizeOutboxExpectedVersion(input.conflictServerVersion),
+    conflictCanonical: input.conflictCanonical && typeof input.conflictCanonical === "object" ? cloneGranularSyncValue(input.conflictCanonical) : null,
+    conflictBaseVersion: normalizeOutboxExpectedVersion(input.conflictBaseVersion),
+    conflictLocalPayload: input.conflictLocalPayload && typeof input.conflictLocalPayload === "object" ? cloneGranularSyncValue(input.conflictLocalPayload) : null,
+    conflictServerPayload: input.conflictServerPayload && typeof input.conflictServerPayload === "object" ? cloneGranularSyncValue(input.conflictServerPayload) : null,
+    conflictDetectedAt: input.conflictDetectedAt || null,
     description: String(input.description || "Mise à jour des données"),
   };
 }
@@ -1532,6 +1538,12 @@ async function conflictDurableOutboxOperationAtomically(operationId, observedVal
     conflictId: String(conflict.conflictId || conflict.id || ""),
     serverVersion: normalizeOutboxExpectedVersion(conflict.serverVersion ?? observed.serverVersion),
     canonical: conflict.canonical || null,
+    conflictServerVersion: normalizeOutboxExpectedVersion(conflict.conflictServerVersion),
+    conflictCanonical: conflict.conflictCanonical || null,
+    conflictBaseVersion: normalizeOutboxExpectedVersion(conflict.baseVersion),
+    conflictLocalPayload: conflict.localPayload || null,
+    conflictServerPayload: conflict.serverPayload || null,
+    conflictDetectedAt: conflict.detectedAt || null,
     lastError: String(conflict.message || "Conflit de concurrence serveur"),
   };
   if (typeof indexedDB === "undefined") {

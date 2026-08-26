@@ -69,6 +69,28 @@ class ModelDServer {
   projectionCount(workshopId) { return [...this.projections.keys()].filter((key) => key.startsWith(`${workshopId}\u0000`)).length; }
   openConflicts(workshopId) { return [...this.conflicts.values()].filter((row) => row.workshop_id === workshopId && row.status === "open").map(clone); }
 
+  currentCanonicalForConflict(conflict) {
+    if (conflict.entity_type === "workshop_settings") {
+      return clone(this.settings.get(conflict.workshop_id) || null);
+    }
+    return this.canonical(conflict.workshop_id, conflict.entity_type, conflict.entity_id);
+  }
+
+  conflictOutcome(row, current, idempotent) {
+    return {
+      status: "conflict", accepted: false, idempotent, conflict: true,
+      conflictId: row.id,
+      baseVersion: row.base_version,
+      localPayload: clone(row.local_payload),
+      serverPayload: clone(row.server_payload),
+      detectedAt: row.detected_at,
+      conflictServerVersion: row.server_version,
+      conflictCanonical: clone(row.canonical),
+      serverVersion: current?.entity_version ?? null,
+      canonical: clone(current || null),
+    };
+  }
+
   seedEntity({ workshopId = "workshop-1", entityType = "case", entityId, payload, entityVersion, deletedAt = null, operationId = "seed", updatedAt, broadcast = false }) {
     this.sequence = Math.max(this.sequence, Number(entityVersion || 0));
     const row = {
@@ -99,17 +121,18 @@ class ModelDServer {
   conflict(operation, current, reason) {
     const key = operationKey(operation.workshopId, operation.operationId);
     const existing = this.conflicts.get(key);
-    if (existing) return { status: "conflict", accepted: false, idempotent: true, conflict: true, conflictId: existing.id, serverVersion: existing.server_version, canonical: clone(existing.canonical) };
+    if (existing) return this.conflictOutcome(existing, this.currentCanonicalForConflict(existing), true);
     const row = {
       id: `conflict-${++this.conflictCounter}`, workshop_id: operation.workshopId,
       entity_type: operation.entityType, entity_id: operation.entityId,
       base_version: operation.baseVersion, server_version: current?.entity_version ?? null,
       local_operation_id: operation.operationId, action: operation.action,
-      local_payload: clone(operation.payload || {}), server_payload: clone(current?.payload || {}),
+      local_payload: clone(operation.payload || {}),
+      server_payload: clone(operation.entityType === "workshop_settings" ? (current?.value || {}) : (current?.payload || {})),
       canonical: clone(current || null), reason, status: "open", detected_at: this.nowIso(),
     };
     this.conflicts.set(key, row);
-    return { status: "conflict", accepted: false, idempotent: false, conflict: true, conflictId: row.id, serverVersion: row.server_version, canonical: clone(current || null) };
+    return this.conflictOutcome(row, current, false);
   }
 
   legacyApply() { throw new Error("client upgrade required: CAS baseVersion required"); }
@@ -179,11 +202,9 @@ class ModelDServer {
     }
     if (this.conflicts.has(opKey)) return this.conflict(operation, null, "idempotent-conflict");
     const current = this.settings.get(operation.workshopId) || null;
-    if ((current && operation.baseVersion !== current.entity_version) || (!current && operation.baseVersion !== null)) return this.conflict(operation, current ? {
-      workshop_id: current.workshop_id, entity_type: "workshop_settings", entity_id: "workshop_settings",
-      payload: current.value, entity_version: current.entity_version, last_operation_id: current.last_operation_id,
-      deleted_at: null, updated_at: current.updated_at,
-    } : null, "settings-base-mismatch");
+    if ((current && operation.baseVersion !== current.entity_version) || (!current && operation.baseVersion !== null)) {
+      return this.conflict(operation, current, "settings-base-mismatch");
+    }
     const version = this.nextVersion();
     const row = { workshop_id: operation.workshopId, setting_key: "workshop_settings",
       value: clone(operation.payload?.entity || {}), entity_version: version,
@@ -240,6 +261,7 @@ class ModelDClient {
     this.state = { cases: new Map(), bookings: new Map(), settings: {}, auditLog: new Map() };
     this.outbox = []; this.observed = new Map(); this.syncMetadata = { case: null, booking: null };
     this.syncConflicts = []; this.suspiciousRealtime = []; this.failNextAtomicSettlement = false;
+    this.failNextPostConflictTransition = false;
     if (persisted) this.restore(persisted);
     this.persist();
   }
@@ -255,6 +277,7 @@ class ModelDClient {
   setClock(value) { this.clockMs = Number(value); return this; }
   offline() { this.online = false; return this; }
   onlineNow() { this.online = true; return this; }
+  failAfterNextConflictTransition() { this.failNextPostConflictTransition = true; return this; }
   nowIso() { return new Date(this.clockMs).toISOString(); }
   observedKey(type, id) { return entityKey(this.workshopId, type, id); }
   base(type, id) { return this.observed.get(this.observedKey(type, id))?.serverVersion ?? null; }
@@ -322,19 +345,22 @@ class ModelDClient {
       if (response === "drop") throw new Error("Injected lost response after canonical apply");
       if (response === "delay") { this.server.delayedResponses.set(`${this.name}\u0000${operation.operationId}`, { operation: clone(operation), outcome: clone(outcome) }); return { acknowledged: false, delayed: true, operationId: operation.operationId, ...outcome }; }
       return this._settle(operation, outcome);
-    } catch (error) { const retained = this.outbox.find((op) => op.operationId === operation.operationId); if (retained) { retained.syncStatus = "failed"; retained.retryCount += 1; retained.lastError = String(error.message); } this.persist(); return { acknowledged: false, error: String(error.message), operationId: operation.operationId }; }
+    } catch (error) { const retained = this.outbox.find((op) => op.operationId === operation.operationId); if (retained && retained.syncStatus !== "conflicted") { retained.syncStatus = "failed"; retained.retryCount += 1; retained.lastError = String(error.message); } this.persist(); return { acknowledged: false, error: String(error.message), operationId: operation.operationId }; }
   }
   _settle(operation, outcome) {
     if (this.failNextAtomicSettlement) { this.failNextAtomicSettlement = false; throw new Error("Injected atomic settlement failure"); }
     if (outcome.conflict) {
       const retained = this.outbox.find((op) => op.operationId === operation.operationId);
       retained.syncStatus = "conflicted"; retained.conflictId = outcome.conflictId; retained.serverVersion = outcome.serverVersion; retained.canonical = clone(outcome.canonical);
+      retained.conflictServerVersion = outcome.conflictServerVersion; retained.conflictCanonical = clone(outcome.conflictCanonical);
       if (outcome.canonical) {
         if (operation.entityType === "workshop_settings") this.remember(outcome.canonical, "workshop_settings", "workshop_settings");
         else this.remember(outcome.canonical);
       }
-      if (!this.syncConflicts.some((entry) => entry.operationId === operation.operationId)) this.syncConflicts.push({ id: outcome.conflictId, operationId: operation.operationId, status: "open", localPayload: clone(operation.payload), canonical: clone(outcome.canonical), serverVersion: outcome.serverVersion });
-      this.persist(); return { acknowledged: false, conflicted: true, ...outcome };
+      if (!this.syncConflicts.some((entry) => entry.operationId === operation.operationId)) this.syncConflicts.push({ id: outcome.conflictId, operationId: operation.operationId, status: "open", localPayload: clone(operation.payload), canonical: clone(outcome.canonical), serverVersion: outcome.serverVersion, conflictCanonical: clone(outcome.conflictCanonical), conflictServerVersion: outcome.conflictServerVersion });
+      this.persist();
+      if (this.failNextPostConflictTransition) { this.failNextPostConflictTransition = false; throw new Error("Injected post-conflict transition failure"); }
+      return { acknowledged: false, conflicted: true, ...outcome };
     }
     if (outcome.canonical) {
       if (operation.entityType === "workshop_settings") this.remember(outcome.canonical, "workshop_settings", "workshop_settings");
@@ -347,8 +373,17 @@ class ModelDClient {
   resolveConflict(conflictId, action) {
     const conflict = this.syncConflicts.find((entry) => entry.id === conflictId); const old = this.outbox.find((op) => op.operationId === conflict?.operationId);
     if (!conflict || !old) throw new Error("Conflict not found");
-    if (action === "keep_local") { const replacement = this.operation({ entityType: old.entityType, entityId: old.entityId, action: old.action, entity: old.payload?.entity, projectionLocalId: old.payload?.projectionLocalId }); replacement.baseVersion = conflict.serverVersion; this.outbox.push(replacement); conflict.replacementOperationId = replacement.operationId; }
-    else if (action === "accept_server" && conflict.canonical) { const row = conflict.canonical; const collection = row.entity_type === "case" ? this.state.cases : this.state.bookings; if (row.deleted_at) collection.delete(row.entity_id); else collection.set(row.entity_id, { ...clone(row.payload), id: row.entity_id }); }
+    const current = old.entityType === "workshop_settings"
+      ? clone(this.server.settings.get(this.workshopId) || null)
+      : this.server.canonical(this.workshopId, old.entityType, old.entityId);
+    const currentVersion = current?.entity_version ?? null;
+    if (action === "keep_local") { const replacement = this.operation({ entityType: old.entityType, entityId: old.entityId, action: old.action, entity: old.payload?.entity, projectionLocalId: old.payload?.projectionLocalId }); replacement.baseVersion = currentVersion; this.outbox.push(replacement); conflict.replacementOperationId = replacement.operationId; }
+    else if (action === "accept_server") {
+      if (old.entityType === "workshop_settings") this.state.settings = clone(current?.value || {});
+      else { const collection = old.entityType === "case" ? this.state.cases : this.state.bookings; if (!current || current.deleted_at) collection.delete(old.entityId); else collection.set(old.entityId, { ...clone(current.payload), id: old.entityId }); }
+    } else throw new Error("Unsupported conflict resolution");
+    this.remember(current || { entity_version: null, last_operation_id: "", updated_at: this.nowIso() }, old.entityType, old.entityId);
+    conflict.canonical = clone(current); conflict.serverVersion = currentVersion;
     this.outbox = this.outbox.filter((op) => op.operationId !== old.operationId); conflict.status = "resolved"; this.persist(); return clone(conflict);
   }
   case(id) { return clone(this.state.cases.get(id) || null); }

@@ -166,11 +166,20 @@ begin
   from public.sync_entity_conflicts
   where workshop_id = p_workshop_id and local_operation_id = p_operation_id;
   if found then
+    select * into current_row from public.sync_entities
+    where workshop_id = existing_conflict.workshop_id
+      and entity_type = existing_conflict.entity_type
+      and entity_id = existing_conflict.entity_id;
     return jsonb_build_object(
       'status', 'conflict', 'accepted', false, 'idempotent', true,
-      'conflict', true, 'server_version', existing_conflict.server_version,
+      'conflict', true,
       'conflict_id', existing_conflict.id,
-      'canonical', jsonb_build_object(
+      'base_version', existing_conflict.base_version,
+      'local_payload', existing_conflict.local_payload,
+      'server_payload', existing_conflict.server_payload,
+      'detected_at', existing_conflict.detected_at,
+      'conflict_server_version', existing_conflict.server_version,
+      'conflict_canonical', case when existing_conflict.server_version is null then null else jsonb_build_object(
         'workshop_id', existing_conflict.workshop_id,
         'entity_type', existing_conflict.entity_type,
         'entity_id', existing_conflict.entity_id,
@@ -179,7 +188,9 @@ begin
         'last_operation_id', existing_conflict.server_last_operation_id,
         'deleted_at', existing_conflict.server_deleted_at,
         'updated_at', existing_conflict.detected_at
-      )
+      ) end,
+      'server_version', current_row.entity_version,
+      'canonical', case when current_row.entity_id is null then null else to_jsonb(current_row) end
     );
   end if;
 
@@ -223,11 +234,20 @@ begin
   from public.sync_entity_conflicts
   where workshop_id = p_workshop_id and local_operation_id = p_operation_id;
   if found then
+    select * into current_row from public.sync_entities
+    where workshop_id = existing_conflict.workshop_id
+      and entity_type = existing_conflict.entity_type
+      and entity_id = existing_conflict.entity_id;
     return jsonb_build_object(
       'status', 'conflict', 'accepted', false, 'idempotent', true,
-      'conflict', true, 'server_version', existing_conflict.server_version,
+      'conflict', true,
       'conflict_id', existing_conflict.id,
-      'canonical', jsonb_build_object(
+      'base_version', existing_conflict.base_version,
+      'local_payload', existing_conflict.local_payload,
+      'server_payload', existing_conflict.server_payload,
+      'detected_at', existing_conflict.detected_at,
+      'conflict_server_version', existing_conflict.server_version,
+      'conflict_canonical', case when existing_conflict.server_version is null then null else jsonb_build_object(
         'workshop_id', existing_conflict.workshop_id,
         'entity_type', existing_conflict.entity_type,
         'entity_id', existing_conflict.entity_id,
@@ -236,7 +256,9 @@ begin
         'last_operation_id', existing_conflict.server_last_operation_id,
         'deleted_at', existing_conflict.server_deleted_at,
         'updated_at', existing_conflict.detected_at
-      )
+      ) end,
+      'server_version', current_row.entity_version,
+      'canonical', case when current_row.entity_id is null then null else to_jsonb(current_row) end
     );
   end if;
 
@@ -261,8 +283,15 @@ begin
     returning * into conflict_row;
     return jsonb_build_object(
       'status', 'conflict', 'accepted', false, 'idempotent', false,
-      'conflict', true, 'server_version', conflict_row.server_version,
+      'conflict', true,
       'conflict_id', conflict_row.id,
+      'base_version', conflict_row.base_version,
+      'local_payload', conflict_row.local_payload,
+      'server_payload', conflict_row.server_payload,
+      'detected_at', conflict_row.detected_at,
+      'conflict_server_version', conflict_row.server_version,
+      'conflict_canonical', case when current_row.entity_id is null then null else to_jsonb(current_row) end,
+      'server_version', current_row.entity_version,
       'canonical', case when current_row.entity_id is null then null else to_jsonb(current_row) end
     );
   end if;
@@ -374,11 +403,18 @@ begin
   select * into conflict_row from public.sync_entity_conflicts
   where workshop_id = p_workshop_id and local_operation_id = p_operation_id;
   if found then
+    select * into current_row from public.app_settings
+    where workshop_id = p_workshop_id and setting_key = 'workshop_settings';
     return jsonb_build_object('status','conflict','accepted',false,'idempotent',true,
-      'conflict',true,'conflict_id',conflict_row.id,'server_version',conflict_row.server_version,
-      'canonical',jsonb_build_object('workshop_id',p_workshop_id,'setting_key','workshop_settings',
+      'conflict',true,'conflict_id',conflict_row.id,
+      'base_version',conflict_row.base_version,'local_payload',conflict_row.local_payload,
+      'server_payload',conflict_row.server_payload,'detected_at',conflict_row.detected_at,
+      'conflict_server_version',conflict_row.server_version,
+      'conflict_canonical',case when conflict_row.server_version is null then null else jsonb_build_object('workshop_id',p_workshop_id,'setting_key','workshop_settings',
         'value',conflict_row.server_payload,'entity_version',conflict_row.server_version,
-        'last_operation_id',conflict_row.server_last_operation_id));
+        'last_operation_id',conflict_row.server_last_operation_id,'updated_at',conflict_row.detected_at) end,
+      'server_version',current_row.entity_version,
+      'canonical',case when current_row.workshop_id is null then null else to_jsonb(current_row) end);
   end if;
   perform pg_advisory_xact_lock(hashtextextended(p_workshop_id::text || ':workshop_settings', 0));
   select * into current_row from public.app_settings
@@ -393,11 +429,18 @@ begin
   select * into conflict_row from public.sync_entity_conflicts
   where workshop_id = p_workshop_id and local_operation_id = p_operation_id;
   if found then
+    select * into current_row from public.app_settings
+    where workshop_id = p_workshop_id and setting_key = 'workshop_settings';
     return jsonb_build_object('status','conflict','accepted',false,'idempotent',true,
-      'conflict',true,'conflict_id',conflict_row.id,'server_version',conflict_row.server_version,
-      'canonical',jsonb_build_object('workshop_id',p_workshop_id,'setting_key','workshop_settings',
+      'conflict',true,'conflict_id',conflict_row.id,
+      'base_version',conflict_row.base_version,'local_payload',conflict_row.local_payload,
+      'server_payload',conflict_row.server_payload,'detected_at',conflict_row.detected_at,
+      'conflict_server_version',conflict_row.server_version,
+      'conflict_canonical',case when conflict_row.server_version is null then null else jsonb_build_object('workshop_id',p_workshop_id,'setting_key','workshop_settings',
         'value',conflict_row.server_payload,'entity_version',conflict_row.server_version,
-        'last_operation_id',conflict_row.server_last_operation_id));
+        'last_operation_id',conflict_row.server_last_operation_id,'updated_at',conflict_row.detected_at) end,
+      'server_version',current_row.entity_version,
+      'canonical',case when current_row.workshop_id is null then null else to_jsonb(current_row) end);
   end if;
   if (current_row.workshop_id is null and p_base_version is not null)
      or (current_row.workshop_id is not null and p_base_version is null)
@@ -414,7 +457,12 @@ begin
       set local_operation_id = excluded.local_operation_id
     returning * into conflict_row;
     return jsonb_build_object('status','conflict','accepted',false,'idempotent',false,
-      'conflict',true,'conflict_id',conflict_row.id,'server_version',conflict_row.server_version,
+      'conflict',true,'conflict_id',conflict_row.id,
+      'base_version',conflict_row.base_version,'local_payload',conflict_row.local_payload,
+      'server_payload',conflict_row.server_payload,'detected_at',conflict_row.detected_at,
+      'conflict_server_version',conflict_row.server_version,
+      'conflict_canonical',case when current_row.workshop_id is null then null else to_jsonb(current_row) end,
+      'server_version',current_row.entity_version,
       'canonical',case when current_row.workshop_id is null then null else to_jsonb(current_row) end);
   end if;
   new_version := nextval('public.nimr_sync_entity_version_seq'::regclass);

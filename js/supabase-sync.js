@@ -3202,18 +3202,39 @@ async function applyCanonicalSyncEntity(client, operation) {
 
 function normalizeCanonicalCasOutcome(value = {}) {
   const status = String(value?.status || "");
-  const canonical = value?.canonical || null;
+  const conflict = value?.conflict === true || status === "conflict";
+  const hasExplicitConflictCanonical = Object.hasOwn(value || {}, "conflict_canonical")
+    || Object.hasOwn(value || {}, "conflictCanonical");
+  const rawCanonical = value?.canonical || null;
+  // An older server used `canonical` for the historical conflict snapshot.
+  // Fail closed during a rolling deployment: without the distinct field, that
+  // row is evidence only and cannot be projected or treated as current.
+  const canonical = conflict && !hasExplicitConflictCanonical ? null : rawCanonical;
+  const conflictCanonical = conflict
+    ? (hasExplicitConflictCanonical ? (value?.conflict_canonical ?? value?.conflictCanonical ?? null) : rawCanonical)
+    : (value?.conflict_canonical ?? value?.conflictCanonical ?? null);
+  const hasExplicitConflictServerVersion = Object.hasOwn(value || {}, "conflict_server_version")
+    || Object.hasOwn(value || {}, "conflictServerVersion");
   return {
     status,
     accepted: value?.accepted === true,
     idempotent: value?.idempotent === true,
-    conflict: value?.conflict === true || status === "conflict",
+    conflict,
     conflictId: String(value?.conflict_id || value?.conflictId || ""),
     acceptedVersion: value?.accepted_version ?? value?.acceptedVersion ?? null,
     // The canonical row is the authority for the entity's current version.
     // acceptedVersion is only the historical receipt version for this operation.
-    serverVersion: canonical?.entity_version ?? canonical?.server_version ?? value?.server_version ?? value?.serverVersion ?? null,
+    serverVersion: canonical?.entity_version ?? canonical?.server_version
+      ?? (conflict && !hasExplicitConflictCanonical ? null : (value?.server_version ?? value?.serverVersion ?? null)),
     canonical,
+    conflictServerVersion: hasExplicitConflictServerVersion
+      ? (value?.conflict_server_version ?? value?.conflictServerVersion ?? null)
+      : (conflict ? (conflictCanonical?.entity_version ?? conflictCanonical?.server_version ?? value?.server_version ?? value?.serverVersion ?? null) : null),
+    conflictCanonical,
+    baseVersion: value?.base_version ?? value?.baseVersion ?? null,
+    localPayload: value?.local_payload ?? value?.localPayload ?? null,
+    serverPayload: value?.server_payload ?? value?.serverPayload ?? null,
+    detectedAt: value?.detected_at ?? value?.detectedAt ?? null,
   };
 }
 
@@ -3240,6 +3261,7 @@ async function registerCanonicalConcurrencyConflict(operation, outcome) {
     || entry?.id === stableId
   ));
   const canonical = outcome.canonical || null;
+  const conflictCanonical = outcome.conflictCanonical || null;
   const conflict = {
     ...(existingIndex >= 0 ? state.syncConflicts[existingIndex] : {}),
     id: stableId,
@@ -3254,14 +3276,18 @@ async function registerCanonicalConcurrencyConflict(operation, outcome) {
     action: operation.action,
     baseVersion: operation.baseVersion,
     serverVersion: outcome.serverVersion,
+    conflictServerVersion: outcome.conflictServerVersion,
     serverConflictId: outcome.conflictId,
     localOperationId: operation.operationId,
     localValue: cloneGranularSyncValue(operation.payload?.entity || operation.payload || {}),
     localPayload: cloneGranularSyncValue(operation.payload || {}),
-    remoteValue: canonical?.payload
-      ? { ...cloneGranularSyncValue(canonical.payload), id: canonical.entity_id }
-      : (canonical?.value ? cloneGranularSyncValue(canonical.value) : null),
+    remoteValue: conflictCanonical?.payload
+      ? { ...cloneGranularSyncValue(conflictCanonical.payload), id: conflictCanonical.entity_id }
+      : (conflictCanonical?.value ? cloneGranularSyncValue(conflictCanonical.value) : null),
     canonical: canonical ? cloneGranularSyncValue(canonical) : null,
+    conflictCanonical: conflictCanonical ? cloneGranularSyncValue(conflictCanonical) : null,
+    conflictServerPayload: cloneGranularSyncValue(outcome.serverPayload),
+    conflictDetectedAt: outcome.detectedAt || null,
     message: "Une autre station a modifié cette entité. La version locale est conservée dans un conflit durable.",
   };
   if (existingIndex >= 0) state.syncConflicts[existingIndex] = conflict;
@@ -3274,15 +3300,84 @@ async function registerCanonicalConcurrencyConflict(operation, outcome) {
   return conflict;
 }
 
+async function fetchCurrentCanonicalForConflict(client, operation) {
+  if (!client) throw new Error("Session Supabase requise pour actualiser la version serveur.");
+  if (operation.entityType === "workshop_settings") {
+    const { data, error } = await client
+      .from("app_settings")
+      .select("workshop_id,setting_key,value,entity_version,last_operation_id,updated_at")
+      .eq("workshop_id", operation.workshopId)
+      .eq("setting_key", "workshop_settings")
+      .maybeSingle();
+    if (error) throw new Error(`Actualisation des réglages serveur impossible: ${error.message || error}`);
+    return data || null;
+  }
+  if (!["case", "booking"].includes(operation.entityType)) {
+    throw new Error("Type de conflit serveur non pris en charge.");
+  }
+  const { data, error } = await client
+    .from("sync_entities")
+    .select("workshop_id,entity_type,entity_id,payload,entity_version,last_operation_id,deleted_at,updated_at")
+    .eq("workshop_id", operation.workshopId)
+    .eq("entity_type", operation.entityType)
+    .eq("entity_id", operation.entityId)
+    .maybeSingle();
+  if (error) throw new Error(`Actualisation de l'entité serveur impossible: ${error.message || error}`);
+  return data || null;
+}
+
+async function applyCurrentCanonicalForAcceptedServer(operation, canonical) {
+  applyingRemoteSupabaseState = true;
+  try {
+    if (operation.entityType === "workshop_settings") {
+      const changed = applyWorkshopSettingsToState(canonical?.value || {});
+      if (changed) {
+        await saveState({ skipCloud: true, skipSnapshot: true, boundedEntityDetection: true, cloudReason: "conflict:accept-current-server-settings" });
+      }
+      return changed;
+    }
+    if (canonical) {
+      const changed = await applyRemoteEntityRow(canonical, { force: true });
+      if (changed) {
+        if (typeof invalidateStateReplacementIndexes === "function") invalidateStateReplacementIndexes();
+        await saveState({ skipCloud: true, skipSnapshot: true, boundedEntityDetection: true, cloudReason: "conflict:accept-current-server" });
+      }
+      return changed;
+    }
+    const collectionName = operation.entityType === "case" ? "cases" : "bookings";
+    const collection = Array.isArray(state[collectionName]) ? state[collectionName] : [];
+    const index = collection.findIndex((entry) => String(entry?.id || "") === operation.entityId);
+    if (index < 0) return false;
+    collection.splice(index, 1);
+    if (operation.entityType === "case" && typeof markEntityCaseDeleted === "function") markEntityCaseDeleted(operation.entityId, { skipCloud: true });
+    if (operation.entityType === "booking" && typeof markEntityBookingDeleted === "function") markEntityBookingDeleted(operation.entityId, { skipCloud: true });
+    if (operation.entityType === "case") rememberRemoteCaseComparable(operation.entityId);
+    if (typeof invalidateStateReplacementIndexes === "function") invalidateStateReplacementIndexes();
+    await saveState({ skipCloud: true, skipSnapshot: true, boundedEntityDetection: true, cloudReason: "conflict:accept-current-server-absence" });
+    return true;
+  } finally {
+    applyingRemoteSupabaseState = false;
+  }
+}
+
 async function resolveCanonicalConcurrencyConflict(conflict, action) {
   const operationId = String(conflict?.localOperationId || "");
   const operations = typeof loadDurableOutboxOperations === "function" ? await loadDurableOutboxOperations() : [];
-  const oldOperation = operations.find((entry) => entry.operationId === operationId);
+  const normalizedConflictId = String(conflict?.serverConflictId || conflict?.id || "");
+  const oldOperation = operations.find((entry) => entry.operationId === operationId)
+    || operations.find((entry) => normalizedConflictId && entry.conflictId === normalizedConflictId);
   if (!oldOperation || oldOperation.syncStatus !== "conflicted") {
     throw new Error("Opération conflictuelle durable introuvable.");
   }
-  const canonical = conflict.canonical || oldOperation.canonical || null;
-  const serverVersion = canonical?.entity_version ?? conflict.serverVersion ?? oldOperation.serverVersion ?? null;
+  const resolvedOperationId = oldOperation.operationId;
+  if (!["keep_local", "accept_cloud"].includes(action)) {
+    throw new Error("Résolution de conflit serveur non prise en charge.");
+  }
+  // Conflict snapshots are immutable evidence. Resolution authority is always
+  // an exact, RLS-scoped read of the current canonical row.
+  const client = getSupabaseClient();
+  const canonical = await fetchCurrentCanonicalForConflict(client, oldOperation);
+  const serverVersion = canonical?.entity_version ?? null;
   const observed = {
     workshopId: oldOperation.workshopId,
     entityType: oldOperation.entityType,
@@ -3310,44 +3405,29 @@ async function resolveCanonicalConcurrencyConflict(conflict, action) {
       conflictId: "",
       serverVersion: null,
       canonical: null,
+      conflictServerVersion: null,
+      conflictCanonical: null,
+      conflictBaseVersion: null,
+      conflictLocalPayload: null,
+      conflictServerPayload: null,
+      conflictDetectedAt: null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
-  } else if (action !== "accept_cloud") {
-    throw new Error("Résolution de conflit serveur non prise en charge.");
   }
-  await resolveConflictedOutboxOperationAtomically(operationId, observed, replacement);
-  if (action === "accept_cloud" && canonical && ["case", "booking"].includes(oldOperation.entityType)) {
-    applyingRemoteSupabaseState = true;
-    try {
-      const changed = await applyRemoteEntityRow(canonical, { force: true });
-      if (changed) {
-        if (typeof invalidateStateReplacementIndexes === "function") invalidateStateReplacementIndexes();
-        await saveState({ skipCloud: true, skipSnapshot: true, boundedEntityDetection: true, cloudReason: "conflict:accept-server" });
-      }
-    } finally {
-      applyingRemoteSupabaseState = false;
-    }
-  }
-  if (action === "accept_cloud" && canonical && oldOperation.entityType === "workshop_settings") {
-    applyingRemoteSupabaseState = true;
-    try {
-      if (applyWorkshopSettingsToState(canonical.value || canonical.payload || {})) {
-        await saveState({ skipCloud: true, skipSnapshot: true, boundedEntityDetection: true, cloudReason: "conflict:accept-server-settings" });
-      }
-    } finally {
-      applyingRemoteSupabaseState = false;
-    }
-  }
-  const client = getSupabaseClient();
-  if (client && conflict.serverConflictId) {
+  if (action === "accept_cloud") await applyCurrentCanonicalForAcceptedServer(oldOperation, canonical);
+  const serverConflictId = String(conflict?.serverConflictId || oldOperation.conflictId || conflict?.id || "");
+  if (client && serverConflictId) {
     const { error } = await client.rpc("nimr_resolve_sync_entity_conflict", {
       p_workshop_id: oldOperation.workshopId,
-      p_conflict_id: conflict.serverConflictId,
+      p_conflict_id: serverConflictId,
       p_resolution: action === "accept_cloud" ? "accept_server" : "keep_local",
     });
-    if (error) console.warn("Résolution du conflit serveur à réconcilier", error);
+    if (error) throw new Error(`Résolution du conflit serveur impossible: ${error.message || error}`);
   }
+  // Remove/swap the durable conflicted operation only after the fresh read and
+  // any accepted-server local persistence have succeeded.
+  await resolveConflictedOutboxOperationAtomically(resolvedOperationId, observed, replacement);
   return { ok: true, replacementOperationId: replacement?.operationId || "", serverVersion };
 }
 
@@ -3493,6 +3573,12 @@ async function processGranularOutboxOperation(client, user, operation) {
           conflictId: acknowledgement.conflictId,
           serverVersion: acknowledgement.serverVersion,
           canonical: acknowledgement.canonical,
+          conflictServerVersion: acknowledgement.conflictServerVersion,
+          conflictCanonical: acknowledgement.conflictCanonical,
+          baseVersion: acknowledgement.baseVersion,
+          localPayload: acknowledgement.localPayload,
+          serverPayload: acknowledgement.serverPayload,
+          detectedAt: acknowledgement.detectedAt,
           message: "Conflit CAS: la version serveur a changé depuis la dernière observation.",
         });
         await registerCanonicalConcurrencyConflict(processing, acknowledgement);
@@ -3505,11 +3591,18 @@ async function processGranularOutboxOperation(client, user, operation) {
     }
     return { acknowledged: true, operationId: processing.operationId, idempotent: acknowledgement.idempotent === true };
   } catch (error) {
-    await updateDurableOutboxOperation(processing.operationId, {
-      syncStatus: "failed",
-      retryCount: Math.min(10, Number(processing.retryCount || 0) + 1),
-      lastError: String(error?.message || error),
-    });
+    const retained = typeof loadDurableOutboxOperations === "function"
+      ? (await loadDurableOutboxOperations()).find((entry) => entry.operationId === processing.operationId)
+      : null;
+    // A successfully persisted conflict is terminal for automatic sending.
+    // Rendering/state failures after that transition must not make it retryable.
+    if (retained?.syncStatus !== "conflicted") {
+      await updateDurableOutboxOperation(processing.operationId, {
+        syncStatus: "failed",
+        retryCount: Math.min(10, Number(processing.retryCount || 0) + 1),
+        lastError: String(error?.message || error),
+      });
+    }
     return { acknowledged: false, operationId: processing.operationId, error: String(error?.message || error) };
   }
 }

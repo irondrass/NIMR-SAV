@@ -73,6 +73,45 @@ assert.doesNotMatch(sqlSource, /'server_version',\s*existing_conflict\.server_ve
 assert.doesNotMatch(sqlSource, /'server_version',\s*conflict_row\.server_version/);
 assert.doesNotMatch(sqlSource, /service_role|SUPABASE_SERVICE/);
 
+// Conflict resolution authorization is derived from the locked server-side
+// conflict row. Settings deliberately exclude technicians even though case
+// and booking resolution permits them; non-operational roles stay denied.
+const resolveConflictSql = sqlSource.slice(
+  sqlSource.indexOf("create or replace function public.nimr_resolve_sync_entity_conflict"),
+  sqlSource.indexOf("revoke all on function public.nimr_resolve_sync_entity_conflict"),
+);
+assert.match(resolveConflictSql, /target_conflict public\.sync_entity_conflicts/);
+assert.match(resolveConflictSql, /select \* into target_conflict from public\.sync_entity_conflicts\s+where workshop_id = p_workshop_id and id = p_conflict_id\s+for update/);
+assert.doesNotMatch(resolveConflictSql, /p_entity_type/);
+assert.match(resolveConflictSql, /if target_conflict\.id is null then\s+return null;\s+end if/);
+assert.match(resolveConflictSql, /if target_conflict\.status = 'resolved' then\s+return target_conflict;\s+end if/);
+assert.match(resolveConflictSql, /else\s+raise exception 'unsupported conflict entity type'/);
+assert.match(resolveConflictSql, /where id = target_conflict\.id and workshop_id = target_conflict\.workshop_id/);
+assert.match(resolveConflictSql, /security definer[\s\S]*?set search_path = pg_catalog, public/);
+assert.match(sqlSource, /revoke all on table public\.sync_entity_conflicts from anon, authenticated;\s+revoke all on table public\.sync_entity_operation_receipts from anon, authenticated;\s+grant select on table public\.sync_entity_conflicts to authenticated;/);
+assert.match(sqlSource, /revoke all on function public\.nimr_resolve_sync_entity_conflict\(uuid, uuid, text\) from public, anon;\s+grant execute on function public\.nimr_resolve_sync_entity_conflict\(uuid, uuid, text\) to authenticated;/);
+
+const settingsAuthorizationSql = resolveConflictSql.match(
+  /if target_conflict\.entity_type = 'workshop_settings' then([\s\S]*?)elsif target_conflict\.entity_type in \('case', 'booking'\) then/,
+)?.[1] || "";
+const caseBookingAuthorizationSql = resolveConflictSql.match(
+  /elsif target_conflict\.entity_type in \('case', 'booking'\) then([\s\S]*?)else/,
+)?.[1] || "";
+const extractAuthorizedRoles = (fragment) => [...fragment.matchAll(/'(admin_technique|directeur|chef_atelier|reception|technicien|controle_qualite|lecture_seule)'/g)]
+  .map((match) => match[1]);
+const settingsResolutionRoles = extractAuthorizedRoles(settingsAuthorizationSql);
+const caseBookingResolutionRoles = extractAuthorizedRoles(caseBookingAuthorizationSql);
+assert.deepEqual(settingsResolutionRoles, ["admin_technique", "directeur", "chef_atelier", "reception"]);
+assert.deepEqual(caseBookingResolutionRoles, ["admin_technique", "directeur", "chef_atelier", "reception", "technicien"]);
+assert.equal(settingsResolutionRoles.includes("technicien"), false);
+assert.equal(caseBookingResolutionRoles.includes("technicien"), true, "technicien must resolve case conflicts");
+assert.equal(caseBookingResolutionRoles.includes("technicien"), true, "technicien must resolve booking conflicts");
+assert.equal(settingsResolutionRoles.includes("reception"), true);
+for (const deniedRole of ["controle_qualite", "lecture_seule"]) {
+  assert.equal(settingsResolutionRoles.includes(deniedRole), false);
+  assert.equal(caseBookingResolutionRoles.includes(deniedRole), false);
+}
+
 // Exercise the real storage implementation, not only the model harness: the
 // outbox acknowledgement and observed version are one IndexedDB transaction.
 const atomicIndexedDb = createMemoryIndexedDb();

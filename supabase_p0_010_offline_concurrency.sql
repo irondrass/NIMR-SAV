@@ -501,20 +501,42 @@ language plpgsql
 security definer
 set search_path = pg_catalog, public
 as $nimr$
-declare resolved public.sync_entity_conflicts;
+declare
+  target_conflict public.sync_entity_conflicts;
+  resolved public.sync_entity_conflicts;
 begin
+  select * into target_conflict from public.sync_entity_conflicts
+  where workshop_id = p_workshop_id and id = p_conflict_id
+  for update;
+  if target_conflict.id is null then
+    return null;
+  end if;
   if p_resolution not in ('accept_server', 'keep_local') then
     raise exception 'unsupported conflict resolution' using errcode = '22023';
   end if;
-  if not public.nimr_has_workshop_role(
-    p_workshop_id,
-    array['admin_technique', 'directeur', 'chef_atelier', 'reception', 'technicien']
-  ) then
-    raise exception 'workshop access denied' using errcode = '42501';
+  if target_conflict.entity_type = 'workshop_settings' then
+    if not public.nimr_has_workshop_role(
+      target_conflict.workshop_id,
+      array['admin_technique', 'directeur', 'chef_atelier', 'reception']
+    ) then
+      raise exception 'workshop access denied' using errcode = '42501';
+    end if;
+  elsif target_conflict.entity_type in ('case', 'booking') then
+    if not public.nimr_has_workshop_role(
+      target_conflict.workshop_id,
+      array['admin_technique', 'directeur', 'chef_atelier', 'reception', 'technicien']
+    ) then
+      raise exception 'workshop access denied' using errcode = '42501';
+    end if;
+  else
+    raise exception 'unsupported conflict entity type' using errcode = '42501';
+  end if;
+  if target_conflict.status = 'resolved' then
+    return target_conflict;
   end if;
   update public.sync_entity_conflicts
   set status = 'resolved', resolved_at = clock_timestamp(), resolution = p_resolution
-  where id = p_conflict_id and workshop_id = p_workshop_id
+  where id = target_conflict.id and workshop_id = target_conflict.workshop_id
   returning * into resolved;
   return resolved;
 end

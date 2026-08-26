@@ -4,6 +4,9 @@ export function createGranularSupabaseAdapter(options = {}) {
   const repairOrders = new Map();
   const audits = new Map();
   const settings = new Map();
+  const receipts = new Map();
+  const conflicts = new Map();
+  let serverVersion = 0;
   let failure = options.failure || null;
   let projectionFailure = options.projectionFailure || null;
 
@@ -50,6 +53,145 @@ export function createGranularSupabaseAdapter(options = {}) {
     return structuredClone(canonical);
   }
 
+  function applyCasOperation(operation) {
+    const receiptKey = `${operation.workshopId}|${operation.operationId}`;
+    const receipt = receipts.get(receiptKey);
+    const key = entityKey(operation);
+    const current = entities.get(key) || null;
+    if (receipt) {
+      return {
+        status: "idempotent", accepted: true, idempotent: true, conflict: false,
+        accepted_version: receipt.version,
+        server_version: current?.entity_version ?? null,
+        canonical: structuredClone(current),
+      };
+    }
+    const priorConflict = conflicts.get(receiptKey);
+    if (priorConflict) {
+      const replayCurrent = entities.get(key) || null;
+      return structuredClone({
+        ...priorConflict,
+        idempotent: true,
+        server_version: replayCurrent?.entity_version ?? null,
+        canonical: replayCurrent,
+      });
+    }
+    const baseMatches = current
+      ? operation.baseVersion === current.entity_version
+      : operation.baseVersion === null;
+    if (!baseMatches) {
+      const conflict = {
+        status: "conflict", accepted: false, idempotent: false, conflict: true,
+        conflict_id: `conflict:${operation.operationId}`,
+        base_version: operation.baseVersion,
+        local_payload: structuredClone(operation.payload || {}),
+        server_payload: structuredClone(current?.payload || {}),
+        detected_at: new Date().toISOString(),
+        conflict_server_version: current?.entity_version ?? null,
+        conflict_canonical: structuredClone(current),
+        server_version: current?.entity_version ?? null,
+        canonical: structuredClone(current),
+      };
+      conflicts.set(receiptKey, {
+        ...conflict,
+        server_version: undefined,
+        canonical: undefined,
+        entityType: operation.entityType,
+        entityId: operation.entityId,
+      });
+      return structuredClone(conflict);
+    }
+    serverVersion = Math.max(serverVersion, current?.entity_version || 0) + 1;
+    const updatedAt = operation.updatedAt || new Date().toISOString();
+    const canonical = {
+      workshop_id: operation.workshopId,
+      entity_type: operation.entityType,
+      entity_id: operation.entityId,
+      payload: operation.action === "delete"
+        ? structuredClone(operation.payload || {})
+        : structuredClone(operation.payload?.entity || {}),
+      entity_version: serverVersion,
+      last_operation_id: operation.operationId,
+      deleted_at: operation.action === "delete" ? updatedAt : null,
+      updated_at: updatedAt,
+      entityVersion: serverVersion,
+      operationId: operation.operationId,
+      deleted: operation.action === "delete",
+    };
+    entities.set(key, canonical);
+    receipts.set(receiptKey, { version: serverVersion });
+    return {
+      status: "accepted", accepted: true, idempotent: false, conflict: false,
+      accepted_version: serverVersion,
+      server_version: serverVersion, canonical: structuredClone(canonical),
+    };
+  }
+
+  function applySettingsCasOperation(operation) {
+    const receiptKey = `${operation.workshopId}|${operation.operationId}`;
+    const current = settings.get(operation.workshopId) || null;
+    const receipt = receipts.get(receiptKey);
+    if (receipt) {
+      return {
+        status: "idempotent", accepted: true, idempotent: true, conflict: false,
+        accepted_version: receipt.version,
+        server_version: current?.entity_version ?? null,
+        canonical: structuredClone(current),
+      };
+    }
+    const priorConflict = conflicts.get(receiptKey);
+    if (priorConflict) {
+      return structuredClone({
+        ...priorConflict,
+        idempotent: true,
+        server_version: current?.entity_version ?? null,
+        canonical: current,
+      });
+    }
+    const baseMatches = current
+      ? operation.baseVersion === current.entity_version
+      : operation.baseVersion === null;
+    if (!baseMatches) {
+      const conflict = {
+        status: "conflict", accepted: false, idempotent: false, conflict: true,
+        conflict_id: `conflict:${operation.operationId}`,
+        base_version: operation.baseVersion,
+        local_payload: structuredClone(operation.payload || {}),
+        server_payload: structuredClone(current?.value || {}),
+        detected_at: new Date().toISOString(),
+        conflict_server_version: current?.entity_version ?? null,
+        conflict_canonical: structuredClone(current),
+        server_version: current?.entity_version ?? null,
+        canonical: structuredClone(current),
+      };
+      conflicts.set(receiptKey, {
+        ...conflict,
+        server_version: undefined,
+        canonical: undefined,
+        entityType: "workshop_settings",
+        entityId: "workshop_settings",
+      });
+      return structuredClone(conflict);
+    }
+    serverVersion = Math.max(serverVersion, current?.entity_version || 0) + 1;
+    const canonical = {
+      workshop_id: operation.workshopId,
+      setting_key: "workshop_settings",
+      value: structuredClone(operation.payload || {}),
+      entity_version: serverVersion,
+      last_operation_id: operation.operationId,
+      updated_at: new Date().toISOString(),
+    };
+    settings.set(operation.workshopId, canonical);
+    receipts.set(receiptKey, { version: serverVersion, entityType: "workshop_settings", entityId: "workshop_settings" });
+    return {
+      status: "accepted", accepted: true, idempotent: false, conflict: false,
+      accepted_version: serverVersion,
+      server_version: serverVersion,
+      canonical: structuredClone(canonical),
+    };
+  }
+
   function consumeProjectionFailure() {
     if (!projectionFailure) return null;
     const current = projectionFailure;
@@ -79,23 +221,57 @@ export function createGranularSupabaseAdapter(options = {}) {
     return query;
   }
 
+  function createSelectQuery(table, columns) {
+    const filters = {};
+    let rowLimit = null;
+    const selectedRows = () => {
+      if (table === "sync_entities") {
+        return [...entities.values()].filter((row) => Object.entries(filters).every(([column, value]) => row[column] === value));
+      }
+      if (table === "app_settings") {
+        return [...settings.values()].filter((row) => Object.entries(filters).every(([column, value]) => row[column] === value));
+      }
+      return [];
+    };
+    const execute = (single = false) => {
+      recordCall({ table, operation: "select", rows: [], filters, columns, ordering: [], pagination: rowLimit == null ? null : { pageSize: rowLimit } });
+      const rows = selectedRows();
+      const limited = rowLimit == null ? rows : rows.slice(0, rowLimit);
+      return { data: single ? structuredClone(limited[0] || null) : structuredClone(limited), error: null };
+    };
+    const query = {
+      eq(column, value) { filters[column] = value; return query; },
+      limit(value) { rowLimit = Number(value); return query; },
+      maybeSingle() { return Promise.resolve(execute(true)); },
+      then(resolve, reject) { return Promise.resolve().then(() => execute(false)).then(resolve, reject); },
+    };
+    return query;
+  }
+
   const client = {
     async rpc(name, args) {
       recordCall({ table: name, operation: "rpc", rows: [args], filters: {}, ordering: [], pagination: null, operationId: args.p_operation_id });
-      if (name !== "nimr_apply_sync_entity") return { data: null, error: new Error(`Unsupported RPC: ${name}`) };
-      const canonical = applyCanonicalOperation({
+      if (name === "nimr_apply_workshop_settings_v2") {
+        return { data: applySettingsCasOperation({ workshopId: args.p_workshop_id, entityType: "workshop_settings", entityId: "workshop_settings", baseVersion: args.p_base_version == null ? null : Number(args.p_base_version), operationId: args.p_operation_id, payload: args.p_payload || {} }), error: null };
+      }
+      if (name === "nimr_resolve_sync_entity_conflict") return { data: { status: "resolved" }, error: null };
+      if (name !== "nimr_apply_sync_entity_v2") return { data: null, error: new Error(`Unsupported RPC: ${name}`) };
+      const outcome = applyCasOperation({
         workshopId: args.p_workshop_id,
         entityType: args.p_entity_type,
         entityId: args.p_entity_id,
-        entityVersion: args.p_entity_version,
+        baseVersion: args.p_base_version == null ? null : Number(args.p_base_version),
         operationId: args.p_operation_id,
         action: args.p_deleted ? "delete" : "upsert",
         payload: args.p_deleted ? (args.p_payload || {}) : { entity: args.p_payload || {} },
       });
-      return { data: canonical, error: null };
+      return { data: outcome, error: null };
     },
     from(table) {
       return {
+        select(columns) {
+          return createSelectQuery(table, columns);
+        },
         upsert(rows) {
           return {
             async select() {
@@ -180,6 +356,8 @@ export function createGranularSupabaseAdapter(options = {}) {
     repairOrders,
     audits,
     settings,
+    receipts,
+    conflicts,
     send,
     page,
     injectFailure(nextFailure) { failure = nextFailure; },

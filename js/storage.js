@@ -165,12 +165,14 @@ let entityAuditStructureGeneration = 0;
 let entityStateFullReplacementGeneration = 0;
 let lastEntityPersistenceStats = null;
 let cloudEntityMutationVersion = 0;
-let lastCloudEntityVersion = 0;
 const cloudCaseMutations = new Map();
 const cloudBookingMutations = new Map();
 const cloudAuditMutations = new Map();
 let cloudWorkshopSettingsMutation = null;
 let durableWorkshopSettingsFingerprint = "";
+const observedGranularEntityMetadata = new Map();
+const durableOutboxEntityBaseVersions = new Map();
+const OBSERVED_GRANULAR_METADATA_PREFIX = "granular-observed:";
 
 function cloneGranularSyncValue(value) {
   if (value === undefined) return undefined;
@@ -282,20 +284,63 @@ function findCloudMutationValue(candidate, entityType, marker) {
   return (Array.isArray(collection) ? collection : []).find((entry) => String(entry?.id || "") === marker.entityId) || null;
 }
 
-function getCloudMutationEntityVersion(marker, value) {
-  if (Number.isSafeInteger(marker.entityVersion) && marker.entityVersion > 0) return marker.entityVersion;
-  const valueTimestamp = Date.parse(value?.updatedAt || "");
-  const markerTimestamp = Date.parse(marker.updatedAt || "");
-  const milliseconds = Math.max(
-    Number.isFinite(valueTimestamp) ? Math.max(0, valueTimestamp) : 0,
-    Number.isFinite(markerTimestamp) ? Math.max(0, markerTimestamp) : Date.now(),
-  );
-  // Millisecond time gives versions continuity across reloads; the bounded
-  // generation suffix deterministically orders mutations captured in one tick.
-  const candidate = (milliseconds * 1000) + (Math.max(0, Number(marker.generation || 0)) % 1000);
-  lastCloudEntityVersion = Math.max(candidate, lastCloudEntityVersion + 1);
-  marker.entityVersion = lastCloudEntityVersion;
-  return marker.entityVersion;
+function getObservedGranularMetadataKey(workshopId, entityType, entityId) {
+  return `${OBSERVED_GRANULAR_METADATA_PREFIX}${String(workshopId || getOutboxWorkshopId())}:${String(entityType || "")}:${String(entityId || "")}`;
+}
+
+function normalizeObservedGranularMetadata(value = {}) {
+  const serverVersion = normalizeOutboxExpectedVersion(value.serverVersion ?? value.entityVersion);
+  return {
+    key: String(value.key || getObservedGranularMetadataKey(value.workshopId, value.entityType, value.entityId)),
+    workshopId: String(value.workshopId || getOutboxWorkshopId()),
+    entityType: String(value.entityType || ""),
+    entityId: String(value.entityId || ""),
+    serverVersion,
+    lastOperationId: String(value.lastOperationId || value.last_operation_id || ""),
+    deleted: Boolean(value.deleted ?? value.deletedAt ?? value.deleted_at),
+    updatedAt: value.updatedAt || value.updated_at || new Date().toISOString(),
+  };
+}
+
+function selectMonotonicObservedGranularMetadata(currentValue, incomingValue) {
+  const incoming = normalizeObservedGranularMetadata(incomingValue);
+  const current = currentValue ? normalizeObservedGranularMetadata(currentValue) : null;
+  if (!current || current.key !== incoming.key) return incoming;
+  const currentVersion = normalizeOutboxExpectedVersion(current.serverVersion);
+  const incomingVersion = normalizeOutboxExpectedVersion(incoming.serverVersion);
+  if (currentVersion !== null && (incomingVersion === null || incomingVersion < currentVersion)) return current;
+  if (currentVersion === incomingVersion && currentVersion !== null) {
+    const operationContradiction = Boolean(
+      current.lastOperationId
+      && incoming.lastOperationId
+      && current.lastOperationId !== incoming.lastOperationId
+    );
+    if (operationContradiction || current.deleted !== incoming.deleted) return current;
+  }
+  return incoming;
+}
+
+function getObservedGranularEntityMetadata(workshopId, entityType, entityId) {
+  return observedGranularEntityMetadata.get(getObservedGranularMetadataKey(workshopId, entityType, entityId)) || null;
+}
+
+function getObservedGranularServerVersion(workshopId, entityType, entityId) {
+  return getObservedGranularEntityMetadata(workshopId, entityType, entityId)?.serverVersion ?? null;
+}
+
+function getMutationBaseVersion(workshopId, entityType, entityId) {
+  const key = [workshopId, entityType, entityId].map((value) => String(value || "")).join("|");
+  if (!durableOutboxEntityBaseVersions.size && typeof readDurableOutboxMirror === "function") {
+    readDurableOutboxMirror().forEach((entry) => {
+      if (!["pending", "processing", "failed", "conflicted", "conflict"].includes(entry.syncStatus || entry.status)) return;
+      const entryKey = [entry.workshopId, entry.entityType, entry.entityId].map((value) => String(value || "")).join("|");
+      if (!durableOutboxEntityBaseVersions.has(entryKey)) {
+        durableOutboxEntityBaseVersions.set(entryKey, normalizeOutboxExpectedVersion(entry.baseVersion ?? entry.expectedVersion));
+      }
+    });
+  }
+  if (durableOutboxEntityBaseVersions.has(key)) return durableOutboxEntityBaseVersions.get(key);
+  return getObservedGranularServerVersion(workshopId, entityType, entityId);
 }
 
 function captureEntityMutationBatch(candidate = state, options = {}) {
@@ -305,9 +350,12 @@ function captureEntityMutationBatch(candidate = state, options = {}) {
     collection.forEach((marker) => {
       const value = findCloudMutationValue(candidate, entityType, marker);
       if (marker.action !== "delete" && !value) return;
-      const versionValue = value || marker.value;
-      const entityVersion = getCloudMutationEntityVersion(marker, versionValue);
-      const localBaseVersion = Math.max(0, Number(value?.localRevision || value?.version || 0));
+      const entityVersion = null;
+      const baseVersion = getMutationBaseVersion(
+        options.workshopId || getOutboxWorkshopId(),
+        entityType,
+        marker.entityId,
+      );
       const deletePayload = entityType === "case" && marker.value
         ? {
           projectionLocalId: typeof caseSyncLocalId === "function"
@@ -320,7 +368,8 @@ function captureEntityMutationBatch(candidate = state, options = {}) {
         entityId: marker.entityId,
         action: marker.action,
         entityVersion,
-        expectedVersion: marker.action === "upsert" && localBaseVersion > 0 ? localBaseVersion - 1 : null,
+        baseVersion,
+        expectedVersion: baseVersion,
         updatedAt: value?.updatedAt || marker.updatedAt,
         generation: marker.generation,
         payload: marker.action === "delete" ? deletePayload : { entity: cloneGranularSyncValue(value) },
@@ -344,10 +393,19 @@ function captureEntityMutationBatch(candidate = state, options = {}) {
   if (cloudWorkshopSettingsMutation) {
     captured.push({
       entityType: "workshop_settings",
-      entityId: options.workshopId || getOutboxWorkshopId(),
+      entityId: "workshop_settings",
       action: "upsert",
-      entityVersion: cloudWorkshopSettingsMutation.generation,
-      expectedVersion: null,
+      entityVersion: null,
+      baseVersion: getMutationBaseVersion(
+        options.workshopId || getOutboxWorkshopId(),
+        "workshop_settings",
+        "workshop_settings",
+      ),
+      expectedVersion: getMutationBaseVersion(
+        options.workshopId || getOutboxWorkshopId(),
+        "workshop_settings",
+        "workshop_settings",
+      ),
       updatedAt: cloudWorkshopSettingsMutation.updatedAt,
       generation: cloudWorkshopSettingsMutation.generation,
       settingsFingerprint: cloudWorkshopSettingsMutation.fingerprint,
@@ -363,20 +421,19 @@ function captureEntityMutationBatch(candidate = state, options = {}) {
 
 function buildDurableOperationFromEntityMutation(mutation, options = {}) {
   const workshopId = String(options.workshopId || getOutboxWorkshopId());
-  const versionToken = mutation.entityVersion ?? mutation.generation ?? 0;
-  const stableToken = [workshopId, mutation.entityType, mutation.entityId, mutation.action, versionToken]
-    .map((part) => String(part || "0").replace(/[^a-zA-Z0-9:_-]/g, "-"))
-    .join(":");
+  const operationId = makeOutboxIdentifier("operation");
+  const baseVersion = Object.hasOwn(mutation, "baseVersion") ? mutation.baseVersion : mutation.expectedVersion;
   return normalizeDurableOutboxOperation({
-    operationId: `operation:${stableToken}`,
-    idempotencyKey: stableToken,
+    operationId,
+    idempotencyKey: `${workshopId}:${operationId}`,
     workshopId,
     userId: options.userId || getOutboxUserId(),
     entityType: mutation.entityType,
     entityId: mutation.entityId,
     action: mutation.action,
     entityVersion: mutation.entityVersion,
-    expectedVersion: mutation.expectedVersion,
+    baseVersion,
+    expectedVersion: baseVersion,
     payload: mutation.payload,
     updatedAt: mutation.updatedAt,
     syncStatus: "pending",
@@ -885,7 +942,6 @@ function getSyncStateFingerprint(candidateState = state) {
   );
 }
 
-const DURABLE_OUTBOX_ACTIVE_STATUSES = new Set(["pending", "processing", "failed", "conflict"]);
 const DURABLE_OUTBOX_MAX_RETRY_COUNT = 10;
 let durableOutboxMutationTail = Promise.resolve();
 
@@ -905,7 +961,7 @@ function getDurableOutboxEquivalenceKey(input = {}) {
     operation.entityType,
     operation.entityId,
     operation.action,
-    operation.expectedVersion === null ? "null" : String(operation.expectedVersion),
+    operation.baseVersion === null ? "null" : String(operation.baseVersion),
     operation.snapshotFingerprint || "no-fingerprint",
   ].join("|");
 }
@@ -977,7 +1033,7 @@ function chooseMergedOutboxStatus(entries, candidate) {
     return "processing";
   }
   if (candidate.syncStatus === "pending" || entries.some((entry) => entry.syncStatus === "pending")) return "pending";
-  if (candidate.syncStatus === "conflict" || entries.some((entry) => entry.syncStatus === "conflict")) return "conflict";
+  if (candidate.syncStatus === "conflicted" || entries.some((entry) => entry.syncStatus === "conflicted")) return "conflicted";
   return "failed";
 }
 
@@ -995,6 +1051,8 @@ function mergeEquivalentOutboxOperations(entries, candidate) {
     operationId: keeper.operationId,
     idempotencyKey: keeper.idempotencyKey,
     createdAt: keeper.createdAt,
+    baseVersion: isGranularCoalescibleOperation(candidate) ? keeper.baseVersion : candidate.baseVersion,
+    expectedVersion: isGranularCoalescibleOperation(candidate) ? keeper.baseVersion : candidate.baseVersion,
     payload: isGranularCoalescibleOperation(candidate)
       ? cloneGranularSyncValue(candidate.payload || {})
       : {
@@ -1030,7 +1088,9 @@ async function consolidateDurableOutboxOperations() {
     const groups = new Map();
     const retained = [];
     records.forEach((entry) => {
-      if (!DURABLE_OUTBOX_ACTIVE_STATUSES.has(entry.syncStatus)) {
+      // Only never-sent pending envelopes are mutable. Processing, failed, and
+      // conflicted operations may already be known to the server.
+      if (entry.syncStatus !== "pending") {
         retained.push(entry);
         return;
       }
@@ -1051,7 +1111,7 @@ async function acknowledgeEquivalentDurableOutboxOperations(reference, acknowled
   return runDurableOutboxMutation(async () => {
     const records = await loadDurableOutboxOperations();
     const equivalent = records.filter((entry) => (
-      DURABLE_OUTBOX_ACTIVE_STATUSES.has(entry.syncStatus)
+      ["pending", "processing", "failed"].includes(entry.syncStatus)
       && areDurableOutboxOperationsEquivalent(entry, reference)
     ));
     const equivalentIds = new Set(equivalent.map((entry) => entry.operationId));
@@ -1073,16 +1133,23 @@ async function acknowledgeEquivalentDurableOutboxOperations(reference, acknowled
 function normalizeDurableOutboxOperation(input = {}) {
   const createdAt = input.createdAt || new Date().toISOString();
   const operationId = String(input.operationId || input.id || makeOutboxIdentifier("operation"));
+  const inputEntityType = String(input.entityType || "workshop_state");
+  // A P0-009 mutable envelope has no baseVersion; its expectedVersion was a
+  // localRevision-domain value and must never be reinterpreted as server CAS.
+  const rawBaseVersion = Object.hasOwn(input, "baseVersion")
+    ? input.baseVersion
+    : (["case", "booking", "workshop_settings"].includes(inputEntityType) ? null : input.expectedVersion);
   return {
     operationId,
     idempotencyKey: String(input.idempotencyKey || `${input.workshopId || getOutboxWorkshopId()}:${operationId}`),
-    entityType: String(input.entityType || "workshop_state"),
+    entityType: inputEntityType,
     entityId: String(input.entityId || input.workshopId || getOutboxWorkshopId()),
     action: String(input.action || "upsert_snapshot"),
     payload: input.payload && typeof input.payload === "object" ? cloneGranularSyncValue(input.payload) : {},
     workshopId: String(input.workshopId || getOutboxWorkshopId()),
     userId: String(input.userId || getOutboxUserId()),
-    expectedVersion: normalizeOutboxExpectedVersion(input.expectedVersion),
+    baseVersion: normalizeOutboxExpectedVersion(rawBaseVersion),
+    expectedVersion: normalizeOutboxExpectedVersion(rawBaseVersion),
     entityVersion: normalizeOutboxExpectedVersion(input.entityVersion),
     snapshotFingerprint: normalizeOutboxSnapshotFingerprint(
       input.snapshotFingerprint || input.payload?.snapshotFingerprint,
@@ -1091,9 +1158,18 @@ function normalizeDurableOutboxOperation(input = {}) {
     lastError: String(input.lastError || input.error || ""),
     createdAt,
     updatedAt: input.updatedAt || createdAt,
-    syncStatus: ["pending", "processing", "failed", "conflict", "acknowledged"].includes(input.syncStatus || input.status)
-      ? (input.syncStatus || input.status)
+    syncStatus: ["pending", "processing", "failed", "conflicted", "conflict", "acknowledged"].includes(input.syncStatus || input.status)
+      ? ((input.syncStatus || input.status) === "conflict" ? "conflicted" : (input.syncStatus || input.status))
       : "pending",
+    conflictId: String(input.conflictId || ""),
+    serverVersion: normalizeOutboxExpectedVersion(input.serverVersion),
+    canonical: input.canonical && typeof input.canonical === "object" ? cloneGranularSyncValue(input.canonical) : null,
+    conflictServerVersion: normalizeOutboxExpectedVersion(input.conflictServerVersion),
+    conflictCanonical: input.conflictCanonical && typeof input.conflictCanonical === "object" ? cloneGranularSyncValue(input.conflictCanonical) : null,
+    conflictBaseVersion: normalizeOutboxExpectedVersion(input.conflictBaseVersion),
+    conflictLocalPayload: input.conflictLocalPayload && typeof input.conflictLocalPayload === "object" ? cloneGranularSyncValue(input.conflictLocalPayload) : null,
+    conflictServerPayload: input.conflictServerPayload && typeof input.conflictServerPayload === "object" ? cloneGranularSyncValue(input.conflictServerPayload) : null,
+    conflictDetectedAt: input.conflictDetectedAt || null,
     description: String(input.description || "Mise à jour des données"),
   };
 }
@@ -1118,7 +1194,8 @@ function publishDurableOutboxMirror(records = []) {
     entityId: record.entityId,
     action: record.action,
     workshopId: record.workshopId,
-    expectedVersion: record.expectedVersion,
+    baseVersion: record.baseVersion,
+    expectedVersion: record.baseVersion,
     snapshotFingerprint: record.snapshotFingerprint,
     retryCount: record.retryCount,
     lastError: record.lastError,
@@ -1126,6 +1203,14 @@ function publishDurableOutboxMirror(records = []) {
     updatedAt: record.updatedAt,
     syncStatus: record.syncStatus,
   }));
+  durableOutboxEntityBaseVersions.clear();
+  compact.forEach((entry) => {
+    if (!["pending", "processing", "failed", "conflicted"].includes(entry.syncStatus)) return;
+    const entityKey = [entry.workshopId, entry.entityType, entry.entityId].map((value) => String(value || "")).join("|");
+    if (!durableOutboxEntityBaseVersions.has(entityKey)) {
+      durableOutboxEntityBaseVersions.set(entityKey, entry.baseVersion);
+    }
+  });
   try {
     localStorage.setItem(DURABLE_OUTBOX_MIRROR_KEY, JSON.stringify(compact));
     localStorage.setItem("nimr-sav-offline-queue", JSON.stringify(compact.map((entry) => ({
@@ -1138,7 +1223,8 @@ function publishDurableOutboxMirror(records = []) {
       entityId: entry.entityId,
       action: entry.action,
       workshopId: entry.workshopId,
-      expectedVersion: entry.expectedVersion,
+      baseVersion: entry.baseVersion,
+      expectedVersion: entry.baseVersion,
       snapshotFingerprint: entry.snapshotFingerprint,
       status: entry.syncStatus === "acknowledged" ? "success" : entry.syncStatus,
       attempts: entry.retryCount,
@@ -1149,8 +1235,8 @@ function publishDurableOutboxMirror(records = []) {
     // Le miroir compact est informatif ; IndexedDB reste la source durable.
   }
   window.NIMR_OUTBOX_STATUS = {
-    pending: compact.filter((entry) => ["pending", "processing", "failed", "conflict"].includes(entry.syncStatus)).length,
-    conflicts: compact.filter((entry) => entry.syncStatus === "conflict").length,
+    pending: compact.filter((entry) => ["pending", "processing", "failed", "conflicted"].includes(entry.syncStatus)).length,
+    conflicts: compact.filter((entry) => entry.syncStatus === "conflicted").length,
     failed: compact.filter((entry) => entry.syncStatus === "failed").length,
     lastError: compact.slice().reverse().find((entry) => entry.lastError)?.lastError || "",
     operations: compact,
@@ -1176,6 +1262,8 @@ async function putDurableOutboxOperation(input) {
   const operation = normalizeDurableOutboxOperation(input);
   return runDurableOutboxMutation(async () => {
     const records = await loadDurableOutboxOperations();
+    const existing = records.find((entry) => entry.operationId === operation.operationId);
+    if (existing && existing.syncStatus !== "pending") return existing;
     const retained = records.filter((entry) => entry.operationId !== operation.operationId);
     retained.push(operation);
     await replaceDurableOutboxOperations(retained);
@@ -1193,6 +1281,9 @@ async function deleteDurableOutboxOperation(operationId) {
 function mergeDurableOutboxCandidate(records, candidate) {
     const sameOperation = records.find((entry) => entry.operationId === candidate.operationId);
     if (sameOperation) {
+      if (sameOperation.syncStatus !== "pending") {
+        return { operation: sameOperation, records };
+      }
       const replacement = normalizeDurableOutboxOperation({
         ...sameOperation,
         ...candidate,
@@ -1206,7 +1297,7 @@ function mergeDurableOutboxCandidate(records, candidate) {
       };
     }
     const mergeable = records.filter((entry) => (
-      DURABLE_OUTBOX_ACTIVE_STATUSES.has(entry.syncStatus)
+      entry.syncStatus === "pending"
       && (
         (
           entry.syncStatus === "pending"
@@ -1329,6 +1420,227 @@ async function putSyncMetadata(key, value = {}) {
   return record;
 }
 
+async function hydrateObservedGranularEntityMetadata(workshopId = "") {
+  let records = [];
+  if (typeof indexedDB === "undefined") {
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const storageKey = localStorage.key(index);
+      if (!storageKey?.startsWith(`nimr-sav-sync-metadata:${OBSERVED_GRANULAR_METADATA_PREFIX}`)) continue;
+      try { records.push(JSON.parse(localStorage.getItem(storageKey) || "null")); } catch { /* ignore corrupt metadata */ }
+    }
+  } else {
+    records = await runIndexedDbTransaction(SYNC_METADATA_STORE, "readonly", (store) => store.getAll());
+  }
+  const normalizedWorkshopId = String(workshopId || "");
+  (records || []).filter((record) => String(record?.key || "").startsWith(OBSERVED_GRANULAR_METADATA_PREFIX))
+    .map(normalizeObservedGranularMetadata)
+    .filter((record) => !normalizedWorkshopId || record.workshopId === normalizedWorkshopId)
+    .forEach((record) => observedGranularEntityMetadata.set(record.key, record));
+  return [...observedGranularEntityMetadata.values()]
+    .filter((record) => !normalizedWorkshopId || record.workshopId === normalizedWorkshopId);
+}
+
+async function rememberObservedGranularEntityMetadata(value = {}) {
+  const record = normalizeObservedGranularMetadata(value);
+  if (!record.entityType || !record.entityId) throw new Error("Identité canonique observée requise.");
+  const persisted = await runDurableOutboxMutation(async () => {
+    if (typeof indexedDB === "undefined") {
+      const current = await loadSyncMetadata(record.key);
+      const selected = selectMonotonicObservedGranularMetadata(current, record);
+      if (current && selected.serverVersion === normalizeObservedGranularMetadata(current).serverVersion
+        && selected.serverVersion !== record.serverVersion) return selected;
+      return normalizeObservedGranularMetadata(await putSyncMetadata(record.key, selected));
+    }
+    let selected = record;
+    await runIndexedDbStoresTransaction(SYNC_METADATA_STORE, "readwrite", (stores) => {
+      const store = stores[SYNC_METADATA_STORE];
+      const request = store.get(record.key);
+      request.onsuccess = () => {
+        selected = selectMonotonicObservedGranularMetadata(request.result, record);
+        if (!request.result || selected.serverVersion === record.serverVersion) store.put(selected);
+      };
+      return null;
+    });
+    return selected;
+  });
+  observedGranularEntityMetadata.set(persisted.key, persisted);
+  return persisted;
+}
+
+async function findActiveDurableOutboxOperationForEntity(workshopId, entityType, entityId) {
+  const records = await loadDurableOutboxOperations();
+  return records.find((entry) => (
+    entry.workshopId === String(workshopId || "")
+    && entry.entityType === String(entityType || "")
+    && entry.entityId === String(entityId || "")
+    && ["pending", "processing", "failed", "conflicted"].includes(entry.syncStatus)
+  )) || null;
+}
+
+async function completeDurableOutboxOperationAtomically(operationId, observedValue = {}, acknowledgement = {}) {
+  const id = String(operationId || "");
+  const observed = normalizeObservedGranularMetadata(observedValue);
+  if (!id || !observed.entityType || !observed.entityId) throw new Error("Accusé CAS incomplet.");
+  if (typeof indexedDB === "undefined") {
+    const records = readOutboxFallback();
+    const matched = records.find((entry) => entry.operationId === id) || null;
+    if (!matched) return { acknowledged: null, remaining: records };
+    const currentObserved = await loadSyncMetadata(observed.key);
+    const settledObserved = selectMonotonicObservedGranularMetadata(currentObserved, observed);
+    // localStorage cannot span keys transactionally. Keep a recovery journal
+    // until both bounded records are durable.
+    const journalKey = `nimr-sav-cas-commit:${id}`;
+    localStorage.setItem(journalKey, JSON.stringify({ operationId: id, observed: settledObserved }));
+    await putSyncMetadata(settledObserved.key, settledObserved);
+    const retained = records.filter((entry) => entry.operationId !== id);
+    writeOutboxFallback(retained);
+    localStorage.removeItem(journalKey);
+    observedGranularEntityMetadata.set(settledObserved.key, settledObserved);
+    publishDurableOutboxMirror(retained);
+    return { acknowledged: { ...matched, syncStatus: "acknowledged", acknowledgedAt: acknowledgement.updatedAt || new Date().toISOString() }, remaining: retained };
+  }
+  const result = await runDurableOutboxMutation(async () => {
+    let acknowledged = null;
+    let settledObserved = null;
+    await runIndexedDbStoresTransaction(
+      [DURABLE_OUTBOX_STORE, SYNC_METADATA_STORE],
+      "readwrite",
+      (stores) => {
+        const request = stores[DURABLE_OUTBOX_STORE].get(id);
+        request.onsuccess = () => {
+          if (!request.result) return;
+          acknowledged = normalizeDurableOutboxOperation(request.result);
+          const metadataRequest = stores[SYNC_METADATA_STORE].get(observed.key);
+          metadataRequest.onsuccess = () => {
+            settledObserved = selectMonotonicObservedGranularMetadata(metadataRequest.result, observed);
+            stores[SYNC_METADATA_STORE].put(settledObserved);
+            stores[DURABLE_OUTBOX_STORE].delete(id);
+          };
+        };
+        return null;
+      },
+    );
+    const remaining = await loadDurableOutboxOperations();
+    return { acknowledged, remaining, settledObserved };
+  });
+  if (result.acknowledged && result.settledObserved) {
+    observedGranularEntityMetadata.set(result.settledObserved.key, result.settledObserved);
+  }
+  return { acknowledged: result.acknowledged, remaining: result.remaining };
+}
+
+async function conflictDurableOutboxOperationAtomically(operationId, observedValue = {}, conflict = {}) {
+  const id = String(operationId || "");
+  const observed = normalizeObservedGranularMetadata(observedValue);
+  if (!id || !observed.entityType || !observed.entityId) throw new Error("Transition de conflit CAS incomplète.");
+  const changes = {
+    syncStatus: "conflicted",
+    conflictId: String(conflict.conflictId || conflict.id || ""),
+    serverVersion: normalizeOutboxExpectedVersion(conflict.serverVersion ?? observed.serverVersion),
+    canonical: conflict.canonical || null,
+    conflictServerVersion: normalizeOutboxExpectedVersion(conflict.conflictServerVersion),
+    conflictCanonical: conflict.conflictCanonical || null,
+    conflictBaseVersion: normalizeOutboxExpectedVersion(conflict.baseVersion),
+    conflictLocalPayload: conflict.localPayload || null,
+    conflictServerPayload: conflict.serverPayload || null,
+    conflictDetectedAt: conflict.detectedAt || null,
+    lastError: String(conflict.message || "Conflit de concurrence serveur"),
+  };
+  if (typeof indexedDB === "undefined") {
+    const records = readOutboxFallback();
+    const current = records.find((entry) => entry.operationId === id);
+    if (!current) return null;
+    const updated = normalizeDurableOutboxOperation({ ...current, ...changes, operationId: id });
+    const next = records.map((entry) => entry.operationId === id ? updated : entry);
+    const currentObserved = await loadSyncMetadata(observed.key);
+    const settledObserved = selectMonotonicObservedGranularMetadata(currentObserved, observed);
+    const journalKey = `nimr-sav-cas-conflict:${id}`;
+    localStorage.setItem(journalKey, JSON.stringify({ operation: updated, observed: settledObserved }));
+    await putSyncMetadata(settledObserved.key, settledObserved);
+    writeOutboxFallback(next);
+    localStorage.removeItem(journalKey);
+    observedGranularEntityMetadata.set(settledObserved.key, settledObserved);
+    publishDurableOutboxMirror(next);
+    return updated;
+  }
+  let updated = null;
+  let settledObserved = null;
+  await runDurableOutboxMutation(async () => {
+    await runIndexedDbStoresTransaction(
+      [DURABLE_OUTBOX_STORE, SYNC_METADATA_STORE],
+      "readwrite",
+      (stores) => {
+        const request = stores[DURABLE_OUTBOX_STORE].get(id);
+        request.onsuccess = () => {
+          if (!request.result) return;
+          updated = normalizeDurableOutboxOperation({ ...request.result, ...changes, operationId: id });
+          const metadataRequest = stores[SYNC_METADATA_STORE].get(observed.key);
+          metadataRequest.onsuccess = () => {
+            settledObserved = selectMonotonicObservedGranularMetadata(metadataRequest.result, observed);
+            stores[SYNC_METADATA_STORE].put(settledObserved);
+            stores[DURABLE_OUTBOX_STORE].put(updated);
+          };
+        };
+        return null;
+      },
+    );
+    await loadDurableOutboxOperations();
+  });
+  if (updated && settledObserved) observedGranularEntityMetadata.set(settledObserved.key, settledObserved);
+  return updated;
+}
+
+async function resolveConflictedOutboxOperationAtomically(operationId, observedValue = {}, replacementInput = null) {
+  const id = String(operationId || "");
+  const observed = normalizeObservedGranularMetadata(observedValue);
+  const replacement = replacementInput ? normalizeDurableOutboxOperation(replacementInput) : null;
+  if (!id || !observed.entityType || !observed.entityId) throw new Error("Résolution de conflit CAS incomplète.");
+  if (replacement && replacement.operationId === id) throw new Error("KEEP LOCAL exige un nouvel operationId.");
+  if (typeof indexedDB === "undefined") {
+    const records = readOutboxFallback();
+    const current = records.find((entry) => entry.operationId === id);
+    if (!current) return { resolved: null, replacement: null };
+    const next = records.filter((entry) => entry.operationId !== id);
+    if (replacement) next.push(replacement);
+    const currentObserved = await loadSyncMetadata(observed.key);
+    const settledObserved = selectMonotonicObservedGranularMetadata(currentObserved, observed);
+    const journalKey = `nimr-sav-cas-resolution:${id}`;
+    localStorage.setItem(journalKey, JSON.stringify({ operationId: id, observed: settledObserved, replacement }));
+    await putSyncMetadata(settledObserved.key, settledObserved);
+    writeOutboxFallback(next);
+    localStorage.removeItem(journalKey);
+    observedGranularEntityMetadata.set(settledObserved.key, settledObserved);
+    publishDurableOutboxMirror(next);
+    return { resolved: current, replacement };
+  }
+  let resolved = null;
+  let settledObserved = null;
+  await runDurableOutboxMutation(async () => {
+    await runIndexedDbStoresTransaction(
+      [DURABLE_OUTBOX_STORE, SYNC_METADATA_STORE],
+      "readwrite",
+      (stores) => {
+        const request = stores[DURABLE_OUTBOX_STORE].get(id);
+        request.onsuccess = () => {
+          if (!request.result) return;
+          resolved = normalizeDurableOutboxOperation(request.result);
+          const metadataRequest = stores[SYNC_METADATA_STORE].get(observed.key);
+          metadataRequest.onsuccess = () => {
+            settledObserved = selectMonotonicObservedGranularMetadata(metadataRequest.result, observed);
+            stores[SYNC_METADATA_STORE].put(settledObserved);
+            stores[DURABLE_OUTBOX_STORE].delete(id);
+            if (replacement) stores[DURABLE_OUTBOX_STORE].put(replacement);
+          };
+        };
+        return null;
+      },
+    );
+    await loadDurableOutboxOperations();
+  });
+  if (resolved && settledObserved) observedGranularEntityMetadata.set(settledObserved.key, settledObserved);
+  return { resolved, replacement: resolved ? replacement : null };
+}
+
 async function updateDurableOutboxOperation(operationId, changes = {}) {
   return runDurableOutboxMutation(async () => {
     const records = await loadDurableOutboxOperations();
@@ -1365,7 +1677,7 @@ function readDurableOutboxMirror() {
 }
 
 function getPendingOutboxCount() {
-  return readDurableOutboxMirror().filter((entry) => ["pending", "processing", "failed", "conflict"].includes(entry.syncStatus)).length;
+  return readDurableOutboxMirror().filter((entry) => ["pending", "processing", "failed", "conflicted"].includes(entry.syncStatus)).length;
 }
 
 window.estimateStateJsonBytes = estimateStateJsonBytes;
@@ -1402,6 +1714,15 @@ window.sortDurableOutboxOperationsForSend = sortDurableOutboxOperationsForSend;
 window.selectGranularRowsAfterCursor = selectGranularRowsAfterCursor;
 window.loadSyncMetadata = loadSyncMetadata;
 window.putSyncMetadata = putSyncMetadata;
+window.getObservedGranularMetadataKey = getObservedGranularMetadataKey;
+window.getObservedGranularEntityMetadata = getObservedGranularEntityMetadata;
+window.getObservedGranularServerVersion = getObservedGranularServerVersion;
+window.hydrateObservedGranularEntityMetadata = hydrateObservedGranularEntityMetadata;
+window.rememberObservedGranularEntityMetadata = rememberObservedGranularEntityMetadata;
+window.findActiveDurableOutboxOperationForEntity = findActiveDurableOutboxOperationForEntity;
+window.completeDurableOutboxOperationAtomically = completeDurableOutboxOperationAtomically;
+window.conflictDurableOutboxOperationAtomically = conflictDurableOutboxOperationAtomically;
+window.resolveConflictedOutboxOperationAtomically = resolveConflictedOutboxOperationAtomically;
 
 window.getDurableOutboxEquivalenceKey = getDurableOutboxEquivalenceKey;
 window.areDurableOutboxOperationsEquivalent = areDurableOutboxOperationsEquivalent;

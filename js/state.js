@@ -3521,6 +3521,44 @@ function resolveSyncConflict(conflictIdOrKey, action = "mark_resolved") {
   const index = conflicts.findIndex((conflict) => conflict.id === conflictIdOrKey || conflict.conflictKey === conflictIdOrKey);
   if (index < 0) return { ok: false, message: "Conflit introuvable." };
   const conflict = { ...conflicts[index] };
+  if (conflict.type === "server_entity_conflict") {
+    if (!["accept_cloud", "keep_local"].includes(action)) {
+      return { ok: false, message: "Choisissez la version serveur ou conservez explicitement la version locale." };
+    }
+    if (typeof resolveCanonicalConcurrencyConflict !== "function") {
+      return { ok: false, message: "Résolution CAS indisponible." };
+    }
+    const completion = Promise.resolve(resolveCanonicalConcurrencyConflict(conflict, action)).then((result) => {
+      const latest = normalizeSyncConflicts(state.syncConflicts);
+      const latestIndex = latest.findIndex((entry) => entry.id === conflict.id || entry.conflictKey === conflict.conflictKey);
+      if (latestIndex >= 0) {
+        latest[latestIndex] = {
+          ...latest[latestIndex],
+          status: "resolved",
+          decision: action === "accept_cloud" ? "accepted_cloud" : "kept_local",
+          resolution: action === "accept_cloud" ? "accept_server" : "keep_local",
+          replacementOperationId: result.replacementOperationId || "",
+          resolvedAt: new Date().toISOString(),
+          resolvedBy: typeof getCurrentActor === "function" ? (getCurrentActor()?.userName || "Atelier") : "Atelier",
+        };
+        state.syncConflicts = normalizeSyncConflicts(latest);
+        saveState({ skipCloud: true, skipSnapshot: true, boundedEntityDetection: true });
+      }
+      if (typeof renderSyncStatusStrip === "function") renderSyncStatusStrip();
+      return result;
+    }).catch((error) => {
+      const latest = normalizeSyncConflicts(state.syncConflicts);
+      const latestIndex = latest.findIndex((entry) => entry.id === conflict.id || entry.conflictKey === conflict.conflictKey);
+      if (latestIndex >= 0) {
+        latest[latestIndex] = { ...latest[latestIndex], status: "open", lastError: String(error?.message || error) };
+        state.syncConflicts = normalizeSyncConflicts(latest);
+        saveState({ skipCloud: true, skipSnapshot: true, boundedEntityDetection: true });
+      }
+      if (typeof renderSyncStatusStrip === "function") renderSyncStatusStrip();
+      return { ok: false, error: String(error?.message || error) };
+    });
+    return { ok: true, pending: true, conflict, completion };
+  }
   const actor = typeof getCurrentActor === "function" ? getCurrentActor() : { userName: "Atelier", userRole: "", resourceId: "" };
   const conflictCaseId = conflict.caseId || conflict.entityId || "";
   if (conflictCaseId) noteCaseRevisionCandidate(conflictCaseId);

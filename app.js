@@ -274,8 +274,7 @@ function bindCaseCreation() {
       submitButton.disabled = true;
     }
     try {
-      const result = await createCaseFromPdfEstimate(quickEstimateCreationDraft, estimateFile, overrides);
-      saveState({ changedCase: result.item });
+      const result = await createAndPersistCaseFromPdfEstimate(quickEstimateCreationDraft, estimateFile, overrides);
       activeCaseId = result.item.id;
       activeCaseDetailTab = "planning";
       resetPdfEstimateCreation(form);
@@ -568,6 +567,20 @@ async function createCaseFromPdfEstimate(draft, estimateFile = null, overrides =
     generatedProposals[item.id] = planningPreparation;
   }
   return { item, claim: appliedClaim, preview, planningPreparation };
+}
+
+async function createAndPersistCaseFromPdfEstimate(draft, estimateFile = null, overrides = {}, persistenceOptions = {}) {
+  const result = await createCaseFromPdfEstimate(draft, estimateFile, overrides);
+  const persisted = await saveState({
+    ...persistenceOptions,
+    changedCase: result.item,
+    flushCloud: true,
+    cloudReason: "case-created-from-pdf",
+  });
+  if (!persisted) {
+    throw new Error("Le dossier est créé localement, mais sa mise en file de synchronisation a échoué. Réessayez avant de fermer l’application.");
+  }
+  return result;
 }
 
 

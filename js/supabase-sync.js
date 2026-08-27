@@ -908,7 +908,6 @@ async function saveLocalToSupabase() {
       supabaseUser: user.email || user.id,
     }));
     saveState({ skipCloud: true, skipSnapshot: true });
-    markLocalCasesAsSynced();
 
     setSupabaseStatus("Sauvegarde Supabase terminée.", "ok");
     setSupabaseDetails(`${stats.repairOrders} dossier(s), ${stats.clients} client(s), ${stats.vehicles} véhicule(s), ${stats.repairSteps} étape(s), ${stats.resources} ressource(s), ${stats.holidays} jour(s) férié(s), ${stats.workHoursDays} jour(s) horaire(s), ${stats.planningSlotsManagedByRpc ?? stats.planningSlots ?? 0} créneau(x) protégé(s) par RPC atomique, ${stats.claims || 0} ordre(s), ${stats.supplements || 0} complément(s), ${stats.photos} photo(s) synchronisé(s). Réglages enregistrés dans app_settings.`);
@@ -2295,11 +2294,51 @@ async function loadRestoreSafetySnapshot() {
   return parsed;
 }
 
-async function confirmRemoteBackupConflict(data, reason) {
+async function hasLocalBusinessStateForBootstrap() {
+  const workshopId = getSupabaseWorkshopId();
+  const operations = typeof loadDurableOutboxOperations === "function"
+    ? await loadDurableOutboxOperations()
+    : [];
+  const hasActiveBusinessOperation = operations.some((operation) => (
+    ["case", "booking"].includes(String(operation?.entityType || ""))
+    && !["acknowledged", "completed"].includes(String(operation?.syncStatus || operation?.status || ""))
+  ));
+  if (hasActiveBusinessOperation) return true;
+
+  const hasObservedCanonicalEntity = (entityType, entityId) => {
+    if (typeof getObservedGranularEntityMetadata !== "function") return false;
+    const observed = getObservedGranularEntityMetadata(workshopId, entityType, entityId);
+    return Number.isFinite(Number(observed?.serverVersion)) && Number(observed.serverVersion) >= 0;
+  };
+  const hasUnacknowledgedCase = (state?.cases || []).some((item) => {
+    const entityId = String(item?.id || "");
+    if (!entityId) return true;
+    if (hasObservedCanonicalEntity("case", entityId)) return false;
+    const localRevision = Number(item?.localRevision);
+    const syncRevision = Number(item?.syncRevision);
+    return !Number.isFinite(localRevision)
+      || !Number.isFinite(syncRevision)
+      || localRevision <= 0
+      || syncRevision < localRevision;
+  });
+  if (hasUnacknowledgedCase) return true;
+
+  return (state?.bookings || []).some((booking) => {
+    const entityId = String(booking?.id || "");
+    return !entityId || !hasObservedCanonicalEntity("booking", entityId);
+  });
+}
+
+async function confirmRemoteBackupConflict(data, reason, options = {}) {
   const remoteCloudTime = getTimestampMs(data.updated_at);
   const localChangeAt = typeof getLocalUserChangeAt === "function" ? getLocalUserChangeAt() : 0;
   const hasUnsyncedLocalChanges = localChangeAt && localChangeAt > lastKnownCloudUpdatedAt;
   if (!hasUnsyncedLocalChanges) return true;
+  if (options.bootstrap === true && !(await hasLocalBusinessStateForBootstrap())) {
+    // First-run user/config/audit persistence updates the generic local-change
+    // timestamp, but cannot justify blocking the incoming business bootstrap.
+    return true;
+  }
   if (localChangeAt >= remoteCloudTime) {
     setSupabaseDetails("Synchronisation entrante ignorée : ce poste possède des modifications locales plus récentes à envoyer.");
     return false;
@@ -2328,9 +2367,9 @@ async function confirmRemoteBackupConflict(data, reason) {
   return safetySnapshotGate.allowed;
 }
 
-async function applyRemoteSupabaseBackup(data, reason = "cloud") {
+async function applyRemoteSupabaseBackup(data, reason = "cloud", options = {}) {
   if (!shouldApplyRemoteBackup(data)) return false;
-  const canApply = await confirmRemoteBackupConflict(data, reason);
+  const canApply = await confirmRemoteBackupConflict(data, reason, options);
   if (!canApply) return false;
   applyingRemoteSupabaseState = true;
   try {
@@ -3202,9 +3241,9 @@ async function restoreGranularWorkshopSettings(client) {
   }
 }
 
-async function performLegacyCloudBootstrapOnce(client, reason) {
+async function performLegacyCloudBootstrap(client, reason) {
   const data = await fetchLatestCloudBackup(client);
-  return applyRemoteSupabaseBackup(data, reason);
+  return applyRemoteSupabaseBackup(data, reason, { bootstrap: true });
 }
 
 async function pullLatestSupabaseBackup(reason = "poll") {
@@ -3226,19 +3265,43 @@ async function pullLatestSupabaseBackup(reason = "poll") {
       const bookings = await pullGranularEntityGroup(client, "booking", GRANULAR_BOOKING_PAGE_SIZE, bootstrap);
       const audit = await pullGranularAuditGroup(client, bootstrap);
       await restoreGranularWorkshopSettings(client);
-      if (bootstrap && cases + bookings === 0 && !bootstrapMeta?.legacyAttempted) {
-        await performLegacyCloudBootstrapOnce(client, "legacy-bootstrap-once");
+      let legacyAttempted = Boolean(bootstrapMeta?.legacyAttempted);
+      let legacyApplied = false;
+      if (bootstrap && cases + bookings === 0) {
+        legacyAttempted = true;
+        legacyApplied = await performLegacyCloudBootstrap(client, "legacy-bootstrap");
       }
+      const initialized = !bootstrap || cases + bookings > 0 || legacyApplied === true;
       await putSyncMetadata(bootstrapKey, {
-        initialized: true,
-        legacyAttempted: Boolean(bootstrapMeta?.legacyAttempted || (bootstrap && cases + bookings === 0)),
+        initialized,
+        legacyAttempted,
+        legacyApplied,
+        lastAttemptAt: new Date().toISOString(),
       });
-      return { granular: true, reason, cases, bookings, audit, bootstrap };
+      return { granular: true, reason, cases, bookings, audit, bootstrap, initialized, legacyAttempted, legacyApplied };
     } catch (error) {
-      if (bootstrap && !bootstrapMeta?.legacyAttempted) {
-        const restored = await performLegacyCloudBootstrapOnce(client, "legacy-schema-fallback-once");
-        await putSyncMetadata(bootstrapKey, { initialized: false, legacyAttempted: true, lastError: String(error?.message || error) });
-        return restored;
+      if (bootstrap) {
+        const restored = await performLegacyCloudBootstrap(client, "legacy-schema-fallback");
+        const initialized = restored === true;
+        await putSyncMetadata(bootstrapKey, {
+          initialized,
+          legacyAttempted: true,
+          legacyApplied: initialized,
+          lastAttemptAt: new Date().toISOString(),
+          lastError: initialized ? "" : String(error?.message || error),
+        });
+        return {
+          granular: false,
+          reason,
+          cases: 0,
+          bookings: 0,
+          audit: 0,
+          bootstrap: true,
+          initialized,
+          legacyAttempted: true,
+          legacyApplied: initialized,
+          error: initialized ? "" : String(error?.message || error),
+        };
       }
       console.warn("Réconciliation granulaire impossible", error?.message || error);
       return false;

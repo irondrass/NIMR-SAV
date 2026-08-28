@@ -28,6 +28,8 @@ function looksLikeSupabaseServiceRoleKey(key = "") {
 }
 
 function resetSupabaseClient() {
+  if (typeof stopSupabaseLiveSync === "function") stopSupabaseLiveSync();
+  if (typeof unbindSupabaseAuthLifecycle === "function") unbindSupabaseAuthLifecycle();
   nimrSupabaseClient = null;
 }
 
@@ -146,6 +148,7 @@ function saveSupabaseRuntimeConfigFromForm(event) {
     saveState({ skipCloud: true, skipSnapshot: true });
     notifyUser("Configuration Supabase enregistrée sur ce poste.", "success");
     refreshSupabasePanel();
+    if (typeof refreshSupabasePermissionState === "function") refreshSupabasePermissionState("configuration-change");
   } catch (error) {
     console.error("Enregistrement config Supabase impossible", error);
     notifyUser("Impossible d'enregistrer la configuration Supabase locale. Vérifiez le stockage du navigateur et les droits de l'utilisateur.", "error");
@@ -166,7 +169,6 @@ function clearSupabaseRuntimeConfig() {
     allowRuntimeConfig: true,
   };
   resetSupabaseClient();
-  if (typeof stopSupabaseLiveSync === "function") stopSupabaseLiveSync();
   addAuditLog("supabase.config.cleared", "Configuration Supabase retirée", "Configuration cloud locale retirée de ce navigateur.");
   saveState({ skipCloud: true, skipSnapshot: true });
   notifyUser("Configuration Supabase retirée de ce navigateur.", "success");

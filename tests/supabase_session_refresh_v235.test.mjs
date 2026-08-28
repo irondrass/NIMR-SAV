@@ -120,7 +120,7 @@ let pullCalls = 0;
 let outboxCalls = 0;
 run(`refreshSupabasePanel = () => Promise.resolve();`);
 run(`renderAdminTechnicalVisibility = () => {};`);
-run(`startSupabaseLiveSync = () => { startCalls += 1; };`);
+run(`startSupabaseLiveSync = async () => { startCalls += 1; await pullLatestSupabaseBackup("authenticated-start"); return true; };`);
 run(`stopSupabaseLiveSync = () => { stopCalls += 1; };`);
 run(`pullLatestSupabaseBackup = async () => { pullCalls += 1; };`);
 run(`processOfflineQueue = async () => { outboxCalls += 1; };`);
@@ -142,6 +142,8 @@ assert.equal(listeners.get("supabase-config-form:submit"), initialConfigBindings
 
 run(`render = () => {}; saveState = () => {}; hideUserLoginScreen = () => {}; ensureCurrentTabAllowed = () => {}; resetUserSessionIdleTimer = () => {}; quietNotify = () => {}; addAuditLog = () => {};`);
 run("completeUserLogin(getUserById('director'))");
+await Promise.resolve();
+await Promise.resolve();
 assert.equal(elements.get("supabase-login-email").disabled, false, "Director can authenticate after fresh local login");
 assert.equal(elements.get("supabase-test").disabled, false, "Director can use operational Supabase diagnostics");
 assert.equal(elements.get("supabase-save").disabled, false, "Director retains cloud export");

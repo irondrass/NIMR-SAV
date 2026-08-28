@@ -125,7 +125,7 @@ function bindSyncConflictUsability() {
 
 function configurePdfWorker() {
   if (window.pdfjsLib?.GlobalWorkerOptions) {
-    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.3";
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.4";
   }
 }
 
@@ -416,10 +416,13 @@ function getPdfEstimateTaskRows(parsed) {
       roleLabel: getPdfTaskRoleLabel(phase),
       sourceLineIds: [],
       sourceOperations: [],
+      sourceKind: "pdf_estimate",
       source: "pdf_estimate",
+      taskModelVersion: CANONICAL_TASK_MODEL_VERSION,
       status: "ready_for_validation",
     };
     task.laborHours = roundPlanningHours(task.laborHours + Number(line.laborHours || 0));
+    task.sourceLaborHours = task.laborHours;
     if (line.sourceLineId && !task.sourceLineIds.includes(line.sourceLineId)) task.sourceLineIds.push(line.sourceLineId);
     const sourceOperation = line.sourceOperation || line.operation || "";
     if (sourceOperation && !task.sourceOperations.includes(sourceOperation)) task.sourceOperations.push(sourceOperation);
@@ -1149,7 +1152,7 @@ function registerServiceWorker() {
   });
   const registerCurrentServiceWorker = async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=23.3.3", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=23.3.4", { updateViaCache: "none" });
       const refreshRegistration = async () => {
         try {
           await registration.update?.();
@@ -1387,7 +1390,7 @@ function renderActivityLog() {
         const localVal = targetConflict ? (targetConflict.localCase || targetConflict.localValue) : null;
         if (localVal) {
           const payload = {
-            version: "v23.3.3",
+            version: "v23.3.4",
             timestamp: new Date().toISOString(),
             cases: [JSON.parse(JSON.stringify(localVal))],
             source: "manual_conflict_backup"

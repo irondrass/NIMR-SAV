@@ -21,10 +21,17 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v23.3.3";
+const APP_VERSION = "v23.3.4";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const CURRENT_DATA_SCHEMA_VERSION = 2;
+const CANONICAL_TASK_MODEL_VERSION = 1;
+const CANONICAL_TASK_SOURCE_KINDS = new Set([
+  "pdf_estimate",
+  "canonical_graph",
+  "manual",
+  "legacy_unknown",
+]);
 const WORKSHOP_NAME = "NIMR SAV";
 const MAX_ESTIMATE_IMPORT_SIZE = 10 * 1024 * 1024;
 const ESTIMATE_IMPORT_EXTENSIONS = ["pdf", "xlsx", "csv"];
@@ -1311,6 +1318,84 @@ function normalizeStringList(value) {
     : [];
 }
 
+function normalizeCanonicalTaskSourceKind(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return CANONICAL_TASK_SOURCE_KINDS.has(normalized) ? normalized : "";
+}
+
+function isCanonicalTaskModel(task) {
+  return Number(task?.taskModelVersion) === CANONICAL_TASK_MODEL_VERSION;
+}
+
+function hasPdfTaskLevelEvidence(task) {
+  if (!task || typeof task !== "object") return false;
+  const explicitSourceKind = normalizeCanonicalTaskSourceKind(task.sourceKind);
+  if (explicitSourceKind) return explicitSourceKind === "pdf_estimate";
+  if (String(task.source || "").trim().toLowerCase() === "pdf_estimate") return true;
+  return normalizeStringList(task.sourceLineIds).length > 0
+    || normalizeStringList(task.sourceOperations).length > 0;
+}
+
+function inferPlanningTaskSourceKind(task) {
+  return normalizeCanonicalTaskSourceKind(task?.sourceKind)
+    || (hasPdfTaskLevelEvidence(task) ? "pdf_estimate" : "legacy_unknown");
+}
+
+function normalizeCasePlanningTask(task, index = 0) {
+  task = task && typeof task === "object" ? task : {};
+  const modern = isCanonicalTaskModel(task);
+  const explicitId = String(task.id || "").trim();
+  const explicitTaskId = String(task.taskId || "").trim();
+  const legacyId = String(explicitTaskId || explicitId || task.key || task.phase || `task-${index + 1}`);
+  const normalized = {
+    ...task,
+    dependencies: normalizeStringList(task.dependencies || task.dependsOn),
+    parallelizable: task.parallelizable === true,
+    sourceKind: modern
+      ? normalizeCanonicalTaskSourceKind(task.sourceKind)
+      : inferPlanningTaskSourceKind(task),
+  };
+
+  if (modern) {
+    normalized.taskModelVersion = CANONICAL_TASK_MODEL_VERSION;
+    if (explicitId || explicitTaskId) {
+      normalized.id = explicitId || explicitTaskId;
+      normalized.taskId = explicitTaskId || explicitId;
+    } else {
+      delete normalized.id;
+      delete normalized.taskId;
+    }
+    if (typeof task.vehicleExclusive !== "boolean") normalized.vehicleExclusive = true;
+  } else {
+    normalized.id = legacyId;
+    normalized.taskId = legacyId;
+  }
+
+  if (Array.isArray(task.sourceLineIds)) normalized.sourceLineIds = normalizeStringList(task.sourceLineIds);
+  if (Array.isArray(task.sourceOperations)) normalized.sourceOperations = normalizeStringList(task.sourceOperations);
+  if (Object.hasOwn(task, "sourceLaborHours")) {
+    normalized.sourceLaborHours = Number(task.sourceLaborHours || 0) || 0;
+  }
+  return normalized;
+}
+
+function isLegacyPdfPlanningTaskSet(tasks = []) {
+  return tasks.length > 0
+    && tasks.every((task) => !isCanonicalTaskModel(task) && hasPdfTaskLevelEvidence(task));
+}
+
+function normalizeCasePlanningTasks(item = {}) {
+  const tasks = Array.isArray(item.planningTasks)
+    ? item.planningTasks
+    : (Array.isArray(item.workshopTasks)
+      ? item.workshopTasks
+      : (Array.isArray(item.tasks) ? item.tasks : []));
+  const sourceAwareTasks = isLegacyPdfPlanningTaskSet(tasks)
+    ? normalizePdfPlanningTasksForCase(tasks)
+    : tasks;
+  return sourceAwareTasks.filter(Boolean).map(normalizeCasePlanningTask);
+}
+
 function normalizePdfPlanningTasksForCase(tasks = []) {
   const phaseOrder = [
     "body",
@@ -2525,6 +2610,24 @@ function normalizeBookingWorkSessions(sessions) {
     : [];
 }
 
+function normalizeBookingTaskProvenance(booking = {}) {
+  const provenance = {};
+  if (Object.hasOwn(booking, "taskModelVersion") && Number(booking.taskModelVersion) === CANONICAL_TASK_MODEL_VERSION) {
+    provenance.taskModelVersion = CANONICAL_TASK_MODEL_VERSION;
+  }
+  if (Object.hasOwn(booking, "sourceKind")) {
+    const sourceKind = normalizeCanonicalTaskSourceKind(booking.sourceKind);
+    if (sourceKind) provenance.sourceKind = sourceKind;
+  }
+  if (Object.hasOwn(booking, "source")) provenance.source = String(booking.source || "");
+  if (Array.isArray(booking.sourceLineIds)) provenance.sourceLineIds = normalizeStringList(booking.sourceLineIds);
+  if (Array.isArray(booking.sourceOperations)) provenance.sourceOperations = normalizeStringList(booking.sourceOperations);
+  if (Object.hasOwn(booking, "sourceLaborHours")) {
+    provenance.sourceLaborHours = Number(booking.sourceLaborHours || 0) || 0;
+  }
+  return provenance;
+}
+
 function normalizeBooking(booking, resourceIds) {
   if (!booking || typeof booking !== "object") return null;
   const ids = Array.isArray(booking.resourceIds)
@@ -2595,6 +2698,7 @@ function normalizeBooking(booking, resourceIds) {
     parentBookingId,
     businessTaskId: booking.businessTaskId || parentBookingId || id,
     taskId: booking.taskId || booking.businessTaskId || parentBookingId || id,
+    ...normalizeBookingTaskProvenance(booking),
     dependencies: normalizeStringList(booking.dependencies || booking.dependsOn),
     parallelizable: booking.parallelizable === true,
     vehicleExclusive: booking.vehicleExclusive !== false,
@@ -2778,9 +2882,7 @@ function normalizeCase(item, bookings, realBookingCaseIds = null) {
     history: normalizeHistory(item.history, item.createdAt),
     photos: Array.isArray(item.photos) ? item.photos.map(normalizePhotoMeta) : [],
     durations: normalizedDurations,
-    planningTasks: normalizePdfPlanningTasksForCase(
-      item.planningTasks || item.tasks || []
-    ),
+    planningTasks: normalizeCasePlanningTasks(item),
     stepServiceTypes: normalizeStepServiceTypes(item.stepServiceTypes),
     stepPreferredResources: normalizeStepPreferredResources(item.stepPreferredResources),
     stepExecutionModes: normalizeStepExecutionModes(item.stepExecutionModes),
@@ -3586,7 +3688,7 @@ function resolveSyncConflict(conflictIdOrKey, action = "mark_resolved") {
       // Save a silent local case snapshot
       const snapshotKey = `nimr-sav-conflict-safety-snapshot:${caseId}:${conflictId}`;
       const snapshotPayload = {
-        version: "v23.3.3",
+        version: "v23.3.4",
         timestamp: new Date().toISOString(),
         cases: [JSON.parse(JSON.stringify(localCase))],
         source: "conflict_safety_snapshot"

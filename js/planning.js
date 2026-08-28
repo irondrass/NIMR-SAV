@@ -74,6 +74,27 @@ function getPlanningTemplateForItem(item, baseTemplate) {
   return template;
 }
 
+function hasExplicitLegacyPlanningConstraint(task) {
+  if (!task || typeof task !== "object") return false;
+  const hasText = (field) => typeof task[field] === "string" && task[field].trim().length > 0;
+  return (
+    (Array.isArray(task.resourceIds) && task.resourceIds.length > 0)
+    || hasText("requiredRole")
+    || hasText("requiredCategory")
+    || hasText("equipmentRole")
+    || hasText("requiredSite")
+    || hasText("preferredResourceId")
+    || hasText("preferredEquipmentId")
+    || (Object.hasOwn(task, "vehicleExclusive") && typeof task.vehicleExclusive === "boolean")
+    || hasText("vehicleLocation")
+    || hasText("subcontractorId")
+    || (Array.isArray(task.dependencies) && task.dependencies.length > 0)
+    || (Array.isArray(task.dependsOn) && task.dependsOn.length > 0)
+    || task.parallelizable === true
+    || String(task.serviceMode || "").trim().toLowerCase() === "external"
+  );
+}
+
 function getExplicitPlanningTasks(item) {
   const direct = Array.isArray(item?.planningTasks)
     ? item.planningTasks
@@ -87,12 +108,7 @@ function getExplicitPlanningTasks(item) {
       isCanonicalTaskModel(task)
       || inferPlanningTaskSourceKind(task) !== "legacy_unknown"
     ));
-    const hasExplicitGraph = tasks.some((task) => (
-      (Array.isArray(task?.dependencies) && task.dependencies.length > 0)
-      || (Array.isArray(task?.dependsOn) && task.dependsOn.length > 0)
-      || task?.parallelizable === true
-      || task?.serviceMode === "external"
-    ));
+    const hasExplicitGraph = tasks.some(hasExplicitLegacyPlanningConstraint);
     return hasCanonicalOrSourcedTask || hasExplicitGraph ? tasks : [];
   }
   const hasExternalStep = Object.values(item?.stepExecutionModes || {}).some((mode) => mode === "external");
@@ -126,10 +142,7 @@ function getExplicitPlanningTasks(item) {
   return legacyTasks.some((task) => (
     isCanonicalTaskModel(task)
     || inferPlanningTaskSourceKind(task) !== "legacy_unknown"
-    || (Array.isArray(task?.dependencies) && task.dependencies.length > 0)
-    || (Array.isArray(task?.dependsOn) && task.dependsOn.length > 0)
-    || task?.parallelizable === true
-    || task?.serviceMode === "external"
+    || hasExplicitLegacyPlanningConstraint(task)
   )) ? legacyTasks : [];
 }
 

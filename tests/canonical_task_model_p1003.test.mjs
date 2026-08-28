@@ -396,6 +396,42 @@ check("N JSON persistence and granular case payload preserve canonical graph", (
   assert.deepEqual(mutation.payload.entity.planningTasks, reloaded.cases[0].planningTasks);
 });
 
+check("O legacy constrained planningTask remains explicit", () => {
+  const normalizedState = normalizeCaseThroughState({
+    id: "case-legacy-hard-resource",
+    durations: { body: 1 },
+    planningTasks: [{
+      id: "legacy-hard-resource",
+      taskId: "legacy-hard-resource",
+      key: "body",
+      durationMinutes: 60,
+      resourceIds: ["body-2"],
+      requiredRole: "tolier",
+      dependencies: [],
+      parallelizable: false,
+    }],
+  });
+  const normalized = normalizedState.cases[0];
+  const normalizedAgain = normalizeCaseThroughState(normalized).cases[0];
+  assert.equal(normalized.planningTasks[0].sourceKind, "legacy_unknown");
+  assert.equal(normalized.planningTasks[0].taskId, "legacy-hard-resource");
+  assert.deepEqual(normalized.planningTasks[0].resourceIds, ["body-2"]);
+  assert.deepEqual(normalizedAgain.planningTasks, normalized.planningTasks);
+
+  context.__p1003LegacyConstrainedState = normalizedState;
+  context.__p1003Start = START;
+  run("state = __p1003LegacyConstrainedState");
+  const explicitTasks = toPlain(run("getExplicitPlanningTasks(state.cases[0])"));
+  assert.equal(explicitTasks.length, 1, "a constrained legacy planningTask must remain explicit");
+  assert.equal(explicitTasks[0].taskId, "legacy-hard-resource");
+  assert.deepEqual(explicitTasks[0].resourceIds, ["body-2"]);
+
+  const proposal = toPlain(run("schedulePipeline(state.cases[0], new Date(__p1003Start), [])"));
+  assert.equal(proposal.steps.length, 1);
+  assert.equal(proposal.steps[0].taskId, "legacy-hard-resource");
+  assert.deepEqual(proposal.steps[0].resourceIds, ["body-2"]);
+});
+
 for (const scenario of scenarios) {
   console.log(`${scenario.pass ? "PASS" : "FAIL"} ${scenario.name}${scenario.error ? `: ${scenario.error}` : ""}`);
 }

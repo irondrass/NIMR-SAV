@@ -112,7 +112,7 @@ function createRealtimeHarness({ autoSubscribe = true } = {}) {
     window: null,
     state: { cases: [], bookings: [], auditLog: [], syncConflicts: [] },
     STORAGE_KEY: "nimr-sav-state",
-    APP_VERSION: "v23.3.5",
+    APP_VERSION: "v23.3.6",
     CURRENT_DATA_SCHEMA_VERSION: 1,
     setTimeout(callback) {
       timeoutCallbacks.push(callback);
@@ -482,19 +482,19 @@ await noChangePull.context.pullLatestSupabaseBackup("confirmation-sans-changemen
 assert.ok(noChangePull.context.localStorage.getItem("nimr-sav-state:last-granular-server-confirmation"));
 assert.equal(noChangePull.renderCalls, 0);
 
-// PWA delivery contract: every runtime reference must force v23.3.5.
+// PWA delivery contract: every runtime reference must force v23.3.6.
 const versionSource = fs.readFileSync(new URL("../js/version.js", import.meta.url), "utf8");
 const stateSource = fs.readFileSync(new URL("../js/state.js", import.meta.url), "utf8");
 const indexSource = fs.readFileSync(new URL("../index.html", import.meta.url), "utf8");
 const appSource = fs.readFileSync(new URL("../app.js", import.meta.url), "utf8");
 const serviceWorkerSource = fs.readFileSync(new URL("../sw.js", import.meta.url), "utf8");
 const offlineSource = fs.readFileSync(new URL("../offline.html", import.meta.url), "utf8");
-assert.match(versionSource, /window\.APP_VERSION = "v23\.3\.5"/u);
-assert.match(versionSource, /window\.NIMR_CACHE_NAME = "nimr-sav-v23\.3\.5"/u);
-assert.match(stateSource, /const APP_VERSION = "v23\.3\.5"/u);
-assert.match(serviceWorkerSource, /const CACHE_NAME = "nimr-sav-v23\.3\.5"/u);
-for (const match of indexSource.matchAll(/\?v=([0-9.]+)/gu)) assert.equal(match[1], "23.3.5");
-assert.match(appSource, /serviceWorker\.register\("sw\.js\?v=23\.3\.5"/u);
-assert.match(offlineSource, /styles\.css\?v=23\.3\.5/u);
+assert.match(versionSource, /window\.APP_VERSION = "v23\.3\.6"/u);
+assert.match(versionSource, /window\.NIMR_CACHE_NAME = "nimr-sav-v23\.3\.6"/u);
+assert.match(stateSource, /const APP_VERSION = "v23\.3\.6"/u);
+assert.match(serviceWorkerSource, /const CACHE_NAME = "nimr-sav-v23\.3\.6"/u);
+for (const match of indexSource.matchAll(/\?v=([0-9.]+)/gu)) assert.equal(match[1], "23.3.6");
+assert.match(appSource, /serviceWorker\.register\("sw\.js\?v=23\.3\.6"/u);
+assert.match(offlineSource, /styles\.css\?v=23\.3\.6/u);
 
 console.log("P0-013 AUTHENTICATED REALTIME LIFECYCLE OK");

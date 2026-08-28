@@ -1,3 +1,176 @@
+const INDEXED_PLANNER_VIEW_KIND = "nimr-indexed-planner-booking-view";
+
+let lastIndexedPlannerViewStats = {
+  fullArrayScans: 0,
+  fullArrayScansInCandidateLoops: 0,
+  indexLookups: 0,
+  resourceLoadRecomputations: 0,
+  candidateEvaluations: 0,
+  maxOverlaySize: 0,
+};
+
+function isIndexedPlannerBookingView(value) {
+  return Boolean(value && value.kind === INDEXED_PLANNER_VIEW_KIND);
+}
+
+function getLastIndexedPlannerViewStats() {
+  return { ...lastIndexedPlannerViewStats };
+}
+
+function createIndexedPlannerBookingView(baseBookings = state.bookings, options = {}) {
+  if (isIndexedPlannerBookingView(baseBookings)) return baseBookings;
+  const base = Array.isArray(baseBookings) ? baseBookings : [];
+  const excludedCaseId = String(options.excludedCaseId || "");
+  const indexes = typeof getBookingRuntimeIndexes === "function"
+    ? getBookingRuntimeIndexes(base)
+    : null;
+  const overlay = [];
+  const loadCache = new Map();
+  const stats = {
+    fullArrayScans: indexes ? 0 : 1,
+    fullArrayScansInCandidateLoops: 0,
+    indexLookups: 0,
+    resourceLoadRecomputations: 0,
+    candidateEvaluations: 0,
+    maxOverlaySize: 0,
+  };
+
+  const baseRows = (map, key) => {
+    stats.indexLookups += 1;
+    if (map) return map.get(key) || [];
+    return base.filter((booking) => booking && (
+      key === booking.caseId
+      || (booking.resourceIds || []).includes(key)
+    ));
+  };
+  const visibleBaseRows = (rows) => excludedCaseId
+    ? rows.filter((booking) => String(booking?.caseId || "") !== excludedCaseId)
+    : rows;
+  const mergeRows = (rows, additions) => [...visibleBaseRows(rows), ...additions];
+  const overlayMatchesDay = (booking, dayKey) => (
+    typeof getRuntimeIndexDayKeysForSlot === "function"
+      ? getRuntimeIndexDayKeysForSlot(booking).includes(dayKey)
+      : getPlanningSlotSegments(booking).some((segment) => todayKey(segment.start) === dayKey)
+  );
+  const getResourceRows = (resourceId) => mergeRows(
+    baseRows(indexes?.bookingsByResourceId, resourceId),
+    overlay.filter((booking) => (booking.resourceIds || []).includes(resourceId)),
+  );
+  const calculateLoad = (resourceId, from, until) => getResourceRows(resourceId).reduce((sum, booking) => {
+    if (!isPlanningBlockingBooking(booking)) return sum;
+    return sum + getPlanningSlotSegments(booking).reduce((segmentSum, segment) => {
+      const start = maxDate(new Date(segment.start), from);
+      const end = minDate(new Date(segment.end), until);
+      return end > start ? segmentSum + diffMinutes(start, end) : segmentSum;
+    }, 0);
+  }, 0);
+
+  const view = {
+    kind: INDEXED_PLANNER_VIEW_KIND,
+    baseBookings: base,
+    excludedCaseId,
+    getSourceCount() {
+      const excluded = excludedCaseId ? baseRows(indexes?.bookingsByCaseId, excludedCaseId).length : 0;
+      return Math.max(0, base.length - excluded) + overlay.length;
+    },
+    getCaseBookings(caseId) {
+      const key = String(caseId || "");
+      const rows = key === excludedCaseId ? [] : baseRows(indexes?.bookingsByCaseId, key);
+      return mergeRows(rows, overlay.filter((booking) => String(booking?.caseId || "") === key));
+    },
+    getResourceBookings(resourceId) {
+      return getResourceRows(String(resourceId || ""));
+    },
+    getDayBookings(value) {
+      const dayKey = value instanceof Date ? todayKey(value) : String(value || "");
+      return mergeRows(
+        baseRows(indexes?.bookingsByDayKey, dayKey),
+        overlay.filter((booking) => overlayMatchesDay(booking, dayKey)),
+      );
+    },
+    getResourceDayBookings(resourceId, value) {
+      const dayKey = value instanceof Date ? todayKey(value) : String(value || "");
+      const key = typeof runtimeResourceDayKey === "function"
+        ? runtimeResourceDayKey(resourceId, dayKey)
+        : `${resourceId}\u0000${dayKey}`;
+      return mergeRows(
+        baseRows(indexes?.bookingsByResourceDayKey, key),
+        overlay.filter((booking) => (
+          (booking.resourceIds || []).includes(resourceId)
+          && overlayMatchesDay(booking, dayKey)
+        )),
+      );
+    },
+    getConflictCandidates(slot, resourceIds, caseId = "") {
+      stats.indexLookups += 1;
+      const baseCandidates = typeof getIndexedConflictCandidateBookings === "function"
+        ? getIndexedConflictCandidateBookings(slot, resourceIds, base, caseId)
+        : base;
+      const dayKeys = typeof getRuntimeIndexDayKeysForSlot === "function"
+        ? new Set(getRuntimeIndexDayKeysForSlot(slot))
+        : new Set(getPlanningSlotSegments(slot).map((segment) => todayKey(segment.start)));
+      const resourceSet = new Set(resourceIds || []);
+      const overlayCandidates = overlay.filter((booking) => (
+        String(booking?.caseId || "") === String(caseId || "")
+        || ((booking.resourceIds || []).some((resourceId) => resourceSet.has(resourceId))
+          && [...dayKeys].some((dayKey) => overlayMatchesDay(booking, dayKey)))
+      ));
+      return mergeRows(baseCandidates, overlayCandidates);
+    },
+    getResourceLoadMinutesInRange(resourceId, from, until) {
+      const cacheKey = `${resourceId}|${from.toISOString()}|${until.toISOString()}`;
+      if (loadCache.has(cacheKey)) return loadCache.get(cacheKey);
+      stats.resourceLoadRecomputations += 1;
+      const minutes = calculateLoad(resourceId, from, until);
+      loadCache.set(cacheKey, minutes);
+      return minutes;
+    },
+    getResourceLoadMinutes(resourceId, fromDate) {
+      const from = startOfDay(fromDate || new Date());
+      return this.getResourceLoadMinutesInRange(resourceId, from, addDays(from, 14));
+    },
+    getResourceDailyLoadMinutes(resourceId, fromDate) {
+      const from = startOfDay(fromDate || new Date());
+      return this.getResourceLoadMinutesInRange(resourceId, from, addDays(from, 1));
+    },
+    addOverlay(booking) {
+      if (!booking) return booking;
+      overlay.push(booking);
+      loadCache.clear();
+      stats.maxOverlaySize = Math.max(stats.maxOverlaySize, overlay.length);
+      return booking;
+    },
+    addOverlays(bookings) {
+      (bookings || []).forEach((booking) => this.addOverlay(booking));
+      return this;
+    },
+    clearOverlay() {
+      overlay.length = 0;
+      loadCache.clear();
+    },
+    getOverlaySize() {
+      return overlay.length;
+    },
+    noteCandidateEvaluation() {
+      stats.candidateEvaluations += 1;
+    },
+    fork() {
+      return createIndexedPlannerBookingView(base, { excludedCaseId }).addOverlays(overlay);
+    },
+    getStats() {
+      return { ...stats };
+    },
+  };
+  view.addOverlays(options.overlayBookings || []);
+  return view;
+}
+
+function ensureIndexedPlannerBookingView(bookings, options = {}) {
+  return isIndexedPlannerBookingView(bookings)
+    ? bookings
+    : createIndexedPlannerBookingView(bookings, options);
+}
+
 function generateAppointmentOptions(item) {
   try {
     const proposal = generateSingleProposal(item, new Date());
@@ -11,16 +184,20 @@ function generateAppointmentOptions(item) {
 }
 
 function generateSingleProposal(item, startAfter) {
-  const bookings = state.bookings.filter((booking) => booking.caseId !== item.id).map(cloneBooking);
-  bookings.push(...getPendingProposalBookings(item.id));
-  return attachProposalAcceptanceMetadata(item, schedulePipeline(item, startAfter, bookings));
+  const bookings = createIndexedPlannerBookingView(state.bookings, { excludedCaseId: item.id });
+  bookings.addOverlays(getPendingProposalBookings(item.id, bookings));
+  try {
+    return attachProposalAcceptanceMetadata(item, schedulePipeline(item, startAfter, bookings));
+  } finally {
+    lastIndexedPlannerViewStats = bookings.getStats();
+  }
 }
 
-function getPendingProposalBookings(excludedCaseId = "") {
+function getPendingProposalBookings(excludedCaseId = "", bookingView = null) {
   if (typeof generatedProposals === "undefined" || !generatedProposals) return [];
-  const acceptedCaseIds = new Set((state.bookings || []).map((booking) => booking.caseId).filter(Boolean));
+  const indexedView = bookingView || createIndexedPlannerBookingView(state.bookings);
   return Object.entries(generatedProposals).flatMap(([caseId, value]) => {
-    if (!caseId || caseId === excludedCaseId || acceptedCaseIds.has(caseId)) return [];
+    if (!caseId || caseId === excludedCaseId || indexedView.getCaseBookings(caseId).length) return [];
     const item = (state.cases || []).find((candidate) => candidate.id === caseId);
     if (!item || (typeof isCaseOperationallyClosed === "function" && isCaseOperationallyClosed(item))) return [];
     const proposal = Array.isArray(value) ? value[0] : (value?.proposal || null);
@@ -216,7 +393,9 @@ function describePlanningAvailabilityFailure(item, template, duration, tempBooki
     const bestCapacity = Math.max(...finiteCapacities);
     return `Durée de ${Math.round(duration / 6) / 10} h supérieure à la capacité journalière disponible de ${Math.round(bestCapacity / 6) / 10} h pour ${label}.`;
   }
-  const sameCaseBookings = (tempBookings || []).filter((booking) => booking.caseId === item.id && booking.temporary !== true);
+  const sameCaseBookings = isIndexedPlannerBookingView(tempBookings)
+    ? tempBookings.getCaseBookings(item.id).filter((booking) => booking.temporary !== true)
+    : (tempBookings || []).filter((booking) => booking.caseId === item.id && booking.temporary !== true);
   if (sameCaseBookings.length) {
     return `Collision avec un booking existant ou capacité atelier insuffisante pour ${label}.`;
   }
@@ -267,7 +446,8 @@ function scheduleSingleStep(item, template, cursor, duration, tempBookings, assi
     ...planningOptions,
     requiredRole: planningOptions.requiredRole || template.role,
   });
-  tempBookings.push(stepToBooking(item, step, true));
+  if (isIndexedPlannerBookingView(tempBookings)) tempBookings.addOverlay(stepToBooking(item, step, true));
+  else tempBookings.push(stepToBooking(item, step, true));
   return step;
 }
 
@@ -281,7 +461,7 @@ function scheduleSequentialPipeline(item, startAfter, bookings) {
   const steps = [];
   let cursor = nextWorkingTime(startAfter);
   let totalMinutes = 0;
-  const tempBookings = [...bookings];
+  const tempBookings = ensureIndexedPlannerBookingView(bookings);
   const fastJob = isFastLaneJob(item);
   const assignment = createPlanningAssignmentContext();
   STEP_TEMPLATES.forEach((baseTemplate) => {
@@ -376,6 +556,7 @@ function buildResourceSlotCandidate({
 }
 
 function findBestResourceSlot(template, startAfter, duration, bookings, fastJob, preferredPrimaryId = null, preferredEquipmentId = null, rotationKey = "", planningOptions = {}) {
+  bookings = ensureIndexedPlannerBookingView(bookings);
   const primaryResources = orderPrimaryResourcesForStep(template.role, fastJob, bookings, startAfter, preferredPrimaryId, planningOptions);
   const equipmentResources = template.equipmentRole
     // La catégorie métier de la tâche qualifie la ressource principale. Elle
@@ -417,8 +598,8 @@ function getResourceAssignmentAlternatives(item, stepKey, startAfter = new Date(
   const duration = Math.max(0, Math.round(Number(item.durations?.[template.key] || 0) * 60));
   if (!duration) return [];
   const fastJob = isFastLaneJob(item);
-  const bookings = state.bookings.filter((booking) => booking.caseId !== item.id).map(cloneBooking);
-  bookings.push(...getPendingProposalBookings(item.id));
+  const bookings = createIndexedPlannerBookingView(state.bookings, { excludedCaseId: item.id });
+  bookings.addOverlays(getPendingProposalBookings(item.id, bookings));
   const primaryResources = getAssignableResources(template.role, fastJob);
   const equipmentResources = template.equipmentRole ? getAssignableResources(template.equipmentRole, fastJob) : [null];
   const candidates = primaryResources.map((primary, primaryIndex) => {
@@ -482,17 +663,20 @@ function orderPrimaryResourcesForStep(role, fastJob, bookings, startAfter, prefe
 }
 
 function getResourceLoadMinutes(resourceId, bookings, fromDate) {
+  if (isIndexedPlannerBookingView(bookings)) return bookings.getResourceLoadMinutes(resourceId, fromDate);
   const from = startOfDay(fromDate || new Date());
   const until = addDays(from, 14);
   return getResourceLoadMinutesInRange(resourceId, bookings, from, until);
 }
 
 function getResourceDailyLoadMinutes(resourceId, bookings, fromDate) {
+  if (isIndexedPlannerBookingView(bookings)) return bookings.getResourceDailyLoadMinutes(resourceId, fromDate);
   const from = startOfDay(fromDate || new Date());
   return getResourceLoadMinutesInRange(resourceId, bookings, from, addDays(from, 1));
 }
 
 function getResourceLoadMinutesInRange(resourceId, bookings, from, until) {
+  if (isIndexedPlannerBookingView(bookings)) return bookings.getResourceLoadMinutesInRange(resourceId, from, until);
   return bookings.reduce((sum, booking) => {
     if (!isPlanningBlockingBooking(booking)) return sum;
     if (!(booking.resourceIds || []).includes(resourceId)) return sum;
@@ -508,7 +692,10 @@ function getResourceActiveCaseCount(resourceIds, bookings, fromDate) {
   const from = startOfDay(fromDate || new Date());
   const until = addDays(from, 14);
   const caseIds = new Set();
-  bookings.forEach((booking) => {
+  const source = isIndexedPlannerBookingView(bookings)
+    ? [...new Set(resourceIds.flatMap((resourceId) => bookings.getResourceBookings(resourceId)))]
+    : bookings;
+  source.forEach((booking) => {
     if (!isPlanningBlockingBooking(booking)) return;
     if (!(booking.resourceIds || []).some((resourceId) => resourceIds.includes(resourceId))) return;
     const overlaps = (booking.segments || []).some((segment) => new Date(segment.start) < until && new Date(segment.end) > from);
@@ -562,6 +749,7 @@ function findEarliestSlot(resourceIds, startAfter, duration, bookings, options =
   let iterations = 0;
   while (cursor < horizon && iterations < MAX_PLANNING_ITERATIONS) {
     iterations += 1;
+    if (isIndexedPlannerBookingView(bookings)) bookings.noteCandidateEvaluation();
     const slot = buildWorkingSlot(cursor, duration);
     const candidate = {
       id: options.bookingId || options.excludedBookingId || "",
@@ -2891,7 +3079,10 @@ function isResourceAvailableForSlot(resource, slot) {
 function getResourceDailyUsageMinutes(resourceId, bookings, dateLike, excludedBookingId = "") {
   const dayStart = startOfDay(dateLike);
   const dayEnd = addDays(dayStart, 1);
-  return (bookings || []).reduce((sum, booking) => {
+  const source = isIndexedPlannerBookingView(bookings)
+    ? bookings.getResourceDayBookings(resourceId, todayKey(dayStart))
+    : (bookings || []);
+  return source.reduce((sum, booking) => {
     if (!booking || booking.id === excludedBookingId || !isPlanningBlockingBooking(booking)) return sum;
     if (!(booking.resourceIds || []).includes(resourceId)) return sum;
     const units = getBookingResourceUnits(booking, resourceId);
@@ -3007,20 +3198,23 @@ function validatePlanningCandidate(candidate, bookings = state.bookings, options
   const issues = [];
   const conflicts = [];
   const slot = { start: candidate?.start, end: candidate?.end, segments: getPlanningSlotSegments(candidate) };
-  const sourceBookings = Array.isArray(bookings) ? bookings : [];
+  const bookingView = isIndexedPlannerBookingView(bookings) ? bookings : null;
+  const sourceBookings = bookingView ? null : (Array.isArray(bookings) ? bookings : []);
   if (!slot.segments.length) {
-    lastPlanningConflictCandidateStats = { sourceCount: sourceBookings.length, candidateCount: 0, indexed: false };
+    lastPlanningConflictCandidateStats = { sourceCount: bookingView?.getSourceCount() || sourceBookings.length, candidateCount: 0, indexed: Boolean(bookingView) };
     return { ok: false, issues: ["Créneau planning invalide."], conflicts: [{ type: "slot", code: "invalid_slot" }], nextAt: null };
   }
   const resources = Array.isArray(state?.resources) ? state.resources : [];
   const resourceIds = [...new Set((candidate?.resourceIds || []).filter(Boolean))];
-  const indexedBookings = options.runtimeIndexCandidates !== false && typeof getIndexedConflictCandidateBookings === "function"
-    ? getIndexedConflictCandidateBookings(slot, resourceIds, sourceBookings, candidate?.caseId || "")
-    : sourceBookings;
+  const indexedBookings = bookingView
+    ? bookingView.getConflictCandidates(slot, resourceIds, candidate?.caseId || "")
+    : (options.runtimeIndexCandidates !== false && typeof getIndexedConflictCandidateBookings === "function"
+      ? getIndexedConflictCandidateBookings(slot, resourceIds, sourceBookings, candidate?.caseId || "")
+      : sourceBookings);
   lastPlanningConflictCandidateStats = {
-    sourceCount: sourceBookings.length,
+    sourceCount: bookingView ? bookingView.getSourceCount() : sourceBookings.length,
     candidateCount: indexedBookings.length,
-    indexed: indexedBookings !== sourceBookings,
+    indexed: Boolean(bookingView) || indexedBookings !== sourceBookings,
   };
   bookings = indexedBookings;
   const requiredRoles = candidate?.requiredRolesByResource || options.requiredRolesByResource || {};
@@ -3276,7 +3470,7 @@ function scheduleTaskGraph(item, tasks, startAfter, bookings = state.bookings) {
   if (graph.some((task) => task.durationMinutes <= 0)) throw new Error("Une durée manque sur une tâche du planning.");
   const pending = new Map(graph.map((task) => [task.id, task]));
   const scheduled = new Map();
-  const tempBookings = (bookings || []).map(cloneBooking);
+  const tempBookings = ensureIndexedPlannerBookingView(bookings);
   const steps = [];
   const assignment = createPlanningAssignmentContext();
   let guard = 0;
@@ -3303,7 +3497,7 @@ function scheduleTaskGraph(item, tasks, startAfter, bookings = state.bookings) {
       }
       taskSteps.forEach((step) => {
         steps.push(step);
-        tempBookings.push(stepToBooking(item, step, true));
+        tempBookings.addOverlay(stepToBooking(item, step, true));
       });
       const taskEnd = taskSteps.reduce((latest, step) => maxDate(latest, new Date(step.end)), new Date(taskSteps[0].end));
       scheduled.set(task.id, { task, steps: taskSteps, end: taskEnd.toISOString() });
@@ -3412,7 +3606,7 @@ function buildSubcontractPlan(item, rawTask, providerOrId, startAfter, bookings 
   const outboundMinutes = getSubcontractTransferMinutes(provider, "out");
   const returnMinutes = getSubcontractTransferMinutes(provider, "return");
   const workMinutes = getSubcontractWorkMinutes(task, provider);
-  const baseBookings = (bookings || []).map(cloneBooking);
+  const baseBookings = ensureIndexedPlannerBookingView(bookings).fork();
   const outboundRoles = { [transportResources[0].id]: transport ? "transport" : "" };
   const outbound = findEarliestSlot(transportResources.map((resource) => resource.id), startAfter, outboundMinutes, baseBookings, {
     caseId: item.id,
@@ -3435,7 +3629,7 @@ function buildSubcontractPlan(item, rawTask, providerOrId, startAfter, bookings 
     subcontractId,
     { vehicleLocation: "transport", requiredRole: "transport" },
   );
-  baseBookings.push(stepToBooking(item, outboundStep, true));
+  baseBookings.addOverlay(stepToBooking(item, outboundStep, true));
 
   const additionalIds = [
     ...(Array.isArray(task.externalResourceIds) ? task.externalResourceIds : []),
@@ -3472,7 +3666,7 @@ function buildSubcontractPlan(item, rawTask, providerOrId, startAfter, bookings 
     subcontractId,
     { vehicleLocation: "external", requiredRole: task.requiredRole, details: task.details || "" },
   );
-  baseBookings.push(stepToBooking(item, workStep, true));
+  baseBookings.addOverlay(stepToBooking(item, workStep, true));
 
   const returnSlot = findEarliestSlot(transportResources.map((resource) => resource.id), new Date(workSlot.end), returnMinutes, baseBookings, {
     caseId: item.id,

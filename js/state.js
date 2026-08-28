@@ -21,7 +21,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v23.3.5";
+const APP_VERSION = "v23.3.6";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const CURRENT_DATA_SCHEMA_VERSION = 2;
@@ -2740,6 +2740,12 @@ function normalizeResource(resource) {
   const returnTransferMinutes = Math.max(0, Number(resource.returnTransferMinutes ?? resource.transferReturnMinutes ?? 0) || 0);
   const standardLeadTimeMinutes = Math.max(0, Number(resource.standardLeadTimeMinutes ?? resource.standardDelayMinutes ?? resource.delayMinutes ?? 0) || 0);
   const minimumLeadTimeMinutes = Math.max(0, Number(resource.minimumLeadTimeMinutes ?? resource.minimumDelayMinutes ?? 0) || 0);
+  const rawDailyCapacity = resource.dailyCapacityMinutes
+    ?? resource.capacityDailyMinutes
+    ?? (Number(resource.dailyCapacityHours ?? resource.capacityDailyHours) > 0
+      ? Number(resource.dailyCapacityHours ?? resource.capacityDailyHours) * 60
+      : null);
+  const dailyCapacityMinutes = rawDailyCapacity == null ? Number.NaN : Number(rawDailyCapacity);
   return {
     id: resource.id || uid("resource"),
     name: resource.name || "Ressource",
@@ -2752,7 +2758,7 @@ function normalizeResource(resource) {
     fastLane: Boolean(resource.fastLane),
     capacity,
     simultaneousCapacity: Math.max(1, Number(resource.simultaneousCapacity ?? capacity) || capacity),
-    dailyCapacityMinutes: Number.isFinite(Number(resource.dailyCapacityMinutes)) ? Math.max(0, Number(resource.dailyCapacityMinutes)) : null,
+    dailyCapacityMinutes: Number.isFinite(dailyCapacityMinutes) ? Math.max(0, dailyCapacityMinutes) : null,
     calendar: resource.calendar && typeof resource.calendar === "object" ? cloneMigrationValue(resource.calendar) : {},
     compatibleRoles: normalizeStringList(resource.compatibleRoles?.length ? resource.compatibleRoles : [role]),
     specialties: normalizeStringList(resource.specialties || resource.specialites),
@@ -3688,7 +3694,7 @@ function resolveSyncConflict(conflictIdOrKey, action = "mark_resolved") {
       // Save a silent local case snapshot
       const snapshotKey = `nimr-sav-conflict-safety-snapshot:${caseId}:${conflictId}`;
       const snapshotPayload = {
-        version: "v23.3.5",
+        version: "v23.3.6",
         timestamp: new Date().toISOString(),
         cases: [JSON.parse(JSON.stringify(localCase))],
         source: "conflict_safety_snapshot"

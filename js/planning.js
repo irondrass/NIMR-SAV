@@ -6,8 +6,23 @@ let lastIndexedPlannerViewStats = {
   indexLookups: 0,
   resourceLoadRecomputations: 0,
   candidateEvaluations: 0,
+  slotRebuilds: 0,
+  daysSearched: 0,
+  segmentCount: 0,
   maxOverlaySize: 0,
 };
+
+let lastPlanningSlotSearchStats = {
+  candidateEvaluations: 0,
+  slotRebuilds: 0,
+  daysSearched: 0,
+  segmentCount: 0,
+  failureCode: "",
+};
+
+function getPlanningSlotSearchStats() {
+  return { ...lastPlanningSlotSearchStats };
+}
 
 function isIndexedPlannerBookingView(value) {
   return Boolean(value && value.kind === INDEXED_PLANNER_VIEW_KIND);
@@ -32,6 +47,9 @@ function createIndexedPlannerBookingView(baseBookings = state.bookings, options 
     indexLookups: 0,
     resourceLoadRecomputations: 0,
     candidateEvaluations: 0,
+    slotRebuilds: 0,
+    daysSearched: 0,
+    segmentCount: 0,
     maxOverlaySize: 0,
   };
 
@@ -153,6 +171,15 @@ function createIndexedPlannerBookingView(baseBookings = state.bookings, options 
     },
     noteCandidateEvaluation() {
       stats.candidateEvaluations += 1;
+    },
+    noteSlotRebuild() {
+      stats.slotRebuilds += 1;
+    },
+    notePlanningDaySearched() {
+      stats.daysSearched += 1;
+    },
+    notePlanningSegments(count) {
+      stats.segmentCount += Math.max(0, Number(count || 0));
     },
     fork() {
       return createIndexedPlannerBookingView(base, { excludedCaseId }).addOverlays(overlay);
@@ -352,6 +379,8 @@ function makePlanningStep(item, template, match, options = {}) {
     resourceIds,
     primaryResourceId: match.primary.id,
     equipmentResourceIds: match.equipment ? [match.equipment.id] : [],
+    capacityUnits: Math.max(1, Number(options.capacityUnits || 1) || 1),
+    resourceUnits: options.resourceUnits && typeof options.resourceUnits === "object" ? { ...options.resourceUnits } : {},
     dependencies: Array.isArray(options.dependencies) ? [...options.dependencies] : [],
     parallelizable: options.parallelizable === true,
     vehicleExclusive: options.vehicleExclusive !== false,
@@ -386,13 +415,6 @@ function describePlanningAvailabilityFailure(item, template, duration, tempBooki
       return `Aucune zone ou ressource ${template.equipmentRole} disponible pour ${label}.`;
     }
   }
-  const finiteCapacities = primaryResources
-    .map((resource) => getResourceDailyCapacityMinutes(resource))
-    .filter((minutes) => Number.isFinite(minutes));
-  if (finiteCapacities.length && finiteCapacities.every((minutes) => minutes < duration)) {
-    const bestCapacity = Math.max(...finiteCapacities);
-    return `Durée de ${Math.round(duration / 6) / 10} h supérieure à la capacité journalière disponible de ${Math.round(bestCapacity / 6) / 10} h pour ${label}.`;
-  }
   const sameCaseBookings = isIndexedPlannerBookingView(tempBookings)
     ? tempBookings.getCaseBookings(item.id).filter((booking) => booking.temporary !== true)
     : (tempBookings || []).filter((booking) => booking.caseId === item.id && booking.temporary !== true);
@@ -425,6 +447,8 @@ function scheduleSingleStep(item, template, cursor, duration, tempBookings, assi
       parallelizable: planningOptions.parallelizable === true,
       dependencies: planningOptions.dependencies || [],
       requiredCategory: planningOptions.requiredCategory || "",
+      capacityUnits: planningOptions.capacityUnits || 1,
+      resourceUnits: planningOptions.resourceUnits || {},
     },
   );
   if (!match) {
@@ -744,13 +768,45 @@ function compareSlots(a, b) {
 }
 
 function findEarliestSlot(resourceIds, startAfter, duration, bookings, options = {}) {
-  let cursor = nextWorkingTime(startAfter);
+  const indexedView = ensureIndexedPlannerBookingView(bookings);
+  const resources = [...new Set((resourceIds || []).filter(Boolean))]
+    .map((resourceId) => state.resources.find((resource) => resource.id === resourceId));
+  lastPlanningSlotSearchStats = {
+    candidateEvaluations: 0,
+    slotRebuilds: 0,
+    daysSearched: 0,
+    segmentCount: 0,
+    failureCode: "",
+  };
+  if (!resources.length || resources.some((resource) => !resource || resource.active === false)) {
+    lastPlanningSlotSearchStats.failureCode = "calendar_unavailable";
+    return null;
+  }
+  const impossibleUnits = resources.some((resource) => (
+    getBookingResourceUnits(options, resource.id) > getResourceSimultaneousCapacity(resource)
+  ));
+  if (impossibleUnits) {
+    indexedView.noteCandidateEvaluation();
+    lastPlanningSlotSearchStats.candidateEvaluations = 1;
+    lastPlanningSlotSearchStats.failureCode = "permanent_impossible_capacity";
+    return null;
+  }
+  let cursor = new Date(startAfter);
   const horizon = addDays(cursor, MAX_PLANNING_SEARCH_DAYS);
   let iterations = 0;
   while (cursor < horizon && iterations < MAX_PLANNING_ITERATIONS) {
     iterations += 1;
-    if (isIndexedPlannerBookingView(bookings)) bookings.noteCandidateEvaluation();
-    const slot = buildWorkingSlot(cursor, duration);
+    indexedView.noteCandidateEvaluation();
+    indexedView.noteSlotRebuild();
+    lastPlanningSlotSearchStats.candidateEvaluations += 1;
+    lastPlanningSlotSearchStats.slotRebuilds += 1;
+    const slot = buildResourceWorkingSlot(resourceIds, cursor, duration, indexedView, options);
+    if (!slot) {
+      if (!lastPlanningSlotSearchStats.failureCode) lastPlanningSlotSearchStats.failureCode = "no_slot_in_horizon";
+      return null;
+    }
+    lastPlanningSlotSearchStats.segmentCount = slot.segments.length;
+    indexedView.notePlanningSegments(slot.segments.length);
     const candidate = {
       id: options.bookingId || options.excludedBookingId || "",
       caseId: options.caseId || "",
@@ -769,14 +825,21 @@ function findEarliestSlot(resourceIds, startAfter, duration, bookings, options =
       capacityUnits: options.capacityUnits || 1,
       resourceUnits: options.resourceUnits || {},
     };
-    const validation = validatePlanningCandidate(candidate, bookings, options);
-    if (validation.ok) return slot;
-    if (validation.permanent) return null;
+    const validation = validatePlanningCandidate(candidate, indexedView, options);
+    if (validation.ok) {
+      lastPlanningSlotSearchStats.failureCode = "";
+      return slot;
+    }
+    if (validation.permanent) {
+      lastPlanningSlotSearchStats.failureCode = validation.conflicts[0]?.code || "permanent_impossible_capacity";
+      return null;
+    }
     const nextAt = validation.nextAt && validation.nextAt > cursor
       ? validation.nextAt
       : addMinutes(cursor, STEP_MINUTES);
-    cursor = nextWorkingTime(nextAt);
+    cursor = new Date(nextAt);
   }
+  lastPlanningSlotSearchStats.failureCode = "no_slot_in_horizon";
   console.warn("Aucun créneau disponible dans l'horizon de recherche.");
   return null;
 }
@@ -1232,6 +1295,8 @@ function stepToBooking(item, step, temporary) {
     resourceIds,
     primaryResourceId: resourceIds[0] || null,
     equipmentResourceIds: resourceIds.slice(1),
+    capacityUnits: Math.max(1, Number(step.capacityUnits || 1) || 1),
+    resourceUnits: step.resourceUnits && typeof step.resourceUnits === "object" ? { ...step.resourceUnits } : {},
     segments,
     plannedStart: step.start,
     plannedEnd: step.end,
@@ -2967,7 +3032,7 @@ function getResourceSimultaneousCapacity(resource) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
 }
 
-function getResourceDailyCapacityMinutes(resource) {
+function getExplicitResourceDailyCapacityMinutes(resource) {
   const explicitMinutes = Number(
     resource?.dailyCapacityMinutes
     ?? resource?.capacityDailyMinutes
@@ -2975,7 +3040,20 @@ function getResourceDailyCapacityMinutes(resource) {
   );
   if (Number.isFinite(explicitMinutes) && explicitMinutes > 0) return explicitMinutes;
   const hours = Number(resource?.dailyCapacityHours ?? resource?.capacityDailyHours);
-  return Number.isFinite(hours) && hours > 0 ? Math.round(hours * 60) : Number.POSITIVE_INFINITY;
+  return Number.isFinite(hours) && hours > 0 ? Math.round(hours * 60) : null;
+}
+
+function getEffectiveResourceDailyCapacityMinutes(resource, dateLike = new Date()) {
+  const effectiveIntervals = getEffectiveResourceDayIntervals(resource, dateLike);
+  const usableMinutes = effectiveIntervals.reduce((sum, interval) => sum + diffMinutes(interval.start, interval.end), 0);
+  if (usableMinutes <= 0) return 0;
+  const explicit = getExplicitResourceDailyCapacityMinutes(resource);
+  if (Number.isFinite(explicit) && explicit > 0) return explicit;
+  return usableMinutes * getResourceSimultaneousCapacity(resource);
+}
+
+function getResourceDailyCapacityMinutes(resource, dateLike = new Date()) {
+  return getEffectiveResourceDailyCapacityMinutes(resource, dateLike);
 }
 
 function getResourceCompatibilityValues(resource) {
@@ -3020,12 +3098,14 @@ function getResourceDayIntervals(resource, dateLike) {
   ].map((entry) => typeof entry === "string" ? entry : entry?.date).filter(Boolean);
   if (closedDates.includes(dateKey)) return [];
   const hours = getResourceCalendarWorkHours(resource);
-  if (!hours) return getDayIntervals(date);
-  const rows = hours[date.getDay()] || hours[String(date.getDay())] || [];
-  return rows
+  const workshopIntervals = getDayIntervals(date);
+  if (!hours) return workshopIntervals;
+  const rawRows = hours[date.getDay()] || hours[String(date.getDay())] || [];
+  const rows = (typeof rawRows === "string" ? rawRows.split(",").map((row) => row.trim().split("-")) : rawRows)
     .filter((row) => Array.isArray(row) && row.length === 2)
     .map(([start, end]) => ({ start: atTime(date, String(start)), end: atTime(date, String(end)) }))
     .filter((row) => row.start < row.end);
+  return intersectPlanningIntervalSets([workshopIntervals, rows]);
 }
 
 function getResourceUnavailableRanges(resource) {
@@ -3045,6 +3125,172 @@ function getPlanningSlotSegments(slot) {
   if (Array.isArray(slot?.segments) && slot.segments.length) return clonePlanningSegments(slot.segments);
   if (slot?.start && slot?.end) return [{ start: new Date(slot.start).toISOString(), end: new Date(slot.end).toISOString() }];
   return [];
+}
+
+function appendPlanningWorkingSegment(segments, start, end) {
+  if (!(start < end)) return;
+  const startIso = start.toISOString();
+  const endIso = end.toISOString();
+  const previous = segments.at(-1);
+  if (previous?.end === startIso) previous.end = endIso;
+  else segments.push({ start: startIso, end: endIso });
+}
+
+function getPlanningDayRowsForResource(bookings, resourceId, dateLike) {
+  return isIndexedPlannerBookingView(bookings)
+    ? bookings.getResourceDayBookings(resourceId, todayKey(dateLike))
+    : (bookings || []).filter((booking) => (
+      (booking.resourceIds || []).includes(resourceId)
+      && getPlanningSlotSegments(booking).some((segment) => todayKey(segment.start) === todayKey(dateLike))
+    ));
+}
+
+function getPlanningSliceBoundary(cursor, intervalEnd, bookingGroups) {
+  let boundary = new Date(intervalEnd);
+  (bookingGroups || []).forEach((rows) => (rows || []).forEach((booking) => {
+    if (!isPlanningBlockingBooking(booking)) return;
+    getPlanningSlotSegments(booking).forEach((segment) => {
+      const busyStart = new Date(segment.start);
+      const busyEnd = new Date(segment.end);
+      if (busyStart > cursor && busyStart < boundary) boundary = busyStart;
+      if (busyStart <= cursor && busyEnd > cursor && busyEnd < boundary) boundary = busyEnd;
+    });
+  }));
+  return boundary;
+}
+
+function isPlanningSliceAvailableForResources(resources, start, end, dayRowsByResource, options = {}) {
+  const excludedBookingId = options.bookingId || options.excludedBookingId || "";
+  for (const resource of resources) {
+    const candidateUnits = getBookingResourceUnits(options, resource.id);
+    const maximum = getMaximumResourceUnitsDuringSegment(
+      resource.id,
+      { start: start.toISOString(), end: end.toISOString() },
+      dayRowsByResource.get(resource.id) || [],
+      candidateUnits,
+      excludedBookingId,
+    );
+    if (maximum > getResourceSimultaneousCapacity(resource)) return false;
+  }
+  return true;
+}
+
+function isPlanningSliceAvailableForVehicle(start, end, caseBookings, options = {}) {
+  if (!options.caseId) return true;
+  const candidate = {
+    id: options.bookingId || options.excludedBookingId || "",
+    caseId: options.caseId,
+    start: start.toISOString(),
+    end: end.toISOString(),
+    segments: [{ start: start.toISOString(), end: end.toISOString() }],
+    resourceIds: [],
+    vehicleLocation: options.vehicleLocation || options.requiredSite || "internal",
+    vehicleExclusive: options.vehicleExclusive !== false,
+    parallelizable: options.parallelizable === true,
+  };
+  return !findVehicleBookingConflict(candidate, caseBookings, candidate.id);
+}
+
+function buildResourceWorkingSlot(resourceIds, startAfter, duration, bookings, options = {}) {
+  const requestedMinutes = Math.max(0, Math.round(Number(duration || 0)));
+  if (!requestedMinutes) return null;
+  const resources = [...new Set((resourceIds || []).filter(Boolean))]
+    .map((resourceId) => state.resources.find((resource) => resource.id === resourceId))
+    .filter(Boolean);
+  if (!resources.length) return null;
+  let cursor = new Date(startAfter);
+  if (Number.isNaN(cursor.getTime())) return null;
+  const horizon = addDays(cursor, MAX_PLANNING_SEARCH_DAYS);
+  const segments = [];
+  let remaining = requestedMinutes;
+  let iterations = 0;
+  let sawWorkingInterval = false;
+  const caseBookings = options.caseId
+    ? (isIndexedPlannerBookingView(bookings)
+      ? bookings.getCaseBookings(options.caseId)
+      : (bookings || []).filter((booking) => booking?.caseId === options.caseId))
+    : [];
+
+  while (remaining > 0 && cursor < horizon && iterations < MAX_PLANNING_ITERATIONS) {
+    iterations += 1;
+    const dayStart = startOfDay(cursor);
+    const dayEnd = addDays(dayStart, 1);
+    lastPlanningSlotSearchStats.daysSearched += 1;
+    if (isIndexedPlannerBookingView(bookings)) bookings.notePlanningDaySearched();
+    const commonIntervals = getCommonResourceDayIntervals(resources, dayStart);
+    if (commonIntervals.length) sawWorkingInterval = true;
+    const dayRowsByResource = new Map(resources.map((resource) => [
+      resource.id,
+      getPlanningDayRowsForResource(bookings, resource.id, dayStart),
+    ]));
+    const candidateUnitMinutes = new Map(resources.map((resource) => [resource.id, 0]));
+    const effectiveDailyCapacities = new Map(resources.map((resource) => [
+      resource.id,
+      getEffectiveResourceDailyCapacityMinutes(resource, dayStart),
+    ]));
+    const existingDailyUsage = new Map(resources.map((resource) => [
+      resource.id,
+      getResourceDailyUsageMinutes(
+        resource.id,
+        bookings,
+        dayStart,
+        options.bookingId || options.excludedBookingId || "",
+      ),
+    ]));
+    const availableProductiveMinutes = () => resources.reduce((minimum, resource) => {
+      const capacity = effectiveDailyCapacities.get(resource.id) || 0;
+      const used = existingDailyUsage.get(resource.id) || 0;
+      const candidateUsed = candidateUnitMinutes.get(resource.id) || 0;
+      const units = getBookingResourceUnits(options, resource.id);
+      return Math.min(minimum, Math.max(0, Math.floor((capacity - used - candidateUsed) / units)));
+    }, Number.POSITIVE_INFINITY);
+
+    for (const interval of commonIntervals) {
+      if (remaining <= 0) break;
+      let sliceStart = maxDate(cursor, interval.start);
+      while (sliceStart < interval.end && remaining > 0 && iterations < MAX_PLANNING_ITERATIONS) {
+        iterations += 1;
+        const dayRemaining = availableProductiveMinutes();
+        if (dayRemaining <= 0) break;
+        const sliceEnd = getPlanningSliceBoundary(
+          sliceStart,
+          interval.end,
+          [...dayRowsByResource.values(), caseBookings],
+        );
+        if (!(sliceStart < sliceEnd)) {
+          sliceStart = addMinutes(sliceStart, STEP_MINUTES);
+          continue;
+        }
+        const resourcesAvailable = isPlanningSliceAvailableForResources(resources, sliceStart, sliceEnd, dayRowsByResource, options);
+        const vehicleAvailable = isPlanningSliceAvailableForVehicle(sliceStart, sliceEnd, caseBookings, options);
+        if (!resourcesAvailable || !vehicleAvailable) {
+          sliceStart = sliceEnd;
+          continue;
+        }
+        const taken = Math.min(diffMinutes(sliceStart, sliceEnd), dayRemaining, remaining);
+        if (taken <= 0) break;
+        const segmentEnd = addMinutes(sliceStart, taken);
+        appendPlanningWorkingSegment(segments, sliceStart, segmentEnd);
+        resources.forEach((resource) => {
+          const units = getBookingResourceUnits(options, resource.id);
+          candidateUnitMinutes.set(resource.id, (candidateUnitMinutes.get(resource.id) || 0) + taken * units);
+        });
+        remaining -= taken;
+        sliceStart = segmentEnd;
+      }
+    }
+    if (remaining > 0) cursor = dayEnd;
+  }
+
+  if (remaining > 0 || !segments.length) {
+    lastPlanningSlotSearchStats.failureCode = sawWorkingInterval ? "no_slot_in_horizon" : "calendar_unavailable";
+    return null;
+  }
+  return {
+    start: new Date(segments[0].start),
+    end: new Date(segments.at(-1).end),
+    segments,
+  };
 }
 
 function planningRangesOverlap(startA, endA, startB, endB) {
@@ -3136,6 +3382,46 @@ function isVehicleExclusiveBooking(booking) {
   if (booking?.vehicleExclusive === true) return true;
   if (booking?.parallelizable === true) return false;
   return ["external", "transport"].includes(getBookingVehicleLocation(booking));
+}
+
+function intersectPlanningIntervalSets(intervalSets = []) {
+  const sets = intervalSets.filter(Array.isArray);
+  if (!sets.length) return [];
+  return sets.slice(1).reduce((current, next) => current.flatMap((left) => next.flatMap((right) => {
+    const start = maxDate(left.start, right.start);
+    const end = minDate(left.end, right.end);
+    return start < end ? [{ start, end }] : [];
+  })), sets[0].map((interval) => ({ start: new Date(interval.start), end: new Date(interval.end) })));
+}
+
+function subtractPlanningRanges(intervals, unavailableRanges) {
+  return (intervals || []).flatMap((interval) => {
+    let pieces = [{ start: new Date(interval.start), end: new Date(interval.end) }];
+    (unavailableRanges || []).forEach((range) => {
+      pieces = pieces.flatMap((piece) => {
+        if (!planningRangesOverlap(piece.start, piece.end, range.start, range.end)) return [piece];
+        const result = [];
+        if (range.start > piece.start) result.push({ start: piece.start, end: minDate(piece.end, range.start) });
+        if (range.end < piece.end) result.push({ start: maxDate(piece.start, range.end), end: piece.end });
+        return result.filter((candidate) => candidate.start < candidate.end);
+      });
+    });
+    return pieces;
+  }).sort((left, right) => left.start - right.start || left.end - right.end);
+}
+
+function getEffectiveResourceDayIntervals(resource, dateLike) {
+  const date = new Date(dateLike);
+  const dayStart = startOfDay(date);
+  const dayEnd = addDays(dayStart, 1);
+  const unavailable = getResourceUnavailableRanges(resource)
+    .filter((range) => planningRangesOverlap(dayStart, dayEnd, range.start, range.end))
+    .map((range) => ({ start: maxDate(dayStart, range.start), end: minDate(dayEnd, range.end) }));
+  return subtractPlanningRanges(getResourceDayIntervals(resource, date), unavailable);
+}
+
+function getCommonResourceDayIntervals(resources, dateLike) {
+  return intersectPlanningIntervalSets((resources || []).map((resource) => getEffectiveResourceDayIntervals(resource, dateLike)));
 }
 
 function findVehicleBookingConflict(candidate, bookings, excludedBookingId = "") {
@@ -3259,6 +3545,12 @@ function validatePlanningCandidate(candidate, bookings = state.bookings, options
     }
     const candidateUnits = getBookingResourceUnits(candidate, resourceId);
     const capacity = getResourceSimultaneousCapacity(resource);
+    if (candidateUnits > capacity) {
+      issues.push(`Unités demandées supérieures à la capacité simultanée de ${resource.name || resource.id}.`);
+      conflicts.push({ type: "capacity", code: "permanent_impossible_capacity", resourceId, message: issues.at(-1) });
+      permanent = true;
+      return;
+    }
     slot.segments.forEach((segment) => {
       const maximum = getMaximumResourceUnitsDuringSegment(resourceId, segment, bookings, candidateUnits, candidate.id || options.excludedBookingId || "");
       if (maximum > capacity) {
@@ -3269,13 +3561,13 @@ function validatePlanningCandidate(candidate, bookings = state.bookings, options
         conflicts.push({ type: "capacity", code: "simultaneous_capacity", resourceId, bookingId: overlapping?.booking?.id || "", end: overlapping?.busy?.end || segment.end, message: issues.at(-1) });
       }
     });
-    const dailyCapacity = getResourceDailyCapacityMinutes(resource);
     const candidateByDay = new Map();
     slot.segments.forEach((segment) => {
       const key = todayKey(segment.start);
       candidateByDay.set(key, (candidateByDay.get(key) || 0) + diffMinutes(segment.start, segment.end) * candidateUnits);
     });
     candidateByDay.forEach((minutes, dateKey) => {
+      const dailyCapacity = getEffectiveResourceDailyCapacityMinutes(resource, parseDateKey(dateKey));
       const used = getResourceDailyUsageMinutes(resourceId, bookings, parseDateKey(dateKey), candidate.id || options.excludedBookingId || "");
       if (used + minutes > dailyCapacity) {
         issues.push(`Capacité journalière dépassée pour ${resource.name || resource.id}.`);
@@ -3417,6 +3709,8 @@ function buildInternalTaskStep(item, task, startAfter, bookings, assignment = cr
     vehicleLocation: task.vehicleLocation || "internal",
     vehicleExclusive: task.vehicleExclusive,
     parallelizable: task.parallelizable,
+    capacityUnits: task.capacityUnits || 1,
+    resourceUnits: task.resourceUnits || {},
   };
   let match = null;
   const requestedResourceIds = [...new Set((task.resourceIds || []).filter(Boolean))];
@@ -3459,6 +3753,8 @@ function buildInternalTaskStep(item, task, startAfter, bookings, assignment = cr
     sourceLineIds: task.sourceLineIds,
     sourceOperations: task.sourceOperations,
     sourceLaborHours: task.sourceLaborHours,
+    capacityUnits: task.capacityUnits || 1,
+    resourceUnits: task.resourceUnits || {},
     planningMode: "task-graph",
     details: task.details || task.observations || "",
   });

@@ -295,29 +295,29 @@ scenario("W", "external task behavior", "PASS", () => {
   return { phases: proposal.steps.map((step) => step.subcontractPhase) };
 });
 
-scenario("X", "long task greater than daily capacity", "FAIL", () => {
+scenario("X", "long task greater than daily capacity", "PASS", () => {
   resetState({ resources: [baseResources[2], baseResources[5]] });
   const proposal = graph({ id: "x", durations: {} }, [{ id: "paint", key: "paint", durationMinutes: 600, requiredRole: "peintre", equipmentRole: "cabine" }]);
   assert.equal(proposal.steps.length, 1);
   assert.equal(totalMinutes(proposal.steps[0]), 600);
   assert.ok(proposal.steps[0].segments.length > 2);
   assert.deepEqual(proposal.steps[0].resourceIds, ["painter-1", "booth"]);
-  assert.equal(run(`todayKey(new Date(${JSON.stringify(proposal.start)}))`), "2026-09-12");
+  assert.equal(run(`todayKey(new Date(${JSON.stringify(proposal.start)}))`), "2026-09-07");
   return {
     representation: "one step, multi-day productive segments",
     start: proposal.start,
     segments: proposal.steps[0].segments.length,
-    failure: "with default 8-hour weekdays and a 420-minute cap, the search skips whole over-capacity days and delays the 600-minute task to the 5-hour Saturday",
+    result: "the first day uses its 420-minute capacity and the remaining 180 minutes continue on the next working day",
   };
 });
 
-scenario("Y", "very long task spanning multiple days", "FAIL", () => {
+scenario("Y", "very long task spanning multiple days", "PASS", () => {
   resetState({ resources: [baseResources[0]] });
-  assert.throws(
-    () => schedule({ id: "y", durations: { body: 20 } }),
-    /supérieure à la capacité journalière|capacité atelier/i,
-  );
-  return { failure: "the multi-day slot builder exists, but higher-level resource validation fails for this duration" };
+  const proposal = schedule({ id: "y", durations: { body: 20 } });
+  assert.equal(proposal.steps.length, 1);
+  assert.equal(totalMinutes(proposal.steps[0]), 1200);
+  assert.ok(proposal.steps[0].segments.length > 2);
+  return { result: "one logical booking spans multiple bounded working segments", segments: proposal.steps[0].segments.length };
 });
 
 scenario("Z", "body to prep to paint to reassembly to finish flow", "FAIL", () => {

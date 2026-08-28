@@ -80,12 +80,20 @@ function getExplicitPlanningTasks(item) {
     : (Array.isArray(item?.workshopTasks) ? item.workshopTasks : []);
   if (direct.length) {
     const tasks = direct.filter(Boolean);
-    return (
-      item?.source === "pdf_estimate"
-      && typeof normalizePdfPlanningTasksForCase === "function"
-    )
-      ? normalizePdfPlanningTasksForCase(tasks)
-      : tasks;
+    if (typeof isLegacyPdfPlanningTaskSet === "function" && isLegacyPdfPlanningTaskSet(tasks)) {
+      return normalizePdfPlanningTasksForCase(tasks).map(normalizeCasePlanningTask);
+    }
+    const hasCanonicalOrSourcedTask = tasks.some((task) => (
+      isCanonicalTaskModel(task)
+      || inferPlanningTaskSourceKind(task) !== "legacy_unknown"
+    ));
+    const hasExplicitGraph = tasks.some((task) => (
+      (Array.isArray(task?.dependencies) && task.dependencies.length > 0)
+      || (Array.isArray(task?.dependsOn) && task.dependsOn.length > 0)
+      || task?.parallelizable === true
+      || task?.serviceMode === "external"
+    ));
+    return hasCanonicalOrSourcedTask || hasExplicitGraph ? tasks : [];
   }
   const hasExternalStep = Object.values(item?.stepExecutionModes || {}).some((mode) => mode === "external");
   if (hasExternalStep) {
@@ -112,12 +120,34 @@ function getExplicitPlanningTasks(item) {
     });
   }
   const legacyTasks = Array.isArray(item?.tasks) ? item.tasks.filter(Boolean) : [];
+  if (isLegacyPdfPlanningTaskSet(legacyTasks)) {
+    return normalizePdfPlanningTasksForCase(legacyTasks).map(normalizeCasePlanningTask);
+  }
   return legacyTasks.some((task) => (
-    Array.isArray(task?.dependencies)
-    || Array.isArray(task?.dependsOn)
+    isCanonicalTaskModel(task)
+    || inferPlanningTaskSourceKind(task) !== "legacy_unknown"
+    || (Array.isArray(task?.dependencies) && task.dependencies.length > 0)
+    || (Array.isArray(task?.dependsOn) && task.dependsOn.length > 0)
     || task?.parallelizable === true
     || task?.serviceMode === "external"
   )) ? legacyTasks : [];
+}
+
+function buildPlanningTaskProvenance(value = {}) {
+  const provenance = {};
+  if (Number(value.taskModelVersion) === CANONICAL_TASK_MODEL_VERSION) {
+    provenance.taskModelVersion = CANONICAL_TASK_MODEL_VERSION;
+  }
+  const sourceKind = normalizeCanonicalTaskSourceKind(value.sourceKind);
+  if (sourceKind) provenance.sourceKind = sourceKind;
+  if (Object.hasOwn(value, "source")) provenance.source = String(value.source || "");
+  if (Array.isArray(value.sourceLineIds)) provenance.sourceLineIds = normalizeStringList(value.sourceLineIds);
+  if (Array.isArray(value.sourceOperations)) provenance.sourceOperations = normalizeStringList(value.sourceOperations);
+  if (Object.hasOwn(value, "sourceLaborHours")) {
+    provenance.sourceLaborHours = Number(value.sourceLaborHours || 0) || 0;
+  }
+  if (value.businessTaskId) provenance.businessTaskId = String(value.businessTaskId);
+  return provenance;
 }
 
 function makePlanningStep(item, template, match, options = {}) {
@@ -138,6 +168,7 @@ function makePlanningStep(item, template, match, options = {}) {
     vehicleLocation: options.vehicleLocation || "internal",
     requiredRole: options.requiredRole || template.role || "",
     requiredCategory: options.requiredCategory || "",
+    ...buildPlanningTaskProvenance(options),
     sourceLineIds: Array.isArray(options.sourceLineIds) ? [...options.sourceLineIds] : [],
     sourceOperations: Array.isArray(options.sourceOperations) ? [...options.sourceOperations] : [],
     sourceLaborHours: Number(options.sourceLaborHours || 0),
@@ -993,6 +1024,7 @@ function stepToBooking(item, step, temporary) {
     title: step.title,
     key: step.key,
     taskId: step.taskId || step.key || "",
+    ...buildPlanningTaskProvenance(step),
     start: step.start,
     end: step.end,
     delivery: step.delivery,
@@ -2896,9 +2928,10 @@ function getBookingVehicleLocation(booking) {
 }
 
 function isVehicleExclusiveBooking(booking) {
-  if (booking?.vehicleExclusive === false || booking?.parallelizable === true) return false;
-  return booking?.vehicleExclusive === true
-    || ["external", "transport"].includes(getBookingVehicleLocation(booking));
+  if (booking?.vehicleExclusive === false) return false;
+  if (booking?.vehicleExclusive === true) return true;
+  if (booking?.parallelizable === true) return false;
+  return ["external", "transport"].includes(getBookingVehicleLocation(booking));
 }
 
 function findVehicleBookingConflict(candidate, bookings, excludedBookingId = "") {
@@ -3092,10 +3125,27 @@ function normalizePlanningTask(task, index = 0) {
     : (Array.isArray(task?.dependsOn) ? task.dependsOn : []);
   const parallelizable = task?.parallelizable === true;
   const serviceMode = planningTextKey(task?.serviceMode || task?.mode || "internal") || "internal";
+  const modern = isCanonicalTaskModel(task);
+  const explicitId = String(task?.id || "").trim();
+  const explicitTaskId = String(task?.taskId || "").trim();
+  if (modern && !explicitId && !explicitTaskId) {
+    throw new Error(`Identité canonique absente pour ${task?.title || task?.label || key}.`);
+  }
+  if (modern && explicitId && explicitTaskId && explicitId !== explicitTaskId) {
+    throw new Error(`Identité canonique incohérente pour ${task?.title || task?.label || key}.`);
+  }
+  const canonicalId = explicitTaskId || explicitId;
+  const legacyId = String(canonicalId || key || `task-${index + 1}`);
+  const sourceKind = modern
+    ? normalizeCanonicalTaskSourceKind(task?.sourceKind)
+    : inferPlanningTaskSourceKind(task);
+  if (modern && !sourceKind) {
+    throw new Error(`Source canonique absente ou invalide pour ${task?.title || task?.label || key}.`);
+  }
   return {
     ...task,
-    id: String(task?.id || task?.taskId || key || `task-${index + 1}`),
-    taskId: String(task?.taskId || task?.id || key || `task-${index + 1}`),
+    id: modern ? canonicalId : legacyId,
+    taskId: modern ? canonicalId : legacyId,
     key,
     title: task?.title || task?.label || task?.operation || baseTemplate.title || getDurationLabel(key) || "Tâche atelier",
     durationMinutes: Math.max(0, Math.round(durationMinutes)),
@@ -3106,10 +3156,13 @@ function normalizePlanningTask(task, index = 0) {
     serviceMode,
     requiredSite: serviceMode === "external" ? "external" : normalizePlanningSite(task?.requiredSite || task?.site || "internal"),
     parallelizable,
+    ...(modern ? { taskModelVersion: CANONICAL_TASK_MODEL_VERSION } : {}),
+    sourceKind,
+    source: String(task?.source || ""),
     sourceLineIds: Array.isArray(task?.sourceLineIds) ? [...new Set(task.sourceLineIds.filter(Boolean).map(String))] : [],
     sourceOperations: Array.isArray(task?.sourceOperations) ? [...new Set(task.sourceOperations.filter(Boolean).map(String))] : [],
     sourceLaborHours: Number(task?.sourceLaborHours ?? task?.laborHours ?? 0) || 0,
-    vehicleExclusive: typeof task?.vehicleExclusive === "boolean" ? task.vehicleExclusive : !parallelizable,
+    vehicleExclusive: typeof task?.vehicleExclusive === "boolean" ? task.vehicleExclusive : (modern ? true : !parallelizable),
     vehicleLocation: normalizePlanningSite(task?.vehicleLocation || (serviceMode === "external" ? "external" : "internal")),
   };
 }
@@ -3185,6 +3238,7 @@ function buildInternalTaskStep(item, task, startAfter, bookings, assignment = cr
   rememberPlanningAssignment(template, assignment, match.primary.id, match.equipment?.id || null);
   return makePlanningStep(item, template, match, {
     taskId: task.taskId,
+    businessTaskId: task.taskId,
     title: task.title,
     dependencies: task.dependencies,
     parallelizable: task.parallelizable,
@@ -3192,6 +3246,9 @@ function buildInternalTaskStep(item, task, startAfter, bookings, assignment = cr
     vehicleLocation: task.vehicleLocation,
     requiredRole: task.requiredRole,
     requiredCategory: task.requiredCategory,
+    taskModelVersion: task.taskModelVersion,
+    sourceKind: task.sourceKind,
+    source: task.source,
     sourceLineIds: task.sourceLineIds,
     sourceOperations: task.sourceOperations,
     sourceLaborHours: task.sourceLaborHours,
@@ -3316,6 +3373,10 @@ function makeSubcontractPlanningStep(item, task, phase, title, slot, resources, 
     subcontractPhase: phase,
     planningMode: "subcontract",
     details: options.details || "",
+    ...buildPlanningTaskProvenance({
+      ...task,
+      businessTaskId: task.taskId || task.id,
+    }),
     color: getVehiclePlanningColor(item),
   };
 }

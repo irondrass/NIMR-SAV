@@ -462,9 +462,10 @@ context.__legacyGraphCase = {
   ],
 };
 const normalizedLegacyGraph = toPlain(run("normalizeCase(__legacyGraphCase, []).planningTasks"));
-assert.deepEqual(normalizedLegacyGraph.map((task) => task.phase), ["body", "paint"]);
-assert.deepEqual(normalizedLegacyGraph.map((task) => task.dependencies), [[], ["first"]]);
-assert.equal(normalizedLegacyGraph.every((task) => task.parallelizable === false), true);
+assert.deepEqual(normalizedLegacyGraph.map((task) => task.phase), ["paint", "body"]);
+assert.deepEqual(normalizedLegacyGraph.map((task) => task.dependencies), [[], ["later"]]);
+assert.deepEqual(normalizedLegacyGraph.map((task) => task.parallelizable), [true, true]);
+assert.deepEqual(normalizedLegacyGraph.map((task) => task.sourceKind), ["legacy_unknown", "legacy_unknown"]);
 
 assert.equal(unexpected.length, 0, unexpected.map((entry) => `${entry.id}: ${entry.error}`).join("\n\n"));
 assert.equal(results.length, 32);

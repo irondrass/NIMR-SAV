@@ -90,7 +90,15 @@ assert.match(
 );
 assert.match(
   planningSource,
+  /isLegacyPdfPlanningTaskSet\(tasks\)[\s\S]*normalizePdfPlanningTasksForCase\(tasks\)/,
+);
+assert.doesNotMatch(
+  planningSource,
   /item\?\.source === "pdf_estimate"[\s\S]*normalizePdfPlanningTasksForCase\(tasks\)/,
+);
+assert.match(
+  stateSource,
+  /planningTasks:\s*normalizeCasePlanningTasks\(item\)/,
 );
 assert.match(
   stateSource,

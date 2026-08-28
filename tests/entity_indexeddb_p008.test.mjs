@@ -5,6 +5,12 @@ function clone(value) {
   return value === undefined ? undefined : structuredClone(value);
 }
 
+function createMemoryIndexedDbRequest() {
+  const request = {};
+  Object.defineProperty(request, Symbol.toStringTag, { value: "IDBRequest" });
+  return request;
+}
+
 function createMemoryIndexedDb() {
   const databases = new Map();
   let failNextTransaction = false;
@@ -60,7 +66,7 @@ function createMemoryIndexedDb() {
             const entries = working.get(storeName);
             if (!definition || !entries) throw new Error(`Store not in transaction: ${storeName}`);
             const request = (operation) => {
-              const result = {};
+              const result = createMemoryIndexedDbRequest();
               pending += 1;
               queueMicrotask(() => {
                 try {
@@ -134,7 +140,7 @@ function createMemoryIndexedDb() {
     },
     waitForDelayedTransactionStart() { return delayedTransactionStarted; },
     open(name, version) {
-      const request = {};
+      const request = createMemoryIndexedDbRequest();
       setTimeout(() => {
         let database = databases.get(name);
         const needsUpgrade = !database || Number(version) > Number(database.version || 0);

@@ -52,6 +52,17 @@ function openLargeStateDatabase() {
   });
 }
 
+function isIndexedDbRequest(value) {
+  if (!value || typeof value !== "object") return false;
+  if (typeof IDBRequest !== "undefined" && value instanceof IDBRequest) return true;
+  return Object.prototype.toString.call(value) === "[object IDBRequest]";
+}
+
+function resolveIndexedDbOperationResult(operationResult) {
+  if (typeof operationResult === "function") return operationResult();
+  return isIndexedDbRequest(operationResult) ? operationResult.result : operationResult;
+}
+
 function runIndexedDbStoresTransaction(storeNames, mode, operation) {
   return openLargeStateDatabase().then((database) => new Promise((resolve, reject) => {
     const names = [...new Set(Array.isArray(storeNames) ? storeNames : [storeNames])];
@@ -74,10 +85,14 @@ function runIndexedDbStoresTransaction(storeNames, mode, operation) {
     }
     transaction.oncomplete = () => {
       if (settled) return;
+      let result;
+      try {
+        result = resolveIndexedDbOperationResult(operationResult);
+      } catch (error) {
+        rejectOnce(error);
+        return;
+      }
       settled = true;
-      const result = typeof operationResult === "function"
-        ? operationResult()
-        : (operationResult && Object.hasOwn(operationResult, "result") ? operationResult.result : operationResult);
       database.close();
       resolve(result);
     };

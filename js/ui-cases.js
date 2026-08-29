@@ -1523,12 +1523,27 @@ function renderTechnicianDashboard() {
   const orderedRows = orderTechnicianRowsForField(rows);
   const currentRow = orderedRows.find((row) => row.status !== "done") || orderedRows[0] || null;
   const nextRow = orderedRows.find((row) => row !== currentRow && row.status !== "done") || null;
+  const remainingRows = orderedRows.filter((row) => row !== currentRow && row !== nextRow);
   fieldFocus.innerHTML = renderTechnicianFieldFocus(currentRow, nextRow);
   actionDock.innerHTML = currentRow && currentRow.status !== "done" ? renderTechnicianTaskActions(currentRow) : "";
   actionDock.hidden = !actionDock.innerHTML.trim();
-  list.innerHTML = rows.length
-    ? orderedRows.map((row) => renderTechnicianTaskCard(row, { isCurrent: row === currentRow })).join("")
-    : `<div class="empty-state compact-empty"><strong>Aucune tâche pour ce technicien.</strong><span>${getCanonicalUserRole(currentUser) === "technicien" && !currentUser.resourceId ? "Aucune ressource technicien n'est liée à votre utilisateur." : "Les tâches apparaissent ici dès qu'elles sont planifiées et affectées."}</span></div>`;
+  if (!rows.length) {
+    list.innerHTML = `<div class="empty-state compact-empty"><strong>Aucune tâche pour ce technicien.</strong><span>${getCanonicalUserRole(currentUser) === "technicien" && !currentUser.resourceId ? "Aucune ressource technicien n'est liée à votre utilisateur." : "Les tâches apparaissent ici dès qu'elles sont planifiées et affectées."}</span></div>`;
+  } else if (remainingRows.length > 0) {
+    list.innerHTML = `
+      <details class="technician-rest-of-day">
+        <summary>
+          <span>Autres tâches du jour</span>
+          <strong>${remainingRows.length}</strong>
+        </summary>
+        <div class="technician-rest-of-day-list">
+          ${remainingRows.map((row) => renderTechnicianTaskCard(row)).join("")}
+        </div>
+      </details>
+    `;
+  } else {
+    list.innerHTML = "";
+  }
 
   manager.innerHTML = getCanonicalUserRole(currentUser) === "technicien" ? "" : renderWorkshopChiefSummary(dateInput.value);
   const managerPanel = manager.closest(".technician-manager-panel");

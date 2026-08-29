@@ -17,6 +17,7 @@ async function initApp() {
     bindCaseFilters();
     bindPlanningToolbar();
     bindWorkshopForms();
+    bindSettingsWorkspaceNavigation();
     bindBackupActions();
     if (typeof bindUserSessionActions === "function") bindUserSessionActions();
     if (typeof bindUserSessionIdleEvents === "function") bindUserSessionIdleEvents();
@@ -128,7 +129,7 @@ function bindSyncConflictUsability() {
 
 function configurePdfWorker() {
   if (window.pdfjsLib?.GlobalWorkerOptions) {
-    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.12";
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.13";
   }
 }
 
@@ -929,6 +930,96 @@ function changePlanningDay(delta) {
   renderMetrics();
 }
 
+let activeSettingsWorkspace = "workshop";
+
+function setSettingsWorkspace(workspaceId, options = {}) {
+  const targetId = workspaceId === "administration" ? "administration" : "workshop";
+  activeSettingsWorkspace = targetId;
+  renderSettingsWorkspaceNavigation();
+}
+window.setSettingsWorkspace = setSettingsWorkspace;
+
+function renderSettingsWorkspaceNavigation() {
+  const workshopTab = document.getElementById("settings-workspace-tab-workshop");
+  const adminTab = document.getElementById("settings-workspace-tab-administration");
+  const workshopPanel = document.getElementById("settings-workspace-workshop");
+  const adminPanel = document.getElementById("settings-workspace-administration");
+  const subtitle = document.getElementById("settings-workspace-subtitle");
+
+  const isWorkshop = activeSettingsWorkspace === "workshop";
+
+  if (workshopTab) {
+    workshopTab.classList.toggle("active", isWorkshop);
+    workshopTab.setAttribute("aria-selected", isWorkshop ? "true" : "false");
+    workshopTab.setAttribute("tabindex", isWorkshop ? "0" : "-1");
+  }
+  if (adminTab) {
+    adminTab.classList.toggle("active", !isWorkshop);
+    adminTab.setAttribute("aria-selected", !isWorkshop ? "true" : "false");
+    adminTab.setAttribute("tabindex", !isWorkshop ? "0" : "-1");
+  }
+  if (workshopPanel) {
+    workshopPanel.hidden = !isWorkshop;
+  }
+  if (adminPanel) {
+    adminPanel.hidden = isWorkshop;
+  }
+  if (subtitle) {
+    subtitle.textContent = isWorkshop
+      ? "Configuration opérationnelle de l’atelier"
+      : "Utilisateurs, sécurité, sauvegarde et journal";
+  }
+}
+window.renderSettingsWorkspaceNavigation = renderSettingsWorkspaceNavigation;
+
+function bindSettingsWorkspaceNavigation() {
+  const workshopTab = document.getElementById("settings-workspace-tab-workshop");
+  const adminTab = document.getElementById("settings-workspace-tab-administration");
+
+  const handleKeyNavigation = (event, currentWorkspace) => {
+    let targetWorkspace = null;
+    if (event.key === "ArrowRight") {
+      targetWorkspace = currentWorkspace === "workshop" ? "administration" : "workshop";
+    } else if (event.key === "ArrowLeft") {
+      targetWorkspace = currentWorkspace === "administration" ? "workshop" : "administration";
+    } else if (event.key === "Home") {
+      targetWorkspace = "workshop";
+    } else if (event.key === "End") {
+      targetWorkspace = "administration";
+    }
+
+    if (targetWorkspace) {
+      event.preventDefault();
+      setSettingsWorkspace(targetWorkspace);
+      const targetTab = targetWorkspace === "workshop" ? workshopTab : adminTab;
+      if (typeof targetTab?.focus === "function") {
+        targetTab.focus();
+      }
+    }
+  };
+
+  if (workshopTab && workshopTab.dataset.bound !== "true") {
+    workshopTab.dataset.bound = "true";
+    workshopTab.addEventListener("click", () => {
+      setSettingsWorkspace("workshop");
+    });
+    workshopTab.addEventListener("keydown", (event) => {
+      handleKeyNavigation(event, "workshop");
+    });
+  }
+  if (adminTab && adminTab.dataset.bound !== "true") {
+    adminTab.dataset.bound = "true";
+    adminTab.addEventListener("click", () => {
+      setSettingsWorkspace("administration");
+    });
+    adminTab.addEventListener("keydown", (event) => {
+      handleKeyNavigation(event, "administration");
+    });
+  }
+  renderSettingsWorkspaceNavigation();
+}
+window.bindSettingsWorkspaceNavigation = bindSettingsWorkspaceNavigation;
+
 function bindWorkshopForms() {
   $("#resource-form")?.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -1217,7 +1308,7 @@ function registerServiceWorker() {
   });
   const registerCurrentServiceWorker = async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=23.3.12", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=23.3.13", { updateViaCache: "none" });
       const refreshRegistration = async () => {
         try {
           await registration.update?.();
@@ -1243,6 +1334,9 @@ function registerServiceWorker() {
 function navigateToConflictsAndFocus() {
   if (typeof setActiveTab === "function") {
     setActiveTab("atelier");
+  }
+  if (typeof setSettingsWorkspace === "function") {
+    setSettingsWorkspace("administration");
   }
   const logPanel = document.getElementById("panel-activity-log");
   if (logPanel) {
@@ -1455,7 +1549,7 @@ function renderActivityLog() {
         const localVal = targetConflict ? (targetConflict.localCase || targetConflict.localValue) : null;
         if (localVal) {
           const payload = {
-            version: "v23.3.12",
+            version: "v23.3.13",
             timestamp: new Date().toISOString(),
             cases: [JSON.parse(JSON.stringify(localVal))],
             source: "manual_conflict_backup"

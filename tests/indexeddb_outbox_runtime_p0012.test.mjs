@@ -369,13 +369,19 @@ const stateSource = fs.readFileSync(new URL("../js/state.js", import.meta.url), 
 const appSource = fs.readFileSync(new URL("../app.js", import.meta.url), "utf8");
 const indexSource = fs.readFileSync(new URL("../index.html", import.meta.url), "utf8");
 const serviceWorkerSource = fs.readFileSync(new URL("../sw.js", import.meta.url), "utf8");
-assert.match(versionSource, /window\.APP_VERSION = "v23\.3\.8"/u);
-assert.match(versionSource, /window\.NIMR_BUILD = "v23\.3\.8"/u);
-assert.match(versionSource, /window\.NIMR_CACHE_NAME = "nimr-sav-v23\.3\.8"/u);
-assert.match(stateSource, /const APP_VERSION = "v23\.3\.8"/u);
-assert.match(appSource, /serviceWorker\.register\("sw\.js\?v=23\.3\.8"/u);
-assert.match(serviceWorkerSource, /const CACHE_NAME = "nimr-sav-v23\.3\.8"/u);
-assert.doesNotMatch(indexSource, /\?v=23\.3\.1/u);
-for (const match of indexSource.matchAll(/\?v=([0-9.]+)/gu)) assert.equal(match[1], "23.3.8");
+const appVersionMatch = versionSource.match(/window\.APP_VERSION = "(v[0-9.]+)"/u);
+const buildVersionMatch = versionSource.match(/window\.NIMR_BUILD = "(v[0-9.]+)"/u);
+const cacheVersionMatch = versionSource.match(/window\.NIMR_CACHE_NAME = "nimr-sav-(v[0-9.]+)"/u);
+assert.ok(appVersionMatch && buildVersionMatch && cacheVersionMatch, "PWA version constants must remain explicit");
+const currentSemanticVersion = appVersionMatch[1];
+const currentAssetVersion = currentSemanticVersion.replace(/^v/u, "");
+assert.equal(buildVersionMatch[1], currentSemanticVersion);
+assert.equal(cacheVersionMatch[1], currentSemanticVersion);
+assert.match(stateSource, new RegExp(`const APP_VERSION = "${currentSemanticVersion.replaceAll(".", "\\.")}"`, "u"));
+assert.match(appSource, new RegExp(`serviceWorker\\.register\\("sw\\.js\\?v=${currentAssetVersion.replaceAll(".", "\\.")}"`, "u"));
+assert.match(serviceWorkerSource, new RegExp(`const CACHE_NAME = "nimr-sav-${currentSemanticVersion.replaceAll(".", "\\.")}"`, "u"));
+const indexAssetVersions = [...indexSource.matchAll(/\?v=([0-9.]+)/gu)].map((match) => match[1]);
+assert.ok(indexAssetVersions.length > 0, "index.html must keep explicit cache-busting query versions");
+assert.equal(indexAssetVersions.every((value) => value === currentAssetVersion), true);
 
 console.log("P0-012 INDEXEDDB OUTBOX RUNTIME OK");

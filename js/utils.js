@@ -472,6 +472,9 @@ function setActiveTab(tab) {
   }
 
   activeTab = tab;
+  if (typeof document !== "undefined" && document.body) {
+    document.body.dataset.activeTab = String(tab || "");
+  }
   $$(".nav-button").forEach((button) => {
     const active = button.dataset.tab === tab;
     button.classList.toggle("active", active);

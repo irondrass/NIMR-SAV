@@ -482,19 +482,25 @@ await noChangePull.context.pullLatestSupabaseBackup("confirmation-sans-changemen
 assert.ok(noChangePull.context.localStorage.getItem("nimr-sav-state:last-granular-server-confirmation"));
 assert.equal(noChangePull.renderCalls, 0);
 
-// PWA delivery contract: every runtime reference must force v23.3.8.
+// PWA delivery contract: every runtime reference must share the current release version.
 const versionSource = fs.readFileSync(new URL("../js/version.js", import.meta.url), "utf8");
 const stateSource = fs.readFileSync(new URL("../js/state.js", import.meta.url), "utf8");
 const indexSource = fs.readFileSync(new URL("../index.html", import.meta.url), "utf8");
 const appSource = fs.readFileSync(new URL("../app.js", import.meta.url), "utf8");
 const serviceWorkerSource = fs.readFileSync(new URL("../sw.js", import.meta.url), "utf8");
 const offlineSource = fs.readFileSync(new URL("../offline.html", import.meta.url), "utf8");
-assert.match(versionSource, /window\.APP_VERSION = "v23\.3\.8"/u);
-assert.match(versionSource, /window\.NIMR_CACHE_NAME = "nimr-sav-v23\.3\.8"/u);
-assert.match(stateSource, /const APP_VERSION = "v23\.3\.8"/u);
-assert.match(serviceWorkerSource, /const CACHE_NAME = "nimr-sav-v23\.3\.8"/u);
-for (const match of indexSource.matchAll(/\?v=([0-9.]+)/gu)) assert.equal(match[1], "23.3.8");
-assert.match(appSource, /serviceWorker\.register\("sw\.js\?v=23\.3\.8"/u);
-assert.match(offlineSource, /styles\.css\?v=23\.3\.8/u);
+const appVersionMatch = versionSource.match(/window\.APP_VERSION = "(v[0-9.]+)"/u);
+const cacheVersionMatch = versionSource.match(/window\.NIMR_CACHE_NAME = "nimr-sav-(v[0-9.]+)"/u);
+assert.ok(appVersionMatch && cacheVersionMatch, "PWA version constants must remain explicit");
+const currentSemanticVersion = appVersionMatch[1];
+const currentAssetVersion = currentSemanticVersion.replace(/^v/u, "");
+assert.equal(cacheVersionMatch[1], currentSemanticVersion);
+assert.match(stateSource, new RegExp(`const APP_VERSION = "${currentSemanticVersion.replaceAll(".", "\\.")}"`, "u"));
+assert.match(serviceWorkerSource, new RegExp(`const CACHE_NAME = "nimr-sav-${currentSemanticVersion.replaceAll(".", "\\.")}"`, "u"));
+const indexAssetVersions = [...indexSource.matchAll(/\?v=([0-9.]+)/gu)].map((match) => match[1]);
+assert.ok(indexAssetVersions.length > 0, "index.html must keep explicit cache-busting query versions");
+assert.equal(indexAssetVersions.every((value) => value === currentAssetVersion), true);
+assert.match(appSource, new RegExp(`serviceWorker\\.register\\("sw\\.js\\?v=${currentAssetVersion.replaceAll(".", "\\.")}"`, "u"));
+assert.match(offlineSource, new RegExp(`styles\\.css\\?v=${currentAssetVersion.replaceAll(".", "\\.")}`, "u"));
 
 console.log("P0-013 AUTHENTICATED REALTIME LIFECYCLE OK");

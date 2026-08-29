@@ -63,12 +63,15 @@ check("F future reactivation requires an explicit dedicated phase", () => {
   assert.match(decisionDoc, /immutabilité de l'historique productif/u);
 });
 
-check("G P1-008 does not bump the PWA release", () => {
-  assert.match(versionSource, /window\.APP_VERSION = "v23\.3\.8";/u);
-  assert.match(versionSource, /window\.NIMR_BUILD = "v23\.3\.8";/u);
-  assert.match(versionSource, /window\.NIMR_CACHE_NAME = "nimr-sav-v23\.3\.8";/u);
+check("G P1-008 records its release without pinning future PWA versions", () => {
+  assert.match(decisionDoc, /version PWA : inchangée \(`v23\.3\.8`\)/u);
+  const appVersion = versionSource.match(/window\.APP_VERSION = "(v\d+\.\d+\.\d+)";/u)?.[1];
+  const buildVersion = versionSource.match(/window\.NIMR_BUILD = "(v\d+\.\d+\.\d+)";/u)?.[1];
+  const cacheVersion = versionSource.match(/window\.NIMR_CACHE_NAME = "nimr-sav-(v\d+\.\d+\.\d+)";/u)?.[1];
+  assert.ok(appVersion, "current APP_VERSION must remain semantic");
+  assert.equal(buildVersion, appVersion);
+  assert.equal(cacheVersion, appVersion);
 });
-
 check("H schema contracts remain unchanged", () => {
   assert.match(stateSource, /const DB_VERSION = 2;/u);
   assert.match(stateSource, /const CURRENT_DATA_SCHEMA_VERSION = 2;/u);

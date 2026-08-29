@@ -30,7 +30,10 @@ async function initApp() {
     bindMobileResumeSafety();
     if (typeof migratePlanningLogicV28 === "function") migratePlanningLogicV28();
     if (typeof migratePlanningLogicV36 === "function") migratePlanningLogicV36();
-    setActiveTab(activeTab || "dossiers");
+    const startupTab = typeof canAccessTab === "function" && canAccessTab("today")
+      ? "today"
+      : (typeof canAccessTab === "function" && canAccessTab("technician") ? "technician" : "dossiers");
+    setActiveTab(startupTab);
     render();
     if (typeof initLocalSecurityGate === "function") initLocalSecurityGate();
     if (typeof checkUserSessionStartup === "function") checkUserSessionStartup();
@@ -125,7 +128,7 @@ function bindSyncConflictUsability() {
 
 function configurePdfWorker() {
   if (window.pdfjsLib?.GlobalWorkerOptions) {
-    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.8";
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.9";
   }
 }
 
@@ -1152,7 +1155,7 @@ function registerServiceWorker() {
   });
   const registerCurrentServiceWorker = async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=23.3.8", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=23.3.9", { updateViaCache: "none" });
       const refreshRegistration = async () => {
         try {
           await registration.update?.();
@@ -1390,7 +1393,7 @@ function renderActivityLog() {
         const localVal = targetConflict ? (targetConflict.localCase || targetConflict.localValue) : null;
         if (localVal) {
           const payload = {
-            version: "v23.3.8",
+            version: "v23.3.9",
             timestamp: new Date().toISOString(),
             cases: [JSON.parse(JSON.stringify(localVal))],
             source: "manual_conflict_backup"

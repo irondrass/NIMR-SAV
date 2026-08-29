@@ -2070,7 +2070,7 @@ function getNextBookingTimeLabel(bookings, now = new Date()) {
 function renderCases() {
   const list = $("#case-list");
   if (!list) return;
-  const search = $("#case-search").value.trim();
+  const search = ($("#case-search")?.value || "").trim();
   const statusFilter = normalizeCaseStatusFilter(state.ui?.caseStatusFilter);
   const typeFilter = state.ui?.caseTypeFilter || "all";
   const sort = state.ui?.caseSort || "recent";
@@ -2079,6 +2079,19 @@ function renderCases() {
     caseListFilterSignature = signature;
     caseListPage = 1;
   }
+
+  const advancedFiltersCount = (typeFilter !== "all" ? 1 : 0) + (sort !== "recent" ? 1 : 0);
+  const filterBadge = $("#case-filter-badge");
+  if (filterBadge) {
+    if (advancedFiltersCount > 0) {
+      filterBadge.textContent = `${advancedFiltersCount} actif${advancedFiltersCount > 1 ? "s" : ""}`;
+      filterBadge.hidden = false;
+    } else {
+      filterBadge.textContent = "";
+      filterBadge.hidden = true;
+    }
+  }
+
   const cases = state.cases
     .filter((item) => {
       const matchesText = caseMatchesGlobalSearch(item, search);
@@ -2091,39 +2104,77 @@ function renderCases() {
   caseListPage = Math.min(Math.max(1, caseListPage), pageCount);
   const pageStart = (caseListPage - 1) * CASE_LIST_PAGE_SIZE;
   const pageCases = cases.slice(pageStart, pageStart + CASE_LIST_PAGE_SIZE);
-  const suffix = state.cases.length > 1 ? "s" : "";
-  $("#case-count").textContent = cases.length === state.cases.length
-    ? `${state.cases.length} dossier${suffix} · page ${caseListPage}/${pageCount}`
-    : `${cases.length}/${state.cases.length} dossier${suffix} · page ${caseListPage}/${pageCount}`;
+
+  const isFiltered = search !== "" || statusFilter !== "all" || typeFilter !== "all" || cases.length !== state.cases.length;
+  const countEl = $("#case-count");
+  if (countEl) {
+    if (isFiltered) {
+      const affichageStr = cases.length === 1 ? "1 dossier affiché" : `${cases.length} dossiers affichés`;
+      countEl.textContent = `${affichageStr} · ${state.cases.length} au total`;
+    } else {
+      countEl.textContent = state.cases.length === 1 ? "1 dossier" : `${state.cases.length} dossiers`;
+    }
+  }
+
   list.dataset.caseListPage = String(caseListPage);
   list.dataset.caseListPageCount = String(pageCount);
   list.dataset.caseListFilteredCount = String(cases.length);
-  list.innerHTML = cases.length
-    ? `${pageCases
-        .map((item) => {
-          const active = item.id === activeCaseId ? " active" : "";
-          const status = getCaseStatus(item);
-          const nextAction = getCaseNextAction(item);
-          return `
-            <button class="case-card${active}${isCaseBlocked(item) ? " blocked-case" : ""}" type="button" data-case="${item.id}">
-              <strong>${escapeHtml(item.clientName)}</strong>
-              <span>${escapeHtml(item.vehicle || "Véhicule non renseigné")} · ${escapeHtml(item.plate || item.vin || "Sans immatriculation")}</span>
-              <span class="case-meta">
-                <span class="tag">${statusLabels[status]}</span>
-                <span class="tag next-action-tag priority-${escapeAttr(nextAction.priority)}">${escapeHtml(nextAction.label)}</span>
-                <span class="tag soft">${escapeHtml(getClaimTypeLabel(getCasePrimaryType(item)))}</span>
-                ${item.appointment ? `<span>${formatDateTime(item.appointment.start)}</span>` : "<span>RDV non planifié</span>"}
-              </span>
-            </button>
-          `;
-        })
-        .join("")}
-        <nav class="case-pagination" aria-label="Pagination des dossiers">
-          <button class="ghost-button" type="button" data-case-page="previous" ${caseListPage <= 1 ? "disabled" : ""}>Page précédente</button>
-          <span data-case-page-status>Page ${caseListPage} sur ${pageCount} · dossiers ${pageStart + 1}-${Math.min(pageStart + pageCases.length, cases.length)} sur ${cases.length}</span>
-          <button class="ghost-button" type="button" data-case-page="next" ${caseListPage >= pageCount ? "disabled" : ""}>Page suivante</button>
-        </nav>`
-    : `<div class="empty-inline">Aucun dossier trouvé.</div>`;
+
+  if (cases.length) {
+    list.innerHTML = `${pageCases
+      .map((item) => {
+        const active = item.id === activeCaseId ? " active" : "";
+        const status = getCaseStatus(item);
+        const nextAction = getCaseNextAction(item);
+        const orderRef = typeof getPrintOrderReference === "function"
+          ? getPrintOrderReference(item)
+          : (item.orNavNumber || "");
+        const hasOrderRef = Boolean(
+          orderRef
+          && orderRef !== "-"
+          && orderRef !== item.id
+        );
+        const apptText = item.appointment?.start
+          ? `RDV ${formatDateTime(item.appointment.start)}`
+          : "RDV non planifié";
+        return `
+          <button class="case-card${active}${isCaseBlocked(item) ? " blocked-case" : ""}" type="button" data-case="${item.id}">
+            <span class="case-card-head">
+              <strong class="case-card-client">${escapeHtml(item.clientName || "Client sans nom")}</strong>
+              <span class="tag case-status-tag">${escapeHtml(statusLabels[status] || status)}</span>
+            </span>
+            <span class="case-card-vehicle">${escapeHtml(item.vehicle || "Véhicule non renseigné")}</span>
+            <span class="case-card-identifiers">
+              <span class="case-card-plate">${escapeHtml(item.plate || item.vin || "Sans immatriculation")}</span>
+              ${hasOrderRef ? `<span class="case-card-or">OR ${escapeHtml(orderRef)}</span>` : ""}
+            </span>
+            <span class="case-meta">
+              <span class="tag soft">${escapeHtml(getClaimTypeLabel(getCasePrimaryType(item)))}</span>
+              <span class="case-card-appointment${item.appointment?.start ? "" : " muted"}">${escapeHtml(apptText)}</span>
+            </span>
+            <span class="tag next-action-tag case-card-next-action priority-${escapeAttr(nextAction.priority)}">
+              ${escapeHtml(nextAction.label)}
+            </span>
+          </button>
+        `;
+      })
+      .join("")}
+      <nav class="case-pagination" aria-label="Pagination des dossiers">
+        <button class="ghost-button" type="button" data-case-page="previous" ${caseListPage <= 1 ? "disabled" : ""}>Page précédente</button>
+        <span data-case-page-status>Page ${caseListPage} sur ${pageCount} · dossiers ${pageStart + 1}-${Math.min(pageStart + pageCases.length, cases.length)} sur ${cases.length}</span>
+        <button class="ghost-button" type="button" data-case-page="next" ${caseListPage >= pageCount ? "disabled" : ""}>Page suivante</button>
+      </nav>`;
+  } else if (state.cases.length === 0) {
+    list.innerHTML = `<div class="empty-inline">Aucun dossier dans l'atelier.</div>`;
+  } else {
+    list.innerHTML = `
+      <div class="empty-inline case-list-empty-filtered">
+        <strong>Aucun dossier ne correspond à votre recherche.</strong>
+        <p>Vérifiez les filtres sélectionnés ou réinitialisez la recherche.</p>
+        <button type="button" class="ghost-button" data-case-reset-trigger>Réinitialiser les filtres</button>
+      </div>
+    `;
+  }
 
   $$('[data-case-page]', list).forEach((button) => {
     button.addEventListener("click", () => {
@@ -2133,6 +2184,29 @@ function renderCases() {
       renderCases();
       list.querySelector("[data-case-page-status]")?.focus?.();
     });
+  });
+
+  list.querySelector("[data-case-reset-trigger]")?.addEventListener("click", () => {
+    if (typeof resetDossierFilters === "function") {
+      resetDossierFilters();
+    } else {
+      const searchInput = $("#case-search");
+      if (searchInput) searchInput.value = "";
+      const statusSelect = $("#case-status-filter");
+      if (statusSelect) statusSelect.value = "all";
+      const typeSelect = $("#case-type-filter");
+      if (typeSelect) typeSelect.value = "all";
+      const sortSelect = $("#case-sort");
+      if (sortSelect) sortSelect.value = "recent";
+      if (state.ui) {
+        state.ui.caseStatusFilter = "all";
+        state.ui.caseTypeFilter = "all";
+        state.ui.caseSort = "recent";
+      }
+      if (typeof resetCaseListPagination === "function") resetCaseListPagination();
+      saveState();
+      renderCases();
+    }
   });
 }
 

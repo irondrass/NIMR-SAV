@@ -128,7 +128,7 @@ function bindSyncConflictUsability() {
 
 function configurePdfWorker() {
   if (window.pdfjsLib?.GlobalWorkerOptions) {
-    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.10";
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.11";
   }
 }
 
@@ -883,6 +883,43 @@ function bindPlanningToolbar() {
     renderPlanning();
     renderMetrics();
   });
+
+  const dateInput = $("#planning-date");
+  dateInput?.addEventListener("change", () => {
+    const val = dateInput.value;
+    if (val && /^\d{4}-\d{2}-\d{2}$/.test(val)) {
+      state.planningDate = val;
+      saveState();
+      renderPlanning();
+      renderMetrics();
+    }
+  });
+
+  const searchInput = $("#planning-search");
+  let searchDebounceTimer = null;
+  searchInput?.addEventListener("input", () => {
+    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(() => {
+      searchDebounceTimer = null;
+      renderPlanning();
+    }, 180);
+  });
+
+  $("#planning-resource-filter")?.addEventListener("change", () => {
+    renderPlanning();
+  });
+
+  $("#planning-filters-reset")?.addEventListener("click", () => {
+    resetPlanningDisplayFilters();
+  });
+}
+
+function resetPlanningDisplayFilters() {
+  const searchInput = $("#planning-search");
+  if (searchInput) searchInput.value = "";
+  const resourceFilter = $("#planning-resource-filter");
+  if (resourceFilter) resourceFilter.value = "all";
+  renderPlanning();
 }
 
 function changePlanningDay(delta) {
@@ -1180,7 +1217,7 @@ function registerServiceWorker() {
   });
   const registerCurrentServiceWorker = async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=23.3.10", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=23.3.11", { updateViaCache: "none" });
       const refreshRegistration = async () => {
         try {
           await registration.update?.();
@@ -1418,7 +1455,7 @@ function renderActivityLog() {
         const localVal = targetConflict ? (targetConflict.localCase || targetConflict.localValue) : null;
         if (localVal) {
           const payload = {
-            version: "v23.3.10",
+            version: "v23.3.11",
             timestamp: new Date().toISOString(),
             cases: [JSON.parse(JSON.stringify(localVal))],
             source: "manual_conflict_backup"

@@ -2,6 +2,10 @@ function renderPlanning() {
   if (typeof getUiRuntimeIndexes === "function") getUiRuntimeIndexes();
   const date = parseDateKey(state.planningDate);
   $("#planning-day-label").textContent = longDate(date);
+  const dateInput = $("#planning-date");
+  if (dateInput && dateInput.value !== state.planningDate) {
+    dateInput.value = state.planningDate;
+  }
   const alert = $("#day-alert");
   const holiday = getHoliday(date);
   const intervals = getDayIntervals(date);
@@ -12,9 +16,25 @@ function renderPlanning() {
     alert.hidden = true;
   }
 
-  const resources = orderPlanningResources(state.resources.filter(isDisplayPlanningResource));
+  const allResources = orderPlanningResources(state.resources.filter(isDisplayPlanningResource));
+  syncPlanningResourceFilter(allResources);
+  const filters = getPlanningDisplayFilters(allResources);
+  const visibleResources = filterPlanningDisplayResources(allResources, filters);
+  const taskNumberMap = buildDailyPlanningTaskNumberMap(date, allResources);
+
+  const activeCount = (filters.search ? 1 : 0) + (filters.resourceId !== "all" ? 1 : 0);
+  const badge = $("#planning-filter-badge");
+  if (badge) {
+    if (activeCount > 0) {
+      badge.textContent = `${activeCount} actif${activeCount > 1 ? "s" : ""}`;
+      badge.hidden = false;
+    } else {
+      badge.textContent = "";
+      badge.hidden = true;
+    }
+  }
+
   const dailyColorMap = buildIndexedDailyVehicleColorMap(todayKey(date));
-  const taskNumberMap = buildDailyPlanningTaskNumberMap(date, resources);
   const gantt = $("#gantt");
   const dayStart = atTime(date, "08:00");
   const dayEnd = atTime(date, "17:00");
@@ -28,7 +48,7 @@ function renderPlanning() {
           ${renderPauseBands(date, total)}
         </div>
       </div>
-      ${resources
+      ${visibleResources
         .map(
           (resource) => `
             <div class="gantt-row">
@@ -39,7 +59,7 @@ function renderPlanning() {
               <div class="timeline">
                 ${renderTicks(total, false)}
                 ${renderPauseBands(date, total)}
-                ${renderResourceBookings(resource, date, dayStart, dayEnd, total, dailyColorMap, taskNumberMap)}
+                ${renderResourceBookings(resource, date, dayStart, dayEnd, total, dailyColorMap, taskNumberMap, filters)}
               </div>
             </div>
           `,
@@ -47,8 +67,61 @@ function renderPlanning() {
         .join("")}
     </div>
   `;
-  renderDailyLaborSummary(date, taskNumberMap);
-  renderMobilePlanningList(date, resources, taskNumberMap);
+  renderDailyLaborSummary(date, taskNumberMap, filters);
+  renderMobilePlanningList(date, visibleResources, taskNumberMap, filters);
+}
+
+function getPlanningDisplayFilters(resources = []) {
+  const searchInput = $("#planning-search");
+  const search = (searchInput?.value || "").trim();
+  const resourceSelect = $("#planning-resource-filter");
+  const selectedResource = resourceSelect?.value || "all";
+  const resourceId = selectedResource !== "all" && resources.some((r) => r.id === selectedResource)
+    ? selectedResource
+    : "all";
+  return { search, resourceId };
+}
+
+function syncPlanningResourceFilter(resources = []) {
+  const select = $("#planning-resource-filter");
+  if (!select) return;
+  const currentVal = select.value || "all";
+  const optionsHtml = [
+    '<option value="all">Toutes les ressources</option>',
+    ...resources.map((r) => `<option value="${escapeAttr(r.id)}">${escapeHtml(r.name || "Ressource")}</option>`)
+  ].join("");
+  select.innerHTML = optionsHtml;
+  if (currentVal !== "all" && resources.some((r) => r.id === currentVal)) {
+    select.value = currentVal;
+  } else {
+    select.value = "all";
+  }
+}
+
+function filterPlanningDisplayResources(resources, filters) {
+  if (!filters || filters.resourceId === "all") return resources;
+  return resources.filter((r) => r.id === filters.resourceId);
+}
+
+function planningCaseMatchesDisplaySearch(caseItem, search) {
+  if (!search) return true;
+  if (!caseItem) return false;
+  return typeof caseMatchesGlobalSearch === "function"
+    ? caseMatchesGlobalSearch(caseItem, search)
+    : false;
+}
+
+function planningBookingMatchesDisplayFilters(booking, caseItem, filters) {
+  if (!filters) return true;
+  const { search, resourceId } = filters;
+  if (resourceId !== "all" && !isBookingVisibleForResource(booking, resourceId)) {
+    return false;
+  }
+  if (search) {
+    if (booking.type === "leave") return false;
+    return planningCaseMatchesDisplaySearch(caseItem, search);
+  }
+  return true;
 }
 
 function buildIndexedDailyVehicleColorMap(dateKey) {
@@ -81,7 +154,7 @@ function getBookingLaborOperations(caseItem, key) {
   return lines;
 }
 
-function renderDailyLaborSummary(date, taskNumberMap) {
+function renderDailyLaborSummary(date, taskNumberMap, filters = null) {
   const target = document.getElementById('daily-labor-summary');
   if (!target) return;
   const day = todayKey(date);
@@ -91,13 +164,17 @@ function renderDailyLaborSummary(date, taskNumberMap) {
     if (booking.type === 'leave') return;
     const caseItem = typeof getIndexedCaseById === "function" ? getIndexedCaseById(booking.caseId) : state.cases.find((item) => item.id === booking.caseId);
     if (isCaseOperationallyClosed(caseItem)) return;
+    if (filters && !planningBookingMatchesDisplayFilters(booking, caseItem, filters)) return;
     const hasSegmentOnDay = (booking.segments || []).some((segment) => todayKey(new Date(segment.start)) === day || todayKey(new Date(segment.end)) === day);
     if (!caseItem || !hasSegmentOnDay) return;
     const ops = getBookingLaborOperations(caseItem, booking.key);
     rows.push({ booking, caseItem, ops });
   });
   if (!rows.length) {
-    target.innerHTML = '<div class="empty-inline">Aucune main-d’œuvre planifiée sur cette journée.</div>';
+    const isFiltered = filters && (filters.search || filters.resourceId !== "all");
+    target.innerHTML = isFiltered
+      ? '<div class="empty-inline">Aucune main-d’œuvre ne correspond aux filtres.</div>'
+      : '<div class="empty-inline">Aucune main-d’œuvre planifiée sur cette journée.</div>';
     return;
   }
   target.innerHTML = `
@@ -114,7 +191,7 @@ function renderDailyLaborSummary(date, taskNumberMap) {
   `;
 }
 
-function renderMobilePlanningList(date, resources, taskNumberMap) {
+function renderMobilePlanningList(date, resources, taskNumberMap, filters = null) {
   const target = $("#mobile-planning-list");
   if (!target) return;
   const day = todayKey(date);
@@ -126,6 +203,7 @@ function renderMobilePlanningList(date, resources, taskNumberMap) {
     if (booking.type === "leave") return;
     const caseItem = typeof getIndexedCaseById === "function" ? getIndexedCaseById(booking.caseId) : state.cases.find((item) => item.id === booking.caseId);
     if (isCaseOperationallyClosed(caseItem)) return;
+    if (filters && !planningBookingMatchesDisplayFilters(booking, caseItem, filters)) return;
     const visibleResources = resources.filter((resource) => isBookingVisibleForResource(booking, resource.id));
     const primaryResource = visibleResources.find((resource) => !isEquipmentResource(resource)) || visibleResources[0];
     if (!primaryResource) return;
@@ -145,7 +223,10 @@ function renderMobilePlanningList(date, resources, taskNumberMap) {
 
   rows.sort((a, b) => a.start - b.start || a.end - b.end || String(a.resource.name || "").localeCompare(String(b.resource.name || "")));
   if (!rows.length) {
-    target.innerHTML = '<div class="empty-inline">Aucune tâche atelier planifiée sur cette journée.</div>';
+    const isFiltered = filters && (filters.search || filters.resourceId !== "all");
+    target.innerHTML = isFiltered
+      ? '<div class="empty-inline">Aucune tâche ne correspond aux filtres.</div>'
+      : '<div class="empty-inline">Aucune tâche atelier planifiée sur cette journée.</div>';
     return;
   }
 
@@ -221,7 +302,7 @@ function renderBand(start, end, dayStart, total) {
   return `<div class="pause-band" style="left:${left}%;width:${width}%"></div>`;
 }
 
-function renderResourceBookings(resource, date, dayStart, dayEnd, total, dailyColorMap = null, taskNumberMap = null) {
+function renderResourceBookings(resource, date, dayStart, dayEnd, total, dailyColorMap = null, taskNumberMap = null, filters = null) {
   const day = todayKey(date);
   const items = [];
   const resourceBookings = typeof getIndexedResourceBookings === "function" ? getIndexedResourceBookings(resource.id) : state.bookings;
@@ -242,6 +323,7 @@ function renderResourceBookings(resource, date, dayStart, dayEnd, total, dailyCo
       const isLeave = booking.type === "leave";
       const caseItem = isLeave ? null : (typeof getIndexedCaseById === "function" ? getIndexedCaseById(booking.caseId) : state.cases.find((item) => item.id === booking.caseId));
       if (!isLeave && isCaseOperationallyClosed(caseItem)) return;
+      if (filters && !planningBookingMatchesDisplayFilters(booking, caseItem, filters)) return;
       const model = isLeave ? "Indisponible" : shortVehicleModel(caseItem?.vehicle || caseItem?.model || "Véhicule");
       const plate = isLeave ? "" : (caseItem?.plate || caseItem?.registration || "");
       const vehicleLine = isLeave ? (booking.title || "Congé / absence") : `${model}${plate ? ` · ${plate}` : ""}`;

@@ -20,8 +20,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <script src="js/version.js?v=23.3.10"></script>
-    <link rel="stylesheet" href="styles.css?v=23.3.10" />
+    <script src="js/version.js?v=23.3.11"></script>
+    <link rel="stylesheet" href="styles.css?v=23.3.11" />
   </head>
   <body>
 <!-- Bouton Menu Mobile -->
@@ -330,26 +330,51 @@
         <section class="view" id="view-planning">
           <section class="panel planning-panel">
             <div class="planning-toolbar">
-              <div>
+              <div class="planning-toolbar-heading">
                 <h1>Planning atelier</h1>
                 <p id="planning-day-label"></p>
               </div>
-              <div class="toolbar-actions">
-                <button class="ghost-button" type="button" id="print-day-gantt">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18M3 12h18M3 19h18M7 5v14M13 5v14M19 5v14" /></svg>
-                  Imprimer Gantt
-                </button>
-                <button class="ghost-button" type="button" id="print-day-planning">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v8H6z" /></svg>
-                  Imprimer tableau
-                </button>
+
+              <div class="planning-date-nav" aria-label="Navigation par date">
                 <button class="icon-button" type="button" id="prev-day" title="Jour précédent" aria-label="Jour précédent">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg>
                 </button>
+                <label class="planning-date-field">
+                  <span class="sr-only">Date du planning</span>
+                  <input id="planning-date" type="date" aria-label="Date du planning" />
+                </label>
                 <button class="ghost-button" type="button" id="today-button">Aujourd'hui</button>
                 <button class="icon-button" type="button" id="next-day" title="Jour suivant" aria-label="Jour suivant">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
                 </button>
+              </div>
+
+              <div class="planning-display-tools" aria-label="Filtres d'affichage planning">
+                <div class="search-wrap">
+                  <input id="planning-search" type="search" placeholder="Client, immat., VIN, OR…" aria-label="Rechercher dans le planning" />
+                </div>
+                <label class="planning-resource-filter-label">
+                  <span class="sr-only">Ressource</span>
+                  <select id="planning-resource-filter" aria-label="Filtrer par ressource">
+                    <option value="all">Toutes les ressources</option>
+                  </select>
+                </label>
+                <span class="planning-filter-badge" id="planning-filter-badge" hidden></span>
+                <button class="ghost-button" type="button" id="planning-filters-reset">Réinitialiser</button>
+
+                <details class="planning-print-details" id="planning-print-details">
+                  <summary class="planning-print-summary">Imprimer</summary>
+                  <div class="planning-print-panel">
+                    <button class="ghost-button" type="button" id="print-day-gantt">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18M3 12h18M3 19h18M7 5v14M13 5v14M19 5v14" /></svg>
+                      Imprimer Gantt
+                    </button>
+                    <button class="ghost-button" type="button" id="print-day-planning">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v8H6z" /></svg>
+                      Imprimer tableau
+                    </button>
+                  </div>
+                </details>
               </div>
             </div>
             <div id="day-alert" class="day-alert" hidden></div>
@@ -1213,22 +1238,22 @@
       </div>
     </div>
 
-    <script src="vendor/pdf.min.js?v=23.3.10" defer></script>
-    <script src="js/utils.js?v=23.3.10" defer></script>
-    <script src="js/state.js?v=23.3.10" defer></script>
-    <script src="js/ui-cases.js?v=23.3.10" defer></script>
-    <script src="js/estimate-import.js?v=23.3.10" defer></script>
-    <script src="js/ui-planning.js?v=23.3.10" defer></script>
-    <script src="js/photos.js?v=23.3.10" defer></script>
-    <script src="js/storage.js?v=23.3.10" defer></script>
-    <script src="js/work-hours-sync.js?v=23.3.10" defer></script>
-    <script src="js/planning.js?v=23.3.10" defer></script>
-    <script src="js/exports.js?v=23.3.10" defer></script>
-    <script src="js/business-rules-v2187.js?v=23.3.10" defer></script>
+    <script src="vendor/pdf.min.js?v=23.3.11" defer></script>
+    <script src="js/utils.js?v=23.3.11" defer></script>
+    <script src="js/state.js?v=23.3.11" defer></script>
+    <script src="js/ui-cases.js?v=23.3.11" defer></script>
+    <script src="js/estimate-import.js?v=23.3.11" defer></script>
+    <script src="js/ui-planning.js?v=23.3.11" defer></script>
+    <script src="js/photos.js?v=23.3.11" defer></script>
+    <script src="js/storage.js?v=23.3.11" defer></script>
+    <script src="js/work-hours-sync.js?v=23.3.11" defer></script>
+    <script src="js/planning.js?v=23.3.11" defer></script>
+    <script src="js/exports.js?v=23.3.11" defer></script>
+    <script src="js/business-rules-v2187.js?v=23.3.11" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
-    <script src="js/supabase-config.js?v=23.3.10" defer></script>
-    <script src="js/supabase-client.js?v=23.3.10" defer></script>
-    <script src="js/supabase-sync.js?v=23.3.10" defer></script>
-    <script src="app.js?v=23.3.10" defer></script>
+    <script src="js/supabase-config.js?v=23.3.11" defer></script>
+    <script src="js/supabase-client.js?v=23.3.11" defer></script>
+    <script src="js/supabase-sync.js?v=23.3.11" defer></script>
+    <script src="app.js?v=23.3.11" defer></script>
   </body>
 </html>

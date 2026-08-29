@@ -128,7 +128,7 @@ function bindSyncConflictUsability() {
 
 function configurePdfWorker() {
   if (window.pdfjsLib?.GlobalWorkerOptions) {
-    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.9";
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.10";
   }
 }
 
@@ -845,6 +845,31 @@ function bindCaseFilters() {
       renderCases();
     });
   }
+
+  const resetBtn = $("#case-filters-reset");
+  resetBtn?.addEventListener("click", () => {
+    resetDossierFilters();
+  });
+}
+
+function resetDossierFilters() {
+  const searchInput = $("#case-search");
+  if (searchInput) searchInput.value = "";
+  const statusSelect = $("#case-status-filter");
+  if (statusSelect) statusSelect.value = "all";
+  const typeSelect = $("#case-type-filter");
+  if (typeSelect) typeSelect.value = "all";
+  const sortSelect = $("#case-sort");
+  if (sortSelect) sortSelect.value = "recent";
+
+  if (state.ui) {
+    state.ui.caseStatusFilter = "all";
+    state.ui.caseTypeFilter = "all";
+    state.ui.caseSort = "recent";
+  }
+  if (typeof resetCaseListPagination === "function") resetCaseListPagination();
+  saveState();
+  renderCases();
 }
 
 function bindPlanningToolbar() {
@@ -1155,7 +1180,7 @@ function registerServiceWorker() {
   });
   const registerCurrentServiceWorker = async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=23.3.9", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=23.3.10", { updateViaCache: "none" });
       const refreshRegistration = async () => {
         try {
           await registration.update?.();
@@ -1393,7 +1418,7 @@ function renderActivityLog() {
         const localVal = targetConflict ? (targetConflict.localCase || targetConflict.localValue) : null;
         if (localVal) {
           const payload = {
-            version: "v23.3.9",
+            version: "v23.3.10",
             timestamp: new Date().toISOString(),
             cases: [JSON.parse(JSON.stringify(localVal))],
             source: "manual_conflict_backup"

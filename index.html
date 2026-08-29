@@ -20,8 +20,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <script src="js/version.js?v=23.3.9"></script>
-    <link rel="stylesheet" href="styles.css?v=23.3.9" />
+    <script src="js/version.js?v=23.3.10"></script>
+    <link rel="stylesheet" href="styles.css?v=23.3.10" />
   </head>
   <body>
 <!-- Bouton Menu Mobile -->
@@ -217,37 +217,51 @@
               </div>
 
               <div class="case-list-tools" aria-label="Filtres dossiers">
-                <div class="search-wrap">
-                  <input id="case-search" type="search" placeholder="Client, téléphone, immat., VIN, OR..." aria-label="Rechercher un dossier" />
+                <div class="case-search-primary">
+                  <div class="search-wrap">
+                    <input id="case-search" type="search" placeholder="Client, immat., VIN, OR, téléphone…" aria-label="Rechercher un dossier" />
+                  </div>
+                  <label class="case-status-filter-label">
+                    <span class="sr-only">Statut</span>
+                    <select id="case-status-filter" aria-label="Filtrer par statut">
+                      <option value="all">Tous les statuts</option>
+                    </select>
+                  </label>
                 </div>
-                <label>
-                  Statut
-                  <select id="case-status-filter" aria-label="Filtrer par statut">
-                    <option value="all">Tous les statuts</option>
-                  </select>
-                </label>
-                <label>
-                  Type de dossier
-                  <select id="case-type-filter" aria-label="Filtrer par type de dossier">
-                    <option value="all">Tous les types</option>
-                    <option value="assurance">Assurance</option>
-                    <option value="client">Client direct / intervention SAV</option>
-                    <option value="vidange">Vidange / entretien rapide</option>
-                    <option value="mechanical_client">Réparation mécanique client</option>
-                    <option value="electrical_client">Réparation électrique client</option>
-                    <option value="diagnostic">Diagnostic</option>
-                    <option value="garantie">Garantie</option>
-                  </select>
-                </label>
-                <label>
-                  Tri
-                  <select id="case-sort" aria-label="Trier les dossiers">
-                    <option value="recent">Plus récents</option>
-                    <option value="oldest">Plus anciens</option>
-                    <option value="client">Client A-Z</option>
-                    <option value="appointment">Prochain RDV</option>
-                  </select>
-                </label>
+
+                <details class="case-filter-details" id="case-filter-details">
+                  <summary class="case-filter-summary">
+                    <span>Filtres et tri</span>
+                    <span class="case-filter-badge" id="case-filter-badge" hidden></span>
+                  </summary>
+                  <div class="case-filter-panel">
+                    <label>
+                      Type de dossier
+                      <select id="case-type-filter" aria-label="Filtrer par type de dossier">
+                        <option value="all">Tous les types</option>
+                        <option value="assurance">Assurance</option>
+                        <option value="client">Client direct / intervention SAV</option>
+                        <option value="vidange">Vidange / entretien rapide</option>
+                        <option value="mechanical_client">Réparation mécanique client</option>
+                        <option value="electrical_client">Réparation électrique client</option>
+                        <option value="diagnostic">Diagnostic</option>
+                        <option value="garantie">Garantie</option>
+                      </select>
+                    </label>
+                    <label>
+                      Tri
+                      <select id="case-sort" aria-label="Trier les dossiers">
+                        <option value="recent">Plus récents</option>
+                        <option value="oldest">Plus anciens</option>
+                        <option value="client">Client A-Z</option>
+                        <option value="appointment">Prochain RDV</option>
+                      </select>
+                    </label>
+                    <div class="case-filter-actions">
+                      <button type="button" class="ghost-button" id="case-filters-reset">Réinitialiser les filtres</button>
+                    </div>
+                  </div>
+                </details>
               </div>
               <div class="case-list" id="case-list" aria-live="polite"></div>
             </aside>
@@ -1199,22 +1213,22 @@
       </div>
     </div>
 
-    <script src="vendor/pdf.min.js?v=23.3.9" defer></script>
-    <script src="js/utils.js?v=23.3.9" defer></script>
-    <script src="js/state.js?v=23.3.9" defer></script>
-    <script src="js/ui-cases.js?v=23.3.9" defer></script>
-    <script src="js/estimate-import.js?v=23.3.9" defer></script>
-    <script src="js/ui-planning.js?v=23.3.9" defer></script>
-    <script src="js/photos.js?v=23.3.9" defer></script>
-    <script src="js/storage.js?v=23.3.9" defer></script>
-    <script src="js/work-hours-sync.js?v=23.3.9" defer></script>
-    <script src="js/planning.js?v=23.3.9" defer></script>
-    <script src="js/exports.js?v=23.3.9" defer></script>
-    <script src="js/business-rules-v2187.js?v=23.3.9" defer></script>
+    <script src="vendor/pdf.min.js?v=23.3.10" defer></script>
+    <script src="js/utils.js?v=23.3.10" defer></script>
+    <script src="js/state.js?v=23.3.10" defer></script>
+    <script src="js/ui-cases.js?v=23.3.10" defer></script>
+    <script src="js/estimate-import.js?v=23.3.10" defer></script>
+    <script src="js/ui-planning.js?v=23.3.10" defer></script>
+    <script src="js/photos.js?v=23.3.10" defer></script>
+    <script src="js/storage.js?v=23.3.10" defer></script>
+    <script src="js/work-hours-sync.js?v=23.3.10" defer></script>
+    <script src="js/planning.js?v=23.3.10" defer></script>
+    <script src="js/exports.js?v=23.3.10" defer></script>
+    <script src="js/business-rules-v2187.js?v=23.3.10" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
-    <script src="js/supabase-config.js?v=23.3.9" defer></script>
-    <script src="js/supabase-client.js?v=23.3.9" defer></script>
-    <script src="js/supabase-sync.js?v=23.3.9" defer></script>
-    <script src="app.js?v=23.3.9" defer></script>
+    <script src="js/supabase-config.js?v=23.3.10" defer></script>
+    <script src="js/supabase-client.js?v=23.3.10" defer></script>
+    <script src="js/supabase-sync.js?v=23.3.10" defer></script>
+    <script src="app.js?v=23.3.10" defer></script>
   </body>
 </html>

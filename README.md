@@ -1,3 +1,8 @@
+> **Contrat planning actuel — P1-008**
+>
+> La préparation anticipée automatique des pièces neuves est **désactivée**.
+> Les mentions v22.x de préparation anticipée dans l'historique ci-dessous décrivent d'anciens comportements et ne sont plus le contrat courant.
+> Voir `FLUX_PIECES_NEUVES_PLANNING.md` pour la décision et les conditions strictes d'une éventuelle réactivation future.
 # v23.0.4 - Hotfix résolution conflits sync
 
 - Les conflits Supabase entrants reçoivent maintenant une clé stable et un statut `open/resolved/ignored`.

@@ -1483,6 +1483,66 @@ select:focus {
   opacity: 0.6;
 }
 
+
+.settings-workspace-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.settings-workspace-header {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.settings-workspace-nav {
+  display: inline-flex;
+  gap: 8px;
+  padding: 6px;
+  background: var(--paper-hover, #f1f5f9);
+  border: 1px solid var(--line, #e2e8f0);
+  border-radius: var(--radius, 10px);
+  width: fit-content;
+  max-width: 100%;
+}
+
+.settings-workspace-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 8px 18px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  color: var(--muted, #64748b);
+  font-size: 0.95rem;
+  font-weight: 650;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  touch-action: manipulation;
+}
+
+.settings-workspace-tab:hover {
+  color: var(--text, #1e293b);
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.settings-workspace-tab.active,
+.settings-workspace-tab[aria-selected="true"] {
+  background: #ffffff;
+  color: var(--brand, #0077c8);
+  border-color: var(--line, #e2e8f0);
+  box-shadow: var(--shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.05));
+  font-weight: 750;
+}
+
+.settings-workspace-panel[hidden] {
+  display: none !important;
+}
+
 .detail-grid,
 .settings-grid {
   display: grid;
@@ -2815,6 +2875,19 @@ select:focus {
   .case-actions,
   .resource-actions {
     justify-content: flex-start;
+  }
+
+  .settings-workspace-nav {
+    display: flex;
+    width: 100%;
+  }
+
+  .settings-workspace-tab {
+    flex: 1 1 0;
+    min-height: 44px;
+    padding: 10px 12px;
+    font-size: 0.9rem;
+    text-align: center;
   }
 }
 

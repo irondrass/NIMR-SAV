@@ -20,8 +20,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <script src="js/version.js?v=23.3.12"></script>
-    <link rel="stylesheet" href="styles.css?v=23.3.12" />
+    <script src="js/version.js?v=23.3.13"></script>
+    <link rel="stylesheet" href="styles.css?v=23.3.13" />
   </head>
   <body>
 <!-- Bouton Menu Mobile -->
@@ -422,378 +422,398 @@
         </section>
 
         <section class="view" id="view-atelier">
-          <div class="settings-grid">
-            <section class="panel">
+          <div class="settings-workspace-shell">
+            <section class="panel settings-workspace-header">
               <div class="panel-heading">
                 <div>
-                  <h1>Ressources</h1>
-                  <p>Techniciens, mécanique, électrique, cabine et contrôle</p>
+                  <h1>Paramètres</h1>
+                  <p id="settings-workspace-subtitle">Configuration opérationnelle de l’atelier</p>
                 </div>
               </div>
-              <form class="resource-form" id="resource-form">
-                <input name="name" required placeholder="Nom ressource" />
-                <select name="role" required>
-                  <option value="tolier">Tôlier</option>
-                  <option value="mecanicien">Mécanicien</option>
-                  <option value="electricien">Électricien</option>
-                  <option value="peintre">Peintre</option>
-                  <option value="zone_preparation">Zone de préparation</option>
-                  <option value="cabine">Cabine peinture</option>
-                  <option value="pont_vidange">Pont vidange</option>
-                  <option value="pont_mecanique">Pont grands travaux mécaniques</option>
-                  <option value="transport">Transport / convoyage</option>
-                  <option value="controle">Contrôle final</option>
-                </select>
-                <input name="location" placeholder="Emplacement" />
-                <select name="site" aria-label="Site de la ressource">
-                  <option value="internal">Interne atelier</option>
-                  <option value="external">Sous-traitant externe</option>
-                </select>
-                <input name="capacity" type="number" min="1" step="1" value="1" placeholder="Capacité simultanée" />
-                <input name="dailyCapacityMinutes" type="number" min="0" step="15" placeholder="Capacité/jour en minutes (optionnel)" />
-                <input name="compatibleRoles" placeholder="Métiers compatibles, séparés par virgule" />
-                <input name="transferOutMinutes" type="number" min="0" step="15" placeholder="Transfert aller (min, externe)" />
-                <input name="transferReturnMinutes" type="number" min="0" step="15" placeholder="Transfert retour (min, externe)" />
-                <input name="standardLeadTimeMinutes" type="number" min="0" step="15" placeholder="Délai standard (min, externe)" />
-                <label class="check-card">
-                  <input type="checkbox" name="fastLane" />
-                  <span>Fast Lane</span>
-                </label>
-                <button class="primary-button" type="submit">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
-                  Ajouter
-                </button>
-              </form>
-              <div class="resource-list" id="resource-list"></div>
-              <form class="fastlane-form" id="fastlane-form">
-                <label class="check-card">
-                  <input type="checkbox" name="fastLaneEnabled" />
-                  <span>Activer la Fast Lane</span>
-                </label>
-                <label>
-                  Limite intervention rapide
-                  <input name="fastLaneMaxHours" type="text" inputmode="decimal" placeholder="Ex. 4 ou 4,5" />
-                </label>
-              </form>
-            </section>
-
-            <section class="panel users-roles-panel" data-admin-technical-panel>
-              <div class="panel-heading">
-                <div>
-                  <h1>Utilisateurs & rôles</h1>
-                  <p>Gérer les profils de l'atelier, leurs rôles, permissions et ressources liées.</p>
-                </div>
-              </div>
-              <form class="resource-form" id="user-form">
-                <input name="userId" type="hidden" />
-                <input name="name" required placeholder="Nom complet" />
-                <select name="role" required>
-                  <option value="admin_technique">Admin technique</option>
-                  <option value="chef_atelier">Chef atelier</option>
-                  <option value="directeur">Directeur SAV</option>
-                  <option value="reception">Réception</option>
-                  <option value="technicien">Technicien</option>
-                  <option value="controle_qualite">Contrôleur Qualité</option>
-                  <option value="lecture_seule">Lecture seule</option>
-                </select>
-                <input name="email" type="email" placeholder="Email (optionnel)" />
-                <input name="pin" type="password" inputmode="numeric" placeholder="PIN de sécurité (requis si sensible)" minlength="4" />
-                <select name="resourceId">
-                  <option value="">Lier à aucune ressource technicien</option>
-                </select>
-                <label class="check-card">
-                  <input type="checkbox" name="active" checked />
-                  <span>Utilisateur actif</span>
-                </label>
-                <div class="backup-actions wide">
-                  <button class="primary-button" type="submit" id="user-submit-btn">
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
-                    <span id="user-submit-label">Ajouter l'utilisateur</span>
-                  </button>
-                  <button class="ghost-button" type="button" id="user-cancel-btn" hidden>
-                    Annuler
-                  </button>
-                </div>
-              </form>
-              <div id="users-duplicates-alert" hidden></div>
-              <div class="resource-list" id="users-list"></div>
-              
-              <div class="section-heading compact-heading">
-                <div>
-                  <h2>Utilisateur actif actuel</h2>
-                  <span>Sélectionner l'utilisateur pour simuler ou basculer les permissions locales (mode offline).</span>
-                </div>
-              </div>
-              <div class="calendar-summary">
-                <select id="current-user-selector" style="min-width: 240px;"></select>
-              </div>
-              <div class="calendar-summary" style="display: flex; flex-direction: column; gap: 8px; margin-top: 10px;">
-                <label class="check-card" style="margin: 0; align-self: flex-start;">
-                  <input type="checkbox" id="always-prompt-startup" />
-                  <span>Toujours demander l'utilisateur au démarrage</span>
-                </label>
-                <button class="ghost-button" id="change-user-settings-btn" type="button" style="align-self: flex-start;">Changer d'utilisateur</button>
-              </div>
-              
-              <div class="section-heading compact-heading">
-                <div>
-                  <h2>Résumé des permissions par rôle</h2>
-                </div>
-              </div>
-              <div class="holiday-list" id="roles-permissions-summary" style="gap: 8px;">
-                <article class="resource-card" style="padding: 12px; font-size: 0.85rem; display: block;">
-                  <strong>Admin technique</strong>
-                  <p class="muted" style="margin: 4px 0 0;">Responsabilités techniques sensibles : configuration cloud Supabase, nettoyage poste, restauration complète, suppression de données, gestion permissions critiques et paramètres système.</p>
-                </article>
-                <article class="resource-card" style="padding: 12px; font-size: 0.85rem; display: block;">
-                  <strong>Directeur SAV</strong>
-                  <p class="muted" style="margin: 4px 0 0;">Pilotage métier : dashboard performance SAV, dossiers, planning, KPI, exports, journal d'activité et suivi des échéances. Pas d'accès aux actions techniques destructives.</p>
-                </article>
-                <article class="resource-card" style="padding: 12px; font-size: 0.85rem; display: block;">
-                  <strong>Chef atelier</strong>
-                  <p class="muted" style="margin: 4px 0 0;">Supervision complète de la production, planification (Gantt), gestion des priorités, affectations et clôture des travaux avec traçabilité.</p>
-                </article>
-                <article class="resource-card" style="padding: 12px; font-size: 0.85rem; display: block;">
-                  <strong>Réception</strong>
-                  <p class="muted" style="margin: 4px 0 0;">Import de devis, édition des informations dossier, planification de rendez-vous et réception physique des véhicules.</p>
-                </article>
-                <article class="resource-card" style="padding: 12px; font-size: 0.85rem; display: block;">
-                  <strong>Technicien</strong>
-                  <p class="muted" style="margin: 4px 0 0;">Démarrer, suspendre (pause), reprendre et terminer ses propres tâches rattachées à sa ressource technicien d'atelier.</p>
-                </article>
-                <article class="resource-card" style="padding: 12px; font-size: 0.85rem; display: block;">
-                  <strong>Lecture seule</strong>
-                  <p class="muted" style="margin: 4px 0 0;">Consultation générale du planning et des dossiers de l'atelier, accès aux impressions (ordres de réparation, etc.).</p>
-                </article>
+              <div class="settings-workspace-nav" role="tablist" aria-label="Espaces de configuration">
+                <button type="button" class="settings-workspace-tab active" id="settings-workspace-tab-workshop" data-settings-workspace="workshop" role="tab" aria-selected="true" aria-controls="settings-workspace-workshop">Paramètres atelier</button>
+                <button type="button" class="settings-workspace-tab" id="settings-workspace-tab-administration" data-settings-workspace="administration" role="tab" aria-selected="false" aria-controls="settings-workspace-administration" tabindex="-1">Administration</button>
               </div>
             </section>
 
-            <section class="panel">
-              <div class="panel-heading">
-                <div>
-                  <h1>Calendrier</h1>
-                  <p>Lun-ven 08:00-12:00 / 13:00-17:00</p>
-                </div>
-              </div>
-              <div class="calendar-summary">
-                <span>Samedi 08:00-13:00</span>
-                <span>Dimanche fermé</span>
-                <span>Pause 12:00-13:00</span>
-              </div>
-              <div class="work-hours-list" id="work-hours-list"></div>
-              <form class="holiday-form" id="holiday-form">
-                <input name="date" type="date" required />
-                <input name="label" required placeholder="Nom du jour férié" />
-                <button class="primary-button" type="submit">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
-                  Ajouter
-                </button>
-              </form>
-              <div class="holiday-list" id="holiday-list"></div>
-              <div class="section-heading compact-heading"><div><h2>Congés / absences ressources</h2><span>Bloque la personne concernée. Si une tâche existe déjà, replanifiez-la ou mettez-la en pause avant d'ajouter l'absence.</span></div></div>
-              <form class="holiday-form" id="resource-leave-form">
-                <select name="resourceId" required></select>
-                <input name="start" type="datetime-local" required />
-                <input name="end" type="datetime-local" required />
-                <input name="label" placeholder="Motif: congé, formation, absence" />
-                <button class="primary-button" type="submit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>Ajouter congé</button>
-              </form>
-              <div class="holiday-list" id="resource-leave-list"></div>
-            </section>
-
-            <section class="panel">
-              <div class="panel-heading">
-                <div>
-                  <h1>Sauvegarde</h1>
-                  <p>Exporter ou restaurer les données atelier</p>
-                </div>
-              </div>
-              <div class="backup-actions">
-                <button class="primary-button" type="button" id="export-encrypted-backup">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 17a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z" /><path d="M17 11V8a5 5 0 0 0-10 0v3" /><rect x="5" y="11" width="14" height="10" rx="2" /></svg>
-                  Exporter sauvegarde chiffrée
-                </button>
-                <button class="ghost-button danger-button" type="button" id="export-backup">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M7 10l5 5 5-5" /><path d="M12 15V3" /></svg>
-                  Exporter JSON non chiffré
-                </button>
-                <label class="file-button">
-                  <input type="file" id="test-encrypted-backup" accept=".nimrsecure,application/json" />
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 12l2 2 4-4" /><path d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>
-                  Tester sauvegarde chiffrée
-                </label>
-                <label class="file-button">
-                  <input type="file" id="import-backup" accept=".json,.nimrsecure,application/json" />
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M17 8 12 3 7 8" /><path d="M12 3v12" /></svg>
-                  Importer sauvegarde
-                </label>
-              </div>
-              <p class="muted backup-warning">Recommandé : utilisez l’export chiffré pour transporter ou archiver une sauvegarde. Le JSON non chiffré contient clients, photos, véhicules, téléphones, VIN, immatriculations et historique.</p>
-              <p class="muted backup-status" id="backup-status">Inclut dossiers, planning, paramètres, historique et photos.</p>
-              <div class="autosave-control-panel">
-                <div>
-                  <h2>Contrôle sauvegarde automatique</h2>
-                  <p>Vérifie la sauvegarde principale, le miroir local, les points de restauration et le dernier état cloud.</p>
-                </div>
-                <div class="backup-actions">
-                  <button class="ghost-button" type="button" id="control-autosave">Contrôler maintenant</button>
-                  <button class="ghost-button" type="button" id="export-safety-snapshot">Télécharger copie de sécurité</button>
-                  <button class="ghost-button" type="button" id="restore-auto-snapshot">Restaurer dernier point automatique</button>
-                </div>
-                <p class="muted backup-status" id="autosave-control-status">Contrôle non exécuté.</p>
-              </div>
-            </section>
-
-            <section class="panel security-panel" data-admin-technical-panel>
-              <div class="panel-heading">
-                <div>
-                  <h1>Sécurité du poste</h1>
-                  <p>Verrou local, exports chiffrés et nettoyage des données de ce navigateur</p>
-                </div>
-              </div>
-              <form class="security-form" id="local-pin-form">
-                <label>
-                  PIN local
-                  <input name="pin" type="password" inputmode="numeric" autocomplete="new-password" minlength="6" placeholder="6 chiffres non évidents" />
-                </label>
-                <label>
-                  Confirmer PIN
-                  <input name="confirmPin" type="password" inputmode="numeric" autocomplete="new-password" minlength="6" placeholder="Répéter le PIN robuste" />
-                </label>
-                <div class="backup-actions wide">
-                  <button class="primary-button" type="submit">Activer / changer PIN</button>
-                  <button class="ghost-button" type="button" id="lock-local-session">Verrouiller maintenant</button>
-                  <button class="ghost-button" type="button" id="disable-local-pin">Désactiver le PIN</button>
-                  <button class="ghost-button danger-button" type="button" id="clear-local-workstation">Nettoyer ce poste</button>
-                </div>
-              </form>
-              <p class="muted backup-warning">Le PIN protège l’interface locale, mais ne chiffre pas les données locales et ne remplace pas une authentification serveur. Les exports chiffrés restent la méthode recommandée pour transporter une sauvegarde.</p>
-              <p class="muted backup-warning">Poste partagé atelier : verrouillez ou changez d'utilisateur après usage. Un changement d'utilisateur referme les actions sensibles ouvertes sur ce navigateur.</p>
-              <p class="muted backup-status" id="local-security-status">Sécurité locale non contrôlée.</p>
-            </section>
-
-            <section class="panel supabase-panel" data-supabase-status-panel>
-              <div class="panel-heading">
-                <div>
-                  <h1>Cloud Supabase</h1>
-                  <p>Sauvegarde, restauration et réglages atelier sécurisés sans perdre les données locales</p>
-                </div>
-              </div>
-              <form class="supabase-config-form" id="supabase-config-form" data-supabase-admin-control="configure">
-                <label class="wide">
-                  Project URL Supabase
-                  <input name="url" type="url" placeholder="https://xxxx.supabase.co" autocomplete="off" />
-                </label>
-                <label>
-                  Publishable key / clé publique Supabase
-                  <input name="anonKey" type="password" placeholder="clé publique Supabase" autocomplete="off" />
-                </label>
-                <label>
-                  ID atelier
-                  <input name="workshopId" placeholder="00000000-0000-0000-0000-000000000001" autocomplete="off" />
-                </label>
-                <label>
-                  Clé sauvegarde
-                  <input name="backupKey" placeholder="nimr-sav-main" autocomplete="off" />
-                </label>
-                <div class="backup-actions wide">
-                  <button class="primary-button" type="submit">Enregistrer config cloud</button>
-                  <button class="ghost-button" type="button" id="supabase-config-clear">Retirer config locale</button>
-                </div>
-              </form>
-              <p class="muted backup-warning">Utilisez uniquement la publishable key / clé publique Supabase côté navigateur. Ne jamais utiliser service_role ici : la sécurité dépend de l'authentification, des règles RLS par atelier et de la vérification que RLS est activé avant un usage réel.</p>
-              <form class="supabase-login-form" id="supabase-login-form" data-supabase-admin-control="session">
-                <label>
-                  Email utilisateur
-                  <input name="email" type="email" autocomplete="username" placeholder="email créé dans Supabase" />
-                </label>
-                <label>
-                  Mot de passe
-                  <input name="password" type="password" autocomplete="current-password" placeholder="Mot de passe Supabase" />
-                </label>
-                <button class="primary-button" type="submit">Connexion Supabase</button>
-              </form>
-              <div class="backup-actions supabase-actions">
-                <button class="ghost-button" type="button" id="supabase-test" data-supabase-admin-control="sync">Tester connexion</button>
-                <button class="primary-button" type="button" id="supabase-save" data-supabase-admin-control="export">Sauvegarder local → Supabase</button>
-                <button class="ghost-button" type="button" id="supabase-restore" data-supabase-admin-control="restore">Restaurer Supabase → local</button>
-                <button class="ghost-button" type="button" id="supabase-signout" data-supabase-admin-control="session">Déconnexion</button>
-              </div>
-              <div id="supabase-safety-download-container" data-supabase-admin-control="restore" style="display: none; margin-top: 10px; padding: 10px; border: 1px dashed var(--border-color, #ccc); border-radius: 4px; background: rgba(255,193,7,0.05);">
-                <p class="muted" style="margin: 0 0 8px 0;">Une copie de sécurité locale est conservée dans l’application avant restauration cloud.</p>
-                <button class="ghost-button" type="button" id="supabase-download-safety-snapshot" style="width: 100%;">Télécharger copie locale avant restauration cloud</button>
-              </div>
-              <p class="muted backup-warning">Avant chaque sauvegarde cloud, l'application télécharge automatiquement une copie JSON locale de sécurité. Avant restauration, une copie locale est conservée silencieusement dans l'application.</p>
-              <p class="muted backup-status" id="supabase-status">Supabase non configuré : synchronisation cloud inactive.</p>
-              <p class="muted" id="supabase-details">Exécutez en priorité supabase_nimr_sav_v23_2_8_full_audit.sql dans SQL Editor. supabase-schema.sql reste le schéma de compatibilité historique.</p>
-              <section class="sync-health-panel" id="supabase-sync-health" aria-labelledby="supabase-sync-health-title">
-                <div class="panel-heading compact-heading">
-                  <div>
-                    <h2 id="supabase-sync-health-title">État de synchronisation</h2>
-                    <p>État local, serveur, Realtime et opérations durables en attente</p>
+            <div class="settings-workspace-panel" id="settings-workspace-workshop" data-settings-workspace-panel="workshop" role="tabpanel" aria-labelledby="settings-workspace-tab-workshop">
+              <div class="settings-grid">
+                <section class="panel">
+                  <div class="panel-heading">
+                    <div>
+                      <h1>Ressources</h1>
+                      <p>Techniciens, mécanique, électrique, cabine et contrôle</p>
+                    </div>
                   </div>
-                </div>
-                <dl class="sync-health-grid">
-                  <div><dt>Connexion</dt><dd data-sync-health="connection">Non vérifiée</dd></div>
-                  <div><dt>Utilisateur / atelier / rôle</dt><dd data-sync-health="identity">Non connecté</dd></div>
-                  <div><dt>Schéma / application</dt><dd data-sync-health="versions">—</dd></div>
-                  <div><dt>Realtime</dt><dd data-sync-health="realtime">Inactif</dd></div>
-                  <div><dt>Dernière confirmation serveur</dt><dd data-sync-health="last-sync">Jamais</dd></div>
-                  <div><dt>Dossiers local / serveur</dt><dd data-sync-health="cases">0 / —</dd></div>
-                  <div><dt>Ressources local / serveur</dt><dd data-sync-health="resources">0 / —</dd></div>
-                  <div><dt>Opérations en attente</dt><dd data-sync-health="pending">0</dd></div>
-                  <div><dt>Conflits</dt><dd data-sync-health="conflicts">0</dd></div>
-                  <div><dt>Dernière erreur</dt><dd data-sync-health="error">Aucune</dd></div>
-                </dl>
-                <div class="backup-actions sync-health-actions" data-supabase-admin-control="sync">
-                  <button class="primary-button" type="button" id="supabase-sync-retry">Relancer la synchronisation</button>
-                  <button class="ghost-button" type="button" id="supabase-sync-export-diagnostic">Exporter diagnostic</button>
-                  <button class="ghost-button" type="button" id="supabase-sync-show-errors">Voir erreurs</button>
-                  <button class="ghost-button" type="button" id="supabase-sync-show-conflicts">Voir conflits</button>
-                  <button class="ghost-button" type="button" id="supabase-sync-export-backup" data-supabase-admin-control="export">Exporter sauvegarde locale</button>
-                </div>
-              </section>
-            </section>
+                  <form class="resource-form" id="resource-form">
+                    <input name="name" required placeholder="Nom ressource" />
+                    <select name="role" required>
+                      <option value="tolier">Tôlier</option>
+                      <option value="mecanicien">Mécanicien</option>
+                      <option value="electricien">Électricien</option>
+                      <option value="peintre">Peintre</option>
+                      <option value="zone_preparation">Zone de préparation</option>
+                      <option value="cabine">Cabine peinture</option>
+                      <option value="pont_vidange">Pont vidange</option>
+                      <option value="pont_mecanique">Pont grands travaux mécaniques</option>
+                      <option value="transport">Transport / convoyage</option>
+                      <option value="controle">Contrôle final</option>
+                    </select>
+                    <input name="location" placeholder="Emplacement" />
+                    <select name="site" aria-label="Site de la ressource">
+                      <option value="internal">Interne atelier</option>
+                      <option value="external">Sous-traitant externe</option>
+                    </select>
+                    <input name="capacity" type="number" min="1" step="1" value="1" placeholder="Capacité simultanée" />
+                    <input name="dailyCapacityMinutes" type="number" min="0" step="15" placeholder="Capacité/jour en minutes (optionnel)" />
+                    <input name="compatibleRoles" placeholder="Métiers compatibles, séparés par virgule" />
+                    <input name="transferOutMinutes" type="number" min="0" step="15" placeholder="Transfert aller (min, externe)" />
+                    <input name="transferReturnMinutes" type="number" min="0" step="15" placeholder="Transfert retour (min, externe)" />
+                    <input name="standardLeadTimeMinutes" type="number" min="0" step="15" placeholder="Délai standard (min, externe)" />
+                    <label class="check-card">
+                      <input type="checkbox" name="fastLane" />
+                      <span>Fast Lane</span>
+                    </label>
+                    <button class="primary-button" type="submit">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+                      Ajouter
+                    </button>
+                  </form>
+                  <div class="resource-list" id="resource-list"></div>
+                  <form class="fastlane-form" id="fastlane-form">
+                    <label class="check-card">
+                      <input type="checkbox" name="fastLaneEnabled" />
+                      <span>Activer la Fast Lane</span>
+                    </label>
+                    <label>
+                      Limite intervention rapide
+                      <input name="fastLaneMaxHours" type="text" inputmode="decimal" placeholder="Ex. 4 ou 4,5" />
+                    </label>
+                  </form>
+                </section>
 
-            <section class="panel activity-log-panel" id="panel-activity-log" hidden>
-              <div class="panel-heading">
-                <div>
-                  <h1>Journal d'activité</h1>
-                  <p>Consulter les événements récents de l'application</p>
-                </div>
+                <section class="panel">
+                  <div class="panel-heading">
+                    <div>
+                      <h1>Calendrier</h1>
+                      <p>Lun-ven 08:00-12:00 / 13:00-17:00</p>
+                    </div>
+                  </div>
+                  <div class="calendar-summary">
+                    <span>Samedi 08:00-13:00</span>
+                    <span>Dimanche fermé</span>
+                    <span>Pause 12:00-13:00</span>
+                  </div>
+                  <div class="work-hours-list" id="work-hours-list"></div>
+                  <form class="holiday-form" id="holiday-form">
+                    <input name="date" type="date" required />
+                    <input name="label" required placeholder="Nom du jour férié" />
+                    <button class="primary-button" type="submit">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+                      Ajouter
+                    </button>
+                  </form>
+                  <div class="holiday-list" id="holiday-list"></div>
+                  <div class="section-heading compact-heading"><div><h2>Congés / absences ressources</h2><span>Bloque la personne concernée. Si une tâche existe déjà, replanifiez-la ou mettez-la en pause avant d'ajouter l'absence.</span></div></div>
+                  <form class="holiday-form" id="resource-leave-form">
+                    <select name="resourceId" required></select>
+                    <input name="start" type="datetime-local" required />
+                    <input name="end" type="datetime-local" required />
+                    <input name="label" placeholder="Motif: congé, formation, absence" />
+                    <button class="primary-button" type="submit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>Ajouter congé</button>
+                  </form>
+                  <div class="holiday-list" id="resource-leave-list"></div>
+                </section>
               </div>
-              <div class="activity-log-controls" style="display:flex; gap:12px; margin-bottom:16px; flex-wrap:wrap;">
-                <select id="activity-log-filter" style="flex:1; min-width: 200px;">
-                  <option value="all">Tous les événements</option>
-                  <option value="users">Utilisateurs & Sécurité</option>
-                  <option value="planning">Planning & Techniciens</option>
-                  <option value="case">Dossiers</option>
-                  <option value="sync">Synchronisation Cloud</option>
-                  <option value="errors">Erreurs & Avertissements</option>
-                </select>
-                <input type="search" id="activity-log-search" placeholder="Rechercher..." style="flex:1; min-width: 200px;" />
-                <button type="button" class="ghost-button" id="activity-log-export">
-                  Export CSV
-                </button>
-              </div>
-              <div class="sync-conflict-panel" id="sync-conflict-panel" hidden></div>
-              <div class="table-container" style="max-height:400px; overflow-y:auto; border:1px solid var(--border-color); border-radius:var(--radius-sm);">
-                <table class="data-table" style="width:100%; border-collapse: collapse; font-size: 0.85rem;">
-                  <thead style="position: sticky; top: 0; background: var(--bg-color); z-index: 1;">
-                    <tr style="text-align: left; border-bottom: 2px solid var(--border-color);">
-                      <th style="padding: 8px;">Date</th>
-                      <th style="padding: 8px;">Type</th>
-                      <th style="padding: 8px;">Acteur</th>
-                      <th style="padding: 8px;">Dossier</th>
-                      <th style="padding: 8px;">Détails</th>
-                    </tr>
-                  </thead>
-                  <tbody id="activity-log-table-body">
-                  </tbody>
-                </table>
-              </div>
-            </section>
+            </div>
 
+            <div class="settings-workspace-panel" id="settings-workspace-administration" data-settings-workspace-panel="administration" role="tabpanel" aria-labelledby="settings-workspace-tab-administration" hidden>
+              <div class="settings-grid">
+                <section class="panel users-roles-panel" data-admin-technical-panel>
+                  <div class="panel-heading">
+                    <div>
+                      <h1>Utilisateurs & rôles</h1>
+                      <p>Gérer les profils de l'atelier, leurs rôles, permissions et ressources liées.</p>
+                    </div>
+                  </div>
+                  <form class="resource-form" id="user-form">
+                    <input name="userId" type="hidden" />
+                    <input name="name" required placeholder="Nom complet" />
+                    <select name="role" required>
+                      <option value="admin_technique">Admin technique</option>
+                      <option value="chef_atelier">Chef atelier</option>
+                      <option value="directeur">Directeur SAV</option>
+                      <option value="reception">Réception</option>
+                      <option value="technicien">Technicien</option>
+                      <option value="controle_qualite">Contrôleur Qualité</option>
+                      <option value="lecture_seule">Lecture seule</option>
+                    </select>
+                    <input name="email" type="email" placeholder="Email (optionnel)" />
+                    <input name="pin" type="password" inputmode="numeric" placeholder="PIN de sécurité (requis si sensible)" minlength="4" />
+                    <select name="resourceId">
+                      <option value="">Lier à aucune ressource technicien</option>
+                    </select>
+                    <label class="check-card">
+                      <input type="checkbox" name="active" checked />
+                      <span>Utilisateur actif</span>
+                    </label>
+                    <div class="backup-actions wide">
+                      <button class="primary-button" type="submit" id="user-submit-btn">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+                        <span id="user-submit-label">Ajouter l'utilisateur</span>
+                      </button>
+                      <button class="ghost-button" type="button" id="user-cancel-btn" hidden>
+                        Annuler
+                      </button>
+                    </div>
+                  </form>
+                  <div id="users-duplicates-alert" hidden></div>
+                  <div class="resource-list" id="users-list"></div>
+
+                  <div class="section-heading compact-heading">
+                    <div>
+                      <h2>Utilisateur actif actuel</h2>
+                      <span>Sélectionner l'utilisateur pour simuler ou basculer les permissions locales (mode offline).</span>
+                    </div>
+                  </div>
+                  <div class="calendar-summary">
+                    <select id="current-user-selector" style="min-width: 240px;"></select>
+                  </div>
+                  <div class="calendar-summary" style="display: flex; flex-direction: column; gap: 8px; margin-top: 10px;">
+                    <label class="check-card" style="margin: 0; align-self: flex-start;">
+                      <input type="checkbox" id="always-prompt-startup" />
+                      <span>Toujours demander l'utilisateur au démarrage</span>
+                    </label>
+                    <button class="ghost-button" id="change-user-settings-btn" type="button" style="align-self: flex-start;">Changer d'utilisateur</button>
+                  </div>
+
+                  <div class="section-heading compact-heading">
+                    <div>
+                      <h2>Résumé des permissions par rôle</h2>
+                    </div>
+                  </div>
+                  <div class="holiday-list" id="roles-permissions-summary" style="gap: 8px;">
+                    <article class="resource-card" style="padding: 12px; font-size: 0.85rem; display: block;">
+                      <strong>Admin technique</strong>
+                      <p class="muted" style="margin: 4px 0 0;">Responsabilités techniques sensibles : configuration cloud Supabase, nettoyage poste, restauration complète, suppression de données, gestion permissions critiques et paramètres système.</p>
+                    </article>
+                    <article class="resource-card" style="padding: 12px; font-size: 0.85rem; display: block;">
+                      <strong>Directeur SAV</strong>
+                      <p class="muted" style="margin: 4px 0 0;">Pilotage métier : dashboard performance SAV, dossiers, planning, KPI, exports, journal d'activité et suivi des échéances. Pas d'accès aux actions techniques destructives.</p>
+                    </article>
+                    <article class="resource-card" style="padding: 12px; font-size: 0.85rem; display: block;">
+                      <strong>Chef atelier</strong>
+                      <p class="muted" style="margin: 4px 0 0;">Supervision complète de la production, planification (Gantt), gestion des priorités, affectations et clôture des travaux avec traçabilité.</p>
+                    </article>
+                    <article class="resource-card" style="padding: 12px; font-size: 0.85rem; display: block;">
+                      <strong>Réception</strong>
+                      <p class="muted" style="margin: 4px 0 0;">Import de devis, édition des informations dossier, planification de rendez-vous et réception physique des véhicules.</p>
+                    </article>
+                    <article class="resource-card" style="padding: 12px; font-size: 0.85rem; display: block;">
+                      <strong>Technicien</strong>
+                      <p class="muted" style="margin: 4px 0 0;">Démarrer, suspendre (pause), reprendre et terminer ses propres tâches rattachées à sa ressource technicien d'atelier.</p>
+                    </article>
+                    <article class="resource-card" style="padding: 12px; font-size: 0.85rem; display: block;">
+                      <strong>Lecture seule</strong>
+                      <p class="muted" style="margin: 4px 0 0;">Consultation générale du planning et des dossiers de l'atelier, accès aux impressions (ordres de réparation, etc.).</p>
+                    </article>
+                  </div>
+                </section>
+
+                <section class="panel">
+                  <div class="panel-heading">
+                    <div>
+                      <h1>Sauvegarde</h1>
+                      <p>Exporter ou restaurer les données atelier</p>
+                    </div>
+                  </div>
+                  <div class="backup-actions">
+                    <button class="primary-button" type="button" id="export-encrypted-backup">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 17a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z" /><path d="M17 11V8a5 5 0 0 0-10 0v3" /><rect x="5" y="11" width="14" height="10" rx="2" /></svg>
+                      Exporter sauvegarde chiffrée
+                    </button>
+                    <button class="ghost-button danger-button" type="button" id="export-backup">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M7 10l5 5 5-5" /><path d="M12 15V3" /></svg>
+                      Exporter JSON non chiffré
+                    </button>
+                    <label class="file-button">
+                      <input type="file" id="test-encrypted-backup" accept=".nimrsecure,application/json" />
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 12l2 2 4-4" /><path d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>
+                      Tester sauvegarde chiffrée
+                    </label>
+                    <label class="file-button">
+                      <input type="file" id="import-backup" accept=".json,.nimrsecure,application/json" />
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M17 8 12 3 7 8" /><path d="M12 3v12" /></svg>
+                      Importer sauvegarde
+                    </label>
+                  </div>
+                  <p class="muted backup-warning">Recommandé : utilisez l’export chiffré pour transporter ou archiver une sauvegarde. Le JSON non chiffré contient clients, photos, véhicules, téléphones, VIN, immatriculations et historique.</p>
+                  <p class="muted backup-status" id="backup-status">Inclut dossiers, planning, paramètres, historique et photos.</p>
+                  <div class="autosave-control-panel">
+                    <div>
+                      <h2>Contrôle sauvegarde automatique</h2>
+                      <p>Vérifie la sauvegarde principale, le miroir local, les points de restauration et le dernier état cloud.</p>
+                    </div>
+                    <div class="backup-actions">
+                      <button class="ghost-button" type="button" id="control-autosave">Contrôler maintenant</button>
+                      <button class="ghost-button" type="button" id="export-safety-snapshot">Télécharger copie de sécurité</button>
+                      <button class="ghost-button" type="button" id="restore-auto-snapshot">Restaurer dernier point automatique</button>
+                    </div>
+                    <p class="muted backup-status" id="autosave-control-status">Contrôle non exécuté.</p>
+                  </div>
+                </section>
+
+                <section class="panel security-panel" data-admin-technical-panel>
+                  <div class="panel-heading">
+                    <div>
+                      <h1>Sécurité du poste</h1>
+                      <p>Verrou local, exports chiffrés et nettoyage des données de ce navigateur</p>
+                    </div>
+                  </div>
+                  <form class="security-form" id="local-pin-form">
+                    <label>
+                      PIN local
+                      <input name="pin" type="password" inputmode="numeric" autocomplete="new-password" minlength="6" placeholder="6 chiffres non évidents" />
+                    </label>
+                    <label>
+                      Confirmer PIN
+                      <input name="confirmPin" type="password" inputmode="numeric" autocomplete="new-password" minlength="6" placeholder="Répéter le PIN robuste" />
+                    </label>
+                    <div class="backup-actions wide">
+                      <button class="primary-button" type="submit">Activer / changer PIN</button>
+                      <button class="ghost-button" type="button" id="lock-local-session">Verrouiller maintenant</button>
+                      <button class="ghost-button" type="button" id="disable-local-pin">Désactiver le PIN</button>
+                      <button class="ghost-button danger-button" type="button" id="clear-local-workstation">Nettoyer ce poste</button>
+                    </div>
+                  </form>
+                  <p class="muted backup-warning">Le PIN protège l’interface locale, mais ne chiffre pas les données locales et ne remplace pas une authentification serveur. Les exports chiffrés restent la méthode recommandée pour transporter une sauvegarde.</p>
+                  <p class="muted backup-warning">Poste partagé atelier : verrouillez ou changez d'utilisateur après usage. Un changement d'utilisateur referme les actions sensibles ouvertes sur ce navigateur.</p>
+                  <p class="muted backup-status" id="local-security-status">Sécurité locale non contrôlée.</p>
+                </section>
+
+                <section class="panel supabase-panel" data-supabase-status-panel>
+                  <div class="panel-heading">
+                    <div>
+                      <h1>Cloud Supabase</h1>
+                      <p>Sauvegarde, restauration et réglages atelier sécurisés sans perdre les données locales</p>
+                    </div>
+                  </div>
+                  <form class="supabase-config-form" id="supabase-config-form" data-supabase-admin-control="configure">
+                    <label class="wide">
+                      Project URL Supabase
+                      <input name="url" type="url" placeholder="https://xxxx.supabase.co" autocomplete="off" />
+                    </label>
+                    <label>
+                      Publishable key / clé publique Supabase
+                      <input name="anonKey" type="password" placeholder="clé publique Supabase" autocomplete="off" />
+                    </label>
+                    <label>
+                      ID atelier
+                      <input name="workshopId" placeholder="00000000-0000-0000-0000-000000000001" autocomplete="off" />
+                    </label>
+                    <label>
+                      Clé sauvegarde
+                      <input name="backupKey" placeholder="nimr-sav-main" autocomplete="off" />
+                    </label>
+                    <div class="backup-actions wide">
+                      <button class="primary-button" type="submit">Enregistrer config cloud</button>
+                      <button class="ghost-button" type="button" id="supabase-config-clear">Retirer config locale</button>
+                    </div>
+                  </form>
+                  <p class="muted backup-warning">Utilisez uniquement la publishable key / clé publique Supabase côté navigateur. Ne jamais utiliser service_role ici : la sécurité dépend de l'authentification, des règles RLS par atelier et de la vérification que RLS est activé avant un usage réel.</p>
+                  <form class="supabase-login-form" id="supabase-login-form" data-supabase-admin-control="session">
+                    <label>
+                      Email utilisateur
+                      <input name="email" type="email" autocomplete="username" placeholder="email créé dans Supabase" />
+                    </label>
+                    <label>
+                      Mot de passe
+                      <input name="password" type="password" autocomplete="current-password" placeholder="Mot de passe Supabase" />
+                    </label>
+                    <button class="primary-button" type="submit">Connexion Supabase</button>
+                  </form>
+                  <div class="backup-actions supabase-actions">
+                    <button class="ghost-button" type="button" id="supabase-test" data-supabase-admin-control="sync">Tester connexion</button>
+                    <button class="primary-button" type="button" id="supabase-save" data-supabase-admin-control="export">Sauvegarder local → Supabase</button>
+                    <button class="ghost-button" type="button" id="supabase-restore" data-supabase-admin-control="restore">Restaurer Supabase → local</button>
+                    <button class="ghost-button" type="button" id="supabase-signout" data-supabase-admin-control="session">Déconnexion</button>
+                  </div>
+                  <div id="supabase-safety-download-container" data-supabase-admin-control="restore" style="display: none; margin-top: 10px; padding: 10px; border: 1px dashed var(--border-color, #ccc); border-radius: 4px; background: rgba(255,193,7,0.05);">
+                    <p class="muted" style="margin: 0 0 8px 0;">Une copie de sécurité locale est conservée dans l’application avant restauration cloud.</p>
+                    <button class="ghost-button" type="button" id="supabase-download-safety-snapshot" style="width: 100%;">Télécharger copie locale avant restauration cloud</button>
+                  </div>
+                  <p class="muted backup-warning">Avant chaque sauvegarde cloud, l'application télécharge automatiquement une copie JSON locale de sécurité. Avant restauration, une copie locale est conservée silencieusement dans l'application.</p>
+                  <p class="muted backup-status" id="supabase-status">Supabase non configuré : synchronisation cloud inactive.</p>
+                  <p class="muted" id="supabase-details">Exécutez en priorité supabase_nimr_sav_v23_2_8_full_audit.sql dans SQL Editor. supabase-schema.sql reste le schéma de compatibilité historique.</p>
+                  <section class="sync-health-panel" id="supabase-sync-health" aria-labelledby="supabase-sync-health-title">
+                    <div class="panel-heading compact-heading">
+                      <div>
+                        <h2 id="supabase-sync-health-title">État de synchronisation</h2>
+                        <p>État local, serveur, Realtime et opérations durables en attente</p>
+                      </div>
+                    </div>
+                    <dl class="sync-health-grid">
+                      <div><dt>Connexion</dt><dd data-sync-health="connection">Non vérifiée</dd></div>
+                      <div><dt>Utilisateur / atelier / rôle</dt><dd data-sync-health="identity">Non connecté</dd></div>
+                      <div><dt>Schéma / application</dt><dd data-sync-health="versions">—</dd></div>
+                      <div><dt>Realtime</dt><dd data-sync-health="realtime">Inactif</dd></div>
+                      <div><dt>Dernière confirmation serveur</dt><dd data-sync-health="last-sync">Jamais</dd></div>
+                      <div><dt>Dossiers local / serveur</dt><dd data-sync-health="cases">0 / —</dd></div>
+                      <div><dt>Ressources local / serveur</dt><dd data-sync-health="resources">0 / —</dd></div>
+                      <div><dt>Opérations en attente</dt><dd data-sync-health="pending">0</dd></div>
+                      <div><dt>Conflits</dt><dd data-sync-health="conflicts">0</dd></div>
+                      <div><dt>Dernière erreur</dt><dd data-sync-health="error">Aucune</dd></div>
+                    </dl>
+                    <div class="backup-actions sync-health-actions" data-supabase-admin-control="sync">
+                      <button class="primary-button" type="button" id="supabase-sync-retry">Relancer la synchronisation</button>
+                      <button class="ghost-button" type="button" id="supabase-sync-export-diagnostic">Exporter diagnostic</button>
+                      <button class="ghost-button" type="button" id="supabase-sync-show-errors">Voir erreurs</button>
+                      <button class="ghost-button" type="button" id="supabase-sync-show-conflicts">Voir conflits</button>
+                      <button class="ghost-button" type="button" id="supabase-sync-export-backup" data-supabase-admin-control="export">Exporter sauvegarde locale</button>
+                    </div>
+                  </section>
+                </section>
+
+                <section class="panel activity-log-panel" id="panel-activity-log" hidden>
+                  <div class="panel-heading">
+                    <div>
+                      <h1>Journal d'activité</h1>
+                      <p>Consulter les événements récents de l'application</p>
+                    </div>
+                  </div>
+                  <div class="activity-log-controls" style="display:flex; gap:12px; margin-bottom:16px; flex-wrap:wrap;">
+                    <select id="activity-log-filter" style="flex:1; min-width: 200px;">
+                      <option value="all">Tous les événements</option>
+                      <option value="users">Utilisateurs & Sécurité</option>
+                      <option value="planning">Planning & Techniciens</option>
+                      <option value="case">Dossiers</option>
+                      <option value="sync">Synchronisation Cloud</option>
+                      <option value="errors">Erreurs & Avertissements</option>
+                    </select>
+                    <input type="search" id="activity-log-search" placeholder="Rechercher..." style="flex:1; min-width: 200px;" />
+                    <button type="button" class="ghost-button" id="activity-log-export">
+                      Export CSV
+                    </button>
+                  </div>
+                  <div class="sync-conflict-panel" id="sync-conflict-panel" hidden></div>
+                  <div class="table-container" style="max-height:400px; overflow-y:auto; border:1px solid var(--border-color); border-radius:var(--radius-sm);">
+                    <table class="data-table" style="width:100%; border-collapse: collapse; font-size: 0.85rem;">
+                      <thead style="position: sticky; top: 0; background: var(--bg-color); z-index: 1;">
+                        <tr style="text-align: left; border-bottom: 2px solid var(--border-color);">
+                          <th style="padding: 8px;">Date</th>
+                          <th style="padding: 8px;">Type</th>
+                          <th style="padding: 8px;">Acteur</th>
+                          <th style="padding: 8px;">Dossier</th>
+                          <th style="padding: 8px;">Détails</th>
+                        </tr>
+                      </thead>
+                      <tbody id="activity-log-table-body">
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              </div>
+            </div>
           </div>
         </section>
       </main>
@@ -1238,22 +1258,22 @@
       </div>
     </div>
 
-    <script src="vendor/pdf.min.js?v=23.3.12" defer></script>
-    <script src="js/utils.js?v=23.3.12" defer></script>
-    <script src="js/state.js?v=23.3.12" defer></script>
-    <script src="js/ui-cases.js?v=23.3.12" defer></script>
-    <script src="js/estimate-import.js?v=23.3.12" defer></script>
-    <script src="js/ui-planning.js?v=23.3.12" defer></script>
-    <script src="js/photos.js?v=23.3.12" defer></script>
-    <script src="js/storage.js?v=23.3.12" defer></script>
-    <script src="js/work-hours-sync.js?v=23.3.12" defer></script>
-    <script src="js/planning.js?v=23.3.12" defer></script>
-    <script src="js/exports.js?v=23.3.12" defer></script>
-    <script src="js/business-rules-v2187.js?v=23.3.12" defer></script>
+    <script src="vendor/pdf.min.js?v=23.3.13" defer></script>
+    <script src="js/utils.js?v=23.3.13" defer></script>
+    <script src="js/state.js?v=23.3.13" defer></script>
+    <script src="js/ui-cases.js?v=23.3.13" defer></script>
+    <script src="js/estimate-import.js?v=23.3.13" defer></script>
+    <script src="js/ui-planning.js?v=23.3.13" defer></script>
+    <script src="js/photos.js?v=23.3.13" defer></script>
+    <script src="js/storage.js?v=23.3.13" defer></script>
+    <script src="js/work-hours-sync.js?v=23.3.13" defer></script>
+    <script src="js/planning.js?v=23.3.13" defer></script>
+    <script src="js/exports.js?v=23.3.13" defer></script>
+    <script src="js/business-rules-v2187.js?v=23.3.13" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
-    <script src="js/supabase-config.js?v=23.3.12" defer></script>
-    <script src="js/supabase-client.js?v=23.3.12" defer></script>
-    <script src="js/supabase-sync.js?v=23.3.12" defer></script>
-    <script src="app.js?v=23.3.12" defer></script>
+    <script src="js/supabase-config.js?v=23.3.13" defer></script>
+    <script src="js/supabase-client.js?v=23.3.13" defer></script>
+    <script src="js/supabase-sync.js?v=23.3.13" defer></script>
+    <script src="app.js?v=23.3.13" defer></script>
   </body>
 </html>

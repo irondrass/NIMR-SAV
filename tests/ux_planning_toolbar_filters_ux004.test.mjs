@@ -19,16 +19,19 @@ function check(name, callback) {
   console.log(`PASS ${name}`);
 }
 
-check("A Release surfaces consistently identify v23.3.11", () => {
-  assert.match(versionSource, /window\.APP_VERSION = "v23\.3\.11";/u);
-  assert.match(versionSource, /window\.NIMR_BUILD = "v23\.3\.11";/u);
-  assert.match(versionSource, /window\.NIMR_CACHE_NAME = "nimr-sav-v23\.3\.11";/u);
-  assert.match(stateSource, /const APP_VERSION = "v23\.3\.11";/u);
-  assert.match(appSource, /pdf\.worker\.min\.js\?v=23\.3\.11/u);
-  assert.match(swSource, /const CACHE_NAME = "nimr-sav-v23\.3\.11";/u);
-  assert.match(indexSource, /styles\.css\?v=23\.3\.11/u);
-  assert.match(indexSource, /app\.js\?v=23\.3\.11/u);
-  assert.match(offlineSource, /styles\.css\?v=23\.3\.11/u);
+check("A UX-004 release surfaces remain internally consistent", () => {
+  const versionMatch = versionSource.match(/window\.APP_VERSION = "(v[0-9.]+)";/u);
+  assert.ok(versionMatch, "window.APP_VERSION must be defined");
+  const currentVersion = versionMatch[1];
+  const assetVersion = currentVersion.replace(/^v/u, "");
+  assert.match(versionSource, new RegExp(`window\\.NIMR_BUILD = "${currentVersion}";`, "u"));
+  assert.match(versionSource, new RegExp(`window\\.NIMR_CACHE_NAME = "nimr-sav-${currentVersion}";`, "u"));
+  assert.match(stateSource, new RegExp(`const APP_VERSION = "${currentVersion}";`, "u"));
+  assert.match(appSource, new RegExp(`pdf\\.worker\\.min\\.js\\?v=${assetVersion.replaceAll(".", "\\.")}`, "u"));
+  assert.match(swSource, new RegExp(`const CACHE_NAME = "nimr-sav-${currentVersion}";`, "u"));
+  assert.match(indexSource, new RegExp(`styles\\.css\\?v=${assetVersion.replaceAll(".", "\\.")}`, "u"));
+  assert.match(indexSource, new RegExp(`app\\.js\\?v=${assetVersion.replaceAll(".", "\\.")}`, "u"));
+  assert.match(offlineSource, new RegExp(`styles\\.css\\?v=${assetVersion.replaceAll(".", "\\.")}`, "u"));
 });
 
 check("B Existing Planning IDs remain intact", () => {

@@ -245,11 +245,24 @@ scenario("R", "manual preferred resource", "AMBIGUOUS", () => {
   return { selected: "body-2", ambiguity: "preference outranks earlier completion and therefore behaves as a hard priority" };
 });
 
-scenario("S", "manual locked resource", "FAIL", () => {
+scenario("S", "manual locked resource", "PASS", () => {
   resetState({ resources: [{ ...baseResources[0], active: false }, baseResources[1]] });
-  const proposal = schedule({ id: "s", durations: { body: 1 }, stepAssignmentLocks: { body: { resourceId: "body-1" } } });
-  assert.equal(proposal.steps[0].primaryResourceId, "body-2");
-  return { selected: "body-2", failure: "an inactive locked resource is silently replaced; lock is implemented as preference" };
+  let failure = null;
+  try {
+    schedule({ id: "s", durations: { body: 1 }, stepAssignmentLocks: { body: { resourceId: "body-1" } } });
+  } catch (error) {
+    failure = error;
+  }
+  assert.ok(failure, "an inactive hard lock must reject scheduling");
+  assert.equal(failure.code, "assignment_lock_incompatible");
+  assert.equal(failure.resourceId, "body-1");
+  assert.match(failure.message, /verrou|ressource/i);
+  return {
+    selected: null,
+    rejectedResourceId: failure.resourceId,
+    errorCode: failure.code,
+    result: "inactive hard assignment lock is rejected explicitly and never falls back to body-2",
+  };
 });
 
 scenario("T", "pending proposal blocks capacity before acceptance", "PASS", () => {
@@ -320,7 +333,7 @@ scenario("Y", "very long task spanning multiple days", "PASS", () => {
   return { result: "one logical booking spans multiple bounded working segments", segments: proposal.steps[0].segments.length };
 });
 
-scenario("Z", "body to prep to paint to reassembly to finish flow", "FAIL", () => {
+scenario("Z", "body to prep to paint to reassembly to finish flow", "PASS", () => {
   resetState();
   const tasks = [
     { id: "body", key: "body", durationMinutes: 60, requiredRole: "tolier" },
@@ -331,13 +344,20 @@ scenario("Z", "body to prep to paint to reassembly to finish flow", "FAIL", () =
   ];
   const proposal = graph({ id: "z", durations: {} }, tasks);
   const byKey = Object.fromEntries(proposal.steps.map((step) => [step.key, step]));
-  assert.notEqual(byKey.body.primaryResourceId, byKey.reassembly.primaryResourceId);
+  assert.equal(byKey.body.primaryResourceId, byKey.reassembly.primaryResourceId);
+  assert.equal(byKey.prep.primaryResourceId, byKey.paint.primaryResourceId);
+  assert.equal(byKey.paint.primaryResourceId, byKey.finish.primaryResourceId);
   assert.deepEqual(byKey.prep.equipmentResourceIds, ["prep-zone"]);
   assert.deepEqual(byKey.paint.equipmentResourceIds, ["booth"]);
+  assert.deepEqual(byKey.body.dependencies, []);
+  assert.deepEqual(byKey.prep.dependencies, ["body"]);
+  assert.deepEqual(byKey.paint.dependencies, ["prep"]);
+  assert.deepEqual(byKey.reassembly.dependencies, ["paint"]);
+  assert.deepEqual(byKey.finish.dependencies, ["reassembly"]);
   return {
     bodyworkerByStep: { body: byKey.body.primaryResourceId, reassembly: byKey.reassembly.primaryResourceId },
     painterByStep: { prep: byKey.prep.primaryResourceId, paint: byKey.paint.primaryResourceId, finish: byKey.finish.primaryResourceId },
-    failure: "task-graph allocation does not apply the sequential bodyworker/painter continuity preferences",
+    result: "body/reassembly and prep/paint/finish continuity are preserved with equipment assignments and no hidden graph dependency",
   };
 });
 

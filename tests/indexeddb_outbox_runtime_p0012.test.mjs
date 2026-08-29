@@ -369,13 +369,13 @@ const stateSource = fs.readFileSync(new URL("../js/state.js", import.meta.url), 
 const appSource = fs.readFileSync(new URL("../app.js", import.meta.url), "utf8");
 const indexSource = fs.readFileSync(new URL("../index.html", import.meta.url), "utf8");
 const serviceWorkerSource = fs.readFileSync(new URL("../sw.js", import.meta.url), "utf8");
-assert.match(versionSource, /window\.APP_VERSION = "v23\.3\.6"/u);
-assert.match(versionSource, /window\.NIMR_BUILD = "v23\.3\.6"/u);
-assert.match(versionSource, /window\.NIMR_CACHE_NAME = "nimr-sav-v23\.3\.6"/u);
-assert.match(stateSource, /const APP_VERSION = "v23\.3\.6"/u);
-assert.match(appSource, /serviceWorker\.register\("sw\.js\?v=23\.3\.6"/u);
-assert.match(serviceWorkerSource, /const CACHE_NAME = "nimr-sav-v23\.3\.6"/u);
+assert.match(versionSource, /window\.APP_VERSION = "v23\.3\.7"/u);
+assert.match(versionSource, /window\.NIMR_BUILD = "v23\.3\.7"/u);
+assert.match(versionSource, /window\.NIMR_CACHE_NAME = "nimr-sav-v23\.3\.7"/u);
+assert.match(stateSource, /const APP_VERSION = "v23\.3\.7"/u);
+assert.match(appSource, /serviceWorker\.register\("sw\.js\?v=23\.3\.7"/u);
+assert.match(serviceWorkerSource, /const CACHE_NAME = "nimr-sav-v23\.3\.7"/u);
 assert.doesNotMatch(indexSource, /\?v=23\.3\.1/u);
-for (const match of indexSource.matchAll(/\?v=([0-9.]+)/gu)) assert.equal(match[1], "23.3.6");
+for (const match of indexSource.matchAll(/\?v=([0-9.]+)/gu)) assert.equal(match[1], "23.3.7");
 
 console.log("P0-012 INDEXEDDB OUTBOX RUNTIME OK");

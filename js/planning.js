@@ -426,7 +426,8 @@ function describePlanningAvailabilityFailure(item, template, duration, tempBooki
 
 function scheduleSingleStep(item, template, cursor, duration, tempBookings, assignment, fastJob, title, details, planningMode = "standard", planningOptions = {}) {
   if (duration <= 0) return null;
-  const preferredPrimaryId = getPreferredPrimaryResourceId(template, assignment, item);
+  const constraint = getPlanningResourceConstraint(template, assignment, item, planningOptions);
+  const preferredPrimaryId = constraint.effectivePreferredPrimaryResourceId;
   const preferredEquipmentId = getPreferredEquipmentResourceId(template, assignment);
   const rotationKey = `${item.id || "case"}:${template.key}`;
   const match = findBestResourceSlot(
@@ -449,6 +450,8 @@ function scheduleSingleStep(item, template, cursor, duration, tempBookings, assi
       requiredCategory: planningOptions.requiredCategory || "",
       capacityUnits: planningOptions.capacityUnits || 1,
       resourceUnits: planningOptions.resourceUnits || {},
+      item,
+      lockedPrimaryResourceId: constraint.lockedPrimaryResourceId,
     },
   );
   if (!match) {
@@ -515,15 +518,68 @@ function createPlanningAssignmentContext() {
   return { tolierId: null, painterId: null, equipmentByRole: {} };
 }
 
-function getPreferredPrimaryResourceId(template, assignment, item = null) {
-  const locked = item?.stepAssignmentLocks?.[template.key]?.resourceId || "";
-  const manual = locked || item?.stepPreferredResources?.[template.key] || "";
-  if (manual && state.resources.some((resource) => resource.id === manual && resource.role === template.role && resource.active !== false)) {
-    return manual;
-  }
+function getAutomaticContinuityPrimaryResourceId(template, assignment) {
   if (template.key === "reassembly") return assignment.tolierId;
   if (["paint", "finish"].includes(template.key)) return assignment.painterId;
   return null;
+}
+
+function getPlanningResourceConstraint(template, assignment, item = null, options = {}) {
+  const lockedPrimaryResourceId = String(item?.stepAssignmentLocks?.[template.key]?.resourceId || "").trim();
+  const preferredPrimaryResourceId = String(
+    options.preferredPrimaryResourceId
+      || item?.stepPreferredResources?.[template.key]
+      || "",
+  ).trim();
+  const continuityPrimaryResourceId = String(
+    Object.hasOwn(options, "continuityPrimaryResourceId")
+      ? (options.continuityPrimaryResourceId || "")
+      : (getAutomaticContinuityPrimaryResourceId(template, assignment) || ""),
+  ).trim();
+  return {
+    lockedPrimaryResourceId,
+    preferredPrimaryResourceId,
+    continuityPrimaryResourceId,
+    effectivePreferredPrimaryResourceId: preferredPrimaryResourceId || continuityPrimaryResourceId || null,
+  };
+}
+
+function getPreferredPrimaryResourceId(template, assignment, item = null) {
+  return getPlanningResourceConstraint(template, assignment, item).effectivePreferredPrimaryResourceId;
+}
+
+function createAssignmentLockError(code, item, template, resourceId, cause) {
+  const taskLabel = template?.title || template?.key || "tâche atelier";
+  const error = new Error(`Verrou de ressource impossible pour ${taskLabel} (${template?.key || "étape"}) : ${resourceId || "ressource absente"} · ${cause}.`);
+  error.code = code;
+  error.stepKey = template?.key || "";
+  error.caseId = item?.id || "";
+  error.resourceId = resourceId || "";
+  return error;
+}
+
+function resolveLockedPrimaryResource(item, template, resourceId, fastJob, planningOptions = {}) {
+  const lockedId = String(resourceId || "").trim();
+  if (!lockedId) return null;
+  const resource = state.resources.find((entry) => entry.id === lockedId);
+  if (!resource) {
+    throw createAssignmentLockError("assignment_lock_resource_missing", item, template, lockedId, "ressource introuvable");
+  }
+  if (resource.active === false) {
+    throw createAssignmentLockError("assignment_lock_incompatible", item, template, lockedId, "ressource inactive");
+  }
+  if (!isResourceCompatible(
+    resource,
+    template.role,
+    planningOptions.requiredCategory || "",
+    planningOptions.requiredSite || "any",
+  )) {
+    throw createAssignmentLockError("assignment_lock_incompatible", item, template, lockedId, "rôle, catégorie ou site incompatible");
+  }
+  if (state.settings.fastLaneEnabled && !fastJob && resource.fastLane) {
+    throw createAssignmentLockError("assignment_lock_incompatible", item, template, lockedId, "ressource réservée au circuit rapide");
+  }
+  return resource;
 }
 
 function getPreferredEquipmentResourceId(template, assignment) {
@@ -581,7 +637,13 @@ function buildResourceSlotCandidate({
 
 function findBestResourceSlot(template, startAfter, duration, bookings, fastJob, preferredPrimaryId = null, preferredEquipmentId = null, rotationKey = "", planningOptions = {}) {
   bookings = ensureIndexedPlannerBookingView(bookings);
-  const primaryResources = orderPrimaryResourcesForStep(template.role, fastJob, bookings, startAfter, preferredPrimaryId, planningOptions);
+  const lockedPrimaryResourceId = String(planningOptions.lockedPrimaryResourceId || "").trim();
+  const lockedPrimary = lockedPrimaryResourceId
+    ? resolveLockedPrimaryResource(planningOptions.item || null, template, lockedPrimaryResourceId, fastJob, planningOptions)
+    : null;
+  const primaryResources = lockedPrimary
+    ? [lockedPrimary]
+    : orderPrimaryResourcesForStep(template.role, fastJob, bookings, startAfter, preferredPrimaryId, planningOptions);
   const equipmentResources = template.equipmentRole
     // La catégorie métier de la tâche qualifie la ressource principale. Elle
     // ne doit pas rendre incompatible l'équipement associé (ex. une cabine
@@ -612,6 +674,15 @@ function findBestResourceSlot(template, startAfter, duration, bookings, fastJob,
       if (!best || compareSlots(candidate, best) < 0) best = candidate;
     });
   });
+  if (!best && lockedPrimaryResourceId) {
+    throw createAssignmentLockError(
+      "assignment_lock_unavailable",
+      planningOptions.item || null,
+      template,
+      lockedPrimaryResourceId,
+      "aucun créneau valide dans l’horizon",
+    );
+  }
   return best;
 }
 
@@ -624,7 +695,23 @@ function getResourceAssignmentAlternatives(item, stepKey, startAfter = new Date(
   const fastJob = isFastLaneJob(item);
   const bookings = createIndexedPlannerBookingView(state.bookings, { excludedCaseId: item.id });
   bookings.addOverlays(getPendingProposalBookings(item.id, bookings));
-  const primaryResources = getAssignableResources(template.role, fastJob);
+  const constraint = getPlanningResourceConstraint(template, createPlanningAssignmentContext(), item);
+  const planningOptions = {
+    item,
+    caseId: item.id,
+    stepKey: template.key,
+    requiredSite: "internal",
+    lockedPrimaryResourceId: constraint.lockedPrimaryResourceId,
+  };
+  let primaryResources = [];
+  try {
+    primaryResources = constraint.lockedPrimaryResourceId
+      ? [resolveLockedPrimaryResource(item, template, constraint.lockedPrimaryResourceId, fastJob, planningOptions)]
+      : getAssignableResources(template.role, fastJob, planningOptions);
+  } catch (error) {
+    if (String(error?.code || "").startsWith("assignment_lock_")) return [];
+    throw error;
+  }
   const equipmentResources = template.equipmentRole ? getAssignableResources(template.equipmentRole, fastJob) : [null];
   const candidates = primaryResources.map((primary, primaryIndex) => {
     let bestForPrimary = null;
@@ -637,7 +724,13 @@ function getResourceAssignmentAlternatives(item, stepKey, startAfter = new Date(
         startAfter,
         duration,
         bookings,
+        preferredPrimaryId: constraint.effectivePreferredPrimaryResourceId,
         rotationKey: `${item.id || "case"}:${template.key}`,
+        planningOptions: {
+          ...planningOptions,
+          primaryRole: template.role,
+          equipmentRole: template.equipmentRole || "",
+        },
       });
       if (candidate && (!bestForPrimary || compareSlots(candidate, bestForPrimary) < 0)) bestForPrimary = candidate;
     });
@@ -2688,8 +2781,24 @@ function schedulePlannedCasesInterleaved(plannedCases, earliestByCase, baseBooki
     const hours = Number(job.item.durations?.[template.key] || 0);
     const duration = Math.max(15, Math.round(hours * 60));
     const assignment = assignmentsByCase.get(job.item.id) || createPlanningAssignmentContext();
-    const preferredPrimaryId = getPreferredPrimaryResourceId(template, assignment, job.item);
-    const match = findBestResourceSlot(template, job.readyAt, duration, tempBookings, isFastLaneJob(job.item), preferredPrimaryId);
+    const constraint = getPlanningResourceConstraint(template, assignment, job.item);
+    const match = findBestResourceSlot(
+      template,
+      job.readyAt,
+      duration,
+      tempBookings,
+      isFastLaneJob(job.item),
+      constraint.effectivePreferredPrimaryResourceId,
+      null,
+      `${job.item.id || "case"}:${template.key}`,
+      {
+        item: job.item,
+        caseId: job.item.id,
+        stepKey: template.key,
+        requiredSite: "internal",
+        lockedPrimaryResourceId: constraint.lockedPrimaryResourceId,
+      },
+    );
     if (!match) throw new Error(`Aucune disponibilité pour ${template.title}.`);
     rememberPlanningAssignment(template, assignment, match.primary.id, match.equipment?.id || null);
     assignmentsByCase.set(job.item.id, assignment);
@@ -3688,7 +3797,53 @@ function getPlanningTaskDependencyEnd(task, scheduledTasks, startAfter) {
   }, new Date(startAfter));
 }
 
-function buildInternalTaskStep(item, task, startAfter, bookings, assignment = createPlanningAssignmentContext()) {
+function buildGraphTaskAncestorIndex(graph) {
+  const byId = new Map(graph.map((task) => [task.id, task]));
+  const byKey = new Map();
+  graph.forEach((task) => {
+    if (!byKey.has(task.key)) byKey.set(task.key, []);
+    byKey.get(task.key).push(task);
+  });
+  const memo = new Map();
+  const visiting = new Set();
+  const resolve = (task) => {
+    if (memo.has(task.id)) return memo.get(task.id);
+    if (visiting.has(task.id)) return new Set();
+    visiting.add(task.id);
+    const ancestors = new Set();
+    (task.dependencies || []).forEach((dependency) => {
+      const matches = byId.has(dependency) ? [byId.get(dependency)] : (byKey.get(dependency) || []);
+      matches.forEach((match) => {
+        ancestors.add(match.id);
+        resolve(match).forEach((ancestorId) => ancestors.add(ancestorId));
+      });
+    });
+    visiting.delete(task.id);
+    memo.set(task.id, ancestors);
+    return ancestors;
+  };
+  graph.forEach(resolve);
+  return memo;
+}
+
+function getGraphContinuityPrimaryResourceId(task, scheduledTasks, ancestorIndex) {
+  const sourceKeys = task.key === "reassembly"
+    ? ["body"]
+    : (task.key === "paint" ? ["prep"] : (task.key === "finish" ? ["paint", "prep"] : []));
+  if (!sourceKeys.length) return null;
+  const ancestors = ancestorIndex.get(task.id) || new Set();
+  for (const sourceKey of sourceKeys) {
+    const candidates = [...scheduledTasks.values()]
+      .filter((entry) => ancestors.has(entry.task.id) && entry.task.key === sourceKey)
+      .sort((a, b) => new Date(b.end) - new Date(a.end) || String(a.task.id).localeCompare(String(b.task.id)));
+    const source = candidates[0];
+    const sourceStep = source?.steps?.find((entry) => entry.key === sourceKey) || source?.steps?.[0];
+    if (sourceStep?.primaryResourceId) return sourceStep.primaryResourceId;
+  }
+  return null;
+}
+
+function buildInternalTaskStep(item, task, startAfter, bookings, assignment = createPlanningAssignmentContext(), schedulingOptions = {}) {
   const baseTemplate = STEP_TEMPLATES.find((template) => template.key === task.key) || {};
   const template = {
     ...baseTemplate,
@@ -3723,16 +3878,24 @@ function buildInternalTaskStep(item, task, startAfter, bookings, assignment = cr
     const equipment = requestedResourceIds[1] ? state.resources.find((resource) => resource.id === requestedResourceIds[1]) : null;
     if (slot && primary) match = { slot, resourceIds: requestedResourceIds, primary, equipment };
   } else {
+    const constraint = getPlanningResourceConstraint(template, assignment, item, {
+      preferredPrimaryResourceId: task.preferredResourceId || "",
+      continuityPrimaryResourceId: schedulingOptions.continuityPrimaryResourceId || "",
+    });
     match = findBestResourceSlot(
       template,
       startAfter,
       task.durationMinutes,
       bookings,
       isFastLaneJob(item),
-      task.preferredResourceId || null,
+      constraint.effectivePreferredPrimaryResourceId,
       task.preferredEquipmentId || null,
       `${item.id}:${task.id}`,
-      options,
+      {
+        ...options,
+        item,
+        lockedPrimaryResourceId: constraint.lockedPrimaryResourceId,
+      },
     );
   }
   if (!match) throw new Error(`Aucune combinaison de ressources compatible pour ${task.title}.`);
@@ -3769,6 +3932,7 @@ function scheduleTaskGraph(item, tasks, startAfter, bookings = state.bookings) {
   const tempBookings = ensureIndexedPlannerBookingView(bookings);
   const steps = [];
   const assignment = createPlanningAssignmentContext();
+  const ancestorIndex = buildGraphTaskAncestorIndex(graph);
   let guard = 0;
 
   while (pending.size && guard < graph.length * graph.length + 10) {
@@ -3789,7 +3953,9 @@ function scheduleTaskGraph(item, tasks, startAfter, bookings = state.bookings) {
         const plan = buildSubcontractPlan(item, task, provider, earliest, tempBookings, { temporary: true });
         taskSteps = plan.steps;
       } else {
-        taskSteps = [buildInternalTaskStep(item, task, earliest, tempBookings, assignment)];
+        taskSteps = [buildInternalTaskStep(item, task, earliest, tempBookings, assignment, {
+          continuityPrimaryResourceId: getGraphContinuityPrimaryResourceId(task, scheduled, ancestorIndex),
+        })];
       }
       taskSteps.forEach((step) => {
         steps.push(step);

@@ -19,16 +19,21 @@ function check(name, callback) {
   console.log(`PASS ${name}`);
 }
 
-check("A Release parity and constant integrity for v23.3.13", () => {
-  assert.match(versionSource, /window\.APP_VERSION = "v23\.3\.13";/u);
-  assert.match(versionSource, /window\.NIMR_BUILD = "v23\.3\.13";/u);
-  assert.match(versionSource, /window\.NIMR_CACHE_NAME = "nimr-sav-v23\.3\.13";/u);
-  assert.match(stateSource, /const APP_VERSION = "v23\.3\.13";/u);
-  assert.match(appSource, /pdf\.worker\.min\.js\?v=23\.3\.13/u);
-  assert.match(swSource, /const CACHE_NAME = "nimr-sav-v23\.3\.13";/u);
-  assert.match(indexSource, /styles\.css\?v=23\.3\.13/u);
-  assert.match(indexSource, /app\.js\?v=23\.3\.13/u);
-  assert.match(offlineSource, /styles\.css\?v=23\.3\.13/u);
+check("A Release parity and constant integrity", () => {
+  const versionMatch = versionSource.match(/window\.APP_VERSION = "(v\d+\.\d+\.\d+)";/u);
+  assert.ok(versionMatch, "version.js defines semantic APP_VERSION");
+  const currentVersion = versionMatch[1];
+  const queryVersion = currentVersion.replace(/^v/u, "");
+  const cacheName = `nimr-sav-${currentVersion}`;
+
+  assert.match(versionSource, new RegExp(`window\\.NIMR_BUILD = "${currentVersion}";`, "u"));
+  assert.match(versionSource, new RegExp(`window\\.NIMR_CACHE_NAME = "${cacheName}";`, "u"));
+  assert.match(stateSource, new RegExp(`const APP_VERSION = "${currentVersion}";`, "u"));
+  assert.match(appSource, new RegExp(`pdf\\.worker\\.min\\.js\\?v=${queryVersion}`, "u"));
+  assert.match(swSource, new RegExp(`const CACHE_NAME = "${cacheName}";`, "u"));
+  assert.match(indexSource, new RegExp(`styles\\.css\\?v=${queryVersion}`, "u"));
+  assert.match(indexSource, new RegExp(`app\\.js\\?v=${queryVersion}`, "u"));
+  assert.match(offlineSource, new RegExp(`styles\\.css\\?v=${queryVersion}`, "u"));
   assert.match(stateSource, /const CURRENT_DATA_SCHEMA_VERSION = 2;/u);
   assert.match(stateSource, /const CANONICAL_TASK_MODEL_VERSION = 1;/u);
   assert.match(stateSource, /const DB_VERSION = 2;/u);

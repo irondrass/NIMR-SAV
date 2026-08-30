@@ -1,9 +1,10 @@
 // Configuration Supabase NIMR SAV.
-// Aucune clé n'est publiée dans le code. Chaque poste configure l'URL et la
-// publishable key / clé publique Supabase depuis Paramètres > Cloud Supabase ;
-// ces valeurs restent locales au navigateur. Ne jamais placer service_role dans cette application.
+// Configuration zero-config pré-embarquée pour la production (clé publishable client uniquement).
+// Ne jamais placer de clé administrative secrète dans cette application.
 const SUPABASE_RUNTIME_CONFIG_KEY = "nimr-sav:supabase-runtime-config:v1";
 const DEFAULT_WORKSHOP_ID = "00000000-0000-0000-0000-000000000001";
+const DEFAULT_SUPABASE_URL = "https://mkecnwolvzgxltrasbmr.supabase.co";
+const DEFAULT_SUPABASE_ANON_KEY = "sb_publishable_v1a1PN7erXlVLCSk3OqVqA_NJ4RX1-Y";
 
 function readRuntimeSupabaseConfig() {
   try {
@@ -15,9 +16,9 @@ function readRuntimeSupabaseConfig() {
 }
 
 window.NIMR_SUPABASE_CONFIG = {
-  enabled: false,
-  url: "",
-  anonKey: "",
+  enabled: true,
+  url: DEFAULT_SUPABASE_URL,
+  anonKey: DEFAULT_SUPABASE_ANON_KEY,
   workshopId: DEFAULT_WORKSHOP_ID,
   backupKey: "nimr-sav-main",
   backupTable: "cloud_backups",

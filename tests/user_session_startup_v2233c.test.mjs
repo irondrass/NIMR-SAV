@@ -11,6 +11,8 @@ const appJs = fs.readFileSync("./app.js", "utf8");
 
 // 2. Préparer le contexte global mocké
 global.window = global;
+global.addEventListener = () => {};
+global.removeEventListener = () => {};
 
 const storageMap = new Map();
 const mockStorage = {
@@ -22,9 +24,9 @@ const mockStorage = {
 global.localStorage = mockStorage;
 global.sessionStorage = mockStorage;
 
-global.state = { 
-  cases: [], 
-  bookings: [], 
+global.state = {
+  cases: [],
+  bookings: [],
   users: [],
   currentUserId: "",
   settings: {
@@ -99,8 +101,8 @@ const getElement = (id) => {
       removeAttribute(name) {
         this.attributes.delete(name);
       },
-      closest(sel) { 
-        return this; 
+      closest(sel) {
+        return this;
       },
       querySelector(sel) {
         return getElement(sel);
@@ -112,8 +114,12 @@ const getElement = (id) => {
   }
   return elements[cleanId];
 };
+Object.defineProperty(global, "navigator", { value: { onLine: false }, configurable: true, writable: true });
+global.getSupabaseUser = async () => null;
 
 global.document = {
+  addEventListener: () => {},
+  removeEventListener: () => {},
   getElementById: (id) => getElement(id),
   querySelector: (sel) => getElement(sel),
   querySelectorAll: (sel) => {
@@ -166,6 +172,9 @@ global.quietNotify = (msg, type) => {
   lastQuietNotification = { msg, type };
 };
 global.isLocalSessionUnlocked = () => localSessionUnlocked;
+global.ensureCurrentTabAllowed = () => {};
+global.saveState = () => Promise.resolve(true);
+global.signOutSupabaseSession = async () => ({ ok: true });
 
 // Ré-importer explicitement les fonctions de test
 const {
@@ -197,129 +206,112 @@ async function runTests() {
   console.log("Initialisation des actions de session...");
   global.bindUserSessionActions();
 
-  // Test 1: Aucun utilisateur -> aucun compte caché et premier accès explicite
+  // Test 1: Aucun utilisateur -> porte cloud obligatoire, même hors ligne.
   const emptyUsers = normalizeUsers([], []);
   assert.deepEqual(emptyUsers, [], "Aucun administrateur bootstrap ne doit être créé");
-  assert.equal(isFirstAccessRecoveryRequired({ users: emptyUsers }), true, "Le premier accès explicite doit être requis");
   state.users = emptyUsers;
   state.currentUserId = "";
   const firstAccessOverlay = getElement("first-access-overlay");
   firstAccessOverlay.hidden = true;
   userLoginOverlay.hidden = true;
-  checkUserSessionStartup();
-  assert.equal(firstAccessOverlay.hidden, false, "L'écran de premier accès explicite doit être affiché");
-  assert.equal(userLoginOverlay.hidden, true, "La sélection utilisateur ne doit pas remplacer le premier accès");
+  await checkUserSessionStartup();
+  assert.equal(firstAccessOverlay.hidden, false, "L'écran de connexion cloud doit être affiché");
+  assert.equal(userLoginOverlay.hidden, true, "La sélection utilisateur ne doit pas remplacer la connexion");
 
-  // Configurer explicitement 3 utilisateurs avec les rôles canoniques
+  // Configurer explicitement plusieurs identités validées sur le même poste.
+  const now = new Date().toISOString();
   const [uAdmin, uTech, uTechNoRes, uInactif] = normalizeUsers([
-    { id: "u-admin", name: "Admin Test", role: "admin_technique", active: true },
-    { id: "u-tech", name: "Tech Test", role: "technicien", active: true, resourceId: "r-tech1" },
-    { id: "u-tech-no-res", name: "Tech Sans Ressource", role: "technicien", active: true, resourceId: "" },
-    { id: "u-inactif", name: "Inactif Test", role: "reception", active: false }
+    { id: "u-admin", name: "Admin Test", role: "admin_technique", active: true, authUserId: "auth-admin", authSource: "supabase_membership", membershipValidatedAt: now, membershipWorkshopId: "00000000-0000-0000-0000-000000000001" },
+    { id: "u-tech", name: "Tech Test", role: "technicien", active: true, resourceId: "r-tech1", authUserId: "auth-tech", authSource: "supabase_membership", membershipValidatedAt: now, membershipWorkshopId: "00000000-0000-0000-0000-000000000001" },
+    { id: "u-tech-no-res", name: "Tech Sans Ressource", role: "technicien", active: true, resourceId: "", authUserId: "auth-tech-no-res", authSource: "supabase_membership", membershipValidatedAt: now, membershipWorkshopId: "00000000-0000-0000-0000-000000000001" },
+    { id: "u-inactif", name: "Inactif Test", role: "reception", active: false, authUserId: "auth-inactif", authSource: "supabase_membership", membershipValidatedAt: now, membershipWorkshopId: "00000000-0000-0000-0000-000000000001" }
   ], state.resources);
 
   state.users = [uAdmin, uTech, uTechNoRes, uInactif];
   state.currentUserId = "";
   state.settings.alwaysPromptUserStartup = undefined; // Par défaut
 
-  // Test 2: Plusieurs utilisateurs actifs -> écran choix affiché au démarrage
+  // Test 2: sans identité courante, le cache multi-utilisateur ne permet aucun accès hors ligne.
   localSessionUnlocked = true;
   userLoginOverlay.hidden = true;
-  checkUserSessionStartup();
-  assert.equal(userLoginOverlay.hidden, false, "L'overlay de sélection utilisateur doit être affiché au démarrage");
+  firstAccessOverlay.hidden = true;
+  await checkUserSessionStartup();
+  assert.equal(firstAccessOverlay.hidden, false, "Une identité courante validée est obligatoire hors ligne");
+  assert.equal(userLoginOverlay.hidden, true, "Aucun sélecteur multi-utilisateur ne doit être exposé");
   assert.equal(appShell.attributes.has("inert"), true, "L'application doit être marquée inert");
 
-  // Test 3: Utilisateur inactif absent de la liste
+  // Test 3: seule l'identité courante validée est affichée et la sélection est figée.
+  state.currentUserId = "u-tech";
+  firstAccessOverlay.hidden = true;
+  userLoginOverlay.hidden = true;
+  await checkUserSessionStartup();
   global.selectedUserIdForStartup = "";
   renderUserLoginScreen();
-  assert.ok(userLoginSelect.innerHTML.includes("Admin Test"), "Admin actif doit être présent");
   assert.ok(userLoginSelect.innerHTML.includes("Tech Test"), "Tech actif doit être présent");
+  assert.ok(!userLoginSelect.innerHTML.includes("Admin Test"), "Une autre identité validée doit rester absente");
   assert.ok(!userLoginSelect.innerHTML.includes("Inactif Test"), "Utilisateur inactif doit être absent");
+  assert.equal(userLoginSelect.disabled, true, "La sélection d'identité doit être verrouillée");
 
-  // Test 4: Choisir tech -> permissions technicien appliquées + warning si pas de ressource
-  // A. Technicien avec ressource
-  global.selectedUserIdForStartup = "u-tech";
-  userLoginForm.elements.userId.value = global.selectedUserIdForStartup;
+  // Test 4: une soumission falsifiée vers une autre identité est rejetée hors ligne.
+  userLoginForm.elements.userId.value = "u-admin";
+  userLoginForm.elements.pin.value = "";
   userLoginForm.dispatchEvent("submit");
-  assert.equal(state.currentUserId, "u-tech", "currentUserId doit passer à u-tech");
-  assert.equal(getCurrentUser().id, "u-tech", "getCurrentUser doit retourner u-tech");
-  assert.equal(getCurrentUser().role, "technicien");
+  assert.equal(state.currentUserId, "u-tech", "L'identité courante ne doit pas changer");
+  assert.match(getElement("user-login-status").textContent, /ne correspond pas à la session authentifiée/u);
 
-  // B. Technicien sans ressource
-  lastNotification = null;
-  global.selectedUserIdForStartup = "u-tech-no-res";
-  userLoginForm.elements.userId.value = global.selectedUserIdForStartup;
-  userLoginForm.dispatchEvent("submit");
-  assert.equal(state.currentUserId, "u-tech-no-res");
-  assert.equal(lastNotification.type, "warn", "Un avertissement doit s'afficher si le technicien n'a pas de ressource liée");
-  assert.ok(lastNotification.msg.includes("Aucun technicien / ressource"));
-
-  // Test 5: currentUserId inactif -> écran choix forcé
+  // Test 5: une identité courante inactive est refusée, sans repli vers un autre cache.
   state.currentUserId = "u-inactif"; // Inactif !
   userLoginOverlay.hidden = true;
-  checkUserSessionStartup();
-  assert.equal(userLoginOverlay.hidden, false, "L'écran doit être forcé si l'utilisateur courant est inactif");
+  firstAccessOverlay.hidden = true;
+  await checkUserSessionStartup();
+  assert.equal(firstAccessOverlay.hidden, false, "L'écran cloud doit être forcé si l'identité courante est inactive");
+  assert.equal(userLoginOverlay.hidden, true);
 
-  // Test 6: Un seul utilisateur actif -> comportement conforme à l'option
-  const singleReception = normalizeUsers([
-    { id: "u-single-reception", name: "Réception unique", role: "reception", active: true }
-  ], state.resources)[0];
-  state.users = [singleReception];
-  
-  // A. Toujours demander = false
-  state.settings.alwaysPromptUserStartup = false;
-  state.currentUserId = "u-single-reception";
-  userLoginOverlay.hidden = true;
-  checkUserSessionStartup();
-  assert.equal(userLoginOverlay.hidden, true, "L'écran de sélection doit être ignoré si un seul actif et alwaysPrompt est faux");
-
-  // B. Toujours demander = true
-  state.settings.alwaysPromptUserStartup = true;
-  userLoginOverlay.hidden = true;
-  checkUserSessionStartup();
-  assert.equal(userLoginOverlay.hidden, false, "L'écran de sélection doit s'afficher si alwaysPrompt est vrai, même pour un seul utilisateur");
-
-  // Test 7: Bouton "Changer utilisateur" revient à l'écran choix
-  userLoginOverlay.hidden = true;
-  sidebarChangeBtn.dispatchEvent("click");
-  assert.equal(userLoginOverlay.hidden, false, "Le clic sur Changer d'utilisateur doit afficher la sélection");
-
-  // Test 8: Audit users.session_selected / users.current_changed
+  // Test 6: une identité sensible peut déverrouiller uniquement son propre PIN.
   state.users = [uAdmin, uTech];
-  state.currentUserId = ""; // Initial
-  state.auditLog = [];
-  
-  // A. Première sélection (démarrage)
-  global.selectedUserIdForStartup = "u-tech";
-  userLoginForm.elements.userId.value = global.selectedUserIdForStartup;
-  userLoginForm.dispatchEvent("submit");
-  let logSelected = state.auditLog.find(l => l.type === "users.session_selected");
-  assert.ok(logSelected, "L'audit doit loguer users.session_selected au premier choix de session");
-  
-  // B. Changement d'utilisateur
-  const uReception = normalizeUsers([
-    { id: "u-reception", name: "Reception Test", role: "reception", active: true }
-  ], state.resources)[0];
-  state.users.push(uReception);
-  global.selectedUserIdForStartup = "u-reception";
-  userLoginForm.elements.userId.value = global.selectedUserIdForStartup;
-  userLoginForm.dispatchEvent("submit");
-  let logChanged = state.auditLog.find(l => l.type === "users.current_changed");
-  assert.ok(logChanged, "L'audit doit loguer users.current_changed lors du changement d'utilisateur");
-  assert.equal(logChanged.userId, "u-tech", "L'acteur de l'audit doit être l'utilisateur précédent");
+  uAdmin.pinHash = "mockhash:739251:admin-salt";
+  uAdmin.pinSalt = "admin-salt";
+  state.currentUserId = "u-admin";
+  sessionStorage.removeItem("nimr-user-pin-unlocked");
+  userLoginOverlay.hidden = true;
+  firstAccessOverlay.hidden = true;
+  await checkUserSessionStartup();
+  assert.equal(userLoginOverlay.hidden, false, "Le PIN de l'identité sensible courante doit être demandé");
+  renderUserLoginScreen();
+  assert.ok(userLoginSelect.innerHTML.includes("Admin Test"));
+  assert.ok(!userLoginSelect.innerHTML.includes("Tech Test"));
+  userLoginForm.elements.userId.value = "u-admin";
+  userLoginForm.elements.pin.value = "739251";
+  const submitListeners = userLoginForm.listeners.get("submit") || [];
+  await Promise.all(submitListeners.map((listener) => listener({ preventDefault: () => {} })));
+  assert.equal(sessionStorage.getItem("nimr-user-pin-unlocked"), "u-admin");
+  assert.equal(state.currentUserId, "u-admin");
 
-  // Test 9: PIN local activé -> prioritaire
+  // Test 7: Déconnexion efface l'identité courante et retourne à la porte cloud.
+  firstAccessOverlay.hidden = true;
+  await triggerLogout();
+  assert.equal(firstAccessOverlay.hidden, false, "Le clic sur Déconnexion doit afficher la connexion cloud d'atelier");
+  assert.equal(state.currentUserId, "", "currentUserId doit être vidé");
+
+  // Test 8: le PIN poste local reste prioritaire sur la porte d'identité.
+  state.users = [uTech];
+  state.currentUserId = "u-tech";
   localSessionUnlocked = false; // Poste verrouillé !
   userLoginOverlay.hidden = true;
-  checkUserSessionStartup();
+  firstAccessOverlay.hidden = true;
+  const lockedResult = await checkUserSessionStartup();
+  assert.equal(lockedResult.code, "LOCAL_WORKSTATION_LOCKED");
   assert.equal(userLoginOverlay.hidden, true, "Le choix utilisateur ne doit pas s'afficher si le PIN local n'est pas déverrouillé");
-  
-  // Déverrouillage PIN local
-  localSessionUnlocked = true;
-  hideLocalLockOverlay();
-  assert.equal(userLoginOverlay.hidden, false, "Le choix utilisateur doit apparaître automatiquement après déverrouillage du PIN local");
+  assert.equal(firstAccessOverlay.hidden, true, "La porte cloud ne doit pas devancer le PIN poste");
 
-  // Test 10: Paramètre check-card admin-only
+  // Test 9: après déverrouillage poste, la même identité validée continue.
+  localSessionUnlocked = true;
+  const unlockedResult = await checkUserSessionStartup();
+  assert.equal(unlockedResult.code, "OFFLINE_CURRENT_IDENTITY");
+  assert.equal(state.currentUserId, "u-tech");
+
+  // Test 10: Paramètre check-card admin-only conservé.
+  state.users = [uAdmin, uTech];
   state.currentUserId = "u-tech"; // Non admin
   renderCurrentSessionIndicator();
   assert.equal(alwaysPromptCheckbox.disabled, true, "L'option de prompt doit être désactivée pour les non-administrateurs");
@@ -328,6 +320,7 @@ async function runTests() {
   renderCurrentSessionIndicator();
   assert.equal(alwaysPromptCheckbox.disabled, false, "L'option de prompt doit être active pour les administrateurs");
 
+  clearTimeout(vm.runInThisContext("userSessionIdleTimer"));
   console.log("Tests v22.33C complétés avec succès !");
 }
 

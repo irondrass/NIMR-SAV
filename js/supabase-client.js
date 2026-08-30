@@ -1,4 +1,12 @@
 let nimrSupabaseClient = null;
+const SEC001_SERVER_WORKSHOP_ROLES = new Set([
+  "admin_technique",
+  "directeur",
+  "chef_atelier",
+  "reception",
+  "technicien",
+  "lecture_seule",
+]);
 
 function getSupabaseConfig() {
   return window.NIMR_SUPABASE_CONFIG || {};
@@ -75,6 +83,113 @@ async function getSupabaseUser() {
   return data?.user || null;
 }
 
+async function resolveSupabaseWorkshopMembership(authUser) {
+  if (!authUser?.id) {
+    return { ok: false, message: "Utilisateur non authentifié.", code: "NO_AUTH_USER" };
+  }
+  const client = getSupabaseClient();
+  if (!client) {
+    return { ok: false, message: "Client Supabase non initialisé.", code: "NO_CLIENT" };
+  }
+  const workshopId = getSupabaseWorkshopId();
+  try {
+    const { data, error } = await client
+      .from("workshop_members")
+      .select("workshop_id, user_id, role, resource_id")
+      .eq("workshop_id", workshopId)
+      .eq("user_id", authUser.id)
+      .maybeSingle();
+
+    if (error) {
+      console.error("Erreur résolution appartenance atelier", error);
+      return { ok: false, message: error.message || "Erreur de requête d'appartenance atelier.", code: "DB_ERROR" };
+    }
+    if (!data) {
+      return {
+        ok: false,
+        message: "Votre compte est authentifié mais n'est pas autorisé pour cet atelier. Contactez l'administrateur NIMR SAV.",
+        code: "NOT_A_MEMBER",
+      };
+    }
+    const rawRole = String(data.role || "").trim();
+    if (!SEC001_SERVER_WORKSHOP_ROLES.has(rawRole)) {
+      return { ok: false, message: "Rôle d'atelier inconnu ou non supporté.", code: "UNSUPPORTED_ROLE" };
+    }
+    return {
+      ok: true,
+      membership: {
+        workshop_id: data.workshop_id,
+        user_id: data.user_id,
+        role: rawRole,
+        resource_id: data.resource_id || null,
+      },
+    };
+  } catch (err) {
+    console.error("Exception résolution appartenance atelier", err);
+    return { ok: false, message: err?.message || "Échec de connexion à la base d'appartenance.", code: "EXCEPTION" };
+  }
+}
+window.resolveSupabaseWorkshopMembership = resolveSupabaseWorkshopMembership;
+
+async function authenticateSupabaseUser(email, password) {
+  const client = getSupabaseClient();
+  if (!client) {
+    return { ok: false, message: "Configuration Supabase indisponible." };
+  }
+  const cleanEmail = String(email || "").trim();
+  const cleanPass = String(password || "");
+  if (!cleanEmail || !cleanPass) {
+    return { ok: false, message: "Email et mot de passe requis." };
+  }
+  try {
+    const { data, error } = await client.auth.signInWithPassword({
+      email: cleanEmail,
+      password: cleanPass,
+    });
+    if (error || !data?.user) {
+      return { ok: false, message: error?.message || "Identifiants invalides." };
+    }
+    const membershipRes = await resolveSupabaseWorkshopMembership(data.user);
+    if (!membershipRes.ok) {
+      return { ok: false, message: membershipRes.message, code: membershipRes.code, authUser: data.user };
+    }
+    return { ok: true, user: data.user, membership: membershipRes.membership };
+  } catch (err) {
+    return { ok: false, message: err?.message || "Erreur lors de l'authentification." };
+  }
+}
+window.authenticateSupabaseUser = authenticateSupabaseUser;
+
+async function signOutSupabaseSession() {
+  const client = getSupabaseClient();
+  if (!client?.auth?.signOut) {
+    return { ok: false, message: "Session Supabase indisponible : déconnexion non confirmée." };
+  }
+  try {
+    const result = await client.auth.signOut();
+    if (!result || typeof result !== "object") {
+      return { ok: false, message: "Réponse Supabase invalide : déconnexion non confirmée." };
+    }
+    if (result?.error) {
+      console.warn("Erreur déconnexion session Supabase", result.error);
+      return {
+        ok: false,
+        error: result.error,
+        message: result.error.message || "Déconnexion Supabase refusée.",
+      };
+    }
+    return { ok: true };
+  } catch (error) {
+    console.warn("Exception déconnexion session Supabase", error);
+    return {
+      ok: false,
+      error,
+      message: error?.message || "Déconnexion Supabase impossible.",
+    };
+  }
+}
+window.signOutSupabaseSession = signOutSupabaseSession;
+
 async function refreshSupabasePanel() {
   if (typeof renderSupabaseSyncHealth === "function") renderSupabaseSyncHealth().catch(() => null);
   const safetyContainer = $("#supabase-safety-download-container");
@@ -97,11 +212,18 @@ async function refreshSupabasePanel() {
   }
   const user = await getSupabaseUser();
   if (user) {
-    if (typeof syncCurrentUserWithSupabaseAuth === "function" && syncCurrentUserWithSupabaseAuth(user)) {
-      saveState({ skipCloud: true });
+    const membershipRes = await resolveSupabaseWorkshopMembership(user);
+    if (membershipRes.ok) {
+      if (typeof syncLocalUserFromSupabaseMembership === "function") {
+        syncLocalUserFromSupabaseMembership(user, membershipRes.membership);
+        saveState({ skipCloud: true });
+      }
+      setSupabaseStatus(`Connecté : ${user.email || user.id} (${membershipRes.membership.role})`, "ok");
+      setSupabaseDetails("Synchronisation multi-PC active : les modifications sont sauvegardées et reçues depuis Supabase selon l'authentification et les règles RLS de l'atelier.");
+    } else {
+      setSupabaseStatus(`Authentifié (${user.email}) mais non autorisé pour cet atelier.`, "error");
+      setSupabaseDetails(membershipRes.message || "Appartenance atelier non trouvée.");
     }
-    setSupabaseStatus(`Connecté : ${user.email || user.id}`, "ok");
-    setSupabaseDetails("Synchronisation multi-PC active : les modifications sont sauvegardées et reçues depuis Supabase selon l'authentification et les règles RLS de l'atelier.");
   } else {
     setSupabaseStatus("Supabase configuré, utilisateur non connecté.", "warn");
     setSupabaseDetails("Connectez-vous avec un compte Supabase autorisé. Les sauvegardes cloud restent bloquées tant que la session n'est pas active.");

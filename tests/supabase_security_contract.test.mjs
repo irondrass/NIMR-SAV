@@ -10,12 +10,21 @@ run(clientSource);
 run(syncSource);
 
 assert.equal(context.looksLikeSupabaseServiceRoleKey("sb_secret_example"), true, "les nouvelles clés secrètes Supabase doivent être refusées");
+assert.equal(context.looksLikeSupabaseServiceRoleKey("sb_publishable_v1a1PN7erXlVLCSk3OqVqA_NJ4RX1-Y"), false, "les clés publishable client doivent être acceptées");
 run(`window.NIMR_SUPABASE_CONFIG = {
   enabled: true,
   url: "https://example.supabase.co",
   anonKey: "sb_secret_example"
 }`);
 assert.equal(context.isSupabaseConfigured(), false, "une configuration secrète ne doit jamais activer le client navigateur");
+run(`window.NIMR_SUPABASE_CONFIG = {
+  enabled: true,
+  url: "https://example.supabase.co",
+  anonKey: "sb_publishable_v1a1PN7erXlVLCSk3OqVqA_NJ4RX1-Y"
+}`);
+assert.equal(context.isSupabaseConfigured(), true, "une configuration publishable valide active le client navigateur");
+assert.match(clientSource, /resolveSupabaseWorkshopMembership/u, "resolveSupabaseWorkshopMembership doit être présent");
+
 
 const schemaErrorClient = {
   from() {

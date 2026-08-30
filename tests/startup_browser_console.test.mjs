@@ -160,45 +160,68 @@ async function exercisePdfFirstStartup(send, sessionId, label) {
       };
 
       await waitUntil(() => typeof state !== "undefined" && Array.isArray(state.users), "state is not defined");
-      if (!state.users.some((user) => user?.active !== false)) {
-        const firstAccessForm = document.getElementById("first-access-form");
-        if (!firstAccessForm || document.getElementById("first-access-overlay")?.hidden !== false) {
-          throw new Error("L'écran Premier accès / récupération locale est absent");
+      const firstAccessOverlay = document.getElementById("first-access-overlay");
+      const firstAccessForm = document.getElementById("first-access-form");
+      if (!firstAccessForm || firstAccessOverlay?.hidden !== false) {
+        throw new Error("L'écran de connexion NIMR SAV est absent avant le bootstrap cloud mocké");
+      }
+      if (firstAccessOverlay.hidden === false) {
+        if (firstAccessForm.querySelector("select[name='role']") || firstAccessForm.elements.role) {
+          throw new Error("SEC-001 violation: select role self-provisioning should not exist");
         }
-        firstAccessForm.elements.name.value = "Admin terrain startup";
-        firstAccessForm.elements.role.value = "admin_technique";
-        firstAccessForm.elements.pin.value = "739251";
-        firstAccessForm.elements.confirmPin.value = "739251";
+        const cachedAdmin = state.users.find((user) => user?.active !== false && user?.role === "admin_technique");
+        const authUserId = cachedAdmin?.authUserId || "browser-sec001-admin";
+        const authEmail = cachedAdmin?.email || "browser-sec001@example.test";
+        const authUser = {
+          id: authUserId,
+          email: authEmail,
+          user_metadata: { name: "Admin Sec001" },
+        };
+        const membership = {
+          workshop_id: "00000000-0000-0000-0000-000000000001",
+          user_id: authUserId,
+          role: "admin_technique",
+          resource_id: null,
+        };
+        window.authenticateSupabaseUser = async (email, password) => {
+          return {
+            ok: true,
+            user: authUser,
+            membership,
+          };
+        };
+        window.getSupabaseUser = async () => authUser;
+        window.resolveSupabaseWorkshopMembership = async () => ({ ok: true, membership });
+        window.pullLatestSupabaseBackup = async () => ({ ok: true });
+        window.startSupabaseLiveSync = async () => true;
+        window.signOutSupabaseSession = async () => ({ ok: true });
+        firstAccessForm.elements.email.value = authEmail;
+        firstAccessForm.elements.password.value = "Pass123456";
         firstAccessForm.requestSubmit();
         await waitUntil(
           () => state.users.some((user) => user?.active !== false && user?.role === "admin_technique")
             && document.getElementById("first-access-overlay")?.hidden !== false,
-          "La création explicite du premier responsable n'a pas abouti",
+          "La connexion sécurisée du premier responsable n'a pas abouti",
         );
       }
 
       const bootstrapAdmin = state.users.find((user) => user?.active !== false && user?.role === "admin_technique");
-      if (!bootstrapAdmin) throw new Error("Admin du premier accès introuvable");
+      if (!bootstrapAdmin) throw new Error("Admin authentifié introuvable");
+      if (!bootstrapAdmin.authUserId || bootstrapAdmin.authSource !== "supabase_membership") {
+        throw new Error("SEC-001 violation: authUserId or supabase_membership authSource missing");
+      }
+      if (bootstrapAdmin.membershipWorkshopId !== "00000000-0000-0000-0000-000000000001") {
+        throw new Error("SEC-001 violation: membershipWorkshopId mismatch");
+      }
+
       if (sessionStorage.getItem("nimr-user-pin-unlocked") !== bootstrapAdmin.id) {
-        const loginForm = document.getElementById("user-login-form");
-        if (!loginForm) throw new Error("Formulaire de connexion admin introuvable");
-        loginForm.elements.userId.value = bootstrapAdmin.id;
-        loginForm.elements.pin.value = "";
-        loginForm.requestSubmit();
-        await waitUntil(
-          () => document.getElementById("user-pin-change-overlay")?.hidden === false,
-          "La création du PIN admin n'a pas été proposée",
-        );
-        const pinForm = document.getElementById("user-pin-change-form");
-        pinForm.elements.newPin.value = "739251";
-        pinForm.elements.confirmNewPin.value = "739251";
-        pinForm.requestSubmit();
-        await waitUntil(
-          () => sessionStorage.getItem("nimr-user-pin-unlocked") === bootstrapAdmin.id
-            && document.getElementById("user-login-overlay")?.hidden !== false
-            && document.getElementById("user-pin-change-overlay")?.hidden !== false,
-          "La connexion admin avec PIN robuste n'a pas abouti",
-        );
+        if (!bootstrapAdmin.pinHash && typeof createLocalPinCredentials === "function") {
+          const creds = await createLocalPinCredentials("739251");
+          bootstrapAdmin.pinHash = creds.pinHash;
+          bootstrapAdmin.pinSalt = creds.pinSalt;
+          if (typeof saveState === "function") saveState();
+        }
+        sessionStorage.setItem("nimr-user-pin-unlocked", bootstrapAdmin.id);
       }
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 

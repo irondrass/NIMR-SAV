@@ -21,7 +21,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v23.3.13";
+const APP_VERSION = "v23.3.14";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const CURRENT_DATA_SCHEMA_VERSION = 2;
@@ -1133,7 +1133,6 @@ function initLocalSecurityGate() {
 
   const overlay = $("#local-lock-overlay");
   if (overlay) overlay.hidden = true;
-  document.querySelector(".app-shell")?.removeAttribute("inert");
   resetLocalSecurityIdleTimer();
 }
 
@@ -1854,6 +1853,9 @@ function normalizeUser(user = {}, resources = []) {
     canonicalRole,
     resourceId: !allowedResourceIds.size || allowedResourceIds.has(resourceId) ? resourceId : "",
     active: user.active !== false,
+    authSource: String(user.authSource || "").trim(),
+    membershipValidatedAt: normalizeNullableDate(user.membershipValidatedAt) || (user.membershipValidatedAt ? String(user.membershipValidatedAt).trim() : ""),
+    membershipWorkshopId: String(user.membershipWorkshopId || user.workshopId || "").trim(),
     createdAt,
     updatedAt: normalizeNullableDate(user.updatedAt) || createdAt,
     pinHash: String(user.pinHash || user.userPinHash || "").trim(),
@@ -2357,6 +2359,89 @@ function canActOnTechnicianTask(user, booking) {
   if (isWorkshopManager(resolvedUser)) return true;
   if (getCanonicalUserRole(resolvedUser) !== "technicien" || !resolvedUser.resourceId) return false;
   return (booking.resourceIds || []).includes(resolvedUser.resourceId);
+}
+
+function syncLocalUserFromSupabaseMembership(authUser, membership) {
+  if (!authUser?.id || !membership) return { ok: false, message: "Identité ou appartenance manquante." };
+  const authUserId = String(authUser.id).trim();
+  const membershipUserId = String(membership.user_id || "").trim();
+  if (!membershipUserId || membershipUserId !== authUserId) {
+    return { ok: false, message: "L'appartenance ne correspond pas à l'identité authentifiée.", code: "MEMBERSHIP_USER_MISMATCH" };
+  }
+  const configuredWorkshopId = typeof getSupabaseWorkshopId === "function"
+    ? String(getSupabaseWorkshopId() || "").trim()
+    : "";
+  const membershipWorkshopId = String(membership.workshop_id || "").trim();
+  if (!membershipWorkshopId || (configuredWorkshopId && membershipWorkshopId !== configuredWorkshopId)) {
+    return { ok: false, message: "L'appartenance ne correspond pas à l'atelier configuré.", code: "MEMBERSHIP_WORKSHOP_MISMATCH" };
+  }
+  state.users = normalizeUsers(state.users, state.resources);
+  const normalizedEmail = String(authUser.email || "").trim().toLowerCase();
+  const workshopId = membershipWorkshopId;
+  const canonicalRole = typeof normalizeUserRole === "function" ? normalizeUserRole(membership.role) : membership.role;
+  const resourceId = membership.resource_id ? String(membership.resource_id).trim() : "";
+
+  let user = state.users.find((candidate) => String(candidate.authUserId || "").trim() === authUserId);
+  let migratedEmailIdentity = false;
+  if (!user && normalizedEmail) {
+    user = state.users.find((candidate) => (
+      candidate.email &&
+      candidate.email.toLowerCase() === normalizedEmail &&
+      !String(candidate.authUserId || "").trim()
+    ));
+    migratedEmailIdentity = Boolean(user);
+  }
+  const now = new Date().toISOString();
+  if (!user) {
+    user = normalizeUser({
+      id: typeof uid === "function" ? uid("user") : `user-${Date.now()}`,
+      name: authUser.user_metadata?.name || normalizedEmail || "Utilisateur Supabase",
+      email: normalizedEmail,
+      role: canonicalRole,
+      active: true,
+      resourceId,
+      authUserId: authUser.id,
+      authSource: "supabase_membership",
+      membershipValidatedAt: now,
+      membershipWorkshopId: workshopId,
+      createdAt: now,
+      updatedAt: now,
+    }, state.resources || []);
+    // L'identifiant de ressource validé par workshop_members reste autoritaire,
+    // même si le cache local des ressources n'a pas encore convergé.
+    user.resourceId = resourceId;
+    state.users.push(user);
+  } else {
+    if (migratedEmailIdentity) {
+      user.pinHash = "";
+      user.pinSalt = "";
+      try {
+        if (sessionStorage.getItem("nimr-user-pin-unlocked") === user.id) {
+          sessionStorage.removeItem("nimr-user-pin-unlocked");
+        }
+      } catch (error) {
+        // Session storage peut être indisponible dans certains navigateurs.
+      }
+      if (typeof window !== "undefined" && window.pendingSelectorUser?.id === user.id) {
+        window.pendingSelectorUser = null;
+      }
+    }
+    user.authUserId = authUserId;
+    user.email = normalizedEmail || user.email;
+    user.role = canonicalRole;
+    user.resourceId = resourceId;
+    user.active = true;
+    user.authSource = "supabase_membership";
+    user.membershipValidatedAt = now;
+    user.membershipWorkshopId = workshopId;
+    user.updatedAt = now;
+    if (!user.name || user.name === "Admin local") {
+      user.name = authUser.user_metadata?.name || normalizedEmail || "Utilisateur Supabase";
+    }
+  }
+  state.currentUserId = user.id;
+  linkResourcesToUsers(state.resources, state.users);
+  return { ok: true, user };
 }
 
 function syncCurrentUserWithSupabaseAuth(authUser) {
@@ -4613,11 +4698,7 @@ function getAllowedTabsForRole(role) {
 
 function getAllowedTabsForCurrentUser() {
   const user = state?.currentUserId ? getUserById(state.currentUserId) : null;
-  if (!user) {
-    const activeUsers = (state?.users || []).filter((u) => u.active !== false);
-    if (activeUsers.length === 0) {
-      return ["reception-workspace", "dossiers", "today", "pilotage", "planning", "technician", "atelier"];
-    }
+  if (!user || user.active === false) {
     return [];
   }
   const role = user.role || "readonly";

@@ -20,8 +20,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <script src="js/version.js?v=23.3.13"></script>
-    <link rel="stylesheet" href="styles.css?v=23.3.13" />
+    <script src="js/version.js?v=23.3.14"></script>
+    <link rel="stylesheet" href="styles.css?v=23.3.14" />
   </head>
   <body>
 <!-- Bouton Menu Mobile -->
@@ -825,29 +825,19 @@
     </div>
     <div class="local-lock-overlay" id="first-access-overlay" hidden>
       <form class="local-lock-dialog" id="first-access-form" role="dialog" aria-modal="true" aria-labelledby="first-access-title">
-        <div class="local-lock-logo">🛠️</div>
-        <h2 id="first-access-title">Premier accès / récupération locale</h2>
-        <p>Créez explicitement le premier responsable de ce poste. Aucun compte administrateur n’est généré automatiquement.</p>
+        <div class="local-lock-logo">🔒</div>
+        <h2 id="first-access-title">Connexion NIMR SAV</h2>
+        <p>Connectez-vous avec vos identifiants d'atelier pour ouvrir l'application.</p>
         <label>
-          Nom complet
-          <input name="name" autocomplete="name" required maxlength="120" placeholder="Nom du responsable" />
+          Email
+          <input name="email" type="email" autocomplete="username" required placeholder="nom@nimr.com.tn" />
         </label>
         <label>
-          Rôle initial
-          <select name="role" required>
-            <option value="admin_technique">Admin technique</option>
-            <option value="directeur">Directeur SAV</option>
-          </select>
+          Mot de passe
+          <input name="password" type="password" autocomplete="current-password" required placeholder="Mot de passe" />
         </label>
-        <label>
-          PIN robuste
-          <input name="pin" type="password" inputmode="numeric" autocomplete="new-password" required minlength="6" placeholder="6 chiffres minimum" />
-        </label>
-        <label>
-          Confirmer le PIN
-          <input name="confirmPin" type="password" inputmode="numeric" autocomplete="new-password" required minlength="6" placeholder="Confirmer le PIN" />
-        </label>
-        <button class="primary-button" type="submit" style="width: 100%;">Créer le responsable et ouvrir l’application</button>
+        <button class="primary-button" type="submit" style="width: 100%;">Se connecter</button>
+        <p class="muted" style="font-size: 0.85rem; margin-top: 8px;">Votre rôle et vos autorisations sont attribués par l’administration NIMR SAV.</p>
         <p class="muted status-error" id="first-access-status" role="alert"></p>
       </form>
     </div>
@@ -856,7 +846,7 @@
         <div class="local-lock-logo">👤</div>
         <h2 id="user-login-title">Connexion utilisateur</h2>
         <p>Sélectionnez votre compte et entrez votre PIN de sécurité pour continuer.</p>
-        
+
         <label>
           Utilisateur
           <select id="user-login-select" name="userId" required style="width: 100%; margin-bottom: 12px; height: 38px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--border-color); font-size: 1rem;"></select>
@@ -989,7 +979,7 @@
             <span class="tag" data-field="summary-assignments"></span>
           </div>
         </section>
-      
+
         <section class="detail-section full-width">
           <div class="section-heading">
             <h2>Réception du véhicule</h2>
@@ -1033,7 +1023,7 @@
             </div>
           </details>
         </section>
-      
+
         <div class="detail-grid">
           <section class="detail-section">
             <div class="section-heading">
@@ -1053,7 +1043,7 @@
             <div class="estimate-import-preview" data-field="estimate-import-preview"></div>
           </section>
         </div>
-      
+
         <section class="detail-section full-width">
           <div class="section-heading">
             <div>
@@ -1258,22 +1248,22 @@
       </div>
     </div>
 
-    <script src="vendor/pdf.min.js?v=23.3.13" defer></script>
-    <script src="js/utils.js?v=23.3.13" defer></script>
-    <script src="js/state.js?v=23.3.13" defer></script>
-    <script src="js/ui-cases.js?v=23.3.13" defer></script>
-    <script src="js/estimate-import.js?v=23.3.13" defer></script>
-    <script src="js/ui-planning.js?v=23.3.13" defer></script>
-    <script src="js/photos.js?v=23.3.13" defer></script>
-    <script src="js/storage.js?v=23.3.13" defer></script>
-    <script src="js/work-hours-sync.js?v=23.3.13" defer></script>
-    <script src="js/planning.js?v=23.3.13" defer></script>
-    <script src="js/exports.js?v=23.3.13" defer></script>
-    <script src="js/business-rules-v2187.js?v=23.3.13" defer></script>
+    <script src="vendor/pdf.min.js?v=23.3.14" defer></script>
+    <script src="js/utils.js?v=23.3.14" defer></script>
+    <script src="js/state.js?v=23.3.14" defer></script>
+    <script src="js/ui-cases.js?v=23.3.14" defer></script>
+    <script src="js/estimate-import.js?v=23.3.14" defer></script>
+    <script src="js/ui-planning.js?v=23.3.14" defer></script>
+    <script src="js/photos.js?v=23.3.14" defer></script>
+    <script src="js/storage.js?v=23.3.14" defer></script>
+    <script src="js/work-hours-sync.js?v=23.3.14" defer></script>
+    <script src="js/planning.js?v=23.3.14" defer></script>
+    <script src="js/exports.js?v=23.3.14" defer></script>
+    <script src="js/business-rules-v2187.js?v=23.3.14" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
-    <script src="js/supabase-config.js?v=23.3.13" defer></script>
-    <script src="js/supabase-client.js?v=23.3.13" defer></script>
-    <script src="js/supabase-sync.js?v=23.3.13" defer></script>
-    <script src="app.js?v=23.3.13" defer></script>
+    <script src="js/supabase-config.js?v=23.3.14" defer></script>
+    <script src="js/supabase-client.js?v=23.3.14" defer></script>
+    <script src="js/supabase-sync.js?v=23.3.14" defer></script>
+    <script src="app.js?v=23.3.14" defer></script>
   </body>
 </html>

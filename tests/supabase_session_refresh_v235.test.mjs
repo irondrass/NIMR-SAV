@@ -107,12 +107,34 @@ const run = (code) => vm.runInContext(code, context);
 
 run(`state = normalizeState({
   users: [
-    { id: "director", name: "Directeur SAV", role: "directeur_sav", active: true },
-    { id: "admin", name: "Admin technique", role: "admin_technique", active: true },
-    { id: "readonly", name: "Lecture seule", role: "lecture_seule", active: true }
+    { id: "director", name: "Directeur SAV", email: "director@nimr.test", active: true },
+    { id: "admin", name: "Admin technique", email: "admin@nimr.test", active: true },
+    { id: "readonly", name: "Lecture seule", email: "readonly@nimr.test", active: true }
   ],
   currentUserId: ""
-})`);
+});
+const workshopId = "00000000-0000-0000-0000-000000000001";
+const directorAuthUser = { id: "auth-director", email: "director@nimr.test", user_metadata: { name: "Directeur SAV" } };
+const adminAuthUser = { id: "auth-admin", email: "admin@nimr.test", user_metadata: { name: "Admin technique" } };
+const readonlyAuthUser = { id: "auth-readonly", email: "readonly@nimr.test", user_metadata: { name: "Lecture seule" } };
+const directorMembership = { workshop_id: workshopId, user_id: "auth-director", role: "directeur", resource_id: null };
+const adminMembership = { workshop_id: workshopId, user_id: "auth-admin", role: "admin_technique", resource_id: null };
+const readonlyMembership = { workshop_id: workshopId, user_id: "auth-readonly", role: "lecture_seule", resource_id: null };
+const directorMembershipSync = syncLocalUserFromSupabaseMembership(directorAuthUser, directorMembership);
+const adminMembershipSync = syncLocalUserFromSupabaseMembership(adminAuthUser, adminMembership);
+const readonlyMembershipSync = syncLocalUserFromSupabaseMembership(readonlyAuthUser, readonlyMembership);
+state.currentUserId = "";
+window.__nimrValidatedAuthUserId = "";`);
+
+assert.equal(run("directorMembershipSync.ok"), true, "Director identity is validated from workshop membership");
+assert.equal(run("adminMembershipSync.ok"), true, "Admin identity is validated from workshop membership");
+assert.equal(run("readonlyMembershipSync.ok"), true, "Readonly identity is validated from workshop membership");
+assert.equal(run("getUserById('director').authUserId"), "auth-director");
+assert.equal(run("getUserById('director').role"), "directeur");
+assert.equal(run("getUserById('admin').authUserId"), "auth-admin");
+assert.equal(run("getUserById('admin').role"), "admin_technique");
+assert.equal(run("getUserById('readonly').authUserId"), "auth-readonly");
+assert.equal(run("getUserById('readonly').role"), "lecture_seule");
 
 let startCalls = 0;
 let stopCalls = 0;
@@ -141,10 +163,10 @@ assert.equal(listeners.get("supabase-login-form:submit"), initialLoginBindings, 
 assert.equal(listeners.get("supabase-config-form:submit"), initialConfigBindings, "rebind does not duplicate configuration listeners");
 
 run(`render = () => {}; saveState = () => {}; hideUserLoginScreen = () => {}; ensureCurrentTabAllowed = () => {}; resetUserSessionIdleTimer = () => {}; quietNotify = () => {}; addAuditLog = () => {};`);
-run("completeUserLogin(getUserById('director'))");
+run(`state.currentUserId = "director"; window.__nimrValidatedAuthUserId = "auth-director"; refreshSupabasePermissionState("validated-director");`);
 await Promise.resolve();
 await Promise.resolve();
-assert.equal(elements.get("supabase-login-email").disabled, false, "Director can authenticate after fresh local login");
+assert.equal(elements.get("supabase-login-email").disabled, false, "Validated Director can authenticate with Supabase");
 assert.equal(elements.get("supabase-test").disabled, false, "Director can use operational Supabase diagnostics");
 assert.equal(elements.get("supabase-save").disabled, false, "Director retains cloud export");
 assert.equal(elements.get("supabase-restore").disabled, true, "Director cannot restore cloud state");
@@ -153,22 +175,44 @@ assert.equal(run("startCalls") > 0, true, "Director login resumes Realtime start
 assert.equal(run("pullCalls") > 0, true, "Director login resumes cloud pull");
 assert.equal(run("outboxCalls") > 0, true, "Director login resumes outbox processing");
 
-run("completeUserLogin(getUserById('admin'))");
+run(`state.currentUserId = "admin"; window.__nimrValidatedAuthUserId = "auth-admin"; refreshSupabasePermissionState("validated-admin");`);
 assert.equal(elements.get("supabase-config-form").children[0].disabled, false, "Admin login enables Supabase configuration");
 assert.equal(elements.get("supabase-restore").disabled, false, "Admin login enables restore");
 
-await run("triggerLogout()");
+elements.get("first-access-overlay").hidden = true;
+const failedLogoutStopCalls = run("stopCalls");
+run(`signOutSupabaseSession = async () => ({ ok: false, message: "network" });`);
+const failedLogout = await run("triggerLogout()");
+assert.equal(failedLogout.ok, false, "returned cloud logout error must reject logout");
+assert.equal(run("state.currentUserId"), "admin", "failed cloud logout preserves current identity");
+assert.equal(run("window.__nimrValidatedAuthUserId"), "auth-admin", "failed cloud logout preserves validated auth marker");
+assert.equal(elements.get("first-access-overlay").hidden, true, "failed cloud logout must not display a false fresh-login state");
+assert.equal(elements.get("supabase-config-form").children[0].disabled, false, "failed cloud logout preserves authenticated permissions");
+assert.equal(run("stopCalls"), failedLogoutStopCalls, "failed cloud logout must not stop the active session as if logout succeeded");
+
+run(`signOutSupabaseSession = async () => ({ ok: true });`);
+const successfulLogout = await run("triggerLogout()");
+assert.equal(successfulLogout.ok, true, "confirmed cloud logout succeeds");
+assert.equal(run("state.currentUserId"), "", "confirmed cloud logout clears currentUserId");
+assert.equal(run("window.__nimrValidatedAuthUserId"), "", "confirmed cloud logout clears validated auth marker");
 assert.equal(elements.get("supabase-login-email").disabled, true, "logout disables Supabase session controls");
 assert.equal(elements.get("supabase-test").disabled, true, "logout disables operational sync controls");
 assert.equal(run("stopCalls") > 0, true, "logout stops Realtime");
+assert.equal(elements.get("first-access-overlay").hidden, false, "confirmed cloud logout displays the cloud login gate");
 
-run("completeUserLogin(getUserById('readonly'))");
+const stopCallsBeforeDowngrade = run("stopCalls");
+run(`state.currentUserId = "readonly"; window.__nimrValidatedAuthUserId = "auth-readonly"; refreshSupabasePermissionState("validated-readonly");`);
 assert.equal(elements.get("supabase-test").disabled, true, "downgrade disables operational sync controls");
-assert.equal(run("stopCalls") > 1, true, "role downgrade stops Realtime again");
+assert.equal(run("stopCalls") > stopCallsBeforeDowngrade, true, "role downgrade stops Realtime again");
 
-run(`state = normalizeState({ users: [], currentUserId: "" }); const firstAccess = createFirstAccessUserLocal({ name: "Premier directeur", role: "directeur_sav", pinHash: "hash", pinSalt: "salt" }); refreshSupabasePermissionState("first-access-test");`);
-assert.equal(run("firstAccess.ok"), true, "first-access creates the legitimate local actor");
-assert.equal(elements.get("supabase-test").disabled, false, "first-access refreshes operational permissions without reload");
-assert.equal(elements.get("supabase-config-form").children[0].disabled, true, "first-access Director remains barred from configuration");
+run(`state = normalizeState({ users: [], currentUserId: "" });
+const authenticatedMembership = syncLocalUserFromSupabaseMembership(directorAuthUser, directorMembership);
+window.__nimrValidatedAuthUserId = directorAuthUser.id;
+refreshSupabasePermissionState("authenticated-membership-test");`);
+assert.equal(run("authenticatedMembership.ok"), true, "authenticated workshop membership creates the validated local mirror");
+assert.equal(run("getCurrentUser().authUserId"), "auth-director");
+assert.equal(run("getCurrentUser().role"), "directeur", "server membership role remains authoritative");
+assert.equal(elements.get("supabase-test").disabled, false, "membership-backed Director refreshes operational permissions without reload");
+assert.equal(elements.get("supabase-config-form").children[0].disabled, true, "membership-backed Director remains barred from configuration");
 
 console.log("Supabase session permission refresh regression OK");

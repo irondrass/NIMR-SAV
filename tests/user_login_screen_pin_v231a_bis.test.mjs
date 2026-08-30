@@ -73,7 +73,7 @@ async function main() {
   }
 
   const server = await startStaticServer();
-  const port = 9237;
+  const port = Number(process.env.NIMR_LOGIN_CDP_PORT || (9300 + (process.pid % 500)));
   const profile = join(tmpdir(), `nimr-browser-login-${Date.now()}`);
   const chrome = spawn(chromePath, [
     "--headless=new",
@@ -82,6 +82,7 @@ async function main() {
     "--disable-gpu",
     "--no-first-run",
     "--no-default-browser-check",
+    "--remote-allow-origins=*",
     "about:blank",
   ], { stdio: "ignore" });
 
@@ -90,21 +91,29 @@ async function main() {
   let socket;
   const send = (method, params = {}, sessionId) => {
     const id = nextId++;
-    socket.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
     return new Promise((resolveSend, rejectSend) => {
-      pending.set(id, { resolve: resolveSend, reject: rejectSend });
-      setTimeout(() => rejectSend(new Error(`CDP timeout: ${method}`)), 10000);
+      const timer = setTimeout(() => {
+        pending.delete(id);
+        rejectSend(new Error(`CDP timeout: ${method}`));
+      }, 10000);
+      pending.set(id, { resolve: resolveSend, reject: rejectSend, timer });
+      socket.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
     });
   };
 
   try {
-    const version = await waitForCdp(port);
-    socket = new WebSocket(version.webSocketDebuggerUrl);
-    socket.addEventListener("message", (event) => {
-      const message = JSON.parse(event.data);
+    await waitForCdp(port);
+    const targets = await fetch(`http://127.0.0.1:${port}/json/list`).then((response) => response.json());
+    const pageTarget = targets.find((target) => target.type === "page" && target.webSocketDebuggerUrl);
+    if (!pageTarget) throw new Error("Cible de page CDP introuvable.");
+    socket = new WebSocket(pageTarget.webSocketDebuggerUrl);
+    socket.addEventListener("message", async (event) => {
+      const payload = typeof event.data === "string" ? event.data : await event.data.text();
+      const message = JSON.parse(payload);
       if (message.id && pending.has(message.id)) {
-        const { resolve: resolveSend, reject: rejectSend } = pending.get(message.id);
+        const { resolve: resolveSend, reject: rejectSend, timer } = pending.get(message.id);
         pending.delete(message.id);
+        clearTimeout(timer);
         if (message.error) rejectSend(new Error(message.error.message));
         else resolveSend(message.result || {});
       }
@@ -115,13 +124,12 @@ async function main() {
       socket.addEventListener("error", rejectOpen, { once: true });
     });
 
-    const { targetId } = await send("Target.createTarget", { url: "about:blank" });
-    const { sessionId } = await send("Target.attachToTarget", { targetId, flatten: true });
-    await send("Log.enable", {}, sessionId);
+    const targetId = pageTarget.id;
+    const sessionId = undefined;
     await send("Runtime.enable", {}, sessionId);
     await send("Page.enable", {}, sessionId);
     await send("Page.navigate", { url: targetUrl }, sessionId);
-    
+
     console.log("Chargement de l'application...");
     await wait(8000);
 
@@ -137,7 +145,7 @@ async function main() {
     }, sessionId);
     for (let i = 0; i < 40; i++) {
       const check = await send("Runtime.evaluate", {
-        expression: `!!(document.getElementById("first-access-overlay") && document.getElementById("user-login-overlay") && document.getElementById("user-pin-change-overlay") && document.querySelector(".app-shell"))`
+        expression: `!!(window.__nimrAppReady === true && document.getElementById("first-access-overlay")?.hidden === false && document.getElementById("user-login-overlay") && document.getElementById("user-pin-change-overlay") && document.querySelector(".app-shell")?.hasAttribute("inert"))`
       }, sessionId);
       if (check.result?.value) {
         break;
@@ -180,12 +188,29 @@ async function main() {
           return { ok: false, error: "Un utilisateur caché a été créé avant le premier accès" };
         }
         if (!form || overlay.hidden) {
-          return { ok: false, error: "L'écran de premier accès explicite devrait être visible" };
+          return { ok: false, error: "L'écran de connexion NIMR SAV devrait être visible" };
         }
-        form.elements.name.value = "Admin premier accès";
-        form.elements.role.value = "admin_technique";
-        form.elements.pin.value = "739251";
-        form.elements.confirmPin.value = "739251";
+        const authUser = { id: "auth-admin-1", email: "admin@nimr.com.tn", user_metadata: { name: "Admin premier accès" } };
+        const membership = {
+          workshop_id: "00000000-0000-0000-0000-000000000001",
+          user_id: "auth-admin-1",
+          role: "admin_technique",
+          resource_id: null,
+        };
+        window.authenticateSupabaseUser = async (email, password) => {
+          return {
+            ok: true,
+            user: { ...authUser, email },
+            membership,
+          };
+        };
+        window.getSupabaseUser = async () => authUser;
+        window.resolveSupabaseWorkshopMembership = async () => ({ ok: true, membership });
+        window.pullLatestSupabaseBackup = async () => ({ ok: true });
+        window.startSupabaseLiveSync = async () => true;
+        window.signOutSupabaseSession = async () => ({ ok: true });
+        form.elements.email.value = "admin@nimr.com.tn";
+        form.elements.password.value = "Pass123456";
         form.requestSubmit();
         for (let attempt = 0; attempt < 40; attempt += 1) {
           if (state.users.some(user => user.active !== false) && overlay.hidden) break;
@@ -193,8 +218,12 @@ async function main() {
         }
         const admin = state.users.find(user => user.canonicalRole === "admin_technique");
         if (!admin || state.currentUserId !== admin.id || !overlay.hidden) {
-          return { ok: false, error: "La création explicite du premier responsable n'a pas abouti" };
+          return { ok: false, error: "La connexion du premier responsable n'a pas abouti" };
         }
+        const creds = await createLocalPinCredentials("739251");
+        admin.pinHash = creds.pinHash;
+        admin.pinSalt = creds.pinSalt;
+        saveState();
         return { ok: true, role: admin.role, canonicalRole: admin.canonicalRole };
       })()`
     }, sessionId);
@@ -209,7 +238,7 @@ async function main() {
         ];
         createUserLocal({ name: "Alaa", role: "technicien", resourceId: "res-alaa", email: "alaa@nimr.local", active: true });
         createUserLocal({ name: "Karim", role: "technicien", resourceId: "res-karim", email: "karim@nimr.local", active: true });
-        
+
         // Ajouter deux utilisateurs doublons pour tester l'alerte en bypassant createUserLocal pour le second
         createUserLocal({ name: "Dup1", role: "reception", email: "dup@nimr.local", active: true });
         state.users.push({ id: "user-dup2", name: "Dup2", role: "reception", email: "dup@nimr.local", active: true, resourceId: "", authUserId: "", pinHash: "", pinSalt: "" });
@@ -230,20 +259,25 @@ async function main() {
     }, sessionId);
     await wait(500);
 
-    // Étape 4 : Sélectionner le responsable explicite et saisir un PIN incorrect
-    console.log("Étape 4 : Sélection admin, test PIN incorrect (et génération d'audit)...");
+    // Étape 4 : Verrouiller l'identité cloud courante et saisir un PIN incorrect
+    console.log("Étape 4 : Identité admin figée, test PIN incorrect (et génération d'audit)...");
     const testIncorrectPin = await send("Runtime.evaluate", {
       awaitPromise: true,
       returnByValue: true,
       expression: `(async () => {
-        checkUserSessionStartup();
+        sessionStorage.removeItem("nimr-user-pin-unlocked");
+        showUserLoginScreen();
         await new Promise(r => setTimeout(r, 100));
 
         const select = document.getElementById("user-login-select");
         const adminOption = Array.from(select.options).find(o => o.text.includes("Admin"));
         if (!adminOption) return { ok: false, error: "Option admin introuvable dans le select" };
-        select.value = adminOption.value;
-        select.dispatchEvent(new Event("change"));
+        if (select.options.length !== 1 || !select.disabled) {
+          return { ok: false, error: "SEC-001: le sélecteur doit être figé sur la seule identité cloud courante" };
+        }
+        if (Array.from(select.options).some(o => o.text.includes("Alaa") || o.text.includes("Karim"))) {
+          return { ok: false, error: "SEC-001: une autre identité locale est exposée dans le sélecteur" };
+        }
 
         const pinInput = document.getElementById("user-login-pin");
         const loginForm = document.getElementById("user-login-form");
@@ -314,8 +348,8 @@ async function main() {
     }, sessionId);
     assert.ok(testExplicitAdminLogin.result.value.ok, `Échec connexion responsable explicite / Clics réels : ${testExplicitAdminLogin.result.value.error}`);
 
-    // Étape 7 : Refresh -> Admin doit ressaisir son PIN
-    console.log("Étape 7 : Refresh page -> Demande de PIN obligatoire pour admin...");
+    // Étape 7 : Refresh en ligne sans session cloud -> le cache admin doit être refusé
+    console.log("Étape 7 : Refresh page -> session cloud absente, cache admin refusé...");
     await send("Page.navigate", { url: targetUrl }, sessionId);
     await wait(8000);
 
@@ -323,59 +357,65 @@ async function main() {
       awaitPromise: true,
       returnByValue: true,
       expression: `(async () => {
-        checkUserSessionStartup();
-        await new Promise(r => setTimeout(r, 100));
-
+        await new Promise(r => setTimeout(r, 250));
+        const firstAccessOverlay = document.getElementById("first-access-overlay");
         const loginOverlay = document.getElementById("user-login-overlay");
-        if (loginOverlay.hidden) {
-          return { ok: false, error: "L'écran de login devrait être affiché après refresh pour l'admin" };
+        const appShell = document.querySelector(".app-shell");
+        const cachedAdmin = state.users.find(user => user.authUserId === "auth-admin-1");
+        if (!cachedAdmin) return { ok: false, error: "Le miroir admin persisté est introuvable" };
+        if (firstAccessOverlay.hidden) {
+          return { ok: false, error: "SEC-001: la porte cloud doit être affichée sans session Supabase en ligne" };
         }
-
-        // Taper le nouveau PIN robuste
-        const select = document.getElementById("user-login-select");
-        const adminOption = Array.from(select.options).find(o => o.text.includes("Admin"));
-        select.value = adminOption.value;
-        select.dispatchEvent(new Event("change"));
-
-        const pinInput = document.getElementById("user-login-pin");
-        const loginForm = document.getElementById("user-login-form");
-        pinInput.value = "739251";
-        loginForm.dispatchEvent(new Event("submit"));
-        await new Promise(r => setTimeout(r, 200));
-
-        if (!loginOverlay.hidden) {
-          return { ok: false, error: "L'application aurait dû se déverrouiller avec le PIN robuste" };
+        if (!loginOverlay.hidden || !appShell.hasAttribute("inert")) {
+          return { ok: false, error: "SEC-001: le cache local ne doit pas ouvrir l'application en ligne" };
         }
         return { ok: true };
       })()`
     }, sessionId);
     assert.ok(testRefreshAdmin.result.value.ok, `Échec test refresh admin : ${testRefreshAdmin.result.value.error}`);
 
-    // Étape 8 : Retour login -> Choix technicien (se connecte directement sans PIN)
-    console.log("Étape 8 : Choix technicien sans PIN...");
+    // Étape 8 : Authentification cloud explicite du technicien Alaa
+    console.log("Étape 8 : Connexion cloud du technicien Alaa...");
     const testTechnicianConnect = await send("Runtime.evaluate", {
       awaitPromise: true,
       returnByValue: true,
       expression: `(async () => {
-        const changeBtn = document.getElementById("sidebar-change-user-btn");
-        changeBtn.click();
-        await new Promise(r => setTimeout(r, 100));
-
-        const select = document.getElementById("user-login-select");
-        const alaaOption = Array.from(select.options).find(o => o.text.includes("Alaa") && o.text.includes("Technicien"));
-        if (!alaaOption) return { ok: false, error: "Option technicien Alaa introuvable" };
-        select.value = alaaOption.value;
-        select.dispatchEvent(new Event("change"));
-
-        const loginForm = document.getElementById("user-login-form");
-        loginForm.dispatchEvent(new Event("submit"));
-        await new Promise(r => setTimeout(r, 200));
-
-        const loginOverlay = document.getElementById("user-login-overlay");
-        if (!loginOverlay.hidden) {
-          return { ok: false, error: "Le technicien aurait dû se connecter directement sans PIN" };
+        const authUser = { id: "auth-tech-alaa", email: "alaa@nimr.local", user_metadata: { name: "Alaa" } };
+        const membership = {
+          workshop_id: "00000000-0000-0000-0000-000000000001",
+          user_id: "auth-tech-alaa",
+          role: "technicien",
+          resource_id: "res-alaa",
+        };
+        window.authenticateSupabaseUser = async (email, password) => ({
+          ok: true,
+          user: { ...authUser, email },
+          membership,
+        });
+        window.getSupabaseUser = async () => authUser;
+        window.resolveSupabaseWorkshopMembership = async () => ({ ok: true, membership });
+        window.pullLatestSupabaseBackup = async () => ({ ok: true });
+        window.startSupabaseLiveSync = async () => true;
+        window.signOutSupabaseSession = async () => ({ ok: true });
+        const firstAccessForm = document.getElementById("first-access-form");
+        firstAccessForm.elements.email.value = "alaa@nimr.local";
+        firstAccessForm.elements.password.value = "Pass123456";
+        firstAccessForm.requestSubmit();
+        for (let attempt = 0; attempt < 40; attempt += 1) {
+          const current = state.users.find(user => user.id === state.currentUserId);
+          if (current?.authUserId === "auth-tech-alaa" && document.getElementById("first-access-overlay").hidden) break;
+          await new Promise(r => setTimeout(r, 100));
         }
-
+        const current = state.users.find(user => user.id === state.currentUserId);
+        if (!current || current.authUserId !== "auth-tech-alaa" || current.resourceId !== "res-alaa") {
+          return { ok: false, error: "L'identité cloud Alaa n'a pas été appliquée" };
+        }
+        showUserLoginScreen();
+        const select = document.getElementById("user-login-select");
+        if (select.options.length !== 1 || select.value !== current.id || !select.disabled) {
+          return { ok: false, error: "SEC-001: Alaa doit être la seule identité locale exposée" };
+        }
+        hideUserLoginScreen();
         return { ok: true };
       })()`
     }, sessionId);
@@ -419,21 +459,42 @@ async function main() {
       awaitPromise: true,
       returnByValue: true,
       expression: `(async () => {
-        // Se reconnecter en admin pour avoir accès à la gestion utilisateur
+        // Se déconnecter puis réauthentifier explicitement l'admin dans le cloud.
         const changeBtn = document.getElementById("sidebar-change-user-btn");
         changeBtn.click();
-        await new Promise(r => setTimeout(r, 100));
-
-        const select = document.getElementById("user-login-select");
-        const adminOption = Array.from(select.options).find(o => o.text.includes("Admin"));
-        select.value = adminOption.value;
-        select.dispatchEvent(new Event("change"));
-
-        const pinInput = document.getElementById("user-login-pin");
-        const loginForm = document.getElementById("user-login-form");
-        pinInput.value = "739251";
-        loginForm.dispatchEvent(new Event("submit"));
-        await new Promise(r => setTimeout(r, 200));
+        for (let attempt = 0; attempt < 40 && document.getElementById("first-access-overlay").hidden; attempt += 1) {
+          await new Promise(r => setTimeout(r, 100));
+        }
+        const authUser = { id: "auth-admin-1", email: "admin@nimr.com.tn", user_metadata: { name: "Admin premier accès" } };
+        const membership = {
+          workshop_id: "00000000-0000-0000-0000-000000000001",
+          user_id: "auth-admin-1",
+          role: "admin_technique",
+          resource_id: null,
+        };
+        window.authenticateSupabaseUser = async (email, password) => ({
+          ok: true,
+          user: { ...authUser, email },
+          membership,
+        });
+        window.getSupabaseUser = async () => authUser;
+        window.resolveSupabaseWorkshopMembership = async () => ({ ok: true, membership });
+        window.pullLatestSupabaseBackup = async () => ({ ok: true });
+        window.startSupabaseLiveSync = async () => true;
+        window.signOutSupabaseSession = async () => ({ ok: true });
+        const firstAccessForm = document.getElementById("first-access-form");
+        firstAccessForm.elements.email.value = "admin@nimr.com.tn";
+        firstAccessForm.elements.password.value = "Pass123456";
+        firstAccessForm.requestSubmit();
+        for (let attempt = 0; attempt < 40; attempt += 1) {
+          const current = state.users.find(user => user.id === state.currentUserId);
+          if (current?.authUserId === "auth-admin-1" && document.getElementById("first-access-overlay").hidden) break;
+          await new Promise(r => setTimeout(r, 100));
+        }
+        const current = state.users.find(user => user.id === state.currentUserId);
+        if (!current || current.authUserId !== "auth-admin-1") {
+          return { ok: false, error: "La réauthentification cloud admin a échoué" };
+        }
 
         // Rendre les utilisateurs et rôles dans le panneau admin
         renderUsersAndRoles();

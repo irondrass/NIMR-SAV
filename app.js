@@ -1,6 +1,9 @@
 let quickEstimateCreationDraft = null;
 
 async function initApp() {
+  const appShell = document.querySelector(".app-shell");
+  appShell?.setAttribute("inert", "");
+  window.__nimrAppReady = false;
   try {
     if (typeof hydrateLargeStateIfAvailable === "function") {
       await hydrateLargeStateIfAvailable();
@@ -31,13 +34,11 @@ async function initApp() {
     bindMobileResumeSafety();
     if (typeof migratePlanningLogicV28 === "function") migratePlanningLogicV28();
     if (typeof migratePlanningLogicV36 === "function") migratePlanningLogicV36();
-    const startupTab = typeof canAccessTab === "function" && canAccessTab("today")
-      ? "today"
-      : (typeof canAccessTab === "function" && canAccessTab("technician") ? "technician" : "dossiers");
-    setActiveTab(startupTab);
-    render();
     if (typeof initLocalSecurityGate === "function") initLocalSecurityGate();
-    if (typeof checkUserSessionStartup === "function") checkUserSessionStartup();
+    if (typeof checkUserSessionStartup !== "function") {
+      throw new Error("Porte d'identité indisponible.");
+    }
+    await checkUserSessionStartup();
     if (typeof resetUserSessionIdleTimer === "function") resetUserSessionIdleTimer();
     bindWorkHoursInputs();
     loadBundledVehicleDatabase();
@@ -129,7 +130,7 @@ function bindSyncConflictUsability() {
 
 function configurePdfWorker() {
   if (window.pdfjsLib?.GlobalWorkerOptions) {
-    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.13";
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.14";
   }
 }
 
@@ -233,7 +234,7 @@ function bindCaseCreation() {
           const preview = prepareEstimateImportPreview(parsed, duplicate);
           const appliedLines = typeof buildAppliedEstimateLines === "function" ? buildAppliedEstimateLines(preview) : [];
           const partLines = typeof buildEstimatePartLines === "function" ? buildEstimatePartLines(preview) : [];
-          
+
           const supplement = normalizeRepairSupplement({
             title: "Complément " + (parsed.info?.estimateNumber || ""),
             status: "draft",
@@ -247,12 +248,12 @@ function bindCaseCreation() {
               quantity: part.quantity
             }))
           });
-          
+
           duplicate.supplements = duplicate.supplements || [];
           duplicate.supplements.push(supplement);
           duplicate.updatedAt = new Date().toISOString();
           addHistory(duplicate, "claim.supplement", "Complément ajouté via import PDF");
-          
+
           saveState({ changedCase: duplicate });
           activeCaseId = duplicate.id;
           activeCaseDetailTab = "claims";
@@ -1308,7 +1309,7 @@ function registerServiceWorker() {
   });
   const registerCurrentServiceWorker = async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=23.3.13", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=23.3.14", { updateViaCache: "none" });
       const refreshRegistration = async () => {
         try {
           await registration.update?.();
@@ -1549,7 +1550,7 @@ function renderActivityLog() {
         const localVal = targetConflict ? (targetConflict.localCase || targetConflict.localValue) : null;
         if (localVal) {
           const payload = {
-            version: "v23.3.13",
+            version: "v23.3.14",
             timestamp: new Date().toISOString(),
             cases: [JSON.parse(JSON.stringify(localVal))],
             source: "manual_conflict_backup"
@@ -1672,46 +1673,213 @@ function bindUserSessionOverlayKeyboard(overlay) {
   overlay.addEventListener("keydown", handleUserSessionOverlayKeydown);
 }
 
-function checkUserSessionStartup() {
+function captureIdentityMirrorState() {
+  const clone = (value) => JSON.parse(JSON.stringify(value || []));
+  return {
+    users: clone(state.users),
+    resources: clone(state.resources),
+    currentUserId: state.currentUserId,
+  };
+}
+
+function restoreIdentityMirrorState(snapshot) {
+  if (!snapshot) return;
+  state.users = snapshot.users;
+  state.resources = snapshot.resources;
+  state.currentUserId = snapshot.currentUserId;
+}
+
+async function persistValidatedSupabaseIdentity(authUser, membership, cloudReason) {
+  if (typeof syncLocalUserFromSupabaseMembership !== "function") {
+    return { ok: false, message: "Synchronisation locale de l'identité indisponible.", code: "LOCAL_MIRROR_UNAVAILABLE" };
+  }
+  const identityMirrorSnapshot = captureIdentityMirrorState();
+  let syncRes;
+  try {
+    syncRes = syncLocalUserFromSupabaseMembership(authUser, membership);
+  } catch (error) {
+    restoreIdentityMirrorState(identityMirrorSnapshot);
+    return {
+      ok: false,
+      message: error?.message || "Impossible de valider l'identité locale.",
+      code: "LOCAL_MIRROR_EXCEPTION",
+    };
+  }
+  if (!syncRes?.ok) {
+    restoreIdentityMirrorState(identityMirrorSnapshot);
+    return syncRes || { ok: false, message: "Impossible de valider l'identité locale.", code: "LOCAL_MIRROR_REJECTED" };
+  }
+
+  let persisted = false;
+  try {
+    persisted = typeof saveState === "function"
+      ? await saveState({ skipCloud: true, skipSnapshot: true, cloudReason })
+      : false;
+  } catch (error) {
+    restoreIdentityMirrorState(identityMirrorSnapshot);
+    return {
+      ok: false,
+      message: error?.message || "Impossible d'enregistrer localement l'identité validée.",
+      code: "LOCAL_MIRROR_PERSIST_FAILED",
+    };
+  }
+  if (persisted !== true) {
+    restoreIdentityMirrorState(identityMirrorSnapshot);
+    return { ok: false, message: "Impossible d'enregistrer localement l'identité validée.", code: "LOCAL_MIRROR_PERSIST_FAILED" };
+  }
+  return syncRes;
+}
+
+async function convergeAndRevalidateSupabaseIdentity(authUser, cloudReason) {
+  document.querySelector(".app-shell")?.setAttribute("inert", "");
+  if (typeof pullLatestSupabaseBackup !== "function" || typeof startSupabaseLiveSync !== "function") {
+    return { ok: false, message: "Convergence cloud indisponible.", code: "CLOUD_CONVERGENCE_UNAVAILABLE" };
+  }
+  try {
+    await pullLatestSupabaseBackup(cloudReason);
+    await startSupabaseLiveSync();
+
+    const confirmedAuthUser = typeof getSupabaseUser === "function" ? await getSupabaseUser() : null;
+    if (!confirmedAuthUser?.id || confirmedAuthUser.id !== authUser?.id) {
+      return { ok: false, message: "La session cloud a changé pendant la synchronisation.", code: "AUTH_IDENTITY_CHANGED" };
+    }
+    if (typeof resolveSupabaseWorkshopMembership !== "function") {
+      return { ok: false, message: "Validation de l'appartenance atelier indisponible.", code: "MEMBERSHIP_PROVIDER_UNAVAILABLE" };
+    }
+    const membershipRes = await resolveSupabaseWorkshopMembership(confirmedAuthUser);
+    if (!membershipRes?.ok) {
+      return {
+        ok: false,
+        message: membershipRes?.message || "L'appartenance atelier n'est plus valide après synchronisation.",
+        code: membershipRes?.code || "POST_CONVERGENCE_MEMBERSHIP_DENIED",
+      };
+    }
+    return persistValidatedSupabaseIdentity(
+      confirmedAuthUser,
+      membershipRes.membership,
+      `${cloudReason}-authoritative-membership`,
+    );
+  } catch (error) {
+    return {
+      ok: false,
+      message: error?.message || "La convergence cloud n'a pas pu être validée.",
+      code: "CLOUD_CONVERGENCE_FAILED",
+    };
+  }
+}
+
+async function checkUserSessionStartup() {
   if (typeof isLocalSessionUnlocked === "function" && !isLocalSessionUnlocked()) {
     // PIN local activé et verrouillé -> priorité au PIN, on attend le déverrouillage
-    return;
+    return { ok: false, code: "LOCAL_WORKSTATION_LOCKED" };
   }
 
   // Vérifier si les overlays ne sont pas enfants de .app-shell (contrainte 3)
+  const firstAccessOverlay = document.getElementById("first-access-overlay");
   const loginOverlay = document.getElementById("user-login-overlay");
   const pinChangeOverlay = document.getElementById("user-pin-change-overlay");
   const appShell = document.querySelector(".app-shell");
   if (appShell && typeof appShell.contains === "function") {
-    if (appShell.contains(loginOverlay) || appShell.contains(pinChangeOverlay)) {
+    if (appShell.contains(firstAccessOverlay) || appShell.contains(loginOverlay) || appShell.contains(pinChangeOverlay)) {
       console.error("DOM CONSTRAINT VIOLATION: Overlays must be siblings of .app-shell, not children!");
     }
   }
 
-  const activeUsers = (state.users || []).filter(user => user.active !== false);
-  if (typeof isFirstAccessRecoveryRequired === "function" && isFirstAccessRecoveryRequired(state)) {
+  const denyStartup = (message, code) => {
+    window.__nimrValidatedAuthUserId = "";
+    if (typeof stopSupabaseLiveSync === "function") stopSupabaseLiveSync();
     showFirstAccessRecovery();
-    return;
+    const status = document.getElementById("first-access-status");
+    if (status) status.textContent = message;
+    return { ok: false, code };
+  };
+
+  // En ligne, la session Supabase, l'appartenance et la persistance du miroir
+  // sont toutes obligatoires. Aucun cache local ne peut remplacer l'une d'elles.
+  if (navigator.onLine !== false) {
+    window.__nimrValidatedAuthUserId = "";
+    if (typeof getSupabaseUser !== "function") {
+      return denyStartup("Connexion cloud indisponible. Rechargez la page avec une connexion internet.", "AUTH_PROVIDER_UNAVAILABLE");
+    }
+    try {
+      const authUser = await getSupabaseUser();
+      if (!authUser?.id) {
+        return denyStartup("Connexion NIMR SAV requise pour accéder à cet atelier.", "NO_CLOUD_SESSION");
+      }
+
+      if (typeof resolveSupabaseWorkshopMembership !== "function") {
+        return denyStartup("Validation de l'appartenance atelier indisponible.", "MEMBERSHIP_PROVIDER_UNAVAILABLE");
+      }
+      const membershipRes = await resolveSupabaseWorkshopMembership(authUser);
+      if (!membershipRes?.ok) {
+        return denyStartup(
+          membershipRes?.message || "Votre compte est authentifié mais n'est pas autorisé pour cet atelier. Contactez l'administrateur NIMR SAV.",
+          membershipRes?.code || "MEMBERSHIP_DENIED",
+        );
+      }
+
+      const syncRes = await persistValidatedSupabaseIdentity(
+        authUser,
+        membershipRes.membership,
+        "validated-membership-mirror",
+      );
+      if (!syncRes?.ok) {
+        return denyStartup(syncRes?.message || "Impossible de valider l'identité locale.", syncRes?.code || "LOCAL_MIRROR_REJECTED");
+      }
+
+      const convergedIdentity = await convergeAndRevalidateSupabaseIdentity(authUser, "session-restore");
+      if (!convergedIdentity?.ok) {
+        return denyStartup(
+          convergedIdentity?.message || "Validation de l'identité après synchronisation impossible.",
+          convergedIdentity?.code || "POST_CONVERGENCE_IDENTITY_DENIED",
+        );
+      }
+
+      window.__nimrValidatedAuthUserId = authUser.id;
+      ensureCurrentTabAllowed();
+      render();
+      hideFirstAccessRecovery();
+      hideUserLoginScreen();
+      hideUserPinChangeOverlay();
+      return { ok: true, code: "ONLINE_AUTHORIZED", user: convergedIdentity.user };
+    } catch (err) {
+      console.warn("Vérification session Supabase au démarrage impossible", err);
+      return denyStartup(err?.message || "Validation cloud impossible. Reconnectez-vous pour continuer.", "ONLINE_AUTH_CHECK_FAILED");
+    }
   }
-  const alwaysPrompt = state.settings.alwaysPromptUserStartup !== false &&
-                       (state.settings.alwaysPromptUserStartup === true || activeUsers.length > 1);
 
+  // Mode hors ligne : seule l'identité courante précédemment validée peut continuer.
+  const configuredWorkshopId = typeof getSupabaseWorkshopId === "function"
+    ? String(getSupabaseWorkshopId() || "").trim()
+    : "";
+  const isValidatedCachedIdentity = (user) => Boolean(
+    user &&
+    user.active !== false &&
+    user.authSource === "supabase_membership" &&
+    user.membershipValidatedAt &&
+    user.authUserId &&
+    (!configuredWorkshopId || user.membershipWorkshopId === configuredWorkshopId)
+  );
   const currentUser = getCurrentUser();
-  const isCurrentActive = currentUser && activeUsers.some(user => user.id === state.currentUserId);
+  const isValidatedOfflineUser = isValidatedCachedIdentity(currentUser);
 
-  if (alwaysPrompt || !isCurrentActive) {
-    showUserLoginScreen();
-  } else {
-    // Si l'utilisateur actif est sensible et n'est pas déverrouillé, on doit demander le PIN
-    if (currentUser && SENSITIVE_ROLES.includes(getCanonicalUserRole(currentUser)) && sessionStorage.getItem("nimr-user-pin-unlocked") !== currentUser.id) {
+  if (navigator.onLine === false) {
+    if (!isValidatedOfflineUser) {
+      return denyStartup("Première connexion internet requise pour enregistrer cet appareil et cette identité.", "OFFLINE_IDENTITY_REQUIRED");
+    }
+
+    const hasPin = Boolean(currentUser.pinHash);
+    const pinRequired = SENSITIVE_ROLES.includes(getCanonicalUserRole(currentUser)) || currentUser.pinRequired || hasPin;
+    if (pinRequired && sessionStorage.getItem("nimr-user-pin-unlocked") !== currentUser.id) {
       showUserLoginScreen();
     } else {
       hideUserLoginScreen();
       hideUserPinChangeOverlay();
-      if (!state.currentUserId && currentUser) {
-        state.currentUserId = currentUser.id;
-      }
+      hideFirstAccessRecovery();
+      ensureCurrentTabAllowed();
+      render();
     }
+    return { ok: true, code: "OFFLINE_CURRENT_IDENTITY", user: currentUser };
   }
 }
 
@@ -1726,7 +1894,7 @@ function showFirstAccessRecovery() {
   document.querySelector(".app-shell")?.setAttribute("inert", "");
   const status = document.getElementById("first-access-status");
   if (status) status.textContent = "";
-  focusUserSessionDialog(overlay, "input[name='name']");
+  focusUserSessionDialog(overlay, "input[name='email']");
 }
 
 function hideFirstAccessRecovery() {
@@ -1821,7 +1989,19 @@ function renderUserLoginScreen() {
   const selectEl = document.getElementById("user-login-select");
   if (!selectEl) return;
 
-  const activeUsers = (state.users || []).filter(user => user.active !== false);
+  const currentUser = getCurrentUser();
+  const configuredWorkshopId = typeof getSupabaseWorkshopId === "function"
+    ? String(getSupabaseWorkshopId() || "").trim()
+    : "";
+  const currentIdentityIsValidated = Boolean(
+    currentUser &&
+    currentUser.active !== false &&
+    currentUser.authSource === "supabase_membership" &&
+    currentUser.membershipValidatedAt &&
+    currentUser.authUserId &&
+    (!configuredWorkshopId || currentUser.membershipWorkshopId === configuredWorkshopId)
+  );
+  const activeUsers = currentIdentityIsValidated ? [currentUser] : [];
 
   selectEl.innerHTML = activeUsers.map(user => {
     const canonicalRole = getCanonicalUserRole(user);
@@ -1837,13 +2017,11 @@ function renderUserLoginScreen() {
     return `<option value="${escapeAttr(user.id)}">${escapeHtml(displayLabel)}</option>`;
   }).join("") || `<option value="">Aucun utilisateur actif trouvé</option>`;
 
-  // Sélectionner par défaut l'utilisateur actuel s'il existe et est actif
-  const currentUser = getCurrentUser();
+  // L'identité cloud courante est la seule identité locale sélectionnable.
   if (currentUser && activeUsers.some(u => u.id === currentUser.id)) {
     selectEl.value = currentUser.id;
-  } else if (activeUsers.length > 0) {
-    selectEl.value = activeUsers[0].id;
   }
+  selectEl.disabled = true;
 
   updateLoginPinRequirement();
 }
@@ -1904,19 +2082,14 @@ function resetSensitiveUiStateForUserSwitch(reason = "user-switch") {
 }
 
 function triggerUserChangeScreen() {
-  // v23.2.5 — Sécurité : seul Admin technique peut changer de session librement.
-  // Tous les autres rôles doivent se déconnecter proprement.
-  const guard = typeof guardUserSwitch === "function" ? guardUserSwitch() : { ok: true };
-  if (guard.ok) {
-    resetSensitiveUiStateForUserSwitch("demande utilisateur");
-    showUserLoginScreen();
-  } else {
-    triggerLogout();
-  }
+  triggerLogout();
 }
 
-// v23.2.5 — Déconnexion propre : efface la session sans afficher l'écran admin
+// Déconnexion propre : déconnecte la session Supabase, efface l'identité locale et affiche la porte d'authentification
 async function triggerLogout() {
+  const appShell = document.querySelector(".app-shell");
+  const shellWasInert = Boolean(appShell?.hasAttribute?.("inert"));
+  appShell?.setAttribute("inert", "");
   const previousUser = (state.users || []).find(user => user.id === state.currentUserId && user.active !== false);
   const previousActor = previousUser ? {
     userId: previousUser.id,
@@ -1924,8 +2097,25 @@ async function triggerLogout() {
     userRole: previousUser.role || "readonly",
     resourceId: previousUser.resourceId || ""
   } : null;
+
+  let logoutResult;
+  try {
+    logoutResult = typeof signOutSupabaseSession === "function"
+      ? await signOutSupabaseSession()
+      : { ok: false, message: "Module de déconnexion Supabase indisponible." };
+  } catch (error) {
+    logoutResult = { ok: false, message: error?.message || "Déconnexion Supabase impossible.", error };
+  }
+  if (!logoutResult?.ok) {
+    const message = logoutResult?.message || "La déconnexion cloud a échoué. Votre session reste active ; réessayez.";
+    notifyUser(`Déconnexion non confirmée : ${message}`, "error");
+    if (!shellWasInert) checkOverlaysInertState();
+    return { ok: false, message, error: logoutResult?.error };
+  }
+
   resetSensitiveUiStateForUserSwitch("déconnexion utilisateur");
   state.currentUserId = "";
+  window.__nimrValidatedAuthUserId = "";
   window.pendingSelectorUser = null;
   try {
     sessionStorage.removeItem("nimr-user-pin-unlocked");
@@ -1943,8 +2133,9 @@ async function triggerLogout() {
   }
   if (typeof loadDurableOutboxOperations === "function") await loadDurableOutboxOperations().catch(() => []);
   if (typeof renderCurrentSessionIndicator === "function") renderCurrentSessionIndicator();
-  showUserLoginScreen();
+  showFirstAccessRecovery();
   if (typeof refreshSupabasePermissionState === "function") refreshSupabasePermissionState("local-logout");
+  return { ok: true };
 }
 
 function renderCurrentSessionIndicator() {
@@ -1958,26 +2149,18 @@ function renderCurrentSessionIndicator() {
     sidebarUserName.textContent = currentUser ? `${currentUser.name} (${roleLabel})` : "Atelier";
   }
 
-  // v23.2.5 — Le bouton sidebar affiche "Changer" uniquement pour Admin.
-  // Pour tous les autres rôles, affiche "Déconnexion".
   const changeBtn = document.getElementById("sidebar-change-user-btn");
   if (changeBtn) {
-    const isAdmin = currentUser && hasPermission("users.manage", { user: currentUser });
-    changeBtn.textContent = isAdmin ? "Changer" : "Déconnexion";
-    changeBtn.title = isAdmin
-      ? "Changer d'utilisateur (Admin technique)"
-      : "Se déconnecter pour changer de session";
-    changeBtn.setAttribute("aria-label", isAdmin ? "Changer d'utilisateur" : "Se déconnecter");
+    changeBtn.textContent = "Déconnexion";
+    changeBtn.title = "Se déconnecter de la session atelier";
+    changeBtn.setAttribute("aria-label", "Se déconnecter");
   }
 
   const settingsChangeBtn = document.getElementById("change-user-settings-btn");
   if (settingsChangeBtn) {
-    const isAdmin = currentUser && hasPermission("users.manage", { user: currentUser });
-    settingsChangeBtn.textContent = isAdmin ? "Changer d'utilisateur" : "Déconnexion";
-    settingsChangeBtn.title = isAdmin
-      ? "Changer d'utilisateur (Admin technique)"
-      : "Se déconnecter proprement avant une nouvelle session";
-    settingsChangeBtn.setAttribute("aria-label", isAdmin ? "Changer d'utilisateur" : "Se déconnecter");
+    settingsChangeBtn.textContent = "Déconnexion";
+    settingsChangeBtn.title = "Se déconnecter proprement avant une nouvelle session";
+    settingsChangeBtn.setAttribute("aria-label", "Se déconnecter");
   }
 
   // Mettre à jour l'option checkbox dans les Paramètres
@@ -2004,42 +2187,52 @@ function bindUserSessionActions() {
     event.preventDefault();
     const status = document.getElementById("first-access-status");
     if (status) status.textContent = "";
-    const name = String(firstAccessForm.elements.name?.value || "").trim();
-    const role = String(firstAccessForm.elements.role?.value || "").trim();
-    const pin = String(firstAccessForm.elements.pin?.value || "");
-    const confirmPin = String(firstAccessForm.elements.confirmPin?.value || "");
-    const validation = typeof validateLocalPinStrength === "function"
-      ? validateLocalPinStrength(pin)
-      : { ok: pin.length >= 6, value: pin, message: "PIN trop faible." };
-    if (!name) {
-      if (status) status.textContent = "Le nom est obligatoire.";
+    const email = String(firstAccessForm.elements.email?.value || "").trim();
+    const password = String(firstAccessForm.elements.password?.value || "");
+    if (!email || !password) {
+      if (status) status.textContent = "Email et mot de passe requis.";
       return;
     }
-    if (!validation.ok) {
-      if (status) status.textContent = validation.message || "PIN trop faible.";
-      return;
-    }
-    if (pin !== confirmPin) {
-      if (status) status.textContent = "Les deux PIN ne correspondent pas.";
-      return;
-    }
+    const submitBtn = firstAccessForm.querySelector("button[type='submit']");
+    if (submitBtn) submitBtn.disabled = true;
     try {
-      const credentials = await createLocalPinCredentials(validation.value);
-      const result = createFirstAccessUserLocal({ name, role, ...credentials });
-      if (!result.ok) {
-        if (status) status.textContent = result.message;
+      if (typeof authenticateSupabaseUser !== "function") {
+        throw new Error("Module d'authentification Supabase non disponible.");
+      }
+      const authResult = await authenticateSupabaseUser(email, password);
+      if (!authResult.ok) {
+        if (status) status.textContent = authResult.message || "Échec de l'authentification.";
         return;
       }
-      sessionStorage.setItem("nimr-user-pin-unlocked", result.user.id);
-      saveState({ skipCloud: true, cloudReason: "first-access" });
-      hideFirstAccessRecovery();
-      setActiveTab("reception-workspace");
+      const syncRes = await persistValidatedSupabaseIdentity(
+        authResult.user,
+        authResult.membership,
+        "validated-membership-login",
+      );
+      if (!syncRes?.ok) {
+        if (status) status.textContent = syncRes.message || "Impossible de synchroniser l'identité locale.";
+        return;
+      }
+
+      const convergedIdentity = await convergeAndRevalidateSupabaseIdentity(authResult.user, "cloud-login");
+      if (!convergedIdentity?.ok) {
+        window.__nimrValidatedAuthUserId = "";
+        if (typeof stopSupabaseLiveSync === "function") stopSupabaseLiveSync();
+        if (status) status.textContent = convergedIdentity?.message || "Validation de l'identité après synchronisation impossible.";
+        return;
+      }
+      window.__nimrValidatedAuthUserId = authResult.user.id;
+      sessionStorage.setItem("nimr-user-pin-unlocked", convergedIdentity.user.id);
+      ensureCurrentTabAllowed();
       render();
-      if (typeof refreshSupabasePermissionState === "function") refreshSupabasePermissionState("first-access");
+      hideFirstAccessRecovery();
+      if (typeof refreshSupabasePermissionState === "function") refreshSupabasePermissionState("cloud-login");
       resetUserSessionIdleTimer();
-      quietNotify(`Bienvenue, ${result.user.name} !`, "success");
+      quietNotify(`Bienvenue, ${convergedIdentity.user.name || convergedIdentity.user.email} !`, "success");
     } catch (error) {
-      if (status) status.textContent = error?.message || "Création du premier accès impossible.";
+      if (status) status.textContent = error?.message || "Connexion impossible.";
+    } finally {
+      if (submitBtn) submitBtn.disabled = false;
     }
   });
 
@@ -2106,6 +2299,31 @@ function bindUserSessionActions() {
     const user = (state.users || []).find(u => u.id === userId);
     if (!user || user.active === false) {
       if (statusEl) statusEl.textContent = "Utilisateur inactif ou invalide. Sélectionnez un compte actif.";
+      return;
+    }
+
+    const validatedCurrentIdentity = getCurrentUser();
+    const configuredWorkshopId = typeof getSupabaseWorkshopId === "function"
+      ? String(getSupabaseWorkshopId() || "").trim()
+      : "";
+    const currentIdentityIsValidated = Boolean(
+      validatedCurrentIdentity &&
+      validatedCurrentIdentity.active !== false &&
+      validatedCurrentIdentity.authSource === "supabase_membership" &&
+      validatedCurrentIdentity.membershipValidatedAt &&
+      validatedCurrentIdentity.authUserId &&
+      (!configuredWorkshopId || validatedCurrentIdentity.membershipWorkshopId === configuredWorkshopId)
+    );
+    const selectedIdentityMismatch = !currentIdentityIsValidated ||
+      userId !== validatedCurrentIdentity.id ||
+      user.authUserId !== validatedCurrentIdentity.authUserId;
+    const offlineIdentityMismatch = navigator.onLine === false && selectedIdentityMismatch;
+    const cloudIdentityMismatch = navigator.onLine !== false && (
+      selectedIdentityMismatch ||
+      window.__nimrValidatedAuthUserId !== validatedCurrentIdentity.authUserId
+    );
+    if (offlineIdentityMismatch || cloudIdentityMismatch) {
+      if (statusEl) statusEl.textContent = "Cette identité ne correspond pas à la session authentifiée de ce poste.";
       return;
     }
 
@@ -2293,7 +2511,7 @@ function setupMobileMenu() {
   toggleBtn.addEventListener('click', () => {
     sidebar.classList.toggle('active');
   });
-  
+
   // Initialiser l'état au chargement
   if (window.innerWidth <= 768) toggleBtn.style.display = 'block';
 }

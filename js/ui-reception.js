@@ -1224,6 +1224,119 @@ async function handleReceptionFormSubmit(e) {
     const caseId = form.dataset.caseId;
     const status = form.querySelector("[name=qualityStatus]")?.value || "not_started";
     const reason = form.querySelector("[name=qualityReason]")?.value || "";
+    const currentUser = typeof getCurrentUser === "function" ? getCurrentUser() : null;
+    const canonicalRole = typeof getCanonicalUserRole === "function"
+      ? getCanonicalUserRole(currentUser)
+      : currentUser?.canonicalRole;
+    const usesDedicatedQualityRpc = canonicalRole === "controle_qualite";
+
+    if (usesDedicatedQualityRpc) {
+      const targetCase = Array.isArray(state?.cases) ? state.cases.find(c => c.id === caseId) : null;
+      if (!targetCase) {
+        notifyUser("Dossier introuvable.", "error");
+        return;
+      }
+      const cleanStatus = String(status || "").trim().toLowerCase();
+      const cleanReason = String(reason || "").trim();
+      const allowedStatuses = ["not_started", "in_progress", "validated", "rejected", "rework"];
+      if (!allowedStatuses.includes(cleanStatus)) {
+        notifyUser("Statut qualité invalide.", "error");
+        return;
+      }
+      if (cleanStatus === "rejected" && !cleanReason) {
+        notifyUser("Motif obligatoire pour refuser le contrôle qualité.", "error");
+        return;
+      }
+      const previousStatus = String(targetCase.receptionWorkflow?.qualityStatus || "not_started").trim().toLowerCase();
+      const isRevalidation = cleanStatus === "validated" && ["rejected", "rework"].includes(previousStatus);
+      const requiredPermission = cleanStatus === "validated"
+        ? (isRevalidation ? "quality.revalidate" : "quality.validate")
+        : (["rejected", "rework"].includes(cleanStatus) ? "quality.reject" : "quality.validate");
+      const qualityGuard = typeof guardAction === "function"
+        ? guardAction(requiredPermission, { item: targetCase }, { notify: false })
+        : { ok: false, message: "Contrôle des permissions indisponible." };
+      if (!qualityGuard.ok) {
+        notifyUser(qualityGuard.message || "Action qualité non autorisée.", "error");
+        return;
+      }
+      if (typeof navigator !== "undefined" && navigator.onLine === false) {
+        notifyUser("Connexion internet requise pour enregistrer une décision de contrôle qualité.", "error");
+        return;
+      }
+      if (typeof submitSupabaseQualityReview !== "function") {
+        notifyUser("Erreur technique : service serveur de contrôle qualité indisponible.", "error");
+        return;
+      }
+      if (typeof applyRemoteEntityRow !== "function") {
+        notifyUser("Erreur technique : adoption canonique serveur indisponible.", "error");
+        return;
+      }
+
+      const operationFingerprint = JSON.stringify([caseId, cleanStatus, cleanReason]);
+      if (!form.dataset.qualityOperationId || form.dataset.qualityOperationFingerprint !== operationFingerprint) {
+        const suffix = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+        form.dataset.qualityOperationId = `qc-op-${suffix}`;
+        form.dataset.qualityOperationFingerprint = operationFingerprint;
+      }
+
+      let response;
+      try {
+        response = await submitSupabaseQualityReview({
+          caseId,
+          status: cleanStatus,
+          reason: cleanReason,
+          operationId: form.dataset.qualityOperationId,
+        });
+      } catch (error) {
+        notifyUser(error?.message || "Erreur de communication avec le serveur.", "error");
+        return;
+      }
+      if (!response?.ok) {
+        notifyUser(response?.message || "Échec de l'enregistrement de la décision qualité.", "error");
+        return;
+      }
+
+      const outcome = Array.isArray(response.data) ? response.data[0] : response.data;
+      const canonical = outcome?.canonical;
+      const serverVersion = canonical?.entity_version
+        ?? canonical?.server_version
+        ?? outcome?.server_version
+        ?? outcome?.accepted_version;
+      const workshopId = typeof getSupabaseWorkshopId === "function" ? String(getSupabaseWorkshopId() || "") : "";
+      if (!canonical?.payload
+        || String(canonical.entity_type || "") !== "case"
+        || String(canonical.entity_id || "") !== String(caseId)
+        || (workshopId && String(canonical.workshop_id || "") !== workshopId)
+        || serverVersion == null) {
+        notifyUser("Erreur technique : réponse canonique qualité invalide.", "error");
+        return;
+      }
+
+      try {
+        const adopted = await applyRemoteEntityRow({ ...canonical, entity_version: serverVersion }, { force: true });
+        if (!adopted) throw new Error("La version canonique qualité n'a pas été adoptée.");
+        const persisted = await saveState({
+          skipCloud: true,
+          skipSnapshot: true,
+          boundedEntityDetection: true,
+          cloudReason: "quality-review:canonical-adoption",
+        });
+        if (!persisted) throw new Error("Persistance locale de la décision qualité non confirmée.");
+      } catch (error) {
+        notifyUser(error?.message || "Adoption locale de la décision qualité impossible.", "error");
+        return;
+      }
+
+      delete form.dataset.qualityOperationId;
+      delete form.dataset.qualityOperationFingerprint;
+      notifyUser("Statut qualité mis à jour.", "success");
+      renderReceptionWorkspace();
+      if (typeof renderCases === "function") renderCases();
+      return;
+    }
+
     const result = advanceReceptionWorkflow(caseId, "update_quality_status", { status, reason });
     if (result.ok) { saveState({ changedCaseIds: [caseId], flushCloud: true, cloudReason: "reception-quality-update" }); notifyUser("Statut qualité mis à jour.", "success"); renderReceptionWorkspace(); if (typeof renderCases === "function") renderCases(); }
     else notifyUser(result.message, "error");

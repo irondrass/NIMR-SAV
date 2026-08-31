@@ -701,6 +701,216 @@ main {
   background: #dcf3e8;
 }
 
+.workshop-progress-section {
+  margin-top: 24px;
+  padding-top: 22px;
+  border-top: 1px solid var(--line);
+}
+
+.workshop-progress-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.workshop-progress-heading h2,
+.workshop-progress-heading p {
+  margin: 0;
+}
+
+.workshop-progress-heading p:not(.workshop-progress-count) {
+  margin-top: 5px;
+  color: var(--muted);
+}
+
+.workshop-progress-count {
+  flex: 0 0 auto;
+  padding: 7px 11px;
+  border-radius: 999px;
+  color: var(--brand);
+  background: var(--brand-light);
+  font-size: 0.82rem;
+  font-weight: 900;
+}
+
+.workshop-progress-toolbar {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(220px, 320px);
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.workshop-progress-toolbar label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.workshop-progress-toolbar input,
+.workshop-progress-toolbar select {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 44px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  background: #fff;
+  font: inherit;
+  font-size: 1rem;
+}
+
+.workshop-progress-board {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  margin-top: 14px;
+}
+
+.workshop-progress-row {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  padding: 12px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-left: 6px solid var(--brand);
+  border-radius: var(--radius);
+  color: var(--ink);
+  text-align: left;
+  background: #fff;
+  box-shadow: var(--shadow-sm);
+  transition: var(--transition);
+}
+
+.workshop-progress-row:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--brand) 34%, var(--line));
+  box-shadow: var(--shadow);
+}
+
+.workshop-progress-row.priority-level-0,
+.workshop-progress-row.priority-level-1 {
+  border-left-color: var(--danger);
+}
+
+.workshop-progress-row.priority-level-2 {
+  border-left-color: var(--warn-text);
+}
+
+.workshop-progress-row.priority-level-3,
+.workshop-progress-row.priority-level-4 {
+  border-left-color: var(--ok-text);
+}
+
+.workshop-progress-cell {
+  display: grid;
+  align-content: start;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  background: var(--soft);
+  overflow-wrap: anywhere;
+}
+
+.workshop-progress-cell > span,
+.workshop-progress-cell > strong {
+  display: block;
+}
+
+.workshop-progress-cell > span {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.workshop-progress-cell-label {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.workshop-progress-priority {
+  justify-self: start;
+  padding: 4px 8px;
+  border-radius: 999px;
+  color: var(--brand);
+  background: var(--brand-light);
+  font-size: 0.74rem;
+}
+
+.priority-level-0 .workshop-progress-priority,
+.priority-level-1 .workshop-progress-priority,
+.workshop-progress-cell.is-late strong,
+.workshop-progress-cell.is-late span {
+  color: var(--danger-text);
+  background: #fff0f3;
+}
+
+.priority-level-2 .workshop-progress-priority,
+.workshop-progress-cell.is-stale strong {
+  color: var(--warn-text);
+  background: #fff7e8;
+}
+
+.priority-level-3 .workshop-progress-priority,
+.priority-level-4 .workshop-progress-priority {
+  color: var(--ok-text);
+  background: #e8f7ef;
+}
+
+.workshop-progress-empty {
+  padding: 24px;
+  text-align: center;
+}
+
+.workshop-progress-row:focus-visible {
+  outline: 3px solid #0b63ce;
+  outline-offset: 3px;
+  box-shadow: 0 0 0 5px rgba(11, 99, 206, 0.22);
+}
+
+@media (max-width: 1100px) {
+  .workshop-progress-row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 820px) {
+  .workshop-progress-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .workshop-progress-count {
+    align-self: flex-start;
+  }
+
+  .workshop-progress-toolbar,
+  .workshop-progress-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .workshop-progress-toolbar,
+  .workshop-progress-row {
+    grid-template-columns: 1fr;
+  }
+
+  .workshop-progress-row {
+    min-height: 44px;
+    padding: 10px;
+  }
+}
+
 .technician-panel,
 .technician-manager-panel {
   padding: 18px;
@@ -6914,6 +7124,7 @@ button:disabled,
   .metric:hover,
   .case-card:hover,
   .today-card:hover,
+  .workshop-progress-row:hover,
   .sav-kpi-card:hover,
   .funnel-step-btn:hover,
   .pilotage-alert:hover,
@@ -6947,7 +7158,8 @@ button:disabled,
 @media print {
   .mobile-menu-btn,
   .skip-link,
-  #pilotage-priority-status {
+  #pilotage-priority-status,
+  .workshop-progress-toolbar {
     display: none !important;
   }
 }

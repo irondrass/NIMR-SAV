@@ -20,8 +20,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <script src="js/version.js?v=23.3.17"></script>
-    <link rel="stylesheet" href="styles.css?v=23.3.17" />
+    <script src="js/version.js?v=23.3.18"></script>
+    <link rel="stylesheet" href="styles.css?v=23.3.18" />
   </head>
   <body>
     <button id="mobile-menu-toggle" class="mobile-menu-btn" type="button" aria-label="Ouvrir la navigation principale" aria-expanded="false" aria-controls="primary-sidebar" hidden>
@@ -202,6 +202,34 @@
               <span class="status-pill" id="today-count-pill">0 dossier</span>
             </div>
             <div class="today-board" id="today-workshop-board"></div>
+            <section class="workshop-progress-section" aria-labelledby="workshop-progress-title">
+              <div class="workshop-progress-heading">
+                <div>
+                  <h2 id="workshop-progress-title">État d’avancement des véhicules atelier</h2>
+                  <p>Suivi en temps réel des véhicules réceptionnés, blocages, responsables et prochaines actions.</p>
+                </div>
+                <p class="workshop-progress-count" id="workshop-progress-status" role="status" aria-live="polite" aria-atomic="true">0 véhicule à l’atelier</p>
+              </div>
+              <div class="workshop-progress-toolbar">
+                <label for="workshop-progress-search">
+                  <span>Rechercher un véhicule</span>
+                  <input id="workshop-progress-search" type="search" placeholder="Client, immat., VIN, OR…" autocomplete="off" />
+                </label>
+                <label for="workshop-progress-filter">
+                  <span>Filtrer l’avancement</span>
+                  <select id="workshop-progress-filter">
+                    <option value="all">Tous</option>
+                    <option value="late">En retard</option>
+                    <option value="blocked">Bloqués</option>
+                    <option value="stale">Sans évolution &gt; 24 h</option>
+                    <option value="in_progress">En cours</option>
+                    <option value="completed">Travaux terminés</option>
+                    <option value="ready">À livrer</option>
+                  </select>
+                </label>
+              </div>
+              <div class="workshop-progress-board" id="workshop-progress-board" aria-labelledby="workshop-progress-title"></div>
+            </section>
           </section>
         </section>
 
@@ -1273,22 +1301,22 @@
       </div>
     </div>
 
-    <script src="vendor/pdf.min.js?v=23.3.17" defer></script>
-    <script src="js/utils.js?v=23.3.17" defer></script>
-    <script src="js/state.js?v=23.3.17" defer></script>
-    <script src="js/ui-cases.js?v=23.3.17" defer></script>
-    <script src="js/estimate-import.js?v=23.3.17" defer></script>
-    <script src="js/ui-planning.js?v=23.3.17" defer></script>
-    <script src="js/photos.js?v=23.3.17" defer></script>
-    <script src="js/storage.js?v=23.3.17" defer></script>
-    <script src="js/work-hours-sync.js?v=23.3.17" defer></script>
-    <script src="js/planning.js?v=23.3.17" defer></script>
-    <script src="js/exports.js?v=23.3.17" defer></script>
-    <script src="js/business-rules-v2187.js?v=23.3.17" defer></script>
+    <script src="vendor/pdf.min.js?v=23.3.18" defer></script>
+    <script src="js/utils.js?v=23.3.18" defer></script>
+    <script src="js/state.js?v=23.3.18" defer></script>
+    <script src="js/ui-cases.js?v=23.3.18" defer></script>
+    <script src="js/estimate-import.js?v=23.3.18" defer></script>
+    <script src="js/ui-planning.js?v=23.3.18" defer></script>
+    <script src="js/photos.js?v=23.3.18" defer></script>
+    <script src="js/storage.js?v=23.3.18" defer></script>
+    <script src="js/work-hours-sync.js?v=23.3.18" defer></script>
+    <script src="js/planning.js?v=23.3.18" defer></script>
+    <script src="js/exports.js?v=23.3.18" defer></script>
+    <script src="js/business-rules-v2187.js?v=23.3.18" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
-    <script src="js/supabase-config.js?v=23.3.17" defer></script>
-    <script src="js/supabase-client.js?v=23.3.17" defer></script>
-    <script src="js/supabase-sync.js?v=23.3.17" defer></script>
-    <script src="app.js?v=23.3.17" defer></script>
+    <script src="js/supabase-config.js?v=23.3.18" defer></script>
+    <script src="js/supabase-client.js?v=23.3.18" defer></script>
+    <script src="js/supabase-sync.js?v=23.3.18" defer></script>
+    <script src="app.js?v=23.3.18" defer></script>
   </body>
 </html>

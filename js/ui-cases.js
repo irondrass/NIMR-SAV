@@ -347,7 +347,7 @@ function render() {
 
 const UNAUTHORIZED_VIEW_SCRUB_SELECTORS = {
   dossiers: ["#case-list", "#case-detail"],
-  today: ["#today-workshop-board"],
+  today: ["#today-workshop-board", "#workshop-progress-board"],
   pilotage: ["#sav-kpi-grid", "#sav-dashboard-load-grid", "#pilotage-alerts", "#pilotage-today-summary", "#pilotage-case-funnel", "#kanban-board"],
   planning: ["#gantt", "#mobile-planning-list"],
   technician: ["#technician-task-list", "#technician-manager-board"],
@@ -1821,6 +1821,12 @@ const TODAY_GROUP_CONFIG = [
   { key: "blocked", label: "Dossiers bloqués" },
 ];
 
+const WORKSHOP_PROGRESS_STALE_HOURS = 24;
+const WORKSHOP_PROGRESS_BLOCKED_CRITICAL_HOURS = 7 * 24;
+
+let workshopProgressSearch = "";
+let workshopProgressFilter = "all";
+
 function renderTodayWorkshop(now = new Date()) {
   const board = $("#today-workshop-board");
   if (!board) return;
@@ -1838,6 +1844,369 @@ function renderTodayWorkshop(now = new Date()) {
       renderCaseDetail();
     });
   });
+  renderWorkshopProgressBoard(now);
+}
+
+function getWorkshopProgressValidDate(value) {
+  if (!value) return null;
+  const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function isWorkshopProgressActiveCase(item) {
+  if (!item || item.deletedAt || item.archivedAt) return false;
+  const flags = item.flags || {};
+  if (flags.received !== true || flags.delivered === true || flags.invoiced === true) return false;
+  return !(typeof isCaseOperationallyClosed === "function" && isCaseOperationallyClosed(item));
+}
+
+function isWorkshopProgressUsableBooking(booking) {
+  const rawStatus = String(booking?.status || "").trim().toLowerCase();
+  return Boolean(
+    booking
+    && booking.type !== "leave"
+    && booking.temporary !== true
+    && !booking.deletedAt
+    && !booking.cancelledAt
+    && !["cancelled", "canceled"].includes(rawStatus)
+  );
+}
+
+function getWorkshopProgressBookings(item) {
+  return getCaseBookings(item).filter(isWorkshopProgressUsableBooking);
+}
+
+function getWorkshopProgressEta(item) {
+  const candidates = [
+    item?.revisedEstimatedDelivery,
+    item?.deliveryEstimate?.current,
+    item?.initialEstimatedDelivery,
+    item?.appointment?.delivery,
+  ];
+  for (const value of candidates) {
+    const date = getWorkshopProgressValidDate(value);
+    if (date) return date;
+  }
+  return null;
+}
+
+function isWorkshopProgressBookingBlocked(booking) {
+  return typeof isBookingTaskBlocked === "function"
+    ? isBookingTaskBlocked(booking)
+    : Boolean(booking?.blockReason || booking?.blockedAt);
+}
+
+function getWorkshopProgressBookingLabel(booking) {
+  if (!booking) return "";
+  return String(booking.title || getDurationLabel(booking.key) || "Étape atelier").trim();
+}
+
+function getWorkshopProgressCurrentStep(item, now = new Date()) {
+  const bookings = getWorkshopProgressBookings(item)
+    .slice()
+    .sort((left, right) => {
+      const leftDate = getWorkshopProgressValidDate(left.start || left.plannedStart)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+      const rightDate = getWorkshopProgressValidDate(right.start || right.plannedStart)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+      return leftDate - rightDate || String(left.id || "").localeCompare(String(right.id || ""));
+    });
+  const byStatus = (status) => bookings.find((booking) => getBookingOperationalStatus(booking) === status);
+  const selected = byStatus("started")
+    || byStatus("paused")
+    || bookings.find(isWorkshopProgressBookingBlocked)
+    || byStatus("planned")
+    || null;
+  if (selected) {
+    const operationalStatus = getBookingOperationalStatus(selected);
+    const status = isWorkshopProgressBookingBlocked(selected) && !["started", "paused"].includes(operationalStatus)
+      ? "blocked"
+      : operationalStatus;
+    return { booking: selected, label: getWorkshopProgressBookingLabel(selected), status };
+  }
+  if (item?.flags?.workCompleted) return { booking: null, label: "Travaux terminés", status: "completed" };
+  if (item?.flags?.received && bookings.length === 0) return { booking: null, label: "À planifier", status: "unplanned" };
+  const status = getCaseStatus(item);
+  return {
+    booking: null,
+    label: typeof getCaseStatusLabel === "function" ? getCaseStatusLabel(status) : (statusLabels[status] || "Dossier atelier"),
+    status,
+  };
+}
+
+function getWorkshopProgressResponsibleNames(booking) {
+  if (!booking) return "Non affecté";
+  const resourceIds = typeof getBookingHumanResourceIds === "function"
+    ? getBookingHumanResourceIds(booking)
+    : [];
+  const names = [...new Set(resourceIds.map((resourceId) => getResource(resourceId)?.name).filter(Boolean))];
+  return names.length ? names.join(", ") : "Non affecté";
+}
+
+function getWorkshopProgressTaskKey(booking) {
+  if (typeof getBookingBusinessTaskId === "function") return getBookingBusinessTaskId(booking);
+  return String(booking?.businessTaskId || booking?.parentBookingId || booking?.id || "");
+}
+
+function getWorkshopProgressTaskProgress(bookings) {
+  const families = new Map();
+  bookings.forEach((booking) => {
+    const key = getWorkshopProgressTaskKey(booking);
+    if (!key) return;
+    if (!families.has(key)) families.set(key, []);
+    families.get(key).push(booking);
+  });
+  const total = families.size;
+  const completed = [...families.values()].filter((family) => (
+    family.length > 0 && family.every((booking) => getBookingOperationalStatus(booking) === "completed")
+  )).length;
+  return {
+    completed,
+    total,
+    label: total ? `${completed} / ${total} tâche${total > 1 ? "s" : ""} terminée${completed > 1 ? "s" : ""}` : "Aucune tâche planifiée",
+  };
+}
+
+function getWorkshopProgressLastActivityAt(item) {
+  const meaningfulDates = [];
+  const addDate = (value) => {
+    const date = getWorkshopProgressValidDate(value);
+    if (date) meaningfulDates.push(date);
+  };
+  addDate(item?.actualRepairStart);
+  addDate(item?.actualRepairEnd);
+  [
+    "vehicleReceivedAt",
+    "sentToWorkshopAt",
+    "qualityReviewedAt",
+    "qualityReturnRequestedAt",
+    "qualityReworkStartedAt",
+    "qualityRevalidatedAt",
+    "readyForDeliveryAt",
+  ].forEach((field) => addDate(item?.receptionWorkflow?.[field]));
+  (Array.isArray(item?.history) ? item.history : []).forEach((entry) => addDate(entry?.at));
+  getWorkshopProgressBookings(item).forEach((booking) => {
+    [
+      "actualStart",
+      "actualEnd",
+      "startedAt",
+      "completedAt",
+      "pausedAt",
+      "resumedAt",
+      "blockedAt",
+      "rescheduledAt",
+    ].forEach((field) => addDate(booking?.[field]));
+    (Array.isArray(booking?.notes) ? booking.notes : []).forEach((note) => addDate(note?.at));
+    (Array.isArray(booking?.workSessions) ? booking.workSessions : []).forEach((session) => {
+      ["startedAt", "pausedAt", "resumedAt", "completedAt"].forEach((field) => addDate(session?.[field]));
+    });
+  });
+  (Array.isArray(item?.workSessions) ? item.workSessions : []).forEach((session) => {
+    ["startedAt", "pausedAt", "resumedAt", "completedAt"].forEach((field) => addDate(session?.[field]));
+  });
+  if (meaningfulDates.length) return new Date(Math.max(...meaningfulDates.map((date) => date.getTime())));
+  return getWorkshopProgressValidDate(item?.updatedAt) || getWorkshopProgressValidDate(item?.createdAt);
+}
+
+function getWorkshopProgressAgeHours(value, now) {
+  const date = getWorkshopProgressValidDate(value);
+  const reference = getWorkshopProgressValidDate(now);
+  if (!date || !reference) return 0;
+  return Math.max(0, (reference.getTime() - date.getTime()) / (60 * 60 * 1000));
+}
+
+function formatWorkshopProgressAge(hours) {
+  const safeHours = Math.max(0, Number(hours || 0));
+  if (safeHours < 1) return "moins d’1 h";
+  if (safeHours < 48) return `${Math.floor(safeHours)} h`;
+  return `${Math.floor(safeHours / 24)} j`;
+}
+
+function getWorkshopProgressPriorityLabel(row) {
+  if (row.etaOverdue) return "RETARD";
+  if (row.blocked) return "BLOQUÉ";
+  if (row.existingLate) return "RETARD";
+  if (row.stale) return "SANS ÉVOLUTION";
+  if (row.readyForDelivery) return "À LIVRER";
+  if (row.workCompleted) return "TERMINÉ";
+  if (row.inProgress) return "EN COURS";
+  return "À PLANIFIER";
+}
+
+function getWorkshopProgressPriority(row) {
+  if (row.etaOverdue || row.blockedHours >= WORKSHOP_PROGRESS_BLOCKED_CRITICAL_HOURS) return 0;
+  if (row.blocked || row.existingLate) return 1;
+  if (row.stale) return 2;
+  if (row.readyForDelivery) return 3;
+  if (row.workCompleted) return 4;
+  if (row.inProgress) return 5;
+  return 6;
+}
+
+function buildWorkshopProgressRow(item, now = new Date()) {
+  const bookings = getWorkshopProgressBookings(item);
+  const currentStep = getWorkshopProgressCurrentStep(item, now);
+  const eta = getWorkshopProgressEta(item);
+  const lastActivityAt = getWorkshopProgressLastActivityAt(item);
+  const lastActivityHours = getWorkshopProgressAgeHours(lastActivityAt, now);
+  const blocked = isCaseBlocked(item);
+  const blockedHours = blocked ? getCaseBlockedHours(item, now) : 0;
+  const flags = item.flags || {};
+  const row = {
+    item,
+    bookings,
+    currentStep,
+    progress: getWorkshopProgressTaskProgress(bookings),
+    responsible: getWorkshopProgressResponsibleNames(currentStep.booking),
+    receivedAt: getWorkshopProgressValidDate(getCaseVehicleReceivedAt(item)),
+    eta,
+    etaOverdue: Boolean(eta && eta < now && flags.delivered !== true),
+    existingLate: isCaseLate(item, now),
+    blocked,
+    blockedHours,
+    blockerLabel: blocked ? (getCaseBlockerLabel(item) || "Blocage atelier") : "Aucun blocage",
+    blockerDetails: blocked ? String(item.blockerDetails || "").trim() : "",
+    partsLabel: PARTS_STATUS_LABELS[normalizePartsStatus(item.partsStatus)] || "Non vérifié",
+    lastActivityAt,
+    lastActivityHours,
+    stale: lastActivityHours >= WORKSHOP_PROGRESS_STALE_HOURS,
+    inProgress: flags.workStarted === true && flags.workCompleted !== true,
+    workCompleted: flags.workCompleted === true && flags.delivered !== true,
+    readyForDelivery: flags.qualityApproved === true && flags.delivered !== true && flags.invoiced !== true,
+    nextAction: getCaseNextAction(item),
+  };
+  row.late = row.etaOverdue || row.existingLate;
+  row.priority = getWorkshopProgressPriority(row);
+  row.priorityLabel = getWorkshopProgressPriorityLabel(row);
+  return row;
+}
+
+function workshopProgressRowMatchesFilter(row, filter) {
+  const filters = {
+    all: () => true,
+    late: () => row.late,
+    blocked: () => row.blocked,
+    stale: () => row.stale,
+    in_progress: () => row.inProgress,
+    completed: () => row.workCompleted,
+    ready: () => row.readyForDelivery,
+  };
+  return (filters[filter] || filters.all)();
+}
+
+function compareWorkshopProgressRows(left, right) {
+  const leftActivity = left.lastActivityAt?.getTime() ?? 0;
+  const rightActivity = right.lastActivityAt?.getTime() ?? 0;
+  const leftReceived = left.receivedAt?.getTime() ?? 0;
+  const rightReceived = right.receivedAt?.getTime() ?? 0;
+  return left.priority - right.priority
+    || leftActivity - rightActivity
+    || leftReceived - rightReceived
+    || String(left.item.clientName || "").localeCompare(String(right.item.clientName || ""), "fr", { sensitivity: "base" })
+    || String(left.item.id || "").localeCompare(String(right.item.id || ""));
+}
+
+function buildWorkshopProgressBoardModel(now = new Date(), options = {}) {
+  const search = String(options.search ?? workshopProgressSearch).trim();
+  const filter = String(options.filter ?? workshopProgressFilter) || "all";
+  const activeCases = (Array.isArray(state?.cases) ? state.cases : []).filter(isWorkshopProgressActiveCase);
+  const rows = activeCases
+    .filter((item) => caseMatchesGlobalSearch(item, search))
+    .map((item) => buildWorkshopProgressRow(item, now))
+    .filter((row) => workshopProgressRowMatchesFilter(row, filter))
+    .sort(compareWorkshopProgressRows);
+  return { total: activeCases.length, visible: rows.length, search, filter, rows };
+}
+
+function renderWorkshopProgressCell(label, content, className = "") {
+  return `<span class="workshop-progress-cell${className ? ` ${className}` : ""}"><small class="workshop-progress-cell-label">${escapeHtml(label)}</small>${content}</span>`;
+}
+
+function renderWorkshopProgressRow(row) {
+  const item = row.item;
+  const identity = item.plate || item.vin || "Sans immatriculation / VIN";
+  const orderReference = typeof getPrintOrderReference === "function" ? getPrintOrderReference(item) : "";
+  const safeOrderReference = orderReference && orderReference !== item.id ? orderReference : "OR non renseigné";
+  const intervention = getClaimTypeLabel(getCasePrimaryType(item));
+  const blockerDetails = [
+    row.partsLabel,
+    row.blocked ? row.blockerLabel : "",
+    row.blockerDetails,
+    row.blocked && row.blockedHours > 0 ? `Bloqué depuis ${formatWorkshopProgressAge(row.blockedHours)}` : "",
+  ].filter(Boolean).join(" · ");
+  const lastActivity = row.lastActivityAt
+    ? `${formatDateTime(row.lastActivityAt)} · il y a ${formatWorkshopProgressAge(row.lastActivityHours)}`
+    : "Évolution non renseignée";
+  const staleNotice = row.stale ? `<strong>Sans évolution depuis ${escapeHtml(formatWorkshopProgressAge(row.lastActivityHours))}</strong>` : "";
+  const eta = row.eta
+    ? `ETA : ${formatDateTime(row.eta)}${row.etaOverdue ? " · EN RETARD" : ""}`
+    : "ETA non définie";
+  return `
+    <button class="workshop-progress-row priority-level-${row.priority}" type="button" data-workshop-progress-case="${escapeAttr(item.id)}" aria-label="Ouvrir le dossier de ${escapeAttr(item.clientName || identity)}">
+      ${renderWorkshopProgressCell("Priorité", `<strong class="workshop-progress-priority">${escapeHtml(row.priorityLabel)}</strong>`, "priority-cell")}
+      ${renderWorkshopProgressCell("Véhicule / client", `<strong>${escapeHtml(item.vehicle || "Véhicule non renseigné")}</strong><span>${escapeHtml(identity)}</span><span>${escapeHtml(item.clientName || "Client non renseigné")}</span>`, "identity-cell")}
+      ${renderWorkshopProgressCell("OR / intervention", `<strong>${escapeHtml(safeOrderReference)}</strong><span>${escapeHtml(intervention)}</span>`)}
+      ${renderWorkshopProgressCell("Entrée", `<span>${row.receivedAt ? formatDateTime(row.receivedAt) : "Date non renseignée"}</span>`)}
+      ${renderWorkshopProgressCell("Étape actuelle", `<strong>${escapeHtml(row.currentStep.label)}</strong><span>${escapeHtml(row.progress.label)}</span>`)}
+      ${renderWorkshopProgressCell("Responsable", `<strong>${escapeHtml(row.responsible)}</strong>`)}
+      ${renderWorkshopProgressCell("Pièces / blocage", `<span>${escapeHtml(blockerDetails)}</span>`)}
+      ${renderWorkshopProgressCell("Dernière évolution", `<span>${escapeHtml(lastActivity)}</span>${staleNotice}`, row.stale ? "is-stale" : "")}
+      ${renderWorkshopProgressCell("Livraison estimée", `<span>${escapeHtml(eta)}</span>`, row.etaOverdue ? "is-late" : "")}
+      ${renderWorkshopProgressCell("Prochaine action", `<strong>${escapeHtml(row.nextAction?.label || "Consulter le dossier")}</strong>`)}
+    </button>
+  `;
+}
+
+function openWorkshopProgressCase(caseId) {
+  if (!caseId) return;
+  activeCaseId = caseId;
+  activeCaseDetailTab = "resume";
+  setActiveTab("dossiers");
+  renderCases();
+  renderCaseDetail();
+}
+
+function bindWorkshopProgressControls() {
+  const search = $("#workshop-progress-search");
+  const filter = $("#workshop-progress-filter");
+  if (search && search.dataset.workshopProgressBound !== "true") {
+    search.dataset.workshopProgressBound = "true";
+    search.addEventListener("input", () => {
+      workshopProgressSearch = search.value || "";
+      renderWorkshopProgressBoard(new Date());
+    });
+  }
+  if (filter && filter.dataset.workshopProgressBound !== "true") {
+    filter.dataset.workshopProgressBound = "true";
+    filter.addEventListener("change", () => {
+      workshopProgressFilter = filter.value || "all";
+      renderWorkshopProgressBoard(new Date());
+    });
+  }
+}
+
+function renderWorkshopProgressBoard(now = new Date()) {
+  const board = $("#workshop-progress-board");
+  if (!board) return null;
+  const search = $("#workshop-progress-search");
+  const filter = $("#workshop-progress-filter");
+  if (search && search.value !== workshopProgressSearch) search.value = workshopProgressSearch;
+  if (filter && filter.value !== workshopProgressFilter) filter.value = workshopProgressFilter;
+  const model = buildWorkshopProgressBoardModel(now);
+  const status = $("#workshop-progress-status");
+  if (status) {
+    const totalLabel = `${model.total} véhicule${model.total > 1 ? "s" : ""} à l’atelier`;
+    status.textContent = model.visible === model.total && !model.search && model.filter === "all"
+      ? totalLabel
+      : `${totalLabel} · ${model.visible} affiché${model.visible > 1 ? "s" : ""}`;
+  }
+  board.innerHTML = model.rows.length
+    ? model.rows.map(renderWorkshopProgressRow).join("")
+    : `<div class="empty-inline workshop-progress-empty">Aucun véhicule ne correspond à ces critères.</div>`;
+  board.onclick = (event) => {
+    const button = event.target.closest?.("[data-workshop-progress-case]");
+    if (button && board.contains(button)) openWorkshopProgressCase(button.dataset.workshopProgressCase);
+  };
+  bindWorkshopProgressControls();
+  return model;
 }
 
 function getTechnicianDashboardResources() {

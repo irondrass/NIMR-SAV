@@ -96,20 +96,20 @@ function check(name, callback) {
 }
 
 check("A Release and schema remain exact", () => {
-  assert.match(versionSource, /^window\.APP_VERSION = "v23\.3\.17";$/mu);
-  assert.match(versionSource, /^window\.NIMR_BUILD = "v23\.3\.17";$/mu);
-  assert.match(versionSource, /^window\.NIMR_CACHE_NAME = "nimr-sav-v23\.3\.17";$/mu);
-  assert.match(stateSource, /^const APP_VERSION = "v23\.3\.17";$/mu);
+  assert.match(versionSource, /^window\.APP_VERSION = "v23\.3\.18";$/mu);
+  assert.match(versionSource, /^window\.NIMR_BUILD = "v23\.3\.18";$/mu);
+  assert.match(versionSource, /^window\.NIMR_CACHE_NAME = "nimr-sav-v23\.3\.18";$/mu);
+  assert.match(stateSource, /^const APP_VERSION = "v23\.3\.18";$/mu);
   assert.match(stateSource, /^const DB_VERSION = 2;$/mu);
   assert.match(stateSource, /^const CURRENT_DATA_SCHEMA_VERSION = 2;$/mu);
   assert.match(stateSource, /^const CANONICAL_TASK_MODEL_VERSION = 1;$/mu);
-  assert.match(swSource, /^const CACHE_NAME = "nimr-sav-v23\.3\.17";$/mu);
-  assert.match(appSource, /pdf\.worker\.min\.js\?v=23\.3\.17/u);
-  assert.match(appSource, /sw\.js\?v=23\.3\.17/u);
-  assert.match(indexSource, /styles\.css\?v=23\.3\.17/u);
-  assert.match(indexSource, /app\.js\?v=23\.3\.17/u);
-  assert.match(offlineSource, /styles\.css\?v=23\.3\.17/u);
-  assert.match(estimateImportSource, /pdf\.worker\.min\.js\?v=23\.3\.17/u);
+  assert.match(swSource, /^const CACHE_NAME = "nimr-sav-v23\.3\.18";$/mu);
+  assert.match(appSource, /pdf\.worker\.min\.js\?v=23\.3\.18/u);
+  assert.match(appSource, /sw\.js\?v=23\.3\.18/u);
+  assert.match(indexSource, /styles\.css\?v=23\.3\.18/u);
+  assert.match(indexSource, /app\.js\?v=23\.3\.18/u);
+  assert.match(offlineSource, /styles\.css\?v=23\.3\.18/u);
+  assert.match(estimateImportSource, /pdf\.worker\.min\.js\?v=23\.3\.18/u);
   assert.doesNotMatch([appSource, indexSource, stateSource, versionSource, swSource].join("\n"), /23\.3\.16/u);
 });
 

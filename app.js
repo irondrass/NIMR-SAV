@@ -130,7 +130,7 @@ function bindSyncConflictUsability() {
 
 function configurePdfWorker() {
   if (window.pdfjsLib?.GlobalWorkerOptions) {
-    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.15";
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.16";
   }
 }
 
@@ -157,10 +157,8 @@ function bindMainNavigation() {
       }
       if (tab === "pilotage") {
         bindSavDashboardFilters();
-        renderSavKpis();
-        renderSavDashboardLoads();
+        renderDirectorDashboard();
         renderTodayWorkshop();
-        renderPilotageAlerts();
         renderKanban();
       }
     });
@@ -1309,7 +1307,7 @@ function registerServiceWorker() {
   });
   const registerCurrentServiceWorker = async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=23.3.15", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=23.3.16", { updateViaCache: "none" });
       const refreshRegistration = async () => {
         try {
           await registration.update?.();

@@ -1834,21 +1834,16 @@ function showTextPromptModal(title, htmlMessage, placeholder) {
     const input = document.createElement("input");
     input.type = "text";
     input.id = "custom-prompt-input";
-    input.style.width = "100%";
-    input.style.padding = "8px";
-    input.style.border = "1px solid var(--border-color,#cfe0e8)";
-    input.style.borderRadius = "8px";
-    input.style.boxSizing = "border-box";
+    input.className = "custom-modal-input";
     input.placeholder = placeholder || "";
     input.autocomplete = "off";
     body.appendChild(input);
-    overlay.hidden = false;
-    if (input) input.focus();
-    const cleanup = () => { overlay.hidden = true; if (titleEl) titleEl.textContent = oldTitle; cancelBtn.removeEventListener("click", onCancel); confirmBtn.removeEventListener("click", onConfirm); };
+    const cleanup = () => { closeAccessibleCustomModal(); if (titleEl) titleEl.textContent = oldTitle; cancelBtn.removeEventListener("click", onCancel); confirmBtn.removeEventListener("click", onConfirm); };
     const onCancel = () => { cleanup(); resolve(null); };
     const onConfirm = () => { const val = input ? input.value.trim() : ""; cleanup(); resolve(val); };
     cancelBtn.addEventListener("click", onCancel);
     confirmBtn.addEventListener("click", onConfirm);
+    openAccessibleCustomModal({ initialFocus: input, onCancel });
   });
 }
 

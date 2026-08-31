@@ -20,8 +20,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <script src="js/version.js?v=23.3.18"></script>
-    <link rel="stylesheet" href="styles.css?v=23.3.18" />
+    <script src="js/version.js?v=23.3.19"></script>
+    <link rel="stylesheet" href="styles.css?v=23.3.19" />
   </head>
   <body>
     <button id="mobile-menu-toggle" class="mobile-menu-btn" type="button" aria-label="Ouvrir la navigation principale" aria-expanded="false" aria-controls="primary-sidebar" hidden>
@@ -582,13 +582,70 @@
 
             <div class="settings-workspace-panel" id="settings-workspace-administration" data-settings-workspace-panel="administration" role="tabpanel" aria-labelledby="settings-workspace-tab-administration" hidden>
               <div class="settings-grid">
-                <section class="panel users-roles-panel" data-admin-technical-panel>
+                <section class="panel users-roles-panel">
                   <div class="panel-heading">
                     <div>
-                      <h1>Utilisateurs & rôles</h1>
-                      <p>Gérer les profils de l'atelier, leurs rôles, permissions et ressources liées.</p>
+                      <h1>Comptes & accès</h1>
+                      <p>Comprendre l’identité Supabase, l’appartenance atelier, le miroir local et la protection de ce poste.</p>
                     </div>
                   </div>
+                  <div class="account-access-grid" id="account-access-foundation">
+                    <article class="account-access-card" aria-labelledby="account-connected-title">
+                      <div class="account-access-card-heading">
+                        <div>
+                          <h2 id="account-connected-title">Compte connecté</h2>
+                          <span class="account-source-badge">Source : Supabase</span>
+                        </div>
+                        <strong class="account-overall-status" id="account-access-overall-status" data-status="not_authorized">Non autorisé atelier</strong>
+                      </div>
+                      <dl class="account-access-details">
+                        <div><dt>Identité authentifiée</dt><dd id="account-auth-identity">Aucune identité Supabase</dd></div>
+                        <div><dt>Rôle atelier serveur</dt><dd id="account-server-role">Non validé</dd></div>
+                        <div><dt>Ressource liée</dt><dd id="account-server-resource">—</dd></div>
+                        <div><dt>Session</dt><dd id="account-session-state">Aucune session Supabase</dd></div>
+                        <div><dt>Appartenance atelier</dt><dd id="account-membership-state">Indisponible</dd></div>
+                      </dl>
+                    </article>
+
+                    <article class="account-access-card" aria-labelledby="account-local-title">
+                      <div class="account-access-card-heading">
+                        <div>
+                          <h2 id="account-local-title">Profil local</h2>
+                          <span class="account-source-badge local">Source : Miroir local</span>
+                        </div>
+                      </div>
+                      <dl class="account-access-details">
+                        <div><dt>Nom local</dt><dd id="account-local-name">Aucun profil local</dd></div>
+                        <div><dt>Rôle canonique local</dt><dd id="account-local-role">Non renseigné</dd></div>
+                        <div><dt>Ressource locale</dt><dd id="account-local-resource">Aucune ressource locale</dd></div>
+                        <div><dt>État local</dt><dd id="account-local-state">Absent</dd></div>
+                      </dl>
+                      <p class="account-authority-note">Les droits réels en ligne proviennent du compte Supabase et de l'appartenance atelier.</p>
+                    </article>
+
+                    <article class="account-access-card account-access-diagnostic" aria-labelledby="account-diagnostic-title">
+                      <div class="account-access-card-heading">
+                        <div>
+                          <h2 id="account-diagnostic-title">Diagnostic d’accès</h2>
+                          <span>Contrôles en lecture seule — aucune correction automatique</span>
+                        </div>
+                      </div>
+                      <dl class="account-access-checks" id="account-access-diagnostics"></dl>
+                      <ul class="account-access-issues" id="account-access-issues" hidden></ul>
+                      <div class="account-provisioning-placeholder">
+                        <button class="ghost-button" type="button" disabled aria-describedby="account-provisioning-note">Inviter un collaborateur</button>
+                        <span id="account-provisioning-note">Provisioning serveur sécurisé — prochaine étape</span>
+                      </div>
+                    </article>
+                  </div>
+
+                  <section class="local-profile-management" id="local-profile-management" aria-labelledby="local-profile-management-title">
+                    <div class="section-heading compact-heading">
+                      <div>
+                        <h2 id="local-profile-management-title">Gestion des profils locaux</h2>
+                        <span>Compatibilité locale uniquement. Ce profil local ne crée pas de compte Supabase.</span>
+                      </div>
+                    </div>
                   <form class="resource-form" id="user-form">
                     <input name="userId" type="hidden" />
                     <input name="name" required placeholder="Nom complet" />
@@ -613,7 +670,7 @@
                     <div class="backup-actions wide">
                       <button class="primary-button" type="submit" id="user-submit-btn">
                         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
-                        <span id="user-submit-label">Ajouter l'utilisateur</span>
+                        <span id="user-submit-label">Ajouter un profil local</span>
                       </button>
                       <button class="ghost-button" type="button" id="user-cancel-btn" hidden>
                         Annuler
@@ -622,15 +679,17 @@
                   </form>
                   <div id="users-duplicates-alert" hidden></div>
                   <div class="resource-list" id="users-list"></div>
+                  </section>
 
                   <div class="section-heading compact-heading">
                     <div>
-                      <h2>Utilisateur actif actuel</h2>
-                      <span>Sélectionner l'utilisateur pour simuler ou basculer les permissions locales (mode offline).</span>
+                      <h2>Profil local actif — LOCAL / HORS LIGNE</h2>
+                      <span id="current-user-selector-note">Ce sélecteur ne crée pas de session Supabase et ne modifie pas les droits serveur.</span>
                     </div>
                   </div>
                   <div class="calendar-summary">
-                    <select id="current-user-selector" style="min-width: 240px;"></select>
+                    <label class="account-local-selector-label" for="current-user-selector">Profil local de compatibilité</label>
+                    <select id="current-user-selector" aria-describedby="current-user-selector-note"></select>
                   </div>
                   <div class="calendar-summary" style="display: flex; flex-direction: column; gap: 8px; margin-top: 10px;">
                     <label class="check-card" style="margin: 0; align-self: flex-start;">
@@ -720,12 +779,12 @@
                   <div class="panel-heading">
                     <div>
                       <h1>Sécurité du poste</h1>
-                      <p>Verrou local, exports chiffrés et nettoyage des données de ce navigateur</p>
+                      <p>PIN local — protection du poste, exports chiffrés et nettoyage des données de ce navigateur</p>
                     </div>
                   </div>
                   <form class="security-form" id="local-pin-form">
                     <label>
-                      PIN local
+                      PIN local — protection du poste
                       <input name="pin" type="password" inputmode="numeric" autocomplete="new-password" minlength="6" placeholder="6 chiffres non évidents" />
                     </label>
                     <label>
@@ -1301,22 +1360,22 @@
       </div>
     </div>
 
-    <script src="vendor/pdf.min.js?v=23.3.18" defer></script>
-    <script src="js/utils.js?v=23.3.18" defer></script>
-    <script src="js/state.js?v=23.3.18" defer></script>
-    <script src="js/ui-cases.js?v=23.3.18" defer></script>
-    <script src="js/estimate-import.js?v=23.3.18" defer></script>
-    <script src="js/ui-planning.js?v=23.3.18" defer></script>
-    <script src="js/photos.js?v=23.3.18" defer></script>
-    <script src="js/storage.js?v=23.3.18" defer></script>
-    <script src="js/work-hours-sync.js?v=23.3.18" defer></script>
-    <script src="js/planning.js?v=23.3.18" defer></script>
-    <script src="js/exports.js?v=23.3.18" defer></script>
-    <script src="js/business-rules-v2187.js?v=23.3.18" defer></script>
+    <script src="vendor/pdf.min.js?v=23.3.19" defer></script>
+    <script src="js/utils.js?v=23.3.19" defer></script>
+    <script src="js/state.js?v=23.3.19" defer></script>
+    <script src="js/ui-cases.js?v=23.3.19" defer></script>
+    <script src="js/estimate-import.js?v=23.3.19" defer></script>
+    <script src="js/ui-planning.js?v=23.3.19" defer></script>
+    <script src="js/photos.js?v=23.3.19" defer></script>
+    <script src="js/storage.js?v=23.3.19" defer></script>
+    <script src="js/work-hours-sync.js?v=23.3.19" defer></script>
+    <script src="js/planning.js?v=23.3.19" defer></script>
+    <script src="js/exports.js?v=23.3.19" defer></script>
+    <script src="js/business-rules-v2187.js?v=23.3.19" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
-    <script src="js/supabase-config.js?v=23.3.18" defer></script>
-    <script src="js/supabase-client.js?v=23.3.18" defer></script>
-    <script src="js/supabase-sync.js?v=23.3.18" defer></script>
-    <script src="app.js?v=23.3.18" defer></script>
+    <script src="js/supabase-config.js?v=23.3.19" defer></script>
+    <script src="js/supabase-client.js?v=23.3.19" defer></script>
+    <script src="js/supabase-sync.js?v=23.3.19" defer></script>
+    <script src="app.js?v=23.3.19" defer></script>
   </body>
 </html>

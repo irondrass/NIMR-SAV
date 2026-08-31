@@ -25,18 +25,18 @@ function createDashboardContext(filename) {
   return createNimrVmContext({ filename });
 }
 
-check("A Exact v23.3.18 release and cache contract", () => {
-  assert.match(versionSource, /^window\.APP_VERSION = "v23\.3\.18";$/mu);
-  assert.match(versionSource, /^window\.NIMR_BUILD = "v23\.3\.18";$/mu);
-  assert.match(versionSource, /^window\.NIMR_CACHE_NAME = "nimr-sav-v23\.3\.18";$/mu);
-  assert.match(stateSource, /^const APP_VERSION = "v23\.3\.18";$/mu);
-  assert.match(swSource, /^const CACHE_NAME = "nimr-sav-v23\.3\.18";$/mu);
-  assert.match(appSource, /pdf\.worker\.min\.js\?v=23\.3\.18/u);
-  assert.match(appSource, /sw\.js\?v=23\.3\.18/u);
-  assert.match(indexSource, /styles\.css\?v=23\.3\.18/u);
-  assert.match(indexSource, /app\.js\?v=23\.3\.18/u);
-  assert.match(offlineSource, /styles\.css\?v=23\.3\.18/u);
-  assert.match(estimateImportSource, /pdf\.worker\.min\.js\?v=23\.3\.18/u);
+check("A Exact v23.3.19 release and cache contract", () => {
+  assert.match(versionSource, /^window\.APP_VERSION = "v23\.3\.19";$/mu);
+  assert.match(versionSource, /^window\.NIMR_BUILD = "v23\.3\.19";$/mu);
+  assert.match(versionSource, /^window\.NIMR_CACHE_NAME = "nimr-sav-v23\.3\.19";$/mu);
+  assert.match(stateSource, /^const APP_VERSION = "v23\.3\.19";$/mu);
+  assert.match(swSource, /^const CACHE_NAME = "nimr-sav-v23\.3\.19";$/mu);
+  assert.match(appSource, /pdf\.worker\.min\.js\?v=23\.3\.19/u);
+  assert.match(appSource, /sw\.js\?v=23\.3\.19/u);
+  assert.match(indexSource, /styles\.css\?v=23\.3\.19/u);
+  assert.match(indexSource, /app\.js\?v=23\.3\.19/u);
+  assert.match(offlineSource, /styles\.css\?v=23\.3\.19/u);
+  assert.match(estimateImportSource, /pdf\.worker\.min\.js\?v=23\.3\.19/u);
   assert.match(stateSource, /^const CURRENT_DATA_SCHEMA_VERSION = 2;$/mu);
   assert.match(stateSource, /^const CANONICAL_TASK_MODEL_VERSION = 1;$/mu);
   assert.match(stateSource, /^const DB_VERSION = 2;$/mu);

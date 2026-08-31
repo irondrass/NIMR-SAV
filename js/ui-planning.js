@@ -632,17 +632,126 @@ function renderResourceLeaves() {
   });
 }
 
+function getAccountAccessRoleLabel(role) {
+  return CANONICAL_USER_ROLES[role] || USER_ROLES[role] || role || "Non renseigné";
+}
+
+function renderAccountAccessFoundation(snapshot = null) {
+  const model = snapshot || (typeof getAccountAccessSnapshot === "function" ? getAccountAccessSnapshot() : null);
+  const root = document.getElementById("account-access-foundation");
+  if (!root || !model) return model;
+  const setText = (id, value) => {
+    const target = document.getElementById(id);
+    if (target) target.textContent = value || "—";
+  };
+  const sessionLabels = {
+    active: "Session Supabase active",
+    offline_local: "Hors ligne — identité locale",
+    missing: "Aucune session Supabase",
+  };
+  const membershipLabels = {
+    active: "Appartenance atelier validée",
+    cached: "Appartenance validée en cache local",
+    invalid_role: "Rôle atelier invalide",
+    not_authorized: "Non autorisé pour cet atelier",
+    unavailable: "Appartenance atelier indisponible",
+  };
+  const localUser = model.localUser;
+  const localResource = model.localResourceId
+    ? (state.resources || []).find((candidate) => candidate?.id === model.localResourceId)
+    : null;
+  setText("account-auth-identity", model.authIdentity?.email || model.authIdentity?.id || "Aucune identité Supabase");
+  setText("account-server-role", model.serverRole ? getAccountAccessRoleLabel(model.serverRole) : "Non validé");
+  setText("account-server-resource", model.resource?.name || model.serverResourceId || (model.serverRole === "technicien" ? "Ressource requise" : "Non requise"));
+  setText("account-session-state", sessionLabels[model.sessionStatus] || model.sessionStatus);
+  setText("account-membership-state", membershipLabels[model.membershipStatus] || model.membershipStatus);
+  setText("account-local-name", localUser?.name || localUser?.email || "Aucun profil local");
+  setText("account-local-role", localUser ? getAccountAccessRoleLabel(model.localRole) : "Non renseigné");
+  setText("account-local-resource", localResource?.name || model.localResourceId || "Aucune ressource locale");
+  setText("account-local-state", localUser ? (model.localAccountActive ? "Actif" : "Inactif") : "Absent");
+
+  const status = document.getElementById("account-access-overall-status");
+  if (status) {
+    status.textContent = model.overallLabel;
+    status.dataset.status = model.overallStatus;
+  }
+
+  const checkState = (condition, attention = false) => condition ? "pass" : (attention ? "attention" : "error");
+  const technicianRole = model.serverRole === "technicien";
+  const diagnostics = [
+    {
+      label: "Session Supabase",
+      status: model.sessionStatus === "active" ? "pass" : (model.sessionStatus === "offline_local" ? "attention" : "error"),
+      detail: sessionLabels[model.sessionStatus] || "Session inconnue",
+    },
+    {
+      label: "Appartenance atelier",
+      status: model.membershipStatus === "active" ? "pass" : (model.membershipStatus === "cached" ? "attention" : "error"),
+      detail: membershipLabels[model.membershipStatus] || "Appartenance inconnue",
+    },
+    {
+      label: "Parité rôle serveur / local",
+      status: model.roleParity === "pass" ? "pass" : (model.roleParity === "warning" ? "attention" : "error"),
+      detail: model.roleParity === "pass" ? "Rôles identiques" : (model.roleParity === "warning" ? "Le serveur reste autoritaire" : "Comparaison indisponible"),
+    },
+    {
+      label: "Ressource liée",
+      status: technicianRole ? checkState(Boolean(model.serverResourceId)) : "pass",
+      detail: technicianRole ? (model.serverResourceId || "Ressource technicien manquante") : "Non requise pour ce rôle",
+    },
+    {
+      label: "Ressource humaine valide",
+      status: technicianRole ? checkState(model.technicianResourceStatus === "valid") : "pass",
+      detail: technicianRole ? (model.technicianResourceStatus === "valid" ? "Ressource humaine active" : "Liaison technicien à corriger") : "Non requise pour ce rôle",
+    },
+    {
+      label: "Compte local actif",
+      status: checkState(model.localAccountActive, !model.online),
+      detail: model.localAccountActive ? "Profil miroir actif" : "Profil miroir absent ou inactif",
+    },
+    {
+      label: "Identité synchronisée",
+      status: checkState(model.identitySynchronized, !model.online),
+      detail: model.identitySynchronized ? "Identités alignées" : "Identité locale différente de la session serveur",
+    },
+  ];
+  const diagnosticRoot = document.getElementById("account-access-diagnostics");
+  if (diagnosticRoot) {
+    diagnosticRoot.innerHTML = diagnostics.map((diagnostic) => `
+      <div class="account-access-check" data-check-status="${escapeAttr(diagnostic.status)}">
+        <dt>${escapeHtml(diagnostic.label)}</dt>
+        <dd><strong>${diagnostic.status === "pass" ? "PASS" : diagnostic.status === "attention" ? "ATTENTION" : "ERREUR"}</strong><span>${escapeHtml(diagnostic.detail)}</span></dd>
+      </div>
+    `).join("");
+  }
+  const issuesRoot = document.getElementById("account-access-issues");
+  if (issuesRoot) {
+    issuesRoot.hidden = model.issues.length === 0;
+    issuesRoot.innerHTML = model.issues.map((issue) => `
+      <li data-issue-severity="${escapeAttr(issue.severity)}"><strong>${issue.severity === "error" ? "ERREUR" : "ATTENTION"}</strong> — ${escapeHtml(issue.message)}</li>
+    `).join("");
+  }
+  return model;
+}
+
 function renderUsersAndRoles() {
   const form = document.getElementById("user-form");
   const list = document.getElementById("users-list");
   const switcher = document.getElementById("current-user-selector");
   if (!form || !list) return;
 
+  const accountSnapshot = renderAccountAccessFoundation();
+
   const canManageUsers = typeof canRenderAction === "function" ? canRenderAction("users.manage") : false;
   const deniedTitle = canManageUsers ? "" : (typeof getPermissionDeniedMessage === "function" ? getPermissionDeniedMessage("users.manage") : "Action réservée administrateur.");
+  const onlineAuthority = typeof hasValidatedOnlineServerAuthority === "function"
+    && hasValidatedOnlineServerAuthority();
+  const serverManagedReadOnlyTitle = "Profil miroir géré par Supabase — modification locale indisponible en ligne.";
 
   form.hidden = !canManageUsers;
   list.hidden = !canManageUsers;
+  const localProfileManagement = document.getElementById("local-profile-management");
+  if (localProfileManagement) localProfileManagement.hidden = !canManageUsers;
   const summary = document.getElementById("roles-permissions-summary");
   if (summary) {
     summary.hidden = !canManageUsers;
@@ -652,16 +761,6 @@ function renderUsersAndRoles() {
     if (prevEl && prevEl.classList.contains("section-heading")) {
       prevEl.hidden = !canManageUsers;
       prevEl.style.display = canManageUsers ? "" : "none";
-    }
-  }
-
-  // Also hide the h1 header of Utilisateurs & rôles if not allowed
-  const panel = form.closest(".users-roles-panel");
-  if (panel) {
-    const heading = panel.querySelector(".panel-heading");
-    if (heading) {
-      heading.hidden = !canManageUsers;
-      heading.style.display = canManageUsers ? "" : "none";
     }
   }
 
@@ -720,11 +819,17 @@ function renderUsersAndRoles() {
     const linkedResource = user.resourceId ? state.resources.find(r => r.id === user.resourceId) : null;
     const canonicalRole = getCanonicalUserRole(user);
     const isTechWithoutRes = canonicalRole === "technicien" && !user.resourceId;
+    const serverManagedProfile = typeof isServerManagedLocalProfile === "function" && isServerManagedLocalProfile(user);
+    const serverManagedReadOnly = onlineAuthority && serverManagedProfile;
+    const mutationDisabled = !canManageUsers || serverManagedReadOnly;
+    const mutationTitle = serverManagedReadOnly ? serverManagedReadOnlyTitle : deniedTitle;
     
     const roleLabel = CANONICAL_USER_ROLES[canonicalRole] || USER_ROLES[user.role] || user.role;
     const activeLabel = user.active !== false ? `<span class="tag ok">Actif</span>` : `<span class="tag warn">Inactif</span>`;
     const currentBadge = isCurrent ? `<span class="tag" style="background:#e0f2fe;color:#0369a1;">Utilisateur actuel</span>` : "";
-    const supabaseBadge = user.authUserId ? `<span class="tag soft" title="Supabase UID: ${escapeAttr(user.authUserId)}">Supabase</span>` : "";
+    const supabaseBadge = serverManagedProfile
+      ? `<span class="tag soft" title="${escapeAttr(serverManagedReadOnlyTitle)}">Géré par Supabase</span>`
+      : "";
     const isDuplicate = user.active !== false && user.email && activeUsers.some(ou => ou.id !== user.id && String(ou.email || "").trim().toLowerCase() === String(user.email || "").trim().toLowerCase() && getCanonicalUserRole(ou) === canonicalRole);
     const duplicateBadge = isDuplicate ? `<span class="tag warn" title="Un autre utilisateur actif a le même email et rôle !">Doublon</span>` : "";
     const warnNoResource = isTechWithoutRes ? `<p class="risk-pill" style="margin-top: 6px; font-size: 0.8rem; font-weight: 700;">Aucune ressource technicien liée à cet utilisateur.</p>` : "";
@@ -749,10 +854,10 @@ function renderUsersAndRoles() {
           ${warnNoResource}
         </div>
         <div class="resource-actions">
-          <button class="ghost-button" type="button" data-edit-user="${escapeAttr(user.id)}" ${canManageUsers ? "" : `disabled title="${escapeAttr(deniedTitle)}"`}>
+          <button class="ghost-button" type="button" data-edit-user="${escapeAttr(user.id)}" ${mutationDisabled ? `disabled title="${escapeAttr(mutationTitle)}"` : ""}>
             Modifier
           </button>
-          <button class="ghost-button" type="button" data-toggle-user-status="${escapeAttr(user.id)}" ${canManageUsers ? "" : `disabled title="${escapeAttr(deniedTitle)}"`}>
+          <button class="ghost-button" type="button" data-toggle-user-status="${escapeAttr(user.id)}" ${mutationDisabled ? `disabled title="${escapeAttr(mutationTitle)}"` : ""}>
             ${user.active === false ? "Activer" : "Désactiver"}
           </button>
         </div>
@@ -761,7 +866,9 @@ function renderUsersAndRoles() {
   }).join("");
 
   if (switcher) {
-    switcher.innerHTML = activeUsers.map(u => {
+    const currentLocalUser = activeUsers.find((user) => user.id === state.currentUserId) || null;
+    const selectorUsers = canManageUsers ? activeUsers : (currentLocalUser ? [currentLocalUser] : []);
+    switcher.innerHTML = selectorUsers.map(u => {
       const emailNorm = String(u.email || "").trim().toLowerCase();
       const canonicalRole = getCanonicalUserRole(u);
       const isDup = emailNorm && activeUsers.some(ou => ou.id !== u.id && String(ou.email || "").trim().toLowerCase() === emailNorm && getCanonicalUserRole(ou) === canonicalRole);
@@ -770,6 +877,16 @@ function renderUsersAndRoles() {
         : `${u.name} (${CANONICAL_USER_ROLES[canonicalRole] || USER_ROLES[u.role] || u.role})`;
       return `<option value="${escapeAttr(u.id)}" ${u.id === state.currentUserId ? 'selected' : ''}>${escapeHtml(displayLabel)}</option>`;
     }).join("");
+    switcher.disabled = onlineAuthority || !canManageUsers;
+    switcher.title = onlineAuthority
+      ? "La session Supabase reste autoritaire. Déconnectez-vous pour changer de compte."
+      : (canManageUsers ? "Sélecteur de compatibilité locale hors ligne" : deniedTitle);
+    const selectorNote = document.getElementById("current-user-selector-note");
+    if (selectorNote) {
+      selectorNote.textContent = onlineAuthority
+        ? "Session Supabase active : ce sélecteur local est désactivé et ne peut pas modifier les droits serveur."
+        : "Mode LOCAL / HORS LIGNE uniquement. Ce sélecteur ne crée pas de session Supabase et ne modifie pas workshop_members.";
+    }
   }
 
   $$("[data-edit-user]", list).forEach((button) => {
@@ -818,4 +935,3 @@ function renderUsersAndRoles() {
     });
   });
 }
-

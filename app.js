@@ -130,7 +130,7 @@ function bindSyncConflictUsability() {
 
 function configurePdfWorker() {
   if (window.pdfjsLib?.GlobalWorkerOptions) {
-    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.18";
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.19";
   }
 }
 
@@ -1156,13 +1156,13 @@ function bindWorkshopForms() {
     form.elements.userId.value = "";
 
     const submitLabel = document.getElementById("user-submit-label");
-    if (submitLabel) submitLabel.textContent = "Ajouter l'utilisateur";
+    if (submitLabel) submitLabel.textContent = "Ajouter un profil local";
 
     const cancelBtn = document.getElementById("user-cancel-btn");
     if (cancelBtn) cancelBtn.hidden = true;
 
     render();
-    quietNotify(userId ? "Utilisateur mis à jour." : "Utilisateur créé.", "success");
+    quietNotify(userId ? "Profil local mis à jour." : "Profil local créé.", "success");
   });
 
   $("#user-cancel-btn")?.addEventListener("click", () => {
@@ -1171,7 +1171,7 @@ function bindWorkshopForms() {
       form.reset();
       form.elements.userId.value = "";
       const submitLabel = document.getElementById("user-submit-label");
-      if (submitLabel) submitLabel.textContent = "Ajouter l'utilisateur";
+      if (submitLabel) submitLabel.textContent = "Ajouter un profil local";
       const cancelBtn = document.getElementById("user-cancel-btn");
       if (cancelBtn) cancelBtn.hidden = true;
     }
@@ -1180,6 +1180,19 @@ function bindWorkshopForms() {
   $("#current-user-selector")?.addEventListener("change", (event) => {
     const newUserId = event.currentTarget.value;
     if (!newUserId) return;
+    const validatedOnlineIdentity = typeof hasValidatedOnlineServerAuthority === "function"
+      && hasValidatedOnlineServerAuthority();
+    if (validatedOnlineIdentity) {
+      notifyUser("Identité serveur inchangée : déconnectez-vous de Supabase pour changer de compte. Le sélecteur local ne modifie jamais les droits serveur.", "error");
+      render();
+      return;
+    }
+    const switchGuard = guardAction("users.manage", {}, { notify: false });
+    if (!switchGuard.ok) {
+      notifyUser(switchGuard.message, "error");
+      render();
+      return;
+    }
     const user = getUserById(newUserId);
     if (!user || user.active === false) {
       notifyUser("Utilisateur inactif ou invalide.", "error");
@@ -1191,7 +1204,7 @@ function bindWorkshopForms() {
       addAuditLog("users.current_changed", `Changement d'utilisateur actif : ${user.name}`);
       saveState();
       render();
-      quietNotify("Utilisateur actif mis à jour.", "success");
+      quietNotify("Profil local hors ligne mis à jour.", "success");
     } else {
       notifyUser("Impossible de basculer d'utilisateur.", "error");
     }
@@ -1307,7 +1320,7 @@ function registerServiceWorker() {
   });
   const registerCurrentServiceWorker = async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=23.3.18", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=23.3.19", { updateViaCache: "none" });
       const refreshRegistration = async () => {
         try {
           await registration.update?.();
@@ -1725,6 +1738,9 @@ async function persistValidatedSupabaseIdentity(authUser, membership, cloudReaso
     restoreIdentityMirrorState(identityMirrorSnapshot);
     return { ok: false, message: "Impossible d'enregistrer localement l'identité validée.", code: "LOCAL_MIRROR_PERSIST_FAILED" };
   }
+  if (typeof setAccountAccessRuntimeContext === "function") {
+    setAccountAccessRuntimeContext(authUser, membership);
+  }
   return syncRes;
 }
 
@@ -1785,6 +1801,7 @@ async function checkUserSessionStartup() {
 
   const denyStartup = (message, code) => {
     window.__nimrValidatedAuthUserId = "";
+    if (typeof clearAccountAccessRuntimeContext === "function") clearAccountAccessRuntimeContext();
     if (typeof stopSupabaseLiveSync === "function") stopSupabaseLiveSync();
     showFirstAccessRecovery();
     const status = document.getElementById("first-access-status");
@@ -1847,6 +1864,7 @@ async function checkUserSessionStartup() {
   }
 
   // Mode hors ligne : seule l'identité courante précédemment validée peut continuer.
+  if (typeof clearAccountAccessRuntimeContext === "function") clearAccountAccessRuntimeContext();
   const configuredWorkshopId = typeof getSupabaseWorkshopId === "function"
     ? String(getSupabaseWorkshopId() || "").trim()
     : "";
@@ -2118,6 +2136,7 @@ async function triggerLogout() {
   resetSensitiveUiStateForUserSwitch("déconnexion utilisateur");
   state.currentUserId = "";
   window.__nimrValidatedAuthUserId = "";
+  if (typeof clearAccountAccessRuntimeContext === "function") clearAccountAccessRuntimeContext();
   window.pendingSelectorUser = null;
   try {
     sessionStorage.removeItem("nimr-user-pin-unlocked");
@@ -2219,6 +2238,7 @@ function bindUserSessionActions() {
       const convergedIdentity = await convergeAndRevalidateSupabaseIdentity(authResult.user, "cloud-login");
       if (!convergedIdentity?.ok) {
         window.__nimrValidatedAuthUserId = "";
+        if (typeof clearAccountAccessRuntimeContext === "function") clearAccountAccessRuntimeContext();
         if (typeof stopSupabaseLiveSync === "function") stopSupabaseLiveSync();
         if (status) status.textContent = convergedIdentity?.message || "Validation de l'identité après synchronisation impossible.";
         return;

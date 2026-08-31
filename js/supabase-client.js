@@ -5,6 +5,7 @@ const SEC001_SERVER_WORKSHOP_ROLES = new Set([
   "chef_atelier",
   "reception",
   "technicien",
+  "controle_qualite",
   "lecture_seule",
 ]);
 
@@ -328,3 +329,59 @@ function bindSupabaseConfigForm() {
   }
   return refreshSupabaseConfigPermissionState();
 }
+
+async function submitSupabaseQualityReview({ caseId, status, reason = "", operationId = null } = {}) {
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    return {
+      ok: false,
+      code: "OFFLINE_NOT_ALLOWED",
+      message: "Connexion internet requise pour enregistrer une décision de contrôle qualité.",
+    };
+  }
+  const client = getSupabaseClient();
+  if (!client) {
+    return { ok: false, code: "NO_CLIENT", message: "Client Supabase non configuré." };
+  }
+  try {
+    const authUser = await getSupabaseUser();
+    if (!authUser?.id) {
+      return { ok: false, code: "UNAUTHENTICATED", message: "Utilisateur non authentifié." };
+    }
+    const workshopId = String(getSupabaseWorkshopId() || "").trim();
+    const membershipResult = await resolveSupabaseWorkshopMembership(authUser);
+    if (!membershipResult?.ok || !membershipResult.membership) {
+      return {
+        ok: false,
+        code: membershipResult?.code || "INVALID_MEMBERSHIP",
+        message: membershipResult?.message || "Appartenance atelier non valide.",
+      };
+    }
+    const membership = membershipResult.membership;
+    if (String(membership.user_id || "") !== String(authUser.id)
+      || (workshopId && String(membership.workshop_id || "") !== workshopId)) {
+      return {
+        ok: false,
+        code: "MEMBERSHIP_IDENTITY_MISMATCH",
+        message: "L'appartenance atelier ne correspond pas à l'identité authentifiée.",
+      };
+    }
+    const opId = String(operationId || "").trim();
+    if (!opId) {
+      return { ok: false, code: "OPERATION_ID_REQUIRED", message: "Identifiant d'opération qualité requis." };
+    }
+    const { data, error } = await client.rpc("nimr_apply_quality_review_v1", {
+      p_workshop_id: workshopId,
+      p_case_id: String(caseId || ""),
+      p_quality_status: String(status || ""),
+      p_reason: String(reason || ""),
+      p_operation_id: opId,
+    });
+    if (error) {
+      return { ok: false, code: error.code || "RPC_ERROR", message: error.message || "Erreur de validation qualité." };
+    }
+    return { ok: true, data };
+  } catch (err) {
+    return { ok: false, code: "EXCEPTION", message: err?.message || "Échec de l'appel RPC contrôle qualité." };
+  }
+}
+window.submitSupabaseQualityReview = submitSupabaseQualityReview;

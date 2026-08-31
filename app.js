@@ -130,7 +130,7 @@ function bindSyncConflictUsability() {
 
 function configurePdfWorker() {
   if (window.pdfjsLib?.GlobalWorkerOptions) {
-    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.19";
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.20";
   }
 }
 
@@ -1177,6 +1177,105 @@ function bindWorkshopForms() {
     }
   });
 
+  const inviteDialog = document.getElementById("invite-workshop-member-dialog");
+  const inviteForm = document.getElementById("invite-workshop-member-form");
+  const inviteStatus = document.getElementById("invite-workshop-member-status");
+  const inviteRole = document.getElementById("invite-workshop-member-role");
+  const inviteResourceField = document.getElementById("invite-workshop-member-resource-field");
+  const inviteResource = document.getElementById("invite-workshop-member-resource");
+  const inviteSubmit = document.getElementById("invite-workshop-member-submit");
+  const updateInviteResourceRequirement = () => {
+    const technicianSelected = inviteRole?.value === "technicien";
+    if (inviteResourceField) inviteResourceField.hidden = !technicianSelected;
+    if (inviteResource) {
+      inviteResource.required = technicianSelected;
+      if (!technicianSelected) inviteResource.value = "";
+    }
+  };
+  const closeInviteDialog = () => {
+    if (inviteDialog?.open) inviteDialog.close();
+    if (inviteForm) inviteForm.reset();
+    if (inviteStatus) {
+      inviteStatus.textContent = "";
+      inviteStatus.removeAttribute("data-state");
+    }
+    updateInviteResourceRequirement();
+  };
+
+  $("#invite-workshop-member-btn")?.addEventListener("click", () => {
+    const snapshot = typeof getAccountAccessSnapshot === "function" ? getAccountAccessSnapshot() : null;
+    const decision = typeof getWorkshopUserAdminUiDecision === "function"
+      ? getWorkshopUserAdminUiDecision(snapshot)
+      : { allowed: false, reason: "Gestion sécurisée indisponible." };
+    if (!decision.allowed) return notifyUser(decision.reason, "error");
+    if (inviteForm) inviteForm.reset();
+    if (inviteStatus) inviteStatus.textContent = "";
+    if (typeof populateWorkshopInviteResourceOptions === "function") {
+      populateWorkshopInviteResourceOptions(inviteResource);
+    }
+    updateInviteResourceRequirement();
+    inviteDialog?.showModal();
+    document.getElementById("invite-workshop-member-name")?.focus();
+  });
+  $("#invite-workshop-member-close")?.addEventListener("click", closeInviteDialog);
+  $("#invite-workshop-member-cancel")?.addEventListener("click", closeInviteDialog);
+  inviteRole?.addEventListener("change", updateInviteResourceRequirement);
+  inviteDialog?.addEventListener("close", () => {
+    if (inviteForm) inviteForm.reset();
+    updateInviteResourceRequirement();
+  });
+
+  inviteForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const snapshot = typeof getAccountAccessSnapshot === "function" ? getAccountAccessSnapshot() : null;
+    const decision = typeof getWorkshopUserAdminUiDecision === "function"
+      ? getWorkshopUserAdminUiDecision(snapshot)
+      : { allowed: false, reason: "Gestion sécurisée indisponible." };
+    if (!decision.allowed) {
+      if (inviteStatus) inviteStatus.textContent = decision.reason;
+      return;
+    }
+    updateInviteResourceRequirement();
+    if (!inviteForm.checkValidity()) {
+      inviteForm.reportValidity();
+      return;
+    }
+    const data = new FormData(inviteForm);
+    const request = {
+      name: normalizeTextInputValue(data.get("name")),
+      email: normalizeTextInputValue(data.get("email")).toLowerCase(),
+      role: String(data.get("role") || ""),
+      resource_id: inviteRole?.value === "technicien" ? String(data.get("resourceId") || "") : null,
+    };
+    if (inviteSubmit) inviteSubmit.disabled = true;
+    if (inviteStatus) {
+      inviteStatus.textContent = "Invitation sécurisée en cours…";
+      inviteStatus.removeAttribute("data-state");
+    }
+    try {
+      const result = await invokeWorkshopUserAdmin("invite_member", request);
+      if (!result?.ok) {
+        if (inviteStatus) inviteStatus.textContent = `${result?.code ? `${result.code} — ` : ""}${result?.message || "Invitation impossible."}`;
+        return;
+      }
+      const mirrorRefresh = await refreshCurrentSupabaseIdentityMirror("identity-provisioning-refresh");
+      await refreshWorkshopUserAdminCapabilities({ force: true });
+      render();
+      if (!mirrorRefresh?.ok) {
+        closeInviteDialog();
+        return notifyUser("Invitation créée côté serveur, mais l’actualisation du miroir courant doit être relancée.", "warn");
+      }
+      if (inviteStatus) {
+        inviteStatus.textContent = "Invitation créée côté serveur.";
+        inviteStatus.dataset.state = "success";
+      }
+      closeInviteDialog();
+      notifyUser("Invitation Supabase créée et appartenance atelier enregistrée.", "success");
+    } finally {
+      if (inviteSubmit) inviteSubmit.disabled = false;
+    }
+  });
+
   $("#current-user-selector")?.addEventListener("change", (event) => {
     const newUserId = event.currentTarget.value;
     if (!newUserId) return;
@@ -1320,7 +1419,7 @@ function registerServiceWorker() {
   });
   const registerCurrentServiceWorker = async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=23.3.19", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=23.3.20", { updateViaCache: "none" });
       const refreshRegistration = async () => {
         try {
           await registration.update?.();
@@ -1743,6 +1842,26 @@ async function persistValidatedSupabaseIdentity(authUser, membership, cloudReaso
   }
   return syncRes;
 }
+
+async function refreshCurrentSupabaseIdentityMirror(cloudReason = "account-administration-refresh") {
+  if (typeof getSupabaseUser !== "function" || typeof resolveSupabaseWorkshopMembership !== "function") {
+    return { ok: false, code: "IDENTITY_REFRESH_UNAVAILABLE", message: "Actualisation de l’identité Supabase indisponible." };
+  }
+  const authUser = await getSupabaseUser();
+  if (!authUser?.id || String(authUser.id) !== String(window.__nimrValidatedAuthUserId || "")) {
+    return { ok: false, code: "AUTH_IDENTITY_CHANGED", message: "La session Supabase active a changé." };
+  }
+  const membershipResult = await resolveSupabaseWorkshopMembership(authUser);
+  if (!membershipResult?.ok || !membershipResult.membership) {
+    return {
+      ok: false,
+      code: membershipResult?.code || "MEMBERSHIP_DENIED",
+      message: membershipResult?.message || "Appartenance atelier non valide.",
+    };
+  }
+  return persistValidatedSupabaseIdentity(authUser, membershipResult.membership, cloudReason);
+}
+window.refreshCurrentSupabaseIdentityMirror = refreshCurrentSupabaseIdentityMirror;
 
 async function convergeAndRevalidateSupabaseIdentity(authUser, cloudReason) {
   document.querySelector(".app-shell")?.setAttribute("inert", "");

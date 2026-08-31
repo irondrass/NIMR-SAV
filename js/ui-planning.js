@@ -632,6 +632,182 @@ function renderResourceLeaves() {
   });
 }
 
+const WORKSHOP_USER_ADMIN_UI_ROLES = new Set(["admin_technique", "directeur"]);
+const WORKSHOP_USER_ADMIN_HUMAN_TYPES = new Set(["controle", "electricien", "mecanicien", "peintre", "tolier"]);
+let workshopUserAdminCapabilityState = Object.freeze({
+  status: "idle",
+  contextKey: "",
+  canManageAccounts: false,
+  provisioningAvailable: false,
+  callerRole: "",
+  workshopId: "",
+  activeAdminTechnicalCount: 0,
+  humanResources: [],
+  reason: "Vérification de la capacité serveur requise.",
+});
+
+function getWorkshopUserAdminContextKey(snapshot = null) {
+  const model = snapshot || (typeof getAccountAccessSnapshot === "function" ? getAccountAccessSnapshot() : null);
+  return [
+    model?.online === false ? "offline" : "online",
+    model?.authIdentity?.id || "",
+    model?.serverMembership?.workshop_id || "",
+    model?.serverRole || "",
+  ].join(":");
+}
+
+function setWorkshopUserAdminCapabilityState(next = {}) {
+  workshopUserAdminCapabilityState = Object.freeze({
+    status: String(next.status || "idle"),
+    contextKey: String(next.contextKey || ""),
+    canManageAccounts: next.canManageAccounts === true,
+    provisioningAvailable: next.provisioningAvailable === true,
+    callerRole: String(next.callerRole || ""),
+    workshopId: String(next.workshopId || ""),
+    activeAdminTechnicalCount: Math.max(0, Number.parseInt(next.activeAdminTechnicalCount, 10) || 0),
+    humanResources: Object.freeze((Array.isArray(next.humanResources) ? next.humanResources : []).map((resource) => Object.freeze({ ...resource }))),
+    reason: String(next.reason || ""),
+  });
+  return workshopUserAdminCapabilityState;
+}
+
+function getWorkshopUserAdminBaseDecision(snapshot = null) {
+  const model = snapshot || (typeof getAccountAccessSnapshot === "function" ? getAccountAccessSnapshot() : null);
+  if (!model || model.online === false) return { ok: false, reason: "Hors ligne : invitations et retraits d’accès serveur indisponibles." };
+  if (!(typeof hasValidatedOnlineServerAuthority === "function" && hasValidatedOnlineServerAuthority())) {
+    return { ok: false, reason: "Une identité Supabase validée est requise." };
+  }
+  if (model.membershipStatus !== "active" || model.overallStatus !== "active") {
+    return { ok: false, reason: "Corrigez le diagnostic d’accès avant de gérer les comptes serveur." };
+  }
+  if (!WORKSHOP_USER_ADMIN_UI_ROLES.has(model.serverRole)) {
+    return { ok: false, reason: "Rôle serveur non autorisé : Admin technique ou Directeur requis." };
+  }
+  return { ok: true, reason: "" };
+}
+
+function getWorkshopUserAdminUiDecision(snapshot = null) {
+  const model = snapshot || (typeof getAccountAccessSnapshot === "function" ? getAccountAccessSnapshot() : null);
+  const baseDecision = getWorkshopUserAdminBaseDecision(model);
+  if (!baseDecision.ok) return { allowed: false, reason: baseDecision.reason };
+  const contextKey = getWorkshopUserAdminContextKey(model);
+  if (workshopUserAdminCapabilityState.contextKey !== contextKey) {
+    return { allowed: false, reason: "Vérification de la capacité serveur en cours." };
+  }
+  if (["loading", "idle"].includes(workshopUserAdminCapabilityState.status)) {
+    return { allowed: false, reason: "Vérification de la capacité serveur en cours." };
+  }
+  if (workshopUserAdminCapabilityState.status !== "ready"
+    || !workshopUserAdminCapabilityState.canManageAccounts
+    || !workshopUserAdminCapabilityState.provisioningAvailable) {
+    return { allowed: false, reason: workshopUserAdminCapabilityState.reason || "Provisioning serveur indisponible." };
+  }
+  if (workshopUserAdminCapabilityState.callerRole !== model.serverRole
+    || workshopUserAdminCapabilityState.workshopId !== model.serverMembership?.workshop_id) {
+    return { allowed: false, reason: "La capacité serveur ne correspond plus à l’identité validée." };
+  }
+  return { allowed: true, reason: "Gestion sécurisée disponible via Supabase." };
+}
+
+async function refreshWorkshopUserAdminCapabilities(options = {}) {
+  const snapshot = options.snapshot || (typeof getAccountAccessSnapshot === "function" ? getAccountAccessSnapshot() : null);
+  const contextKey = getWorkshopUserAdminContextKey(snapshot);
+  const baseDecision = getWorkshopUserAdminBaseDecision(snapshot);
+  if (!baseDecision.ok) {
+    return setWorkshopUserAdminCapabilityState({ status: "unavailable", contextKey, reason: baseDecision.reason });
+  }
+  if (!options.force && workshopUserAdminCapabilityState.contextKey === contextKey
+    && ["loading", "ready"].includes(workshopUserAdminCapabilityState.status)) {
+    return workshopUserAdminCapabilityState;
+  }
+  setWorkshopUserAdminCapabilityState({ status: "loading", contextKey, reason: "Vérification de la capacité serveur en cours." });
+  if (typeof invokeWorkshopUserAdmin !== "function") {
+    return setWorkshopUserAdminCapabilityState({ status: "error", contextKey, reason: "Client de provisioning serveur indisponible." });
+  }
+  const result = await invokeWorkshopUserAdmin("capabilities", {});
+  const currentSnapshot = typeof getAccountAccessSnapshot === "function" ? getAccountAccessSnapshot() : snapshot;
+  if (getWorkshopUserAdminContextKey(currentSnapshot) !== contextKey) {
+    return setWorkshopUserAdminCapabilityState({ status: "idle", contextKey: "", reason: "Identité serveur modifiée ; nouvelle vérification requise." });
+  }
+  const expectedRole = String(snapshot?.serverRole || "");
+  const expectedWorkshopId = String(snapshot?.serverMembership?.workshop_id || "");
+  const responseMatchesAuthority = result?.ok === true
+    && result.can_manage_accounts === true
+    && result.provisioning_available === true
+    && String(result.caller_role || "") === expectedRole
+    && String(result.workshop_id || "") === expectedWorkshopId
+    && Number.isInteger(result.active_admin_technique_count)
+    && result.active_admin_technique_count >= 0;
+  if (!responseMatchesAuthority) {
+    return setWorkshopUserAdminCapabilityState({
+      status: "error",
+      contextKey,
+      reason: result?.message || "Le serveur n’autorise pas la gestion des comptes pour cette identité.",
+    });
+  }
+  const humanResources = (Array.isArray(result.human_resources) ? result.human_resources : [])
+    .filter((resource) => resource?.id && WORKSHOP_USER_ADMIN_HUMAN_TYPES.has(String(resource.type || "").trim().toLowerCase()))
+    .map((resource) => ({
+      id: String(resource.id),
+      localId: String(resource.local_id || ""),
+      name: String(resource.name || resource.local_id || resource.id),
+      type: String(resource.type || "").trim().toLowerCase(),
+    }));
+  return setWorkshopUserAdminCapabilityState({
+    status: "ready",
+    contextKey,
+    canManageAccounts: true,
+    provisioningAvailable: true,
+    callerRole: expectedRole,
+    workshopId: expectedWorkshopId,
+    activeAdminTechnicalCount: result.active_admin_technique_count,
+    humanResources,
+    reason: "Gestion sécurisée disponible via Supabase.",
+  });
+}
+
+function renderWorkshopUserAdminProvisioning(snapshot = null) {
+  const model = snapshot || (typeof getAccountAccessSnapshot === "function" ? getAccountAccessSnapshot() : null);
+  const contextKey = getWorkshopUserAdminContextKey(model);
+  const baseDecision = getWorkshopUserAdminBaseDecision(model);
+  if (workshopUserAdminCapabilityState.contextKey !== contextKey) {
+    setWorkshopUserAdminCapabilityState({ status: "idle", contextKey, reason: baseDecision.reason || "Vérification de la capacité serveur requise." });
+  }
+  if (baseDecision.ok && workshopUserAdminCapabilityState.status === "idle") {
+    Promise.resolve().then(async () => {
+      await refreshWorkshopUserAdminCapabilities({ snapshot: model });
+      if (document.getElementById("users-list")) renderUsersAndRoles();
+    }).catch(() => null);
+  }
+  const decision = getWorkshopUserAdminUiDecision(model);
+  const inviteButton = document.getElementById("invite-workshop-member-btn");
+  const note = document.getElementById("account-provisioning-note");
+  if (inviteButton) {
+    inviteButton.disabled = !decision.allowed;
+    inviteButton.title = decision.reason;
+    inviteButton.setAttribute("aria-disabled", decision.allowed ? "false" : "true");
+  }
+  if (note) note.textContent = decision.reason;
+  return decision;
+}
+
+function populateWorkshopInviteResourceOptions(select) {
+  if (!select) return [];
+  const resources = Array.from(workshopUserAdminCapabilityState.humanResources || []);
+  select.innerHTML = `
+    <option value="">Sélectionner une ressource humaine</option>
+    ${resources.map((resource) => `<option value="${escapeAttr(resource.id)}">${escapeHtml(resource.name)} · ${escapeHtml(ROLE_LABELS[resource.type] || resource.type)}</option>`).join("")}
+  `;
+  return resources;
+}
+
+if (typeof window !== "undefined") {
+  window.getWorkshopUserAdminUiDecision = getWorkshopUserAdminUiDecision;
+  window.refreshWorkshopUserAdminCapabilities = refreshWorkshopUserAdminCapabilities;
+  window.getWorkshopUserAdminCapabilityState = () => workshopUserAdminCapabilityState;
+  window.populateWorkshopInviteResourceOptions = populateWorkshopInviteResourceOptions;
+}
+
 function getAccountAccessRoleLabel(role) {
   return CANONICAL_USER_ROLES[role] || USER_ROLES[role] || role || "Non renseigné";
 }
@@ -741,6 +917,7 @@ function renderUsersAndRoles() {
   if (!form || !list) return;
 
   const accountSnapshot = renderAccountAccessFoundation();
+  const serverManagementDecision = renderWorkshopUserAdminProvisioning(accountSnapshot);
 
   const canManageUsers = typeof canRenderAction === "function" ? canRenderAction("users.manage") : false;
   const deniedTitle = canManageUsers ? "" : (typeof getPermissionDeniedMessage === "function" ? getPermissionDeniedMessage("users.manage") : "Action réservée administrateur.");
@@ -823,6 +1000,16 @@ function renderUsersAndRoles() {
     const serverManagedReadOnly = onlineAuthority && serverManagedProfile;
     const mutationDisabled = !canManageUsers || serverManagedReadOnly;
     const mutationTitle = serverManagedReadOnly ? serverManagedReadOnlyTitle : deniedTitle;
+    const targetAuthUserId = String(user.authUserId || "").trim();
+    const isCurrentServerIdentity = Boolean(targetAuthUserId && targetAuthUserId === String(accountSnapshot?.authIdentity?.id || ""));
+    const isLastActiveTechnicalAdmin = canonicalRole === "admin_technique"
+      && workshopUserAdminCapabilityState.activeAdminTechnicalCount <= 1;
+    const canRenderOffboardAction = Boolean(serverManagedProfile && targetAuthUserId && serverManagementDecision.allowed);
+    const offboardTitle = isCurrentServerIdentity
+      ? "Vous ne pouvez pas retirer votre propre accès atelier."
+      : (isLastActiveTechnicalAdmin
+        ? "Le dernier administrateur technique actif ne peut pas être retiré."
+        : "Révoquer l’appartenance atelier puis supprimer le compte Auth côté serveur.");
     
     const roleLabel = CANONICAL_USER_ROLES[canonicalRole] || USER_ROLES[user.role] || user.role;
     const activeLabel = user.active !== false ? `<span class="tag ok">Actif</span>` : `<span class="tag warn">Inactif</span>`;
@@ -860,6 +1047,11 @@ function renderUsersAndRoles() {
           <button class="ghost-button" type="button" data-toggle-user-status="${escapeAttr(user.id)}" ${mutationDisabled ? `disabled title="${escapeAttr(mutationTitle)}"` : ""}>
             ${user.active === false ? "Activer" : "Désactiver"}
           </button>
+          ${canRenderOffboardAction ? `
+            <button class="ghost-button danger-button" type="button" data-offboard-user="${escapeAttr(user.id)}" ${(isCurrentServerIdentity || isLastActiveTechnicalAdmin) ? `disabled title="${escapeAttr(offboardTitle)}"` : `title="${escapeAttr(offboardTitle)}"`}>
+              Retirer l’accès
+            </button>
+          ` : ""}
         </div>
       </article>
     `;
@@ -932,6 +1124,41 @@ function renderUsersAndRoles() {
         saveState();
         render();
       }
+    });
+  });
+
+  $$("[data-offboard-user]", list).forEach((button) => {
+    button.addEventListener("click", async () => {
+      const user = getUserById(button.dataset.offboardUser);
+      const latestSnapshot = typeof getAccountAccessSnapshot === "function" ? getAccountAccessSnapshot() : null;
+      const latestDecision = getWorkshopUserAdminUiDecision(latestSnapshot);
+      if (!user || !isServerManagedLocalProfile(user) || !String(user.authUserId || "").trim()) return;
+      if (!latestDecision.allowed) return notifyUser(latestDecision.reason, "error");
+      if (String(user.authUserId) === String(latestSnapshot?.authIdentity?.id || "")) {
+        return notifyUser("Vous ne pouvez pas retirer votre propre accès atelier.", "error");
+      }
+      const latestCapability = workshopUserAdminCapabilityState;
+      if (getCanonicalUserRole(user) === "admin_technique" && latestCapability.activeAdminTechnicalCount <= 1) {
+        return notifyUser("Le dernier administrateur technique actif ne peut pas être retiré.", "error");
+      }
+      const roleLabel = getAccountAccessRoleLabel(getCanonicalUserRole(user));
+      const confirmed = await showConfirmModal(`Retirer l’accès atelier de <strong>${escapeHtml(user.name || "Collaborateur")}</strong>${user.email ? ` (${escapeHtml(user.email)})` : ""} ?<br><br>Rôle : <strong>${escapeHtml(roleLabel)}</strong><br><br>L’appartenance atelier sera révoquée immédiatement. L’historique sera conservé et le compte Auth sera ensuite supprimé côté serveur.`);
+      if (!confirmed) return;
+      button.disabled = true;
+      const result = await invokeWorkshopUserAdmin("offboard_member", { user_id: String(user.authUserId) });
+      if (!result?.ok) {
+        button.disabled = false;
+        return notifyUser(result?.message || "Retrait de l’accès impossible.", "error");
+      }
+      if (typeof refreshCurrentSupabaseIdentityMirror === "function") {
+        await refreshCurrentSupabaseIdentityMirror("identity-offboarding-refresh");
+      }
+      await refreshWorkshopUserAdminCapabilities({ force: true });
+      render();
+      const message = result.code === "AUTH_CLEANUP_PENDING"
+        ? "Accès atelier révoqué. Nettoyage du compte Auth encore en attente."
+        : "Accès atelier retiré et compte Auth supprimé côté serveur.";
+      notifyUser(message, result.code === "AUTH_CLEANUP_PENDING" ? "warn" : "success");
     });
   });
 }

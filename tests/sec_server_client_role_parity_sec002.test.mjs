@@ -168,9 +168,9 @@ function qualitySubmitEvent(ctx, status = "validated", reason = "") {
 // CHECK A: Release & Schema Baseline Constants
 {
   const ctx = createAppContext();
-  assert.equal(ctx.APP_VERSION, "v23.3.19", "APP_VERSION must be v23.3.19");
-  assert.equal(ctx.NIMR_BUILD, "v23.3.19", "NIMR_BUILD must be v23.3.19");
-  assert.equal(ctx.NIMR_CACHE_NAME, "nimr-sav-v23.3.19", "NIMR_CACHE_NAME must be nimr-sav-v23.3.19");
+  assert.equal(ctx.APP_VERSION, "v23.3.20", "APP_VERSION must be v23.3.20");
+  assert.equal(ctx.NIMR_BUILD, "v23.3.20", "NIMR_BUILD must be v23.3.20");
+  assert.equal(ctx.NIMR_CACHE_NAME, "nimr-sav-v23.3.20", "NIMR_CACHE_NAME must be nimr-sav-v23.3.20");
 
   const dbVersion = vm.runInContext("DB_VERSION", ctx);
   const schemaVersion = vm.runInContext("CURRENT_DATA_SCHEMA_VERSION", ctx);

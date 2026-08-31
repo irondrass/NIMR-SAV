@@ -61,21 +61,21 @@ function createUx009Context(filename) {
   return createNimrVmContext({ filename });
 }
 
-check("A v23.3.19 release/cache is exact and schema versions are unchanged", () => {
-  assert.match(versionSource, /^window\.APP_VERSION = "v23\.3\.19";$/mu);
-  assert.match(versionSource, /^window\.NIMR_BUILD = "v23\.3\.19";$/mu);
-  assert.match(versionSource, /^window\.NIMR_CACHE_NAME = "nimr-sav-v23\.3\.19";$/mu);
-  assert.match(stateSource, /^const APP_VERSION = "v23\.3\.19";$/mu);
+check("A v23.3.20 release/cache is exact and schema versions are unchanged", () => {
+  assert.match(versionSource, /^window\.APP_VERSION = "v23\.3\.20";$/mu);
+  assert.match(versionSource, /^window\.NIMR_BUILD = "v23\.3\.20";$/mu);
+  assert.match(versionSource, /^window\.NIMR_CACHE_NAME = "nimr-sav-v23\.3\.20";$/mu);
+  assert.match(stateSource, /^const APP_VERSION = "v23\.3\.20";$/mu);
   assert.match(stateSource, /^const DB_VERSION = 2;$/mu);
   assert.match(stateSource, /^const CURRENT_DATA_SCHEMA_VERSION = 2;$/mu);
   assert.match(stateSource, /^const CANONICAL_TASK_MODEL_VERSION = 1;$/mu);
-  assert.match(swSource, /^const CACHE_NAME = "nimr-sav-v23\.3\.19";$/mu);
-  assert.match(appSource, /pdf\.worker\.min\.js\?v=23\.3\.19/u);
-  assert.match(appSource, /sw\.js\?v=23\.3\.19/u);
-  assert.match(estimateImportSource, /pdf\.worker\.min\.js\?v=23\.3\.19/u);
-  assert.match(indexSource, /styles\.css\?v=23\.3\.19/u);
-  assert.match(indexSource, /app\.js\?v=23\.3\.19/u);
-  assert.match(offlineSource, /styles\.css\?v=23\.3\.19/u);
+  assert.match(swSource, /^const CACHE_NAME = "nimr-sav-v23\.3\.20";$/mu);
+  assert.match(appSource, /pdf\.worker\.min\.js\?v=23\.3\.20/u);
+  assert.match(appSource, /sw\.js\?v=23\.3\.20/u);
+  assert.match(estimateImportSource, /pdf\.worker\.min\.js\?v=23\.3\.20/u);
+  assert.match(indexSource, /styles\.css\?v=23\.3\.20/u);
+  assert.match(indexSource, /app\.js\?v=23\.3\.20/u);
+  assert.match(offlineSource, /styles\.css\?v=23\.3\.20/u);
 });
 
 check("B Workshop Progress Board is inside Today without a new navigation tab", () => {
@@ -347,13 +347,21 @@ check("K Native accessible row activation opens the canonical dossier", () => {
 check("L Protected planning, Supabase, SQL, schema and UX-007 KPI logic are unchanged", () => {
   for (const protectedFile of [
     "js/planning.js",
-    "js/supabase-client.js",
     "js/supabase-sync.js",
     "js/supabase-config.js",
     "supabase-schema.sql",
   ]) {
     assert.equal(normalizeEol(readProjectFile(protectedFile)), normalizeEol(readBaseFile(protectedFile)), protectedFile);
   }
+  const currentSupabaseClient = readProjectFile("js/supabase-client.js");
+  const provisioningClient = sourceSlice(currentSupabaseClient, "const WORKSHOP_USER_ADMIN_ACTIONS", "async function authenticateSupabaseUser");
+  assert.equal(
+    normalizeEol(currentSupabaseClient.replace(provisioningClient, "")),
+    normalizeEol(readBaseFile("js/supabase-client.js")),
+    "The pre-existing Supabase client must remain unchanged outside the bounded IDENTITY-001B wrapper",
+  );
+  assert.match(provisioningClient, /client\.functions\.invoke\("workshop-user-admin"/u);
+  assert.doesNotMatch(provisioningClient, /auth\.admin|service_role|sb_secret_|SUPABASE_SECRET_KEYS/u);
   const baseUiCases = readBaseFile("js/ui-cases.js");
   assert.equal(
     normalizeEol(sourceSlice(uiCasesSource, "function buildSavKpis", "function renderSavDashboardLoads")),
@@ -371,7 +379,7 @@ check("L Protected planning, Supabase, SQL, schema and UX-007 KPI logic are unch
 
   const changed = execFileSync("git", ["diff", "--name-only", BASE_SHA], { cwd: repoRoot, encoding: "utf8" });
   assert.doesNotMatch(changed, /(?:^|\n)js\/planning\.js(?:\n|$)/u);
-  assert.doesNotMatch(changed, /(?:^|\n)js\/supabase-(?:client|sync|config)\.js(?:\n|$)/u);
+  assert.doesNotMatch(changed, /(?:^|\n)js\/supabase-(?:sync|config)\.js(?:\n|$)/u);
   assert.doesNotMatch(changed, /\.sql(?:\n|$)/u);
 
   const { context, run } = createUx009Context("ux009-bounded.js");

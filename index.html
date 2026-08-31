@@ -20,8 +20,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <script src="js/version.js?v=23.3.19"></script>
-    <link rel="stylesheet" href="styles.css?v=23.3.19" />
+    <script src="js/version.js?v=23.3.20"></script>
+    <link rel="stylesheet" href="styles.css?v=23.3.20" />
   </head>
   <body>
     <button id="mobile-menu-toggle" class="mobile-menu-btn" type="button" aria-label="Ouvrir la navigation principale" aria-expanded="false" aria-controls="primary-sidebar" hidden>
@@ -633,11 +633,51 @@
                       <dl class="account-access-checks" id="account-access-diagnostics"></dl>
                       <ul class="account-access-issues" id="account-access-issues" hidden></ul>
                       <div class="account-provisioning-placeholder">
-                        <button class="ghost-button" type="button" disabled aria-describedby="account-provisioning-note">Inviter un collaborateur</button>
-                        <span id="account-provisioning-note">Provisioning serveur sécurisé — prochaine étape</span>
+                        <button class="ghost-button" id="invite-workshop-member-btn" type="button" disabled aria-disabled="true" aria-describedby="account-provisioning-note">Inviter un collaborateur</button>
+                        <span id="account-provisioning-note">Vérification de la capacité serveur requise.</span>
                       </div>
                     </article>
                   </div>
+
+                  <dialog class="account-admin-dialog" id="invite-workshop-member-dialog" aria-labelledby="invite-workshop-member-title" aria-describedby="invite-workshop-member-description">
+                    <form class="account-admin-form" id="invite-workshop-member-form">
+                      <div class="account-admin-dialog-heading">
+                        <div>
+                          <h2 id="invite-workshop-member-title">Inviter un collaborateur</h2>
+                          <p id="invite-workshop-member-description">L’invitation et l’appartenance atelier seront créées uniquement par le service serveur sécurisé.</p>
+                        </div>
+                        <button class="icon-button" id="invite-workshop-member-close" type="button" aria-label="Fermer la fenêtre d’invitation">×</button>
+                      </div>
+                      <label for="invite-workshop-member-name">Nom complet</label>
+                      <input id="invite-workshop-member-name" name="name" type="text" autocomplete="name" maxlength="160" required />
+                      <label for="invite-workshop-member-email">Email</label>
+                      <input id="invite-workshop-member-email" name="email" type="email" autocomplete="email" maxlength="254" required />
+                      <label for="invite-workshop-member-role">Rôle atelier</label>
+                      <select id="invite-workshop-member-role" name="role" required>
+                        <option value="">Sélectionner un rôle</option>
+                        <option value="admin_technique">Admin technique</option>
+                        <option value="directeur">Directeur SAV</option>
+                        <option value="chef_atelier">Chef atelier</option>
+                        <option value="reception">Réception</option>
+                        <option value="technicien">Technicien</option>
+                        <option value="controle_qualite">Contrôleur Qualité</option>
+                        <option value="lecture_seule">Lecture seule</option>
+                      </select>
+                      <div class="account-admin-resource-field" id="invite-workshop-member-resource-field" hidden>
+                        <label for="invite-workshop-member-resource">Ressource technicien</label>
+                        <select id="invite-workshop-member-resource" name="resourceId">
+                          <option value="">Sélectionner une ressource humaine</option>
+                        </select>
+                        <p>Seules les ressources humaines actives de l’atelier sont proposées. Les équipements ne peuvent pas représenter un technicien.</p>
+                      </div>
+                      <p class="account-authority-note">Cette action ne crée aucun profil d’autorité dans <code>state.users</code>. Le miroir local est actualisé uniquement depuis l’identité et l’appartenance Supabase validées.</p>
+                      <output class="account-admin-form-status" id="invite-workshop-member-status" role="status" aria-live="polite"></output>
+                      <div class="account-admin-dialog-actions">
+                        <button class="ghost-button" id="invite-workshop-member-cancel" type="button">Annuler</button>
+                        <button class="primary-button" id="invite-workshop-member-submit" type="submit">Envoyer l’invitation sécurisée</button>
+                      </div>
+                    </form>
+                  </dialog>
 
                   <section class="local-profile-management" id="local-profile-management" aria-labelledby="local-profile-management-title">
                     <div class="section-heading compact-heading">
@@ -1360,22 +1400,22 @@
       </div>
     </div>
 
-    <script src="vendor/pdf.min.js?v=23.3.19" defer></script>
-    <script src="js/utils.js?v=23.3.19" defer></script>
-    <script src="js/state.js?v=23.3.19" defer></script>
-    <script src="js/ui-cases.js?v=23.3.19" defer></script>
-    <script src="js/estimate-import.js?v=23.3.19" defer></script>
-    <script src="js/ui-planning.js?v=23.3.19" defer></script>
-    <script src="js/photos.js?v=23.3.19" defer></script>
-    <script src="js/storage.js?v=23.3.19" defer></script>
-    <script src="js/work-hours-sync.js?v=23.3.19" defer></script>
-    <script src="js/planning.js?v=23.3.19" defer></script>
-    <script src="js/exports.js?v=23.3.19" defer></script>
-    <script src="js/business-rules-v2187.js?v=23.3.19" defer></script>
+    <script src="vendor/pdf.min.js?v=23.3.20" defer></script>
+    <script src="js/utils.js?v=23.3.20" defer></script>
+    <script src="js/state.js?v=23.3.20" defer></script>
+    <script src="js/ui-cases.js?v=23.3.20" defer></script>
+    <script src="js/estimate-import.js?v=23.3.20" defer></script>
+    <script src="js/ui-planning.js?v=23.3.20" defer></script>
+    <script src="js/photos.js?v=23.3.20" defer></script>
+    <script src="js/storage.js?v=23.3.20" defer></script>
+    <script src="js/work-hours-sync.js?v=23.3.20" defer></script>
+    <script src="js/planning.js?v=23.3.20" defer></script>
+    <script src="js/exports.js?v=23.3.20" defer></script>
+    <script src="js/business-rules-v2187.js?v=23.3.20" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
-    <script src="js/supabase-config.js?v=23.3.19" defer></script>
-    <script src="js/supabase-client.js?v=23.3.19" defer></script>
-    <script src="js/supabase-sync.js?v=23.3.19" defer></script>
-    <script src="app.js?v=23.3.19" defer></script>
+    <script src="js/supabase-config.js?v=23.3.20" defer></script>
+    <script src="js/supabase-client.js?v=23.3.20" defer></script>
+    <script src="js/supabase-sync.js?v=23.3.20" defer></script>
+    <script src="app.js?v=23.3.20" defer></script>
   </body>
 </html>

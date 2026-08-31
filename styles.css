@@ -2478,6 +2478,104 @@ select:focus {
   font-weight: 700;
 }
 
+.account-admin-dialog {
+  box-sizing: border-box;
+  width: min(620px, calc(100vw - 32px));
+  max-width: 100%;
+  max-height: calc(100vh - 32px);
+  margin: auto;
+  padding: 0;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #fff;
+  color: var(--ink);
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.28);
+}
+
+.account-admin-dialog::backdrop {
+  background: rgba(15, 23, 42, 0.58);
+}
+
+.account-admin-form {
+  display: grid;
+  gap: 10px;
+  padding: 22px;
+}
+
+.account-admin-form > label,
+.account-admin-resource-field > label {
+  color: var(--ink);
+  font-size: 0.84rem;
+  font-weight: 800;
+}
+
+.account-admin-form input,
+.account-admin-form select,
+.account-admin-dialog button {
+  min-height: 44px;
+}
+
+.account-admin-dialog-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 4px;
+}
+
+.account-admin-dialog-heading h2,
+.account-admin-dialog-heading p {
+  margin: 0;
+}
+
+.account-admin-dialog-heading p {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.account-admin-dialog-heading .icon-button {
+  flex: 0 0 44px;
+  width: 44px;
+  padding: 0;
+  font-size: 1.6rem;
+}
+
+.account-admin-resource-field {
+  display: grid;
+  gap: 8px;
+}
+
+.account-admin-resource-field[hidden] {
+  display: none;
+}
+
+.account-admin-resource-field p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.account-admin-form-status {
+  min-height: 22px;
+  color: var(--danger);
+  font-size: 0.84rem;
+  font-weight: 750;
+}
+
+.account-admin-form-status[data-state="success"] {
+  color: var(--ok-text);
+}
+
+.account-admin-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 4px;
+}
+
 .local-profile-management {
   margin-top: 6px;
   padding-top: 18px;
@@ -5278,6 +5376,19 @@ a:focus-visible,
   .technician-current-task,
   .technician-next-task {
     padding: 12px;
+  }
+
+  .account-admin-dialog {
+    width: calc(100vw - 20px);
+    max-height: calc(100vh - 20px);
+  }
+
+  .account-admin-form {
+    padding: 16px;
+  }
+
+  .account-admin-dialog-actions > button {
+    flex: 1 1 100%;
   }
 
   .technician-field-grid {

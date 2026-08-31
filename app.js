@@ -130,7 +130,7 @@ function bindSyncConflictUsability() {
 
 function configurePdfWorker() {
   if (window.pdfjsLib?.GlobalWorkerOptions) {
-    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.16";
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.17";
   }
 }
 
@@ -1307,7 +1307,7 @@ function registerServiceWorker() {
   });
   const registerCurrentServiceWorker = async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=23.3.16", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=23.3.17", { updateViaCache: "none" });
       const refreshRegistration = async () => {
         try {
           await registration.update?.();
@@ -2069,6 +2069,10 @@ function resetSensitiveUiStateForUserSwitch(reason = "user-switch") {
   estimateImportPreviews = {};
   document.querySelectorAll(".custom-modal-overlay").forEach((overlay) => {
     if (overlay.id === "user-login-overlay") return;
+    if (overlay.id === "custom-modal-overlay" && typeof closeAccessibleCustomModal === "function") {
+      closeAccessibleCustomModal({ restoreFocus: false });
+      return;
+    }
     overlay.hidden = true;
     if (!overlay.id) overlay.remove();
   });
@@ -2493,25 +2497,67 @@ initApp();
 
 // Gestion du menu burger sur mobile
 function setupMobileMenu() {
-  const toggleBtn = document.getElementById('mobile-menu-toggle');
-  const sidebar = document.querySelector('.sidebar') || document.querySelector('.nav-menu');
+  const toggleBtn = document.getElementById("mobile-menu-toggle");
+  const sidebar = document.getElementById("primary-sidebar") || document.querySelector(".sidebar");
   if (!toggleBtn || !sidebar) return;
 
-  window.addEventListener('resize', () => {
-    if (window.innerWidth <= 768) {
-      toggleBtn.style.display = 'block';
+  const isMobileViewport = () => window.innerWidth <= 768;
+  const setMenuState = (open, { restoreFocus = false } = {}) => {
+    const expanded = Boolean(open && isMobileViewport());
+    sidebar.classList.toggle("active", expanded);
+    toggleBtn.setAttribute("aria-expanded", expanded ? "true" : "false");
+    toggleBtn.setAttribute("aria-label", expanded ? "Fermer la navigation principale" : "Ouvrir la navigation principale");
+    document.body.classList.toggle("mobile-nav-open", expanded);
+
+    if (isMobileViewport()) {
+      sidebar.setAttribute("aria-hidden", expanded ? "false" : "true");
+      sidebar.toggleAttribute("inert", !expanded);
     } else {
-      toggleBtn.style.display = 'none';
-      sidebar.classList.remove('active');
+      sidebar.removeAttribute("aria-hidden");
+      sidebar.removeAttribute("inert");
+    }
+
+    if (restoreFocus && !expanded && !toggleBtn.hidden && toggleBtn.isConnected) {
+      window.setTimeout(() => toggleBtn.focus(), 0);
+    }
+  };
+
+  const syncViewportState = () => {
+    const mobile = isMobileViewport();
+    toggleBtn.hidden = !mobile;
+    if (!mobile) setMenuState(false);
+    else if (!sidebar.classList.contains("active")) setMenuState(false);
+  };
+
+  if (toggleBtn.dataset.mobileMenuBound === "true") {
+    syncViewportState();
+    return;
+  }
+  toggleBtn.dataset.mobileMenuBound = "true";
+
+  toggleBtn.addEventListener("click", () => {
+    const willOpen = !sidebar.classList.contains("active");
+    setMenuState(willOpen, { restoreFocus: !willOpen });
+    if (willOpen) {
+      const currentNav = sidebar.querySelector('.nav-button[aria-current="page"]') || sidebar.querySelector(".nav-button:not([hidden])");
+      window.setTimeout(() => currentNav?.focus(), 0);
     }
   });
 
-  toggleBtn.addEventListener('click', () => {
-    sidebar.classList.toggle('active');
+  sidebar.addEventListener("click", (event) => {
+    if (!event.target.closest(".nav-button") || !isMobileViewport()) return;
+    setMenuState(false, { restoreFocus: true });
   });
 
-  // Initialiser l'état au chargement
-  if (window.innerWidth <= 768) toggleBtn.style.display = 'block';
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || !sidebar.classList.contains("active")) return;
+    event.preventDefault();
+    setMenuState(false, { restoreFocus: true });
+  });
+
+  window.addEventListener("resize", syncViewportState);
+
+  syncViewportState();
 }
-document.addEventListener('DOMContentLoaded', setupMobileMenu);
-window.addEventListener('load', setupMobileMenu);
+document.addEventListener("DOMContentLoaded", setupMobileMenu);
+window.addEventListener("load", setupMobileMenu);

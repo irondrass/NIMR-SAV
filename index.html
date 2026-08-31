@@ -20,24 +20,26 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <script src="js/version.js?v=23.3.16"></script>
-    <link rel="stylesheet" href="styles.css?v=23.3.16" />
+    <script src="js/version.js?v=23.3.17"></script>
+    <link rel="stylesheet" href="styles.css?v=23.3.17" />
   </head>
   <body>
-<!-- Bouton Menu Mobile -->
-<button id="mobile-menu-toggle" class="mobile-menu-btn" style="display: none; position: fixed; top: 10px; left: 10px; z-index: 1100; background: #333; color: white; border: none; padding: 10px; border-radius: 5px;">☰ Menu</button>
+    <button id="mobile-menu-toggle" class="mobile-menu-btn" type="button" aria-label="Ouvrir la navigation principale" aria-expanded="false" aria-controls="primary-sidebar" hidden>
+      <span aria-hidden="true">☰</span>
+      <span>Menu</span>
+    </button>
     <a class="skip-link" href="#main-content">Aller au contenu principal</a>
     <noscript>Cette application nécessite JavaScript pour fonctionner.</noscript>
     <div class="app-shell">
-      <aside class="sidebar">
+      <aside class="sidebar" id="primary-sidebar">
         <div class="brand">
           <img src="assets/icon.svg" alt="" class="brand-mark" />
           <div>
             <strong>NIMR SAV</strong>
             <span>Planning atelier global</span>
-            <div id="sidebar-user-status" style="font-size: 0.72rem; color: var(--muted); margin-top: 4px; display: flex; align-items: center; gap: 6px;">
+            <div id="sidebar-user-status" class="sidebar-user-status">
               <span id="sidebar-user-name">...</span>
-              <button class="link-button" id="sidebar-change-user-btn" type="button" style="background: none; border: none; padding: 0; color: var(--brand); text-decoration: underline; cursor: pointer;">Changer</button>
+              <button class="link-button sidebar-change-user-button" id="sidebar-change-user-btn" type="button">Changer</button>
             </div>
           </div>
           <span class="save-status-indicator status-saved" id="save-status-indicator" aria-live="polite">Sauvegardé</span>
@@ -113,17 +115,17 @@
 
         <section class="sync-status-strip" id="sync-status-strip" aria-label="État sauvegarde et synchronisation">
           <span class="sync-item"><strong>Local</strong><b data-sync-local>Contrôle...</b></span>
-          <span class="sync-item"><strong>Cloud</strong><button type="button" data-sync-cloud style="background:transparent; border:none; padding:0; font:inherit; color:inherit; text-align:inherit; display:inline;">Contrôle...</button></span>
+          <span class="sync-item"><strong>Cloud</strong><button type="button" class="sync-cloud-action" data-sync-cloud>Contrôle...</button></span>
           <span class="sync-item"><strong>Connexion</strong><b data-sync-connection>Contrôle...</b></span>
           <span class="sync-item"><strong>Dernière sauvegarde</strong><b data-sync-last-save>Jamais</b></span>
           <span class="sync-item"><strong>Modifications en attente</strong><b data-sync-pending>0</b></span>
-          <button type="button" id="fallback-resolve-conflict-btn" class="primary-button" style="min-height:28px; height:28px; padding:2px 10px; font-size:0.76rem; border-radius:999px; background:var(--danger, #dc2626); color:#fff; border:none;" hidden>Résoudre le conflit</button>
+          <button type="button" id="fallback-resolve-conflict-btn" class="primary-button conflict-action-button" hidden>Résoudre le conflit</button>
         </section>
 
         <section class="view" id="view-reception-workspace">
           <section class="panel pdf-import-home" aria-labelledby="pdf-import-title">
             <div class="pdf-import-hero">
-              <span class="eyebrow">Créer un dossier</span>
+              <span class="eyebrow">Import devis PDF</span>
               <h1 id="pdf-import-title">Nouveau dossier</h1>
               <p>Déposez le devis PDF, vérifiez les informations détectées puis créez le dossier.</p>
             </div>
@@ -322,7 +324,8 @@
                   <span>Dossiers critiques, retards, blocages et décisions management.</span>
                 </div>
               </div>
-              <div class="pilotage-alerts pilotage-priority-list" id="pilotage-alerts" aria-live="polite"></div>
+              <p class="visually-hidden" id="pilotage-priority-status" role="status" aria-live="polite" aria-atomic="true"></p>
+              <div class="pilotage-alerts pilotage-priority-list" id="pilotage-alerts"></div>
             </section>
             <section class="pilotage-level-block pilotage-load-flow-block" aria-label="Charge et flux atelier">
               <div class="section-heading compact-heading">
@@ -1260,7 +1263,7 @@
     </template>
 
     <div id="custom-modal-overlay" class="custom-modal-overlay" hidden>
-      <div class="custom-modal-content">
+      <div class="custom-modal-content" role="dialog" aria-modal="true" aria-labelledby="custom-modal-title" aria-describedby="custom-modal-body" tabindex="-1">
         <h3 id="custom-modal-title">Confirmation</h3>
         <div id="custom-modal-body"></div>
         <div class="custom-modal-actions">
@@ -1270,22 +1273,22 @@
       </div>
     </div>
 
-    <script src="vendor/pdf.min.js?v=23.3.16" defer></script>
-    <script src="js/utils.js?v=23.3.16" defer></script>
-    <script src="js/state.js?v=23.3.16" defer></script>
-    <script src="js/ui-cases.js?v=23.3.16" defer></script>
-    <script src="js/estimate-import.js?v=23.3.16" defer></script>
-    <script src="js/ui-planning.js?v=23.3.16" defer></script>
-    <script src="js/photos.js?v=23.3.16" defer></script>
-    <script src="js/storage.js?v=23.3.16" defer></script>
-    <script src="js/work-hours-sync.js?v=23.3.16" defer></script>
-    <script src="js/planning.js?v=23.3.16" defer></script>
-    <script src="js/exports.js?v=23.3.16" defer></script>
-    <script src="js/business-rules-v2187.js?v=23.3.16" defer></script>
+    <script src="vendor/pdf.min.js?v=23.3.17" defer></script>
+    <script src="js/utils.js?v=23.3.17" defer></script>
+    <script src="js/state.js?v=23.3.17" defer></script>
+    <script src="js/ui-cases.js?v=23.3.17" defer></script>
+    <script src="js/estimate-import.js?v=23.3.17" defer></script>
+    <script src="js/ui-planning.js?v=23.3.17" defer></script>
+    <script src="js/photos.js?v=23.3.17" defer></script>
+    <script src="js/storage.js?v=23.3.17" defer></script>
+    <script src="js/work-hours-sync.js?v=23.3.17" defer></script>
+    <script src="js/planning.js?v=23.3.17" defer></script>
+    <script src="js/exports.js?v=23.3.17" defer></script>
+    <script src="js/business-rules-v2187.js?v=23.3.17" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
-    <script src="js/supabase-config.js?v=23.3.16" defer></script>
-    <script src="js/supabase-client.js?v=23.3.16" defer></script>
-    <script src="js/supabase-sync.js?v=23.3.16" defer></script>
-    <script src="app.js?v=23.3.16" defer></script>
+    <script src="js/supabase-config.js?v=23.3.17" defer></script>
+    <script src="js/supabase-client.js?v=23.3.17" defer></script>
+    <script src="js/supabase-sync.js?v=23.3.17" defer></script>
+    <script src="app.js?v=23.3.17" defer></script>
   </body>
 </html>

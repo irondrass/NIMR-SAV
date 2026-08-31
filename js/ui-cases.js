@@ -489,25 +489,18 @@ function renderSavKpis(snapshot) {
   const kpis = buildSavKpis(snapshot);
   target.innerHTML = kpis
     .map((kpi) => `
-      <article class="sav-kpi-card ${kpi.level || "neutral"}" tabindex="0" role="button" data-nav-tab="${escapeAttr(kpi.navTab || "dossiers")}">
+      <button type="button" class="sav-kpi-card ${kpi.level || "neutral"}" data-nav-tab="${escapeAttr(kpi.navTab || "dossiers")}">
         <span>${escapeHtml(kpi.label)}</span>
         <strong>${escapeHtml(kpi.value)}</strong>
         <small>${escapeHtml(kpi.detail)}</small>
-      </article>
+      </button>
     `)
     .join("");
 
   $$(".sav-kpi-card[data-nav-tab]", target).forEach((card) => {
-    const handleNav = () => {
+    card.addEventListener("click", () => {
       const tab = card.dataset.navTab || "dossiers";
       if (typeof setActiveTab === "function") setActiveTab(tab);
-    };
-    card.addEventListener("click", handleNav);
-    card.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        handleNav();
-      }
     });
   });
 }
@@ -2814,6 +2807,13 @@ function renderPilotageAlerts(snapshot) {
     return;
   }
   const priorities = snapshot?.priorities || [];
+  const status = $("#pilotage-priority-status");
+  if (status) {
+    const message = priorities.length
+      ? `${priorities.length} dossier${priorities.length > 1 ? "s" : ""} à traiter en priorité.`
+      : "Aucune alerte prioritaire.";
+    if (status.textContent !== message) status.textContent = message;
+  }
 
   target.innerHTML = priorities.length
     ? priorities.map((alert) => `

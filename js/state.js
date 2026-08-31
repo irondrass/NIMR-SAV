@@ -21,7 +21,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v23.3.16";
+const APP_VERSION = "v23.3.17";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const CURRENT_DATA_SCHEMA_VERSION = 2;
@@ -4458,6 +4458,66 @@ function appendSafeModalMessage(target, message) {
   });
 }
 
+let customModalReturnFocus = null;
+let customModalKeydownHandler = null;
+let customModalAppWasInert = false;
+
+function getCustomModalElements() {
+  const overlay = document.getElementById("custom-modal-overlay");
+  return {
+    overlay,
+    dialog: overlay?.querySelector?.(".custom-modal-content") || null,
+    appShell: document.querySelector?.(".app-shell") || null,
+  };
+}
+
+function closeAccessibleCustomModal({ restoreFocus = true } = {}) {
+  const { overlay, appShell } = getCustomModalElements();
+  if (overlay && customModalKeydownHandler) {
+    overlay.removeEventListener("keydown", customModalKeydownHandler);
+  }
+  customModalKeydownHandler = null;
+  if (overlay) overlay.hidden = true;
+  if (appShell && !customModalAppWasInert) appShell.removeAttribute?.("inert");
+
+  const returnTarget = customModalReturnFocus;
+  customModalReturnFocus = null;
+  customModalAppWasInert = false;
+  if (restoreFocus && returnTarget && returnTarget.isConnected !== false && typeof returnTarget.focus === "function") {
+    window.setTimeout(() => returnTarget.focus(), 0);
+  }
+}
+
+function openAccessibleCustomModal({ initialFocus = null, onCancel = null } = {}) {
+  const { overlay, dialog, appShell } = getCustomModalElements();
+  if (!overlay || !dialog) return false;
+
+  const activeElement = document.activeElement;
+  customModalReturnFocus = activeElement && activeElement !== document.body && typeof activeElement.focus === "function"
+    ? activeElement
+    : null;
+  customModalAppWasInert = Boolean(appShell?.hasAttribute?.("inert"));
+  appShell?.setAttribute?.("inert", "");
+  overlay.hidden = false;
+
+  customModalKeydownHandler = (event) => {
+    if (event.key === "Escape" && typeof onCancel === "function") {
+      event.preventDefault();
+      event.stopPropagation?.();
+      onCancel();
+      return;
+    }
+    if (event.key === "Tab" && typeof trapFocusWithin === "function") {
+      trapFocusWithin(dialog, event);
+    }
+  };
+  overlay.addEventListener("keydown", customModalKeydownHandler);
+
+  const focusTarget = initialFocus && !initialFocus.disabled ? initialFocus : dialog;
+  window.setTimeout(() => focusTarget?.focus?.(), 0);
+  return true;
+}
+
 function showConfirmModal(htmlMessage) {
   return new Promise((resolve) => {
     const overlay = document.getElementById("custom-modal-overlay");
@@ -4471,12 +4531,11 @@ function showConfirmModal(htmlMessage) {
     }
 
     appendSafeModalMessage(body, htmlMessage);
-    overlay.hidden = false;
 
     const cleanup = () => {
-      overlay.hidden = true;
       cancelBtn.removeEventListener("click", onCancel);
       confirmBtn.removeEventListener("click", onConfirm);
+      closeAccessibleCustomModal();
     };
 
     const onCancel = () => {
@@ -4491,6 +4550,7 @@ function showConfirmModal(htmlMessage) {
 
     cancelBtn.addEventListener("click", onCancel);
     confirmBtn.addEventListener("click", onConfirm);
+    openAccessibleCustomModal({ initialFocus: cancelBtn, onCancel });
   });
 }
 
@@ -4519,14 +4579,11 @@ function showPromptModal(htmlMessage, expectedText) {
     input.placeholder = expectedText;
     input.autocomplete = "off";
     body.appendChild(input);
-    overlay.hidden = false;
-
-    input.focus();
 
     const cleanup = () => {
-      overlay.hidden = true;
       cancelBtn.removeEventListener("click", onCancel);
       confirmBtn.removeEventListener("click", onConfirm);
+      closeAccessibleCustomModal();
     };
 
     const onCancel = () => {
@@ -4541,6 +4598,7 @@ function showPromptModal(htmlMessage, expectedText) {
 
     cancelBtn.addEventListener("click", onCancel);
     confirmBtn.addEventListener("click", onConfirm);
+    openAccessibleCustomModal({ initialFocus: input, onCancel });
   });
 }
 
@@ -4615,23 +4673,15 @@ function showInputPromptModal({
       body.appendChild(messageWrap);
       body.appendChild(input);
     }
-    overlay.hidden = false;
-
-    if (input) {
-      input.focus();
-      if (input.tagName === "INPUT") {
-        input.select();
-      }
-    }
 
     const cleanup = () => {
-      overlay.hidden = true;
       if (titleEl) titleEl.textContent = previousTitle;
       cancelBtn.textContent = previousCancelText;
       confirmBtn.textContent = previousConfirmText;
       cancelBtn.removeEventListener("click", onCancel);
       confirmBtn.removeEventListener("click", onConfirm);
       input?.removeEventListener("keydown", onKeyDown);
+      closeAccessibleCustomModal();
     };
 
     const onCancel = () => {
@@ -4649,15 +4699,14 @@ function showInputPromptModal({
       if (e.key === "Enter") {
         e.preventDefault();
         onConfirm();
-      } else if (e.key === "Escape") {
-        e.preventDefault();
-        onCancel();
       }
     };
 
     cancelBtn.addEventListener("click", onCancel);
     confirmBtn.addEventListener("click", onConfirm);
     input?.addEventListener("keydown", onKeyDown);
+    openAccessibleCustomModal({ initialFocus: input, onCancel });
+    if (input?.tagName === "INPUT") input.select();
   });
 }
 

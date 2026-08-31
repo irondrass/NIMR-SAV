@@ -21,7 +21,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v23.3.18";
+const APP_VERSION = "v23.3.19";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const CURRENT_DATA_SCHEMA_VERSION = 2;
@@ -1900,6 +1900,237 @@ function getCurrentUser() {
   return users.find((user) => user.id === state.currentUserId && user.active !== false) || null;
 }
 
+const ACCOUNT_ACCESS_HUMAN_RESOURCE_ROLES = new Set(["tolier", "mecanicien", "electricien", "peintre", "controle"]);
+let accountAccessRuntimeContext = Object.freeze({ authIdentity: null, serverMembership: null });
+
+function sanitizeAccountAuthIdentity(authIdentity) {
+  if (!authIdentity?.id) return null;
+  return Object.freeze({
+    id: String(authIdentity.id).trim(),
+    email: String(authIdentity.email || "").trim().toLowerCase(),
+  });
+}
+
+function sanitizeAccountServerMembership(membership) {
+  if (!membership || typeof membership !== "object") return null;
+  return Object.freeze({
+    workshop_id: String(membership.workshop_id || "").trim(),
+    user_id: String(membership.user_id || "").trim(),
+    role: String(membership.role || "").trim(),
+    resource_id: membership.resource_id ? String(membership.resource_id).trim() : "",
+  });
+}
+
+function setAccountAccessRuntimeContext(authIdentity, serverMembership) {
+  accountAccessRuntimeContext = Object.freeze({
+    authIdentity: sanitizeAccountAuthIdentity(authIdentity),
+    serverMembership: sanitizeAccountServerMembership(serverMembership),
+  });
+  return accountAccessRuntimeContext;
+}
+
+function clearAccountAccessRuntimeContext() {
+  accountAccessRuntimeContext = Object.freeze({ authIdentity: null, serverMembership: null });
+}
+
+function isServerManagedLocalProfile(user) {
+  return Boolean(
+    user
+    && (
+      String(user.authUserId || "").trim()
+      || String(user.authSource || "").trim() === "supabase_membership"
+    )
+  );
+}
+
+function hasValidatedOnlineServerAuthority() {
+  if (typeof navigator !== "undefined" && navigator.onLine === false) return false;
+  const validatedAuthUserId = typeof window !== "undefined"
+    ? String(window.__nimrValidatedAuthUserId || "").trim()
+    : "";
+  const runtimeAuthUserId = String(accountAccessRuntimeContext.authIdentity?.id || "").trim();
+  const membershipUserId = String(accountAccessRuntimeContext.serverMembership?.user_id || "").trim();
+  return Boolean(
+    validatedAuthUserId
+    && runtimeAuthUserId === validatedAuthUserId
+    && membershipUserId === validatedAuthUserId
+  );
+}
+
+function isAccountAccessHumanResource(resource) {
+  return Boolean(resource && ACCOUNT_ACCESS_HUMAN_RESOURCE_ROLES.has(String(resource.role || "").trim()));
+}
+
+function getAccountAccessSnapshot(options = {}) {
+  const hasOption = (key) => Object.prototype.hasOwnProperty.call(options, key);
+  const online = hasOption("online")
+    ? options.online !== false
+    : (typeof navigator === "undefined" || navigator.onLine !== false);
+  const users = Array.isArray(options.users) ? options.users : (Array.isArray(state?.users) ? state.users : []);
+  const resources = Array.isArray(options.resources) ? options.resources : (Array.isArray(state?.resources) ? state.resources : []);
+  const authIdentity = sanitizeAccountAuthIdentity(
+    hasOption("authIdentity") ? options.authIdentity : accountAccessRuntimeContext.authIdentity,
+  );
+  const serverMembership = sanitizeAccountServerMembership(
+    hasOption("serverMembership") ? options.serverMembership : accountAccessRuntimeContext.serverMembership,
+  );
+  const configuredWorkshopId = hasOption("workshopId")
+    ? String(options.workshopId || "").trim()
+    : (typeof getSupabaseWorkshopId === "function" ? String(getSupabaseWorkshopId() || "").trim() : "");
+  const localUser = hasOption("localUser")
+    ? options.localUser
+    : (authIdentity?.id
+      ? users.find((user) => String(user?.authUserId || "").trim() === authIdentity.id)
+      : users.find((user) => user?.id === state?.currentUserId));
+  const serverRole = String(serverMembership?.role || "").trim();
+  const serverRoleValid = Boolean(CANONICAL_USER_ROLES[serverRole]);
+  const localRole = localUser ? getCanonicalUserRole(localUser) : "";
+  const serverResourceId = String(serverMembership?.resource_id || "").trim();
+  const localResourceId = String(localUser?.resourceId || "").trim();
+  const authoritativeResourceId = online && serverMembership ? serverResourceId : localResourceId;
+  const resource = authoritativeResourceId
+    ? resources.find((candidate) => candidate?.id === authoritativeResourceId) || null
+    : null;
+  const issues = [];
+  const addIssue = (code, severity, message) => {
+    if (!issues.some((issue) => issue.code === code)) issues.push({ code, severity, message });
+  };
+
+  let sessionStatus = "missing";
+  let membershipStatus = "unavailable";
+  if (!online) {
+    sessionStatus = localUser ? "offline_local" : "missing";
+    membershipStatus = localUser?.authSource === "supabase_membership" ? "cached" : "unavailable";
+    addIssue("OFFLINE_LOCAL_IDENTITY", "warning", "Mode hors ligne : le profil local validé reste un cache, pas une session Supabase.");
+  } else if (!authIdentity) {
+    addIssue("NO_AUTH_SESSION", "error", "Aucune session Supabase authentifiée n'est disponible.");
+  } else {
+    sessionStatus = "active";
+    if (!serverMembership) {
+      membershipStatus = "not_authorized";
+      addIssue("NO_SERVER_MEMBERSHIP", "error", "Aucune appartenance workshop_members validée pour cette session.");
+    } else if (!serverMembership.user_id || serverMembership.user_id !== authIdentity.id) {
+      membershipStatus = "not_authorized";
+      addIssue("AUTH_MEMBERSHIP_ID_MISMATCH", "error", "L'appartenance atelier ne correspond pas à l'identité Supabase authentifiée.");
+    } else if (!serverMembership.workshop_id || (configuredWorkshopId && serverMembership.workshop_id !== configuredWorkshopId)) {
+      membershipStatus = "not_authorized";
+      addIssue("MEMBERSHIP_WORKSHOP_MISMATCH", "error", "L'appartenance ne correspond pas à l'atelier configuré.");
+    } else if (!serverRoleValid) {
+      membershipStatus = "invalid_role";
+      addIssue("SERVER_ROLE_INVALID", "error", "Le rôle fourni par workshop_members n'est pas un rôle canonique reconnu.");
+    } else {
+      membershipStatus = "active";
+    }
+  }
+
+  if (!localUser) {
+    addIssue("LOCAL_MIRROR_MISSING", online ? "error" : "warning", "Aucun profil miroir local ne correspond à l'identité courante.");
+  } else {
+    if (localUser.active === false) addIssue("LOCAL_ACCOUNT_INACTIVE", "error", "Le profil miroir local est inactif.");
+    if (online && authIdentity?.id && String(localUser.authUserId || "").trim() !== authIdentity.id) {
+      addIssue("IDENTITY_NOT_SYNCHRONIZED", "error", "Le profil local ne correspond pas à l'identité Supabase authentifiée.");
+    }
+  }
+
+  const roleParity = serverRoleValid && localUser
+    ? (serverRole === localRole ? "pass" : "warning")
+    : "unavailable";
+  if (roleParity === "warning") {
+    addIssue("ROLE_PARITY_MISMATCH", "warning", "Le rôle local diffère du rôle serveur ; le rôle serveur reste autoritaire en ligne.");
+  }
+
+  const resourceParity = serverMembership && localUser
+    ? (serverResourceId === localResourceId ? "pass" : "warning")
+    : "unavailable";
+  if (resourceParity === "warning") {
+    addIssue("RESOURCE_PARITY_MISMATCH", "warning", "La ressource locale diffère de la ressource workshop_members.");
+  }
+
+  let technicianResourceStatus = serverRole === "technicien" ? "missing" : "not_required";
+  if (serverRole === "technicien") {
+    if (!serverResourceId) {
+      addIssue("TECHNICIAN_RESOURCE_MISSING", "error", "Le technicien doit être lié à une ressource humaine dans workshop_members.");
+    } else if (!resource) {
+      technicianResourceStatus = "not_found";
+      addIssue("TECHNICIAN_RESOURCE_NOT_FOUND", "error", "La ressource technicien du serveur n'existe pas dans le miroir local synchronisé.");
+    } else if (!isAccountAccessHumanResource(resource)) {
+      technicianResourceStatus = "equipment";
+      addIssue("TECHNICIAN_RESOURCE_EQUIPMENT", "error", "La ressource liée au technicien est un équipement ou une ressource non humaine.");
+    } else if (resource.active === false) {
+      technicianResourceStatus = "inactive";
+      addIssue("TECHNICIAN_RESOURCE_INACTIVE", "error", "La ressource humaine liée au technicien est inactive.");
+    } else {
+      technicianResourceStatus = "valid";
+    }
+  }
+
+  const accountHumanResources = resources.filter((candidate) => {
+    if (!isAccountAccessHumanResource(candidate)) return false;
+    return Boolean(
+      (serverResourceId && candidate.id === serverResourceId)
+      || (localResourceId && candidate.id === localResourceId)
+      || (localUser?.id && candidate.userId === localUser.id)
+      || (authIdentity?.id && candidate.authUserId === authIdentity.id)
+    );
+  });
+  if (accountHumanResources.length > 1) {
+    addIssue("ACCOUNT_MULTIPLE_HUMAN_RESOURCES", "error", "Le même compte semble lié à plusieurs ressources humaines locales.");
+  }
+
+  if (serverResourceId) {
+    const duplicateLocalLinks = users.filter((user) => user?.active !== false && String(user?.resourceId || "").trim() === serverResourceId);
+    if (duplicateLocalLinks.length > 1) {
+      addIssue("DUPLICATE_ACTIVE_RESOURCE_LINK", "error", "Plusieurs profils locaux actifs utilisent la même ressource technicien.");
+    }
+  }
+
+  const hasError = issues.some((issue) => issue.severity === "error");
+  let overallStatus = "active";
+  let overallLabel = "Actif";
+  if (!online) {
+    overallStatus = "offline_local";
+    overallLabel = "Hors ligne / identité locale";
+  } else if (membershipStatus === "invalid_role") {
+    overallStatus = "invalid_role";
+    overallLabel = "Rôle invalide";
+  } else if (serverRole === "technicien" && technicianResourceStatus !== "valid") {
+    overallStatus = "resource_missing";
+    overallLabel = "Ressource manquante";
+  } else if (hasError) {
+    overallStatus = "not_authorized";
+    overallLabel = "Non autorisé atelier";
+  }
+
+  return {
+    authIdentity,
+    serverMembership,
+    localUser: localUser ? { ...localUser } : null,
+    serverRole,
+    localRole,
+    serverResourceId,
+    localResourceId,
+    resource: resource ? {
+      id: resource.id,
+      name: resource.name || resource.id,
+      role: resource.role || "",
+      type: resource.type || "",
+      active: resource.active !== false,
+    } : null,
+    online,
+    serverAuthorityActive: Boolean(online && authIdentity?.id),
+    sessionStatus,
+    membershipStatus,
+    roleParity,
+    resourceParity,
+    technicianResourceStatus,
+    localAccountActive: Boolean(localUser && localUser.active !== false),
+    identitySynchronized: Boolean(!online || (authIdentity?.id && localUser?.authUserId === authIdentity.id)),
+    issues,
+    overallStatus,
+    overallLabel,
+  };
+}
+
 function getCurrentActor() {
   const user = getCurrentUser();
   if (!user) {
@@ -2032,6 +2263,13 @@ function updateUserLocal(userId, userData, actor = null) {
   }
   const user = getUserById(userId);
   if (!user) return { ok: false, message: "Utilisateur introuvable." };
+  if (hasValidatedOnlineServerAuthority() && isServerManagedLocalProfile(user)) {
+    return {
+      ok: false,
+      code: "SERVER_MANAGED_PROFILE_READ_ONLY",
+      message: "Profil géré par Supabase : rôle, ressource et état proviennent de l’appartenance atelier.",
+    };
+  }
 
   const name = String(userData?.name || "").trim();
   const role = String(userData?.role || "").trim();

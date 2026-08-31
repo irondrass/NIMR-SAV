@@ -61,21 +61,21 @@ function createUx009Context(filename) {
   return createNimrVmContext({ filename });
 }
 
-check("A v23.3.18 release/cache is exact and schema versions are unchanged", () => {
-  assert.match(versionSource, /^window\.APP_VERSION = "v23\.3\.18";$/mu);
-  assert.match(versionSource, /^window\.NIMR_BUILD = "v23\.3\.18";$/mu);
-  assert.match(versionSource, /^window\.NIMR_CACHE_NAME = "nimr-sav-v23\.3\.18";$/mu);
-  assert.match(stateSource, /^const APP_VERSION = "v23\.3\.18";$/mu);
+check("A v23.3.19 release/cache is exact and schema versions are unchanged", () => {
+  assert.match(versionSource, /^window\.APP_VERSION = "v23\.3\.19";$/mu);
+  assert.match(versionSource, /^window\.NIMR_BUILD = "v23\.3\.19";$/mu);
+  assert.match(versionSource, /^window\.NIMR_CACHE_NAME = "nimr-sav-v23\.3\.19";$/mu);
+  assert.match(stateSource, /^const APP_VERSION = "v23\.3\.19";$/mu);
   assert.match(stateSource, /^const DB_VERSION = 2;$/mu);
   assert.match(stateSource, /^const CURRENT_DATA_SCHEMA_VERSION = 2;$/mu);
   assert.match(stateSource, /^const CANONICAL_TASK_MODEL_VERSION = 1;$/mu);
-  assert.match(swSource, /^const CACHE_NAME = "nimr-sav-v23\.3\.18";$/mu);
-  assert.match(appSource, /pdf\.worker\.min\.js\?v=23\.3\.18/u);
-  assert.match(appSource, /sw\.js\?v=23\.3\.18/u);
-  assert.match(estimateImportSource, /pdf\.worker\.min\.js\?v=23\.3\.18/u);
-  assert.match(indexSource, /styles\.css\?v=23\.3\.18/u);
-  assert.match(indexSource, /app\.js\?v=23\.3\.18/u);
-  assert.match(offlineSource, /styles\.css\?v=23\.3\.18/u);
+  assert.match(swSource, /^const CACHE_NAME = "nimr-sav-v23\.3\.19";$/mu);
+  assert.match(appSource, /pdf\.worker\.min\.js\?v=23\.3\.19/u);
+  assert.match(appSource, /sw\.js\?v=23\.3\.19/u);
+  assert.match(estimateImportSource, /pdf\.worker\.min\.js\?v=23\.3\.19/u);
+  assert.match(indexSource, /styles\.css\?v=23\.3\.19/u);
+  assert.match(indexSource, /app\.js\?v=23\.3\.19/u);
+  assert.match(offlineSource, /styles\.css\?v=23\.3\.19/u);
 });
 
 check("B Workshop Progress Board is inside Today without a new navigation tab", () => {
@@ -94,9 +94,10 @@ check("B Workshop Progress Board is inside Today without a new navigation tab", 
 check("C Role tabs and permissions remain content-identical to baseline", () => {
   const baseState = readBaseFile("js/state.js");
   for (const [start, end] of [
-    ["const DIRECTOR_PERMISSIONS", "const MUTATION_PERMISSIONS"],
-    ["const ROLE_PERMISSIONS", "function permissionMatches"],
-    ["const ROLE_TABS", "function getDefaultTabForRole"],
+    ["const DIRECTOR_PERMISSIONS", "const READ_ONLY_PERMISSIONS"],
+    ["const ROLE_PERMISSIONS", "const MUTATION_PERMISSIONS"],
+    ["const ROLE_TABS", "// Tab par défaut"],
+    ["const ROLE_DEFAULT_TABS", "// v23.2.5"],
   ]) {
     assert.equal(normalizeEol(sourceSlice(stateSource, start, end)), normalizeEol(sourceSlice(baseState, start, end)));
   }

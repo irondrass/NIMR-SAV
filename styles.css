@@ -2288,6 +2288,216 @@ select:focus {
   flex: 1 1 auto;
 }
 
+.account-access-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 22px;
+}
+
+.users-roles-panel {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+}
+
+.account-access-card {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fbfdfe;
+}
+
+.account-access-diagnostic {
+  grid-column: 1 / -1;
+}
+
+.account-access-card-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.account-access-card-heading h2 {
+  margin: 0 0 5px;
+  font-size: 1rem;
+}
+
+.account-access-card-heading > div > span:not(.account-source-badge) {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.account-source-badge,
+.account-overall-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 4px 9px;
+  border: 1px solid #b8d9ef;
+  border-radius: 999px;
+  background: #eef8ff;
+  color: #075985;
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.account-source-badge.local {
+  border-color: #d9dce3;
+  background: #f5f6f8;
+  color: #475569;
+}
+
+.account-overall-status[data-status="active"] {
+  border-color: #9fd7b4;
+  background: #ecfdf3;
+  color: #166534;
+}
+
+.account-overall-status[data-status="offline_local"] {
+  border-color: #e6cb8a;
+  background: #fff8e5;
+  color: #854d0e;
+}
+
+.account-overall-status[data-status="not_authorized"],
+.account-overall-status[data-status="invalid_role"],
+.account-overall-status[data-status="resource_missing"] {
+  border-color: #efb2b2;
+  background: #fff1f2;
+  color: #991b1b;
+}
+
+.account-access-details,
+.account-access-checks {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.account-access-details > div,
+.account-access-check {
+  display: grid;
+  grid-template-columns: minmax(130px, 0.8fr) minmax(0, 1.2fr);
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.account-access-details > div:last-child,
+.account-access-check:last-child {
+  border-bottom: 0;
+}
+
+.account-access-details dt,
+.account-access-check dt {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.account-access-details dd,
+.account-access-check dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.account-access-check dd {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+}
+
+.account-access-check dd strong {
+  flex: 0 0 auto;
+}
+
+.account-access-check dd span {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.account-access-check[data-check-status="pass"] dd strong {
+  color: #166534;
+}
+
+.account-access-check[data-check-status="attention"] dd strong {
+  color: #854d0e;
+}
+
+.account-access-check[data-check-status="error"] dd strong,
+.account-access-issues [data-issue-severity="error"] strong {
+  color: #991b1b;
+}
+
+.account-authority-note,
+.account-access-issues {
+  margin: 12px 0 0;
+  padding: 11px 12px;
+  border-left: 4px solid #0b63ce;
+  border-radius: 7px;
+  background: #eff6ff;
+  color: #1e3a5f;
+  font-size: 0.84rem;
+  font-weight: 650;
+}
+
+.account-access-issues {
+  display: grid;
+  gap: 7px;
+  padding-left: 30px;
+  border-left-color: #d97706;
+  background: #fff8e5;
+  color: #653d08;
+}
+
+.account-access-issues[hidden] {
+  display: none;
+}
+
+.account-provisioning-placeholder {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.account-provisioning-placeholder span,
+.account-local-selector-label {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.local-profile-management {
+  margin-top: 6px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.local-profile-management[hidden] {
+  display: none;
+}
+
+.account-local-selector-label {
+  display: block;
+  margin-bottom: 7px;
+}
+
+#current-user-selector {
+  width: min(100%, 440px);
+  min-height: 44px;
+}
+
 .fastlane-form {
   margin-top: 18px;
   padding-top: 16px;
@@ -2999,6 +3209,18 @@ select:focus {
   .blocker-grid,
   .work-hour-row {
     grid-template-columns: 1fr;
+  }
+
+  .account-access-grid,
+  .account-access-details > div,
+  .account-access-check {
+    grid-template-columns: 1fr;
+  }
+
+  .account-access-card-heading,
+  .account-access-check dd {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .panel-list {

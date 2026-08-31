@@ -132,6 +132,84 @@ async function resolveSupabaseWorkshopMembership(authUser) {
 }
 window.resolveSupabaseWorkshopMembership = resolveSupabaseWorkshopMembership;
 
+const WORKSHOP_USER_ADMIN_ACTIONS = new Set(["capabilities", "invite_member", "offboard_member"]);
+
+async function readWorkshopUserAdminInvokeError(error) {
+  const context = error?.context;
+  if (!context || typeof context.json !== "function") return null;
+  try {
+    const response = typeof context.clone === "function" ? context.clone() : context;
+    const body = await response.json();
+    return body && typeof body === "object" ? body : null;
+  } catch (parseError) {
+    return null;
+  }
+}
+
+async function invokeWorkshopUserAdmin(action, payload = {}) {
+  const normalizedAction = String(action || "").trim().toLowerCase();
+  if (!WORKSHOP_USER_ADMIN_ACTIONS.has(normalizedAction)) {
+    return { ok: false, code: "INVALID_ACTION", message: "Action d’administration de compte non autorisée." };
+  }
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    return { ok: false, code: "OFFLINE_NOT_ALLOWED", message: "Connexion internet requise : cette opération de sécurité ne sera pas mise en attente." };
+  }
+  const client = getSupabaseClient();
+  if (!client?.functions?.invoke) {
+    return { ok: false, code: "NO_CLIENT", message: "Client Supabase non configuré." };
+  }
+  try {
+    const authUser = await getSupabaseUser();
+    if (!authUser?.id) {
+      return { ok: false, code: "UNAUTHENTICATED", message: "Session Supabase authentifiée requise." };
+    }
+    const membershipResult = await resolveSupabaseWorkshopMembership(authUser);
+    if (!membershipResult?.ok || !membershipResult.membership) {
+      return {
+        ok: false,
+        code: membershipResult?.code || "INVALID_MEMBERSHIP",
+        message: membershipResult?.message || "Appartenance atelier non valide.",
+      };
+    }
+    const workshopId = String(getSupabaseWorkshopId() || "").trim();
+    const membership = membershipResult.membership;
+    if (String(membership.user_id || "") !== String(authUser.id)
+      || !workshopId
+      || String(membership.workshop_id || "") !== workshopId) {
+      return {
+        ok: false,
+        code: "MEMBERSHIP_IDENTITY_MISMATCH",
+        message: "L’appartenance atelier ne correspond pas à l’identité Supabase active.",
+      };
+    }
+    const { data, error } = await client.functions.invoke("workshop-user-admin", {
+      body: {
+        ...(payload && typeof payload === "object" ? payload : {}),
+        action: normalizedAction,
+        workshop_id: workshopId,
+      },
+    });
+    if (error) {
+      const serverError = await readWorkshopUserAdminInvokeError(error);
+      return serverError || {
+        ok: false,
+        code: "WORKSHOP_USER_ADMIN_FAILED",
+        message: error.message || "Le service sécurisé de gestion des comptes est indisponible.",
+      };
+    }
+    return data && typeof data === "object"
+      ? data
+      : { ok: false, code: "INVALID_SERVER_RESPONSE", message: "Réponse serveur de gestion des comptes invalide." };
+  } catch (error) {
+    return {
+      ok: false,
+      code: "WORKSHOP_USER_ADMIN_EXCEPTION",
+      message: error?.message || "Appel sécurisé de gestion des comptes impossible.",
+    };
+  }
+}
+window.invokeWorkshopUserAdmin = invokeWorkshopUserAdmin;
+
 async function authenticateSupabaseUser(email, password) {
   const client = getSupabaseClient();
   if (!client) {

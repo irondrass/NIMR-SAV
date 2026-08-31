@@ -96,20 +96,20 @@ function check(name, callback) {
 }
 
 check("A Release and schema remain exact", () => {
-  assert.match(versionSource, /^window\.APP_VERSION = "v23\.3\.19";$/mu);
-  assert.match(versionSource, /^window\.NIMR_BUILD = "v23\.3\.19";$/mu);
-  assert.match(versionSource, /^window\.NIMR_CACHE_NAME = "nimr-sav-v23\.3\.19";$/mu);
-  assert.match(stateSource, /^const APP_VERSION = "v23\.3\.19";$/mu);
+  assert.match(versionSource, /^window\.APP_VERSION = "v23\.3\.20";$/mu);
+  assert.match(versionSource, /^window\.NIMR_BUILD = "v23\.3\.20";$/mu);
+  assert.match(versionSource, /^window\.NIMR_CACHE_NAME = "nimr-sav-v23\.3\.20";$/mu);
+  assert.match(stateSource, /^const APP_VERSION = "v23\.3\.20";$/mu);
   assert.match(stateSource, /^const DB_VERSION = 2;$/mu);
   assert.match(stateSource, /^const CURRENT_DATA_SCHEMA_VERSION = 2;$/mu);
   assert.match(stateSource, /^const CANONICAL_TASK_MODEL_VERSION = 1;$/mu);
-  assert.match(swSource, /^const CACHE_NAME = "nimr-sav-v23\.3\.19";$/mu);
-  assert.match(appSource, /pdf\.worker\.min\.js\?v=23\.3\.19/u);
-  assert.match(appSource, /sw\.js\?v=23\.3\.19/u);
-  assert.match(indexSource, /styles\.css\?v=23\.3\.19/u);
-  assert.match(indexSource, /app\.js\?v=23\.3\.19/u);
-  assert.match(offlineSource, /styles\.css\?v=23\.3\.19/u);
-  assert.match(estimateImportSource, /pdf\.worker\.min\.js\?v=23\.3\.19/u);
+  assert.match(swSource, /^const CACHE_NAME = "nimr-sav-v23\.3\.20";$/mu);
+  assert.match(appSource, /pdf\.worker\.min\.js\?v=23\.3\.20/u);
+  assert.match(appSource, /sw\.js\?v=23\.3\.20/u);
+  assert.match(indexSource, /styles\.css\?v=23\.3\.20/u);
+  assert.match(indexSource, /app\.js\?v=23\.3\.20/u);
+  assert.match(offlineSource, /styles\.css\?v=23\.3\.20/u);
+  assert.match(estimateImportSource, /pdf\.worker\.min\.js\?v=23\.3\.20/u);
   assert.doesNotMatch([appSource, indexSource, stateSource, versionSource, swSource].join("\n"), /23\.3\.16/u);
 });
 
@@ -202,9 +202,18 @@ check("I Critical status meaning is not color-only", () => {
 });
 
 check("J Protected behavior and UX-007 metrics remain unchanged", () => {
-  for (const protectedFile of ["js/planning.js", "js/supabase-client.js", "js/supabase-sync.js", "js/supabase-config.js"]) {
+  for (const protectedFile of ["js/planning.js", "js/supabase-sync.js", "js/supabase-config.js"]) {
     assert.equal(normalizeEol(readProjectFile(protectedFile)), normalizeEol(readBaseFile(protectedFile)), `${protectedFile} must remain content-identical to base`);
   }
+  const currentSupabaseClient = readProjectFile("js/supabase-client.js");
+  const provisioningClient = sourceSlice(currentSupabaseClient, "const WORKSHOP_USER_ADMIN_ACTIONS", "async function authenticateSupabaseUser");
+  assert.equal(
+    normalizeEol(currentSupabaseClient.replace(provisioningClient, "")),
+    normalizeEol(readBaseFile("js/supabase-client.js")),
+    "The pre-existing Supabase client must remain unchanged outside the bounded IDENTITY-001B wrapper",
+  );
+  assert.match(provisioningClient, /client\.functions\.invoke\("workshop-user-admin"/u);
+  assert.doesNotMatch(provisioningClient, /auth\.admin|service_role|sb_secret_|SUPABASE_SECRET_KEYS/u);
   const baseState = readBaseFile("js/state.js");
   assert.equal(
     normalizeEol(sourceSlice(stateSource, "const DIRECTOR_PERMISSIONS", "const MUTATION_PERMISSIONS")),

@@ -62,21 +62,21 @@ function createIdentityContext(filename) {
   return createNimrVmContext({ filename });
 }
 
-check("A v23.3.19 is exact and schema constants are unchanged", () => {
-  assert.match(versionSource, /^window\.APP_VERSION = "v23\.3\.19";$/mu);
-  assert.match(versionSource, /^window\.NIMR_BUILD = "v23\.3\.19";$/mu);
-  assert.match(versionSource, /^window\.NIMR_CACHE_NAME = "nimr-sav-v23\.3\.19";$/mu);
-  assert.match(stateSource, /^const APP_VERSION = "v23\.3\.19";$/mu);
+check("A v23.3.20 is exact and schema constants are unchanged", () => {
+  assert.match(versionSource, /^window\.APP_VERSION = "v23\.3\.20";$/mu);
+  assert.match(versionSource, /^window\.NIMR_BUILD = "v23\.3\.20";$/mu);
+  assert.match(versionSource, /^window\.NIMR_CACHE_NAME = "nimr-sav-v23\.3\.20";$/mu);
+  assert.match(stateSource, /^const APP_VERSION = "v23\.3\.20";$/mu);
   assert.match(stateSource, /^const DB_VERSION = 2;$/mu);
   assert.match(stateSource, /^const CURRENT_DATA_SCHEMA_VERSION = 2;$/mu);
   assert.match(stateSource, /^const CANONICAL_TASK_MODEL_VERSION = 1;$/mu);
-  assert.match(swSource, /^const CACHE_NAME = "nimr-sav-v23\.3\.19";$/mu);
-  assert.match(appSource, /pdf\.worker\.min\.js\?v=23\.3\.19/u);
-  assert.match(appSource, /sw\.js\?v=23\.3\.19/u);
-  assert.match(estimateImportSource, /pdf\.worker\.min\.js\?v=23\.3\.19/u);
-  assert.match(indexSource, /styles\.css\?v=23\.3\.19/u);
-  assert.match(indexSource, /app\.js\?v=23\.3\.19/u);
-  assert.match(offlineSource, /styles\.css\?v=23\.3\.19/u);
+  assert.match(swSource, /^const CACHE_NAME = "nimr-sav-v23\.3\.20";$/mu);
+  assert.match(appSource, /pdf\.worker\.min\.js\?v=23\.3\.20/u);
+  assert.match(appSource, /sw\.js\?v=23\.3\.20/u);
+  assert.match(estimateImportSource, /pdf\.worker\.min\.js\?v=23\.3\.20/u);
+  assert.match(indexSource, /styles\.css\?v=23\.3\.20/u);
+  assert.match(indexSource, /app\.js\?v=23\.3\.20/u);
+  assert.match(offlineSource, /styles\.css\?v=23\.3\.20/u);
   assert.doesNotMatch([appSource, indexSource, stateSource, versionSource, estimateImportSource, offlineSource, swSource].join("\n"), /23\.3\.18/u);
 });
 
@@ -297,15 +297,14 @@ check("K No Auth Admin API, administrative secret or service role is introduced 
   const additions = productionDiff.split(/\r?\n/u).filter((line) => line.startsWith("+") && !line.startsWith("+++")).join("\n");
   assert.doesNotMatch(additions, /sb_secret_|service[_-]?role|\.auth\.admin\b|auth\.admin\b|createUser\s*\(/iu);
   assert.match(indexSource, /Inviter un collaborateur/u);
-  assert.match(indexSource, /Provisioning serveur sécurisé — prochaine étape/u);
-  assert.match(indexSource, /Inviter un collaborateur<\/button>/u);
-  assert.doesNotMatch(appSource, /Inviter un collaborateur/u);
+  assert.match(indexSource, /id="invite-workshop-member-btn"[\s\S]*Inviter un collaborateur<\/button>/u);
+  assert.match(readProjectFile("js/supabase-client.js"), /client\.functions\.invoke\("workshop-user-admin"/u);
+  assert.doesNotMatch(readProjectFile("js/supabase-client.js"), /\.auth\.admin\b|auth\.admin\b/iu);
 });
 
 check("L Planning, Supabase, SQL, UX-007, UX-009 and write behavior remain protected", () => {
   for (const protectedFile of [
     "js/planning.js",
-    "js/supabase-client.js",
     "js/supabase-sync.js",
     "js/supabase-config.js",
     "supabase-schema.sql",
@@ -330,7 +329,7 @@ check("L Planning, Supabase, SQL, UX-007, UX-009 and write behavior remain prote
   assert.doesNotMatch(snapshotSource, /saveState\s*\(|state\.[A-Za-z0-9_$.[\]]+\s*=/u);
   assert.doesNotMatch(snapshotSource, /\.from\s*\(|\.insert\s*\(|\.update\s*\(|\.upsert\s*\(/u);
   const changed = execFileSync("git", ["diff", "--name-only", BASE_SHA], { cwd: repoRoot, encoding: "utf8" });
-  assert.doesNotMatch(changed, /(?:^|\n)supabase\/functions\//u);
+  assert.equal(fs.existsSync(path.join(repoRoot, "supabase/functions/workshop-user-admin/index.ts")), true);
   assert.doesNotMatch(changed, /\.sql(?:\n|$)/u);
 });
 
@@ -376,6 +375,19 @@ async function runBrowserSmoke() {
           window.pullLatestSupabaseBackup = async () => ({ ok: true });
           window.startSupabaseLiveSync = async () => true;
           window.signOutSupabaseSession = async () => ({ ok: true });
+          window.invokeWorkshopUserAdmin = async (action) => {
+            const snapshot = typeof getAccountAccessSnapshot === "function" ? getAccountAccessSnapshot() : null;
+            return action === "capabilities"
+              ? {
+                  ok: true,
+                  can_manage_accounts: true,
+                  provisioning_available: true,
+                  caller_role: snapshot?.serverRole || "admin_technique",
+                  workshop_id: snapshot?.serverMembership?.workshop_id || membership.workshop_id,
+                  human_resources: [],
+                }
+              : { ok: false, code: "NOT_USED_BY_IDENTITY001A" };
+          };
           form.elements.email.value = authUser.email;
           form.elements.password.value = "Pass123456";
           form.requestSubmit();

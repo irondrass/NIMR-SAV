@@ -25,18 +25,18 @@ function createDashboardContext(filename) {
   return createNimrVmContext({ filename });
 }
 
-check("A Exact v23.3.19 release and cache contract", () => {
-  assert.match(versionSource, /^window\.APP_VERSION = "v23\.3\.19";$/mu);
-  assert.match(versionSource, /^window\.NIMR_BUILD = "v23\.3\.19";$/mu);
-  assert.match(versionSource, /^window\.NIMR_CACHE_NAME = "nimr-sav-v23\.3\.19";$/mu);
-  assert.match(stateSource, /^const APP_VERSION = "v23\.3\.19";$/mu);
-  assert.match(swSource, /^const CACHE_NAME = "nimr-sav-v23\.3\.19";$/mu);
-  assert.match(appSource, /pdf\.worker\.min\.js\?v=23\.3\.19/u);
-  assert.match(appSource, /sw\.js\?v=23\.3\.19/u);
-  assert.match(indexSource, /styles\.css\?v=23\.3\.19/u);
-  assert.match(indexSource, /app\.js\?v=23\.3\.19/u);
-  assert.match(offlineSource, /styles\.css\?v=23\.3\.19/u);
-  assert.match(estimateImportSource, /pdf\.worker\.min\.js\?v=23\.3\.19/u);
+check("A Exact v23.3.20 release and cache contract", () => {
+  assert.match(versionSource, /^window\.APP_VERSION = "v23\.3\.20";$/mu);
+  assert.match(versionSource, /^window\.NIMR_BUILD = "v23\.3\.20";$/mu);
+  assert.match(versionSource, /^window\.NIMR_CACHE_NAME = "nimr-sav-v23\.3\.20";$/mu);
+  assert.match(stateSource, /^const APP_VERSION = "v23\.3\.20";$/mu);
+  assert.match(swSource, /^const CACHE_NAME = "nimr-sav-v23\.3\.20";$/mu);
+  assert.match(appSource, /pdf\.worker\.min\.js\?v=23\.3\.20/u);
+  assert.match(appSource, /sw\.js\?v=23\.3\.20/u);
+  assert.match(indexSource, /styles\.css\?v=23\.3\.20/u);
+  assert.match(indexSource, /app\.js\?v=23\.3\.20/u);
+  assert.match(offlineSource, /styles\.css\?v=23\.3\.20/u);
+  assert.match(estimateImportSource, /pdf\.worker\.min\.js\?v=23\.3\.20/u);
   assert.match(stateSource, /^const CURRENT_DATA_SCHEMA_VERSION = 2;$/mu);
   assert.match(stateSource, /^const CANONICAL_TASK_MODEL_VERSION = 1;$/mu);
   assert.match(stateSource, /^const DB_VERSION = 2;$/mu);
@@ -137,7 +137,7 @@ check("D Canonical delivery, QC and today signals are exact", () => {
     ],
     bookings: []
   })`);
-  const snapshot = context.buildDirectorDashboardSnapshot(undefined, new Date("2026-08-31T12:00:00.000Z"));
+  const snapshot = context.buildDirectorDashboardSnapshot(undefined, run('new Date("2026-08-31T12:00:00.000Z")'));
   const deliveryAlerts = snapshot.priorities.filter((alert) => alert.title === "Date de livraison dépassée");
 
   assert.equal(snapshot.metrics.overdueCases, 1, "Only the revised overdue deadline is late");
@@ -255,7 +255,7 @@ check("F Priority ordering is deterministic", () => {
     ],
     bookings: []
   })`);
-  const priorities = context.buildDirectorDashboardSnapshot(undefined, new Date("2026-08-31T12:00:00.000Z")).priorities;
+  const priorities = context.buildDirectorDashboardSnapshot(undefined, run('new Date("2026-08-31T12:00:00.000Z")')).priorities;
   const rank = { critical: 0, high: 1, medium: 2 };
   for (let index = 1; index < priorities.length; index += 1) {
     assert.ok(rank[priorities[index - 1].severity] <= rank[priorities[index].severity]);
@@ -346,7 +346,7 @@ check("G False QC, time and planning signals are rejected", () => {
   });
   state.cases.find((item) => item.id === "qc-not-started").flags.qualityReturnReason = "Legacy reason only";`);
 
-  const snapshot = context.buildDirectorDashboardSnapshot(undefined, new Date("2026-08-31T12:00:00.000Z"));
+  const snapshot = context.buildDirectorDashboardSnapshot(undefined, run('new Date("2026-08-31T12:00:00.000Z")'));
   const findAlert = (caseId, title) => snapshot.priorities.find((alert) => alert.caseId === caseId && alert.title === title);
 
   assert.equal(snapshot.metrics.qcReworkCases, 0);
@@ -465,7 +465,7 @@ check("J Aggregate construction remains bounded", () => {
     });
   `);
   const startedAt = performance.now();
-  const snapshot = context.buildDirectorDashboardSnapshot(undefined, new Date("2026-08-31T12:00:00.000Z"));
+  const snapshot = context.buildDirectorDashboardSnapshot(undefined, run('new Date("2026-08-31T12:00:00.000Z")'));
   const durationMs = performance.now() - startedAt;
 
   assert.equal(snapshot.metrics.activeCases, 500);

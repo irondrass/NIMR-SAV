@@ -6447,3 +6447,179 @@ body.is-offline .sync-status-strip .sync-item:nth-of-type(3) {
     margin-top: 4px;
   }
 }
+
+/* UX-007 — Director dashboard hierarchy and actionable priorities */
+.pilotage-panel,
+.pilotage-level-block {
+  display: grid;
+  gap: 14px;
+}
+
+.pilotage-level-block {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--paper);
+}
+
+.sav-kpi-card[role="button"] {
+  cursor: pointer;
+}
+
+.sav-kpi-card[role="button"]:focus-visible {
+  outline: 3px solid rgba(37, 99, 235, 0.3);
+  outline-offset: 2px;
+}
+
+.pilotage-priority-list {
+  display: grid;
+  gap: 10px;
+}
+
+.pilotage-priority-card {
+  display: grid;
+  grid-template-columns: minmax(120px, auto) minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-left: 5px solid #8aa4b2;
+  border-radius: var(--radius);
+  background: #fff;
+  box-shadow: var(--shadow-sm);
+}
+
+.pilotage-priority-card.severity-critical { border-left-color: #dc2626; background: #fffafa; }
+.pilotage-priority-card.severity-high { border-left-color: #ea580c; background: #fffdfa; }
+.pilotage-priority-card.severity-medium { border-left-color: #2563eb; background: #fbfdff; }
+
+.priority-card-header,
+.priority-card-body {
+  display: grid;
+  gap: 6px;
+}
+
+.priority-card-header { justify-items: start; }
+
+.severity-badge,
+.case-stage-pill {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.severity-badge {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.severity-badge.critical { background: #fee2e2; color: #991b1b; }
+.severity-badge.high { background: #ffedd5; color: #9a3412; }
+.severity-badge.medium { background: #dbeafe; color: #1e40af; }
+
+.case-ref-badge,
+.priority-title { font-weight: 750; color: var(--ink); }
+.case-stage-pill { color: var(--muted); background: #f1f5f9; }
+.priority-reason { margin: 0; color: var(--text); font-size: 0.88rem; }
+
+.priority-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.priority-card-action .cta-button {
+  min-height: 44px;
+  padding: 8px 16px;
+  white-space: nowrap;
+}
+
+.pilotage-flow-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.load-bar-wrap {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e2e8f0;
+}
+
+.load-bar-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--brand);
+}
+
+.pilotage-today-summary-card,
+.pilotage-case-funnel-card {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  box-shadow: var(--shadow-sm);
+}
+
+.pilotage-today-summary-card h3,
+.pilotage-case-funnel-card h3 {
+  margin: 0 0 12px;
+  color: var(--ink);
+  font-size: 0.95rem;
+}
+
+.today-metrics-grid,
+.funnel-steps-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.today-metrics-grid { grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); }
+.funnel-steps-grid { grid-template-columns: repeat(6, minmax(70px, 1fr)); }
+
+.today-metric-item,
+.funnel-step-btn {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #f8fafb;
+}
+
+.today-metric-item span,
+.funnel-step-btn .step-name { color: var(--muted); font-size: 0.75rem; }
+.today-metric-item strong,
+.funnel-step-btn strong { color: var(--ink); font-size: 1.35rem; }
+
+.funnel-step-btn {
+  min-height: 44px;
+  text-align: center;
+  cursor: pointer;
+}
+
+.funnel-step-btn:hover,
+.funnel-step-btn:focus-visible {
+  border-color: #2563eb;
+  background: #eff6ff;
+  outline: none;
+}
+
+.funnel-step-btn .step-num { color: #2563eb; font-size: 0.7rem; font-weight: 800; }
+
+@media (max-width: 900px) {
+  .pilotage-priority-card { grid-template-columns: 1fr; }
+  .priority-card-action .cta-button { width: 100%; }
+  .pilotage-flow-grid { grid-template-columns: 1fr; }
+  .funnel-steps-grid { grid-template-columns: repeat(3, minmax(70px, 1fr)); }
+}
+
+@media (max-width: 560px) {
+  .pilotage-level-block { padding: 12px; }
+  .funnel-steps-grid { grid-template-columns: repeat(2, minmax(70px, 1fr)); }
+}

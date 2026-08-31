@@ -20,8 +20,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <script src="js/version.js?v=23.3.15"></script>
-    <link rel="stylesheet" href="styles.css?v=23.3.15" />
+    <script src="js/version.js?v=23.3.16"></script>
+    <link rel="stylesheet" href="styles.css?v=23.3.16" />
   </head>
   <body>
 <!-- Bouton Menu Mobile -->
@@ -276,11 +276,11 @@
         </section>
 
         <section class="view" id="view-pilotage">
-          <section class="panel kanban-panel">
+          <section class="panel kanban-panel pilotage-panel">
             <div class="panel-heading">
               <div>
-                <h1>Dashboard performance SAV</h1>
-                <p>KPI Directeur SAV, charge atelier et alertes prioritaires</p>
+                <h1>Dashboard Directeur SAV</h1>
+                <p>Pilotage opérationnel, alertes prioritaires, charge atelier et flux des dossiers</p>
               </div>
             </div>
             <div class="sav-dashboard-filters" aria-label="Filtres dashboard SAV">
@@ -288,8 +288,8 @@
                 Période
                 <select id="sav-dashboard-period" aria-label="Filtrer le dashboard par période">
                   <option value="today">Aujourd'hui</option>
-                  <option value="week">Semaine</option>
-                  <option value="month">Mois</option>
+                  <option value="week">7 jours</option>
+                  <option value="month">30 jours</option>
                 </select>
               </label>
               <label>
@@ -312,18 +312,40 @@
                 </select>
               </label>
             </div>
-            <div class="sav-kpi-grid" id="sav-kpi-grid" aria-label="KPI SAV"></div>
-            <div class="sav-dashboard-load-grid" id="sav-dashboard-load-grid" aria-label="Charge atelier par service"></div>
-            <div class="pilotage-alert-block">
+            <section class="pilotage-level-block pilotage-executive-block" aria-label="Indicateurs clés">
+              <div class="sav-kpi-grid" id="sav-kpi-grid" aria-label="Indicateurs clés de performance"></div>
+            </section>
+            <section class="pilotage-level-block pilotage-priority-block" aria-labelledby="pilotage-priority-heading">
               <div class="section-heading compact-heading">
                 <div>
-                  <h2>Alertes priorité Directeur SAV</h2>
-                  <span>Réceptions, retards, blocages et clôtures atelier à traiter.</span>
+                  <h2 id="pilotage-priority-heading">À traiter en priorité</h2>
+                  <span>Dossiers critiques, retards, blocages et décisions management.</span>
                 </div>
               </div>
-              <div class="pilotage-alerts" id="pilotage-alerts"></div>
-            </div>
-            <div class="kanban-board" id="kanban-board"></div>
+              <div class="pilotage-alerts pilotage-priority-list" id="pilotage-alerts" aria-live="polite"></div>
+            </section>
+            <section class="pilotage-level-block pilotage-load-flow-block" aria-label="Charge et flux atelier">
+              <div class="section-heading compact-heading">
+                <div>
+                  <h2>Charge atelier & flux des opérations</h2>
+                  <span>Capacités par service, suivi du jour et avancement des dossiers.</span>
+                </div>
+              </div>
+              <div class="sav-dashboard-load-grid" id="sav-dashboard-load-grid" aria-label="Charge atelier par service"></div>
+              <div class="pilotage-flow-grid">
+                <div class="pilotage-today-summary-card" id="pilotage-today-summary" aria-label="Synthèse opérationnelle du jour"></div>
+                <div class="pilotage-case-funnel-card" id="pilotage-case-funnel" aria-label="Répartition du flux des dossiers"></div>
+              </div>
+            </section>
+            <section class="pilotage-level-block pilotage-kanban-block" aria-label="Tableau opérationnel Kanban">
+              <div class="section-heading compact-heading">
+                <div>
+                  <h2>Suivi Kanban des dossiers</h2>
+                  <span>Vue globale des dossiers par étape opérationnelle.</span>
+                </div>
+              </div>
+              <div class="kanban-board" id="kanban-board"></div>
+            </section>
           </section>
         </section>
 
@@ -1248,22 +1270,22 @@
       </div>
     </div>
 
-    <script src="vendor/pdf.min.js?v=23.3.15" defer></script>
-    <script src="js/utils.js?v=23.3.15" defer></script>
-    <script src="js/state.js?v=23.3.15" defer></script>
-    <script src="js/ui-cases.js?v=23.3.15" defer></script>
-    <script src="js/estimate-import.js?v=23.3.15" defer></script>
-    <script src="js/ui-planning.js?v=23.3.15" defer></script>
-    <script src="js/photos.js?v=23.3.15" defer></script>
-    <script src="js/storage.js?v=23.3.15" defer></script>
-    <script src="js/work-hours-sync.js?v=23.3.15" defer></script>
-    <script src="js/planning.js?v=23.3.15" defer></script>
-    <script src="js/exports.js?v=23.3.15" defer></script>
-    <script src="js/business-rules-v2187.js?v=23.3.15" defer></script>
+    <script src="vendor/pdf.min.js?v=23.3.16" defer></script>
+    <script src="js/utils.js?v=23.3.16" defer></script>
+    <script src="js/state.js?v=23.3.16" defer></script>
+    <script src="js/ui-cases.js?v=23.3.16" defer></script>
+    <script src="js/estimate-import.js?v=23.3.16" defer></script>
+    <script src="js/ui-planning.js?v=23.3.16" defer></script>
+    <script src="js/photos.js?v=23.3.16" defer></script>
+    <script src="js/storage.js?v=23.3.16" defer></script>
+    <script src="js/work-hours-sync.js?v=23.3.16" defer></script>
+    <script src="js/planning.js?v=23.3.16" defer></script>
+    <script src="js/exports.js?v=23.3.16" defer></script>
+    <script src="js/business-rules-v2187.js?v=23.3.16" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
-    <script src="js/supabase-config.js?v=23.3.15" defer></script>
-    <script src="js/supabase-client.js?v=23.3.15" defer></script>
-    <script src="js/supabase-sync.js?v=23.3.15" defer></script>
-    <script src="app.js?v=23.3.15" defer></script>
+    <script src="js/supabase-config.js?v=23.3.16" defer></script>
+    <script src="js/supabase-client.js?v=23.3.16" defer></script>
+    <script src="js/supabase-sync.js?v=23.3.16" defer></script>
+    <script src="app.js?v=23.3.16" defer></script>
   </body>
 </html>

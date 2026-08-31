@@ -307,6 +307,7 @@ function render() {
   });
 
   getUiRuntimeIndexes();
+  let directorDashboardSnapshot = null;
 
   // La liste reste prête pour l'ouverture de l'onglet Dossiers, mais elle est
   // bornée à 50 cartes. Les vues lourdes cachées sont rendues à la demande.
@@ -320,9 +321,7 @@ function render() {
   }
   if (activeTab === "pilotage" && (typeof canAccessTab !== "function" || canAccessTab("pilotage"))) {
     bindSavDashboardFilters();
-    renderSavKpis();
-    renderSavDashboardLoads();
-    renderPilotageAlerts();
+    directorDashboardSnapshot = renderDirectorDashboard();
     renderKanban();
   }
   if (activeTab === "planning" && (typeof canAccessTab !== "function" || canAccessTab("planning"))) {
@@ -341,7 +340,7 @@ function render() {
   }
 
   renderSyncStatusStrip();
-  renderMetrics();
+  renderMetrics(directorDashboardSnapshot);
   if (typeof renderAdminTechnicalVisibility === "function") renderAdminTechnicalVisibility();
   if (typeof renderCurrentSessionIndicator === "function") renderCurrentSessionIndicator();
 }
@@ -349,7 +348,7 @@ function render() {
 const UNAUTHORIZED_VIEW_SCRUB_SELECTORS = {
   dossiers: ["#case-list", "#case-detail"],
   today: ["#today-workshop-board"],
-  pilotage: ["#sav-kpi-grid", "#sav-dashboard-load-grid", "#pilotage-alerts", "#kanban-board"],
+  pilotage: ["#sav-kpi-grid", "#sav-dashboard-load-grid", "#pilotage-alerts", "#pilotage-today-summary", "#pilotage-case-funnel", "#kanban-board"],
   planning: ["#gantt", "#mobile-planning-list"],
   technician: ["#technician-task-list", "#technician-manager-board"],
   atelier: [
@@ -441,15 +440,15 @@ function scrubUnauthorizedViewContent(tab, view) {
 }
 
 
-function renderMetrics() {
-  const dashboard = typeof buildSavPerformanceDashboard === "function" ? buildSavPerformanceDashboard() : null;
+function renderMetrics(snapshot = null) {
+  const dashboard = snapshot || (typeof buildSavPerformanceDashboard === "function" ? buildSavPerformanceDashboard() : null);
   const active = dashboard ? dashboard.metrics.activeCases : state.cases.filter((item) => !isCaseOperationallyClosed(item)).length;
   const waiting = dashboard ? dashboard.metrics.withoutNextAction : state.cases.filter((item) => getNextWorkflowAction(item) && getBusinessRuleIssues(item, getNextWorkflowAction(item)).length).length;
   const deliveries = dashboard ? dashboard.metrics.scheduledAppointments : state.cases.filter((item) => item.appointment && !isCaseOperationallyClosed(item)).length;
   $("#metric-active").textContent = active;
   $("#metric-waiting").textContent = waiting;
   $("#metric-deliveries").textContent = deliveries;
-  const today = new Date();
+  const today = dashboard?.now ? new Date(dashboard.now) : new Date();
   const loadMetrics = [
     ["#metric-load-body-human", categoryHumanDayLoad(today, "body")],
     ["#metric-load-body-equipment", categoryEquipmentDayLoad(today, "body")],
@@ -470,161 +469,226 @@ function renderMetrics() {
   if (legacyMetric) legacyMetric.textContent = `${Math.round(dayLoad(today) * 100)}%`;
 }
 
-function renderSavKpis() {
+function renderDirectorDashboard(now = new Date()) {
+  const snapshot = buildSavPerformanceDashboard(now);
+  renderSavKpis(snapshot);
+  renderSavDashboardLoads(snapshot);
+  renderPilotageAlerts(snapshot);
+  renderPilotageTodaySummary(snapshot);
+  renderPilotageCaseFunnel(snapshot);
+  return snapshot;
+}
+
+function renderSavKpis(snapshot) {
   const target = $("#sav-kpi-grid");
   if (!target) return;
   if (typeof hasPermission === "function" && !hasPermission("dashboard.view")) {
     target.innerHTML = `<div class="empty-inline">Dashboard SAV réservé aux rôles autorisés.</div>`;
     return;
   }
-  target.innerHTML = buildSavKpis()
+  const kpis = buildSavKpis(snapshot);
+  target.innerHTML = kpis
     .map((kpi) => `
-      <article class="sav-kpi-card ${kpi.level || "neutral"}">
+      <article class="sav-kpi-card ${kpi.level || "neutral"}" tabindex="0" role="button" data-nav-tab="${escapeAttr(kpi.navTab || "dossiers")}">
         <span>${escapeHtml(kpi.label)}</span>
         <strong>${escapeHtml(kpi.value)}</strong>
         <small>${escapeHtml(kpi.detail)}</small>
       </article>
     `)
     .join("");
+
+  $$(".sav-kpi-card[data-nav-tab]", target).forEach((card) => {
+    const handleNav = () => {
+      const tab = card.dataset.navTab || "dossiers";
+      if (typeof setActiveTab === "function") setActiveTab(tab);
+    };
+    card.addEventListener("click", handleNav);
+    card.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        handleNav();
+      }
+    });
+  });
 }
-function buildSavKpis(now = new Date()) {
-  const dashboard = buildSavPerformanceDashboard(now);
-  const { metrics, range } = dashboard;
-  const periodLabel = range.shortLabel;
+
+function buildSavKpis(snapshotOrNow = new Date()) {
+  const snapshot = snapshotOrNow?.metrics
+    ? snapshotOrNow
+    : buildSavPerformanceDashboard(snapshotOrNow);
+  const { metrics, range } = snapshot;
+  const periodLabel = range?.shortLabel || "Aujourd'hui";
 
   return [
     {
       label: "Dossiers actifs",
-      value: String(metrics.activeCases),
-      detail: `${periodLabel} · type/statut filtrés`,
+      value: String(metrics.activeCases || 0),
+      detail: "En cours actuellement",
       level: metrics.activeCases ? "info" : "neutral",
-    },
-    {
-      label: periodLabel === "Aujourd'hui" ? "Créés aujourd'hui" : "Dossiers créés",
-      value: String(metrics.createdCases),
-      detail: range.label,
-      level: metrics.createdCases ? "info" : "neutral",
-    },
-    {
-      label: periodLabel === "Aujourd'hui" ? "Véhicules reçus aujourd'hui" : "Véhicules reçus",
-      value: String(metrics.receivedVehicles),
-      detail: "Réceptions enregistrées",
-      level: metrics.receivedVehicles ? "info" : "neutral",
-    },
-    {
-      label: periodLabel === "Aujourd'hui" ? "RDV prévus aujourd'hui" : "RDV prévus",
-      value: String(metrics.scheduledAppointments),
-      detail: "Selon date de rendez-vous",
-      level: metrics.scheduledAppointments ? "info" : "neutral",
-    },
-    {
-      label: "Travaux en retard",
-      value: String(metrics.overdueWorkshopCases),
-      detail: "Tâches atelier dépassées",
-      level: metrics.overdueWorkshopCases ? "danger" : "success",
-    },
-    {
-      label: "Dossiers bloqués",
-      value: String(metrics.blockedCases),
-      detail: "Pièces, ressources ou motif manuel",
-      level: metrics.blockedCases ? "danger" : "success",
-    },
-    {
-      label: "Dossiers ouverts",
-      value: String(metrics.openCases),
-      detail: "Non clôturés sur le périmètre",
-      level: metrics.openCases ? "info" : "neutral",
-    },
-    {
-      label: "Bloqués > 48h",
-      value: String(metrics.blockedOver48h),
-      detail: "À prioriser atelier / pièces",
-      level: metrics.blockedOver48h ? "danger" : "success",
-    },
-    {
-      label: "Bloqués > 7 jours",
-      value: String(metrics.blockedOver7d),
-      detail: "Escalade Directeur SAV",
-      level: metrics.blockedOver7d ? "danger" : "success",
+      navTab: "dossiers",
     },
     {
       label: "Actions à traiter",
-      value: String(metrics.pendingActions),
-      detail: "Dossiers sans prochaine étape claire",
+      value: String(metrics.pendingActions || 0),
+      detail: "Décisions et jalons à planifier",
       level: metrics.pendingActions ? "warn" : "success",
+      navTab: "dossiers",
     },
     {
-      label: "Travaux terminés",
-      value: String(metrics.completedWorkCases),
-      detail: "Dossiers prêts à clôturer",
-      level: metrics.completedWorkCases ? "info" : "success",
+      label: periodLabel === "Aujourd'hui" ? "RDV prévus aujourd'hui" : "RDV prévus",
+      value: String(metrics.scheduledAppointments || 0),
+      detail: "Selon date de rendez-vous",
+      level: metrics.scheduledAppointments ? "info" : "neutral",
+      navTab: "today",
+    },
+    {
+      label: "Travaux en retard",
+      value: String(metrics.overdueCases || metrics.overdueWorkshopCases || 0),
+      detail: "Délais livraison / atelier",
+      level: (metrics.overdueCases || metrics.overdueWorkshopCases) ? "danger" : "success",
+      navTab: "dossiers",
+    },
+    {
+      label: "Attente pièces",
+      value: String(metrics.waitingPartsCases || 0),
+      detail: "Approvisionnement / blocage",
+      level: metrics.waitingPartsCases ? "danger" : "success",
+      navTab: "dossiers",
+    },
+    {
+      label: "Retouches atelier",
+      value: String(metrics.qcReworkCases || 0),
+      detail: "Corrections après contrôle",
+      level: metrics.qcReworkCases ? "danger" : "success",
+      navTab: "dossiers",
     },
     {
       label: "Charge humaine vs capacité",
-      value: `${metrics.humanLoadPercent}%`,
+      value: `${metrics.humanLoadPercent || 0}%`,
       detail: "Moyenne ressources atelier",
-      level: loadLevel(metrics.humanLoadPercent),
+      level: loadLevel(metrics.humanLoadPercent || 0),
+      navTab: "planning",
     },
     {
-      label: "Matériel / ponts / cabine",
-      value: `${metrics.equipmentLoadPercent}%`,
-      detail: `Ponts ${metrics.liftLoadPercent}% · Cabine ${metrics.boothLoadPercent}%`,
-      level: loadLevel(Math.max(metrics.equipmentLoadPercent, metrics.liftLoadPercent, metrics.boothLoadPercent)),
+      label: "Charge matériel atelier",
+      value: `${metrics.equipmentLoadPercent || 0}%`,
+      detail: `Ponts ${metrics.liftLoadPercent || 0}% · Cabine ${metrics.boothLoadPercent || 0}%`,
+      level: loadLevel(Math.max(metrics.equipmentLoadPercent || 0, metrics.liftLoadPercent || 0, metrics.boothLoadPercent || 0)),
+      navTab: "planning",
     },
     {
-      label: "Charge réception",
-      value: String(metrics.receptionLoad),
-      detail: "Créations, RDV et réceptions",
-      level: metrics.receptionLoad > 8 ? "warn" : metrics.receptionLoad ? "info" : "neutral",
-    },
-    {
-      label: "Charge atelier",
-      value: String(metrics.workshopLoad),
-      detail: "Reçus, en réparation ou bloqués",
-      level: metrics.workshopLoad > 12 ? "warn" : metrics.workshopLoad ? "info" : "neutral",
-    },
-    {
-      label: "Clôtures atelier",
-      value: String(metrics.completedWorkCases),
-      detail: "Travaux terminés non clôturés",
-      level: metrics.completedWorkCases ? "warn" : "success",
-    },
-    {
-      label: "Temps moyen cycle dossier",
-      value: metrics.averageCycleHours ? `${formatLocalizedDecimal(metrics.averageCycleHours)} h` : "0 h",
-      detail: "Création → clôture atelier",
-      level: metrics.averageCycleHours > 72 ? "warn" : "neutral",
-    },
-    {
-      label: "Sans prochaine action",
-      value: String(metrics.withoutNextAction),
-      detail: "Aucun jalon futur planifié",
-      level: metrics.withoutNextAction ? "warn" : "success",
-    },
-    {
-      label: "Priorités Directeur SAV",
-      value: String(metrics.directorAlerts),
-      detail: "Alertes opérationnelles minimisées",
-      level: metrics.directorAlerts ? "warn" : "success",
+      label: "Travaux terminés",
+      value: String(metrics.completedWorkCases || 0),
+      detail: "Prêts pour contrôle ou livraison",
+      level: metrics.completedWorkCases ? "info" : "success",
+      navTab: "dossiers",
     },
   ];
 }
 
-function renderSavDashboardLoads() {
+function renderSavDashboardLoads(snapshot) {
   const target = $("#sav-dashboard-load-grid");
   if (!target) return;
   if (typeof hasPermission === "function" && !hasPermission("dashboard.view")) {
     target.innerHTML = "";
     return;
   }
-  const dashboard = buildSavPerformanceDashboard();
-  target.innerHTML = dashboard.serviceLoads.map((item) => `
+  target.innerHTML = (snapshot?.serviceLoads || []).map((item) => `
     <article class="sav-load-card ${item.level}">
       <span>${escapeHtml(item.label)}</span>
       <strong>${item.human}%</strong>
-      <small>Humain · Matériel ${item.equipment}%</small>
+      <div class="load-bar-wrap" aria-hidden="true">
+        <div class="load-bar-fill" style="width: ${Math.min(100, Math.max(0, item.human))}%"></div>
+      </div>
+      <small>Humain ${item.human}% · Matériel ${item.equipment}%</small>
     </article>
   `).join("");
+}
+
+function renderPilotageTodaySummary(snapshot) {
+  const target = $("#pilotage-today-summary");
+  if (!target) return;
+  if (typeof hasPermission === "function" && !hasPermission("dashboard.view")) {
+    target.innerHTML = "";
+    return;
+  }
+  const { todaySummary } = snapshot || {};
+  target.innerHTML = `
+    <h3>Aujourd'hui en atelier</h3>
+    <div class="today-metrics-grid">
+      <div class="today-metric-item">
+        <span>Réceptions attendues</span>
+        <strong>${todaySummary?.receptions || 0}</strong>
+      </div>
+      <div class="today-metric-item">
+        <span>Véhicules à l'atelier</span>
+        <strong>${todaySummary?.inWorkshop || 0}</strong>
+      </div>
+      <div class="today-metric-item">
+        <span>Travaux démarrés</span>
+        <strong>${todaySummary?.startingToday || 0}</strong>
+      </div>
+      <div class="today-metric-item">
+        <span>Travaux terminés</span>
+        <strong>${todaySummary?.completingToday || 0}</strong>
+      </div>
+      <div class="today-metric-item">
+        <span>Livraisons prévues</span>
+        <strong>${todaySummary?.deliveries || 0}</strong>
+      </div>
+    </div>
+  `;
+}
+
+function renderPilotageCaseFunnel(snapshot) {
+  const target = $("#pilotage-case-funnel");
+  if (!target) return;
+  if (typeof hasPermission === "function" && !hasPermission("dashboard.view")) {
+    target.innerHTML = "";
+    return;
+  }
+  const { funnel } = snapshot || {};
+  target.innerHTML = `
+    <h3>Flux des dossiers actifs</h3>
+    <div class="funnel-steps-grid">
+      <button type="button" class="funnel-step-btn" data-nav-tab="dossiers" aria-label="Dossiers en création ou réception: ${funnel?.created || 0}">
+        <span class="step-num">1</span>
+        <span class="step-name">Réception</span>
+        <strong>${funnel?.created || 0}</strong>
+      </button>
+      <button type="button" class="funnel-step-btn" data-nav-tab="today" aria-label="Dossiers avec rendez-vous fixé: ${funnel?.appointment || 0}">
+        <span class="step-num">2</span>
+        <span class="step-name">RDV fixé</span>
+        <strong>${funnel?.appointment || 0}</strong>
+      </button>
+      <button type="button" class="funnel-step-btn" data-nav-tab="planning" aria-label="Véhicules reçus à planifier: ${funnel?.received || 0}">
+        <span class="step-num">3</span>
+        <span class="step-name">Reçu</span>
+        <strong>${funnel?.received || 0}</strong>
+      </button>
+      <button type="button" class="funnel-step-btn" data-nav-tab="planning" aria-label="Dossiers en cours de travaux: ${funnel?.inProgress || 0}">
+        <span class="step-num">4</span>
+        <span class="step-name">En travaux</span>
+        <strong>${funnel?.inProgress || 0}</strong>
+      </button>
+      <button type="button" class="funnel-step-btn" data-nav-tab="dossiers" aria-label="Dossiers en contrôle qualité: ${funnel?.quality || 0}">
+        <span class="step-num">5</span>
+        <span class="step-name">Contrôle</span>
+        <strong>${funnel?.quality || 0}</strong>
+      </button>
+      <button type="button" class="funnel-step-btn" data-nav-tab="dossiers" aria-label="Dossiers prêts ou livrés: ${funnel?.delivered || 0}">
+        <span class="step-num">6</span>
+        <span class="step-name">Prêt / Livré</span>
+        <strong>${funnel?.delivered || 0}</strong>
+      </button>
+    </div>
+  `;
+  $$(".funnel-step-btn", target).forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const tab = btn.dataset.navTab || "dossiers";
+      if (typeof setActiveTab === "function") setActiveTab(tab);
+    });
+  });
 }
 
 function bindSavDashboardFilters() {
@@ -644,11 +708,9 @@ function bindSavDashboardFilters() {
       state.ui[key] = key.includes("Status") ? normalizeCaseStatusFilter(control.value) : (control.value || fallback);
       control.value = state.ui[key];
       saveState();
-      renderSavKpis();
-      renderSavDashboardLoads();
-      renderPilotageAlerts();
+      const snapshot = renderDirectorDashboard();
       renderKanban();
-      renderMetrics();
+      renderMetrics(snapshot);
     });
   });
 }
@@ -660,10 +722,568 @@ const SAV_DASHBOARD_SERVICE_LOADS = [
   ["electrical", "Électricité / diagnostic"],
 ];
 
-function buildSavPerformanceDashboard(now = new Date()) {
+function getDirectorDashboardDate(value) {
+  if (!value) return null;
+  const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function getDirectorDeliveryDeadline(item) {
+  const candidates = [
+    item?.revisedEstimatedDelivery,
+    item?.deliveryEstimate?.current,
+    item?.deliveryEstimate?.revised,
+    item?.initialEstimatedDelivery,
+    item?.deliveryEstimate?.initial,
+    item?.appointment?.delivery,
+  ];
+  for (const candidate of candidates) {
+    const date = getDirectorDashboardDate(candidate);
+    if (date) return date;
+  }
+  return null;
+}
+
+function getDirectorBookingStatus(booking) {
+  const aliases = { in_progress: "started", done: "completed" };
+  const rawStatus = String(booking?.status || "").trim().toLowerCase();
+  const status = aliases[rawStatus] || rawStatus || (booking?.temporary ? "temporary" : "planned");
+  return ["unplanned", "planned", "started", "paused", "blocked", "completed", "cancelled", "temporary"].includes(status)
+    ? status
+    : "planned";
+}
+
+function isDirectorProductionBooking(booking) {
+  return Boolean(
+    booking
+    && booking.type !== "leave"
+    && booking.temporary !== true
+    && booking.needsScheduling !== true
+    && !booking.deletedAt
+  );
+}
+
+function getDirectorPlanningMilestone(caseBookings, now) {
+  const nowDate = getDirectorDashboardDate(now);
+  if (!nowDate) return null;
+  let overdue = null;
+  let active = null;
+  let future = null;
+  for (const booking of caseBookings || []) {
+    if (!isDirectorProductionBooking(booking)) continue;
+    const status = getDirectorBookingStatus(booking);
+    if (["cancelled", "completed", "unplanned", "temporary"].includes(status)) continue;
+    const actualStart = getDirectorDashboardDate(booking.actualStart || booking.startedAt);
+    if (actualStart || ["started", "paused", "blocked"].includes(status)) {
+      active ||= { state: "active", booking, start: actualStart };
+      continue;
+    }
+    const plannedStart = getDirectorDashboardDate(
+      booking.plannedStart
+      || booking.start
+      || booking.plannedSegments?.[0]?.start
+      || booking.segments?.[0]?.start
+    );
+    if (!plannedStart) continue;
+    const candidate = {
+      state: plannedStart.getTime() < nowDate.getTime() ? "overdue" : "future",
+      booking,
+      start: plannedStart,
+    };
+    if (candidate.state === "overdue") {
+      if (!overdue || plannedStart < overdue.start) overdue = candidate;
+    } else if (!future || plannedStart < future.start) {
+      future = candidate;
+    }
+  }
+  return overdue || active || future;
+}
+
+function getDirectorCaseWorkStartedAt(item, caseBookings) {
+  const dates = [item?.actualRepairStart];
+  for (const booking of caseBookings || []) {
+    if (!isDirectorProductionBooking(booking)) continue;
+    dates.push(booking.actualStart, booking.startedAt);
+    for (const session of booking.workSessions || []) dates.push(session?.startedAt);
+  }
+  const validDates = dates.map(getDirectorDashboardDate).filter(Boolean);
+  return validDates.length ? new Date(Math.min(...validDates.map((date) => date.getTime()))) : null;
+}
+
+function getDirectorCaseWorkCompletedAt(item, caseBookings) {
+  for (const candidate of [item?.actualRepairEnd]) {
+    const date = getDirectorDashboardDate(candidate);
+    if (date) return date;
+  }
+  if (!item?.flags?.workCompleted) return null;
+  const productionBookings = (caseBookings || []).filter(isDirectorProductionBooking);
+  if (!productionBookings.length) return null;
+  const completedDates = [];
+  for (const booking of productionBookings) {
+    if (getDirectorBookingStatus(booking) !== "completed") return null;
+    const sessionEnd = (booking.workSessions || []).map((session) => session?.completedAt).filter(Boolean).at(-1);
+    const completedAt = getDirectorDashboardDate(booking.actualEnd || booking.completedAt || sessionEnd);
+    if (!completedAt) return null;
+    completedDates.push(completedAt);
+  }
+  return new Date(Math.max(...completedDates.map((date) => date.getTime())));
+}
+
+function isDirectorQcRework(item) {
+  const status = String(item?.receptionWorkflow?.qualityStatus || "").trim().toLowerCase();
+  return status === "rejected" || status === "rework";
+}
+
+function buildDirectorDashboardSnapshot(currentState = state, nowInput = new Date()) {
+  const now = nowInput instanceof Date && !Number.isNaN(nowInput.getTime()) ? new Date(nowInput) : new Date();
   const range = getSavDashboardRange(now);
   const filters = getSavDashboardFilters();
+  const rawCases = Array.isArray(currentState?.cases) ? currentState.cases : [];
+  const rawBookings = Array.isArray(currentState?.bookings) ? currentState.bookings : [];
+
+  // Filter cases matching UI filters
+  const filteredCases = rawCases.filter((item) => {
+    if (!item || item.deletedAt) return false;
+    if (filters.type !== "all" && !caseMatchesTypeFilter(item, filters.type)) return false;
+    if (filters.status !== "all" && getCaseStatus(item) !== filters.status) return false;
+    return true;
+  });
+
+  // Pre-index bookings by caseId for fast lookup without nested O(N*M) scanning
+  const bookingsByCaseId = new Map();
+  for (let i = 0; i < rawBookings.length; i += 1) {
+    const b = rawBookings[i];
+    if (!b?.caseId) continue;
+    let list = bookingsByCaseId.get(b.caseId);
+    if (!list) {
+      list = [];
+      bookingsByCaseId.set(b.caseId, list);
+    }
+    list.push(b);
+  }
+
+  // Active cases (non-archived, non-operationally closed)
+  const activeCases = filteredCases.filter(isSavDashboardActiveCase);
+  const openCases = activeCases.length;
+
+  // Key metrics calculation
+  const createdCases = filteredCases.filter((c) => dateInRange(c.createdAt, range)).length;
+  const receivedVehicles = filteredCases.filter((c) => dateInRange(getCaseVehicleReceivedAt(c), range)).length;
+  const scheduledAppointments = filteredCases.filter((c) => dateInRange(c.appointment?.start, range)).length;
+
+  // Overdue / delayed cases:
+  // Strict rule: only an existing canonical revised/current deadline, then initial fallback, can establish delivery lateness.
+  // OR active booking in the past without workCompleted
+  const isCaseOverdue = (c) => {
+    if (!c || isCaseOperationallyClosed(c)) return false;
+    const deliveryDue = getDirectorDeliveryDeadline(c);
+    if (deliveryDue && !c.flags?.delivered && !c.flags?.invoiced) {
+      if (deliveryDue < now) return true;
+    }
+    return isCaseLate(c, now);
+  };
+  const overdueCases = activeCases.filter(isCaseOverdue);
+
+  // Waiting parts:
+  // Strict rule: partsStatus in ('waiting_parts', 'blocked_parts') or blockerReason === 'waiting_parts'
+  const isWaitingParts = (c) => Boolean(
+    c && (
+      c.partsStatus === "waiting_parts" ||
+      c.partsStatus === "blocked_parts" ||
+      c.blockerReason === "waiting_parts" ||
+      (c.flags?.blocked && (c.blockedReason === "waiting_parts" || c.blockerReason === "waiting_parts"))
+    )
+  );
+  const waitingPartsCases = activeCases.filter(isWaitingParts);
+
+  // QC rejected / rework:
+  // Strict rule: receptionWorkflow.qualityStatus in ('rejected', 'rework')
+  const qcReworkCases = activeCases.filter(isDirectorQcRework);
+
+  // Blocked cases general:
+  const blockedCases = activeCases.filter(isCaseBlocked);
+  const blockedOver48h = blockedCases.filter((c) => getCaseBlockedHours(c, now) >= 48);
+  const blockedOver7d = blockedCases.filter((c) => getCaseBlockedHours(c, now) >= 168);
+
+  // Pending actions / without next action:
+  const pendingActions = activeCases.filter((c) => caseWithoutScheduledNextAction(c, now)).length;
+
+  // Completed work awaiting QC or delivery:
+  const completedWorkCases = activeCases.filter((c) => c.flags?.workCompleted && !c.flags?.invoiced);
+  const readyForDeliveryCases = activeCases.filter((c) => c.flags?.qualityApproved && !c.flags?.delivered && !c.flags?.invoiced);
+
+  // Load calculations (reusing existing helpers)
+  const humanLoadPercent = averageLoadPercentForRange(range, humanDayLoad);
+  const equipmentLoadPercent = averageLoadPercentForRange(range, equipmentDayLoad);
+  const liftLoadPercent = averageLoadPercentForRange(range, (day) => dayLoadForResources(day, (resource) => resource.active !== false && ["pont_vidange", "pont_mecanique"].includes(resource.role)));
+  const boothLoadPercent = averageLoadPercentForRange(range, (day) => dayLoadForResources(day, (resource) => resource.active !== false && resource.role === "cabine"));
+
+  const serviceLoads = SAV_DASHBOARD_SERVICE_LOADS.map(([key, label]) => {
+    const human = averageLoadPercentForRange(range, (day) => categoryHumanDayLoad(day, key));
+    const equipment = averageLoadPercentForRange(range, (day) => categoryEquipmentDayLoad(day, key));
+    return { key, label, human, equipment, level: loadLevel(Math.max(human, equipment)) };
+  });
+
+  // Today Operational Summary:
+  const todayKeyStr = todayKey(now);
+  const todayReceptions = activeCases.filter((c) => {
+    const apptStart = c.appointment?.start ? todayKey(new Date(c.appointment.start)) : null;
+    return apptStart === todayKeyStr && !c.flags?.received;
+  }).length;
+  const inWorkshopCount = activeCases.filter((c) => c.flags?.received && !c.flags?.delivered && !c.flags?.invoiced).length;
+  const startingToday = activeCases.filter((c) => {
+    const startedAt = getDirectorCaseWorkStartedAt(c, bookingsByCaseId.get(c.id) || []);
+    return startedAt ? todayKey(startedAt) === todayKeyStr : false;
+  }).length;
+  const completingToday = activeCases.filter((c) => {
+    const completedAt = getDirectorCaseWorkCompletedAt(c, bookingsByCaseId.get(c.id) || []);
+    return completedAt ? todayKey(completedAt) === todayKeyStr : false;
+  }).length;
+  const deliveriesExpectedToday = activeCases.filter((c) => {
+    const deliveryDue = getDirectorDeliveryDeadline(c);
+    return deliveryDue ? todayKey(deliveryDue) === todayKeyStr && !c.flags?.delivered : false;
+  }).length;
+
+  const todaySummary = {
+    receptions: todayReceptions,
+    inWorkshop: inWorkshopCount,
+    startingToday,
+    completingToday,
+    deliveries: deliveriesExpectedToday,
+  };
+
+  // Funnel breakdown:
+  const funnel = {
+    created: activeCases.filter((c) => !c.appointment?.start && !c.flags?.received).length,
+    appointment: activeCases.filter((c) => c.appointment?.start && !c.flags?.received).length,
+    received: activeCases.filter((c) => c.flags?.received && !c.flags?.workStarted).length,
+    inProgress: activeCases.filter((c) => c.flags?.workStarted && !c.flags?.workCompleted).length,
+    quality: activeCases.filter((c) => c.flags?.workCompleted && !c.flags?.qualityApproved).length,
+    delivered: activeCases.filter((c) => c.flags?.qualityApproved || c.flags?.delivered).length,
+  };
+
+  // Priority Alerts ranking:
+  const rawAlerts = [];
+  for (let i = 0; i < activeCases.length; i += 1) {
+    const item = activeCases[i];
+    if (isCaseOperationallyClosed(item)) continue;
+    const flags = item.flags || {};
+    const ref = getDashboardCaseReference(item);
+    const client = item.clientName || "Client non renseigné";
+    const vehicle = [item.plate, item.vehicleModel || item.carModel].filter(Boolean).join(" · ") || "Véhicule non précisé";
+    const statusLabel = statusLabels[getCaseStatus(item)] || "En cours";
+    const caseBookings = bookingsByCaseId.get(item.id) || [];
+    const planningMilestone = getDirectorPlanningMilestone(caseBookings, now);
+
+    // --- CRITICAL (Severity Rank 0..3) ---
+    // 1. Overdue delivery
+    const deliveryDue = getDirectorDeliveryDeadline(item);
+    if (deliveryDue && !flags.delivered && !flags.invoiced) {
+      if (deliveryDue < now) {
+        const delayHours = Math.max(1, Math.round((now.getTime() - deliveryDue.getTime()) / (1000 * 3600)));
+        rawAlerts.push({
+          id: `alert-delivery-${item.id}`,
+          caseId: item.id,
+          severity: "critical",
+          severityRank: 0,
+          severityLabel: "CRITIQUE",
+          title: "Date de livraison dépassée",
+          reason: `Prévue le ${formatDate(deliveryDue)} (${delayHours}h de retard)`,
+          ref,
+          client,
+          vehicle,
+          stageLabel: statusLabel,
+          when: deliveryDue.toISOString(),
+          ctaLabel: "Voir dossier",
+          ctaAction: "dossiers",
+        });
+      }
+    }
+
+    // 2. Inconsistency: delivered without work completed
+    if (flags.delivered && !flags.workCompleted && !flags.invoiced) {
+      rawAlerts.push({
+        id: `alert-inconsistency-${item.id}`,
+        caseId: item.id,
+        severity: "critical",
+        severityRank: 1,
+        severityLabel: "CRITIQUE",
+        title: "Incohérence livraison / travaux",
+        reason: "Véhicule marqué livré alors que les travaux ne sont pas validés terminés",
+        ref,
+        client,
+        vehicle,
+        stageLabel: statusLabel,
+        when: item.updatedAt || item.createdAt,
+        ctaLabel: "Voir dossier",
+        ctaAction: "dossiers",
+      });
+    }
+
+    // 3. QC rejected awaiting rework
+    if (isDirectorQcRework(item)) {
+      const qcReason = item.receptionWorkflow?.qualityReturnReason || "Correction qualité demandée";
+      rawAlerts.push({
+        id: `alert-qc-${item.id}`,
+        caseId: item.id,
+        severity: "critical",
+        severityRank: 2,
+        severityLabel: "CRITIQUE",
+        title: "Contrôle qualité rejeté / Rework",
+        reason: qcReason,
+        ref,
+        client,
+        vehicle,
+        stageLabel: statusLabel,
+        when: item.receptionWorkflow?.qualityReviewedAt || item.updatedAt || item.createdAt,
+        ctaLabel: "Voir dossier",
+        ctaAction: "dossiers",
+      });
+    }
+
+    // 4. Major blocking condition
+    if (isCaseBlocked(item) && !isWaitingParts(item)) {
+      const blockerText = getDashboardBlockerLabel(item);
+      rawAlerts.push({
+        id: `alert-blocked-${item.id}`,
+        caseId: item.id,
+        severity: "critical",
+        severityRank: 3,
+        severityLabel: "CRITIQUE",
+        title: "Dossier bloqué atelier",
+        reason: blockerText,
+        ref,
+        client,
+        vehicle,
+        stageLabel: statusLabel,
+        when: item.updatedAt || item.createdAt,
+        ctaLabel: "Voir dossier",
+        ctaAction: "dossiers",
+      });
+    }
+
+    // --- HIGH (Severity Rank 4..7) ---
+    // 5. Waiting parts
+    if (isWaitingParts(item)) {
+      rawAlerts.push({
+        id: `alert-parts-${item.id}`,
+        caseId: item.id,
+        severity: "high",
+        severityRank: 4,
+        severityLabel: "ÉLEVÉ",
+        title: "En attente de pièces",
+        reason: "Approvisionnement ou pièces bloquantes",
+        ref,
+        client,
+        vehicle,
+        stageLabel: statusLabel,
+        when: item.updatedAt || item.createdAt,
+        ctaLabel: "Voir dossier",
+        ctaAction: "dossiers",
+      });
+    }
+
+    // 6. Received but work not started and the canonical planned start is overdue.
+    if (flags.received && !flags.workStarted && planningMilestone?.state === "overdue") {
+      rawAlerts.push({
+        id: `alert-unstarted-${item.id}`,
+        caseId: item.id,
+        severity: "high",
+        severityRank: 5,
+        severityLabel: "ÉLEVÉ",
+        title: "Démarrage atelier planifié en retard",
+        reason: `Démarrage prévu le ${formatDateTime(planningMilestone.start)}`,
+        ref,
+        client,
+        vehicle,
+        stageLabel: statusLabel,
+        when: planningMilestone.start.toISOString(),
+        ctaLabel: "Voir dossier",
+        ctaAction: "dossiers",
+      });
+    }
+
+    // 7. Work completed but QC not validated
+    if (flags.workCompleted && !flags.qualityApproved && !flags.delivered && !isDirectorQcRework(item)) {
+      rawAlerts.push({
+        id: `alert-qc-pending-${item.id}`,
+        caseId: item.id,
+        severity: "high",
+        severityRank: 6,
+        severityLabel: "ÉLEVÉ",
+        title: "Travaux terminés en attente contrôle qualité",
+        reason: "Prêt pour vérification et validation qualité finale",
+        ref,
+        client,
+        vehicle,
+        stageLabel: statusLabel,
+        when: item.workCompletedAt || item.updatedAt || item.createdAt,
+        ctaLabel: "Voir dossier",
+        ctaAction: "dossiers",
+      });
+    }
+
+    // 8. Ready for delivery but not delivered
+    if (flags.qualityApproved && !flags.delivered && !flags.invoiced) {
+      rawAlerts.push({
+        id: `alert-delivery-ready-${item.id}`,
+        caseId: item.id,
+        severity: "high",
+        severityRank: 7,
+        severityLabel: "ÉLEVÉ",
+        title: "Qualité validée — Prêt pour livraison client",
+        reason: "Contrôle qualité validé, restitution client à coordonner",
+        ref,
+        client,
+        vehicle,
+        stageLabel: statusLabel,
+        when: item.receptionWorkflow?.readyForDeliveryAt || item.updatedAt || item.createdAt,
+        ctaLabel: "Voir dossier",
+        ctaAction: "dossiers",
+      });
+    }
+
+    // --- MEDIUM (Severity Rank 8..10) ---
+    // 9. Missed appointment / late reception
+    if (item.appointment?.start && !flags.received) {
+      const apptDate = new Date(item.appointment.start);
+      if (!Number.isNaN(apptDate.getTime()) && apptDate < now) {
+        const ageMins = (now.getTime() - apptDate.getTime()) / (1000 * 60);
+        if (ageMins > RECEPTION_GRACE_HOURS * 60) {
+          rawAlerts.push({
+            id: `alert-reception-late-${item.id}`,
+            caseId: item.id,
+            severity: "medium",
+            severityRank: 8,
+            severityLabel: "MOYEN",
+            title: "Réception véhicule en retard",
+            reason: `RDV prévu le ${formatDateTime(apptDate)}`,
+            ref,
+            client,
+            vehicle,
+            stageLabel: statusLabel,
+            when: item.appointment.start,
+            ctaLabel: "Voir dossier",
+            ctaAction: "dossiers",
+          });
+        }
+      }
+    }
+
+    // 10. Vehicle received without future planning slot
+    if (flags.received && !flags.workStarted && !planningMilestone) {
+      rawAlerts.push({
+        id: `alert-unplanned-${item.id}`,
+        caseId: item.id,
+        severity: "medium",
+        severityRank: 9,
+        severityLabel: "MOYEN",
+        title: "Véhicule reçu sans planning",
+        reason: "Aucun créneau atelier planifié",
+        ref,
+        client,
+        vehicle,
+        stageLabel: statusLabel,
+        when: item.createdAt,
+        ctaLabel: "Voir dossier",
+        ctaAction: "dossiers",
+      });
+    }
+
+    // 11. Without next action scheduled
+    if (caseWithoutScheduledNextAction(item, now)) {
+      rawAlerts.push({
+        id: `alert-noaction-${item.id}`,
+        caseId: item.id,
+        severity: "medium",
+        severityRank: 10,
+        severityLabel: "MOYEN",
+        title: "Sans prochaine action planifiée",
+        reason: "Aucun jalon ou tâche future identifiée",
+        ref,
+        client,
+        vehicle,
+        stageLabel: statusLabel,
+        when: item.updatedAt || item.createdAt,
+        ctaLabel: "Voir dossier",
+        ctaAction: "dossiers",
+      });
+    }
+  }
+
+  // Stable sort: severityRank ASC (CRITICAL < HIGH < MEDIUM), then when ASC, then caseId ASC
+  rawAlerts.sort((a, b) => {
+    if (a.severityRank !== b.severityRank) return a.severityRank - b.severityRank;
+    const timeA = new Date(a.when || 0).getTime();
+    const timeB = new Date(b.when || 0).getTime();
+    if (timeA !== timeB) return timeA - timeB;
+    return String(a.caseId).localeCompare(String(b.caseId));
+  });
+
+  const receptionLoad = activeCases.filter((item) => (
+    dateInRange(item.createdAt, range)
+    || dateInRange(item.appointment?.start, range)
+    || dateInRange(getCaseVehicleReceivedAt(item), range)
+  )).length;
+
+  const workshopLoad = activeCases.filter((item) => (
+    item.flags?.received
+    && !item.flags?.invoiced
+    && (isCaseBlocked(item) || !item.flags?.workCompleted)
+  )).length;
+
+  const cycleHours = filteredCases
+    .map((item) => getCaseCycleHours(item, range))
+    .filter((value) => value > 0);
+  const averageCycleHours = cycleHours.length ? roundHours(cycleHours.reduce((sum, value) => sum + value, 0) / cycleHours.length) : 0;
+
+  const snapshot = {
+    now,
+    range,
+    filters,
+    metrics: {
+      activeCases: activeCases.length,
+      openCases,
+      createdCases,
+      receivedVehicles,
+      scheduledAppointments,
+      overdueCases: overdueCases.length,
+      overdueWorkshopCases: overdueCases.length,
+      waitingPartsCases: waitingPartsCases.length,
+      qcReworkCases: qcReworkCases.length,
+      blockedCases: blockedCases.length,
+      blockedOver48h: blockedOver48h.length,
+      blockedOver7d: blockedOver7d.length,
+      pendingActions,
+      withoutNextAction: pendingActions,
+      completedWorkCases: completedWorkCases.length,
+      readyForDeliveryCases: readyForDeliveryCases.length,
+      receptionLoad,
+      workshopLoad,
+      humanLoadPercent,
+      equipmentLoadPercent,
+      liftLoadPercent,
+      boothLoadPercent,
+      averageCycleHours,
+      directorAlerts: rawAlerts.length,
+    },
+    priorities: rawAlerts,
+    serviceLoads,
+    todaySummary,
+    funnel,
+    cases: {
+      filteredCases,
+      periodCases: activeCases,
+    },
+  };
+
+  return snapshot;
+}
+
+function buildSavPerformanceDashboard(now = new Date()) {
   const indexes = getUiRuntimeIndexes();
+  const range = getSavDashboardRange(now);
+  const filters = getSavDashboardFilters();
   const cacheKey = [
     range.key,
     range.start.toISOString(),
@@ -674,6 +1294,7 @@ function buildSavPerformanceDashboard(now = new Date()) {
     indexes.casesLength,
     indexes.bookingsLength,
   ].join("|");
+
   if (
     savPerformanceDashboardCache?.key === cacheKey
     && savPerformanceDashboardCache.casesSource === indexes.casesSource
@@ -681,75 +1302,16 @@ function buildSavPerformanceDashboard(now = new Date()) {
   ) {
     return savPerformanceDashboardCache.value;
   }
-  const cases = getSavDashboardCases(range);
-  const activeCases = cases.periodCases.filter(isSavDashboardActiveCase);
-  const openCases = activeCases.length;
-  const createdCases = cases.filteredCases.filter((item) => dateInRange(item.createdAt, range)).length;
-  const receivedVehicles = cases.filteredCases.filter((item) => dateInRange(getCaseVehicleReceivedAt(item), range)).length;
-  const scheduledAppointments = cases.filteredCases.filter((item) => dateInRange(item.appointment?.start, range)).length;
-  const overdueWorkshopCases = activeCases.filter((item) => isCaseLate(item, now)).length;
-  const blockedCases = activeCases.filter(isCaseBlocked).length;
-  const blockedOver48h = activeCases.filter((item) => isCaseBlocked(item) && getCaseBlockedHours(item, now) >= 48).length;
-  const blockedOver7d = activeCases.filter((item) => isCaseBlocked(item) && getCaseBlockedHours(item, now) >= 168).length;
-  const completedWorkCases = activeCases.filter((item) => item.flags?.workCompleted && !item.flags?.invoiced).length;
-  const receptionLoad = activeCases.filter((item) => (
-    dateInRange(item.createdAt, range)
-    || dateInRange(item.appointment?.start, range)
-    || dateInRange(getCaseVehicleReceivedAt(item), range)
-  )).length;
-  const workshopLoad = activeCases.filter((item) => (
-    item.flags?.received
-    && !item.flags?.invoiced
-    && (isCaseBlocked(item) || !item.flags?.workCompleted)
-  )).length;
-  const withoutNextAction = activeCases.filter((item) => caseWithoutScheduledNextAction(item, now)).length;
-  const cycleHours = cases.filteredCases
-    .map((item) => getCaseCycleHours(item, range))
-    .filter((value) => value > 0);
-  const averageCycleHours = cycleHours.length ? roundHours(cycleHours.reduce((sum, value) => sum + value, 0) / cycleHours.length) : 0;
-  const directorAlerts = buildPilotageAlerts(now, { cases: activeCases, limit: 99 }).length;
-  const serviceLoads = SAV_DASHBOARD_SERVICE_LOADS.map(([key, label]) => {
-    const human = averageLoadPercentForRange(range, (day) => categoryHumanDayLoad(day, key));
-    const equipment = averageLoadPercentForRange(range, (day) => categoryEquipmentDayLoad(day, key));
-    return { key, label, human, equipment, level: loadLevel(Math.max(human, equipment)) };
-  });
-  const humanLoadPercent = averageLoadPercentForRange(range, humanDayLoad);
-  const equipmentLoadPercent = averageLoadPercentForRange(range, equipmentDayLoad);
-  const liftLoadPercent = averageLoadPercentForRange(range, (day) => dayLoadForResources(day, (resource) => resource.active !== false && ["pont_vidange", "pont_mecanique"].includes(resource.role)));
-  const boothLoadPercent = averageLoadPercentForRange(range, (day) => dayLoadForResources(day, (resource) => resource.active !== false && resource.role === "cabine"));
-  const dashboard = {
-    range,
-    cases,
-    serviceLoads,
-    metrics: {
-      activeCases: activeCases.length,
-      openCases,
-      createdCases,
-      receivedVehicles,
-      scheduledAppointments,
-      overdueWorkshopCases,
-      blockedCases,
-      blockedOver48h,
-      blockedOver7d,
-      pendingActions: withoutNextAction,
-      completedWorkCases,
-      receptionLoad,
-      workshopLoad,
-      humanLoadPercent,
-      equipmentLoadPercent,
-      liftLoadPercent,
-      boothLoadPercent,
-      averageCycleHours,
-      withoutNextAction,
-      directorAlerts,
-    },
-  };
+
+  const dashboard = buildDirectorDashboardSnapshot(state, now);
+
   savPerformanceDashboardCache = {
     key: cacheKey,
     casesSource: indexes.casesSource,
     bookingsSource: indexes.bookingsSource,
     value: dashboard,
   };
+
   return dashboard;
 }
 
@@ -766,15 +1328,13 @@ function getSavDashboardFilters() {
 function getSavDashboardRange(now = new Date()) {
   const filters = getSavDashboardFilters();
   const today = startOfDay(now);
-  if (filters.period === "week") {
-    const mondayOffset = (today.getDay() + 6) % 7;
-    const start = startOfDay(addDays(today, -mondayOffset));
-    return { key: "week", start, end: startOfDay(addDays(start, 7)), label: "Semaine en cours", shortLabel: "Semaine" };
+  if (filters.period === "week" || filters.period === "7d") {
+    const start = startOfDay(addDays(today, -6));
+    return { key: "week", start, end: startOfDay(addDays(today, 1)), label: "7 derniers jours", shortLabel: "7 jours" };
   }
-  if (filters.period === "month") {
-    const start = new Date(today.getFullYear(), today.getMonth(), 1);
-    const end = new Date(today.getFullYear(), today.getMonth() + 1, 1);
-    return { key: "month", start, end, label: "Mois en cours", shortLabel: "Mois" };
+  if (filters.period === "month" || filters.period === "30d") {
+    const start = startOfDay(addDays(today, -29));
+    return { key: "month", start, end: startOfDay(addDays(today, 1)), label: "30 derniers jours", shortLabel: "30 jours" };
   }
   return { key: "today", start: today, end: startOfDay(addDays(today, 1)), label: "Aujourd'hui", shortLabel: "Aujourd'hui" };
 }
@@ -2246,31 +2806,62 @@ function compareCasesForList(a, b) {
 }
 
 
-function renderPilotageAlerts() {
+function renderPilotageAlerts(snapshot) {
   const target = $("#pilotage-alerts");
   if (!target) return;
   if (typeof hasPermission === "function" && !hasPermission("dashboard.view")) {
     target.innerHTML = "";
     return;
   }
-  const alerts = buildPilotageAlerts();
-  target.innerHTML = alerts.length
-    ? alerts.map((alert) => `
-        <button class="pilotage-alert ${escapeAttr(alert.level)}" type="button" data-alert-case="${escapeAttr(alert.caseId)}">
-          <strong>${escapeHtml(alert.title)}</strong>
-          <span>${escapeHtml(alert.details)}</span>
-        </button>
+  const priorities = snapshot?.priorities || [];
+
+  target.innerHTML = priorities.length
+    ? priorities.map((alert) => `
+        <article class="pilotage-priority-card severity-${escapeAttr(alert.severity || "medium")}" data-alert-case="${escapeAttr(alert.caseId)}">
+          <div class="priority-card-header">
+            <span class="severity-badge ${escapeAttr(alert.severity || "medium")}">${escapeHtml(alert.severityLabel || "ALERTE")}</span>
+            <span class="case-ref-badge">${escapeHtml(alert.ref)}</span>
+            <span class="case-stage-pill">${escapeHtml(alert.stageLabel)}</span>
+          </div>
+          <div class="priority-card-body">
+            <strong class="priority-title">${escapeHtml(alert.title)}</strong>
+            <p class="priority-reason">${escapeHtml(alert.reason)}</p>
+            <div class="priority-meta">
+              <span class="priority-client">👤 ${escapeHtml(alert.client)}</span>
+              <span class="priority-vehicle">🚗 ${escapeHtml(alert.vehicle)}</span>
+            </div>
+          </div>
+          <div class="priority-card-action">
+            <button class="ghost-button cta-button" type="button" data-nav-tab="${escapeAttr(alert.ctaAction || "dossiers")}" data-nav-case="${escapeAttr(alert.caseId)}">
+              ${escapeHtml(alert.ctaLabel || "Voir dossier")} →
+            </button>
+          </div>
+        </article>
       `).join("")
-    : `<div class="empty-inline">Aucune alerte opérationnelle.</div>`;
-  $$('[data-alert-case]', target).forEach((button) => {
-    button.addEventListener('click', () => {
-      activeCaseId = button.dataset.alertCase;
-      activeTab = 'dossiers';
-      setActiveTab('dossiers');
-      renderCases();
-      renderCaseDetail();
+    : `<div class="empty-inline">Aucune alerte prioritaire.</div>`;
+
+  $$("[data-nav-case]", target).forEach((button) => {
+    button.addEventListener("click", () => {
+      const caseId = button.dataset.navCase;
+      if (caseId) openDirectorDashboardCase(caseId);
     });
   });
+}
+
+function openDirectorDashboardCase(caseId) {
+  if (!caseId) return false;
+  if (typeof setActiveTab === "function") setActiveTab("dossiers");
+  activeCaseId = caseId;
+  activeCaseDetailTab = "infos";
+  if (typeof renderCases === "function") renderCases();
+  if (typeof renderCaseDetail === "function") renderCaseDetail();
+  const detail = $("#case-detail");
+  if (detail) {
+    detail.setAttribute("tabindex", "-1");
+    detail.scrollIntoView?.({ block: "start" });
+    detail.focus?.();
+  }
+  return true;
 }
 
 function buildPilotageAlerts(now = new Date(), options = {}) {

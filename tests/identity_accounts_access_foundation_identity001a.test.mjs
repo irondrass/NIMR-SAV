@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { createNimrVmContext } from "./helpers/nimr_vm_context.mjs";
 
 const BASE_SHA = "4d57a8e23e4161cdbd065daaebfc979c490c9c5b";
+const IDENTITY_001D2E_BASE_SHA = "c7a05dcb465ede8620f2cedfe94d3511364d09ed";
 const browserSmokeRequested = process.argv.includes("--browser-smoke");
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -31,6 +32,14 @@ function sourceSlice(source, startMarker, endMarker) {
   const end = source.indexOf(endMarker, start + startMarker.length);
   assert.notEqual(end, -1, `Missing source marker: ${endMarker}`);
   return source.slice(start, end);
+}
+
+function withoutSourceSlice(source, startMarker, endMarker) {
+  const start = source.indexOf(startMarker);
+  assert.notEqual(start, -1, `Missing source marker: ${startMarker}`);
+  const end = source.indexOf(endMarker, start + startMarker.length);
+  assert.notEqual(end, -1, `Missing source marker: ${endMarker}`);
+  return source.slice(0, start) + source.slice(end);
 }
 
 const appSource = readProjectFile("app.js");
@@ -305,12 +314,22 @@ check("K No Auth Admin API, administrative secret or service role is introduced 
 check("L Planning, Supabase, SQL, UX-007, UX-009 and write behavior remain protected", () => {
   for (const protectedFile of [
     "js/planning.js",
-    "js/supabase-sync.js",
     "js/supabase-config.js",
     "supabase-schema.sql",
   ]) {
     assert.equal(normalizeEol(readProjectFile(protectedFile)), normalizeEol(readBaseFile(protectedFile)), protectedFile);
   }
+  const omitIdentity001d2eAuthSlices = (source) => [
+    ["async function signInSupabaseFromForm", "async function signOutSupabase"],
+    ["async function startSupabaseLiveSync", "function stopSupabaseLiveSync"],
+    ["function bindSupabaseAuthLifecycle", "function setSyncHealthValue"],
+    ["async function pullLatestSupabaseBackup", "const GRANULAR_OUTBOX_BATCH_SIZE"],
+  ].reduce((result, [start, end]) => withoutSourceSlice(result, start, end), source);
+  assert.equal(
+    normalizeEol(omitIdentity001d2eAuthSlices(readProjectFile("js/supabase-sync.js"))),
+    normalizeEol(omitIdentity001d2eAuthSlices(readBaseFile("js/supabase-sync.js"))),
+    "js/supabase-sync.js outside IDENTITY-001D2-E auth gates",
+  );
   const sqlFiles = execFileSync("git", ["ls-tree", "-r", "--name-only", BASE_SHA], { cwd: repoRoot, encoding: "utf8" })
     .split(/\r?\n/u)
     .filter((file) => file.endsWith(".sql"));
@@ -328,7 +347,7 @@ check("L Planning, Supabase, SQL, UX-007, UX-009 and write behavior remain prote
   const snapshotSource = sourceSlice(stateSource, "function getAccountAccessSnapshot", "function getCurrentActor");
   assert.doesNotMatch(snapshotSource, /saveState\s*\(|state\.[A-Za-z0-9_$.[\]]+\s*=/u);
   assert.doesNotMatch(snapshotSource, /\.from\s*\(|\.insert\s*\(|\.update\s*\(|\.upsert\s*\(/u);
-  const changed = execFileSync("git", ["diff", "--name-only", BASE_SHA], { cwd: repoRoot, encoding: "utf8" });
+  const changed = execFileSync("git", ["diff", "--name-only", IDENTITY_001D2E_BASE_SHA], { cwd: repoRoot, encoding: "utf8" });
   assert.equal(fs.existsSync(path.join(repoRoot, "supabase/functions/workshop-user-admin/index.ts")), true);
   assert.doesNotMatch(changed, /\.sql(?:\n|$)/u);
 });

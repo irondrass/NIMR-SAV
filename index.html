@@ -995,6 +995,24 @@
         <p class="muted status-error" id="first-access-status" role="alert"></p>
       </form>
     </div>
+    <div class="local-lock-overlay" id="supabase-recovery-otp-overlay" hidden>
+      <form class="local-lock-dialog" id="supabase-recovery-otp-form" role="dialog" aria-modal="true" aria-labelledby="supabase-recovery-otp-title" aria-describedby="supabase-recovery-otp-description">
+        <div class="local-lock-logo">✉️</div>
+        <h2 id="supabase-recovery-otp-title">Vérifier votre identité</h2>
+        <p id="supabase-recovery-otp-description">Un code de récupération à 6 chiffres vient d’être envoyé par email. Saisissez-le ci-dessous.</p>
+        <label>
+          Email
+          <input name="email" type="email" autocomplete="username" readonly required />
+        </label>
+        <label>
+          Code de récupération
+          <input name="token" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" minlength="6" maxlength="6" required placeholder="000000" />
+        </label>
+        <button class="primary-button" type="submit">Vérifier le code</button>
+        <button class="ghost-button" type="button" id="supabase-recovery-otp-cancel">Retour</button>
+        <p class="muted status-error" id="supabase-recovery-otp-status" role="alert" aria-live="assertive"></p>
+      </form>
+    </div>
     <div class="local-lock-overlay" id="supabase-password-setup-overlay" hidden>
       <form class="local-lock-dialog" id="supabase-password-setup-form" role="dialog" aria-modal="true" aria-labelledby="supabase-password-setup-title" aria-describedby="supabase-password-setup-description">
         <div class="local-lock-logo">🔐</div>

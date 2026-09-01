@@ -311,6 +311,7 @@ await check("N Edge race mapping is narrow and preserves revoke-before-Auth clea
     "tests/identity_accounts_access_foundation_identity001a.test.mjs",
     "tests/identity_secure_provisioning_offboarding_identity001b.test.mjs",
     "tests/identity_invited_user_password_onboarding_identity001d2e.test.mjs",
+    "tests/identity_password_recovery_otp_identity001d2f.test.mjs",
     "app.js",
     "index.html",
     "js/supabase-client.js",

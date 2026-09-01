@@ -356,17 +356,91 @@ async function requestSupabasePasswordRecovery(email) {
   try {
     const { error } = await client.auth.resetPasswordForEmail(cleanEmail, { redirectTo });
     if (error) {
-      return { ok: false, code: "RECOVERY_REQUEST_FAILED", message: error.message || "Envoi du lien impossible." };
+      return { ok: false, code: "RECOVERY_REQUEST_FAILED", message: error.message || "Envoi du code impossible." };
     }
     return {
       ok: true,
-      message: "Si ce compte existe, un email de récupération vient d’être envoyé.",
+      message: "Si ce compte existe, un code de récupération vient d’être envoyé.",
     };
   } catch (error) {
-    return { ok: false, code: "RECOVERY_REQUEST_FAILED", message: error?.message || "Envoi du lien impossible." };
+    return { ok: false, code: "RECOVERY_REQUEST_FAILED", message: error?.message || "Envoi du code impossible." };
   }
 }
 window.requestSupabasePasswordRecovery = requestSupabasePasswordRecovery;
+
+async function verifySupabaseRecoveryOtp(email, token) {
+  const client = getSupabaseClient();
+  if (!client?.auth?.verifyOtp || !client.auth?.getUser) {
+    return { ok: false, code: "NO_CLIENT", message: "Service de vérification Supabase indisponible." };
+  }
+  const cleanEmail = String(email || "").trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(cleanEmail)) {
+    return { ok: false, code: "INVALID_EMAIL", message: "Saisissez une adresse email valide." };
+  }
+  const cleanToken = String(token || "").replace(/\s+/gu, "");
+  if (!/^\d{6}$/u.test(cleanToken)) {
+    return { ok: false, code: "INVALID_OTP", message: "Saisissez le code de récupération à 6 chiffres." };
+  }
+
+  window.__nimrRecoveryOtpVerificationPending = true;
+  try {
+    const { data, error } = await client.auth.verifyOtp({
+      email: cleanEmail,
+      token: cleanToken,
+      type: "recovery",
+    });
+    const session = data?.session;
+    const verifiedUser = data?.user || session?.user;
+    if (
+      error
+      || !session?.user?.id
+      || !verifiedUser?.id
+      || String(verifiedUser.id) !== String(session.user.id)
+    ) {
+      return {
+        ok: false,
+        code: "RECOVERY_OTP_REJECTED",
+        message: "Code invalide ou expiré. Demandez un nouveau code.",
+      };
+    }
+
+    if (typeof markSupabaseAuthSessionRecovered === "function") {
+      markSupabaseAuthSessionRecovered("PASSWORD_RECOVERY", session);
+    } else {
+      writePersistentPasswordSetupRequirement(verifiedUser.id, "recovery");
+      writeSupabaseAuthFlowSessionMarker(verifiedUser.id, "recovery");
+    }
+
+    const { data: currentData, error: currentError } = await client.auth.getUser();
+    const currentUser = currentData?.user;
+    if (
+      currentError
+      || !currentUser?.id
+      || String(currentUser.id) !== String(verifiedUser.id)
+    ) {
+      if (currentUser?.id) {
+        writePersistentPasswordSetupRequirement(currentUser.id, "recovery");
+        writeSupabaseAuthFlowSessionMarker(currentUser.id, "recovery");
+      }
+      return {
+        ok: false,
+        code: "AUTH_REVALIDATION_FAILED",
+        message: "La session de récupération n’a pas pu être confirmée.",
+      };
+    }
+
+    return { ok: true, user: currentUser };
+  } catch (error) {
+    return {
+      ok: false,
+      code: "RECOVERY_OTP_FAILED",
+      message: "Code invalide ou expiré. Demandez un nouveau code.",
+    };
+  } finally {
+    window.__nimrRecoveryOtpVerificationPending = false;
+  }
+}
+window.verifySupabaseRecoveryOtp = verifySupabaseRecoveryOtp;
 
 async function completeSupabasePasswordSetup(password) {
   const newPassword = String(password || "");

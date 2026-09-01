@@ -2851,8 +2851,12 @@ function bindSupabaseAuthLifecycle() {
   const { data } = client.auth.onAuthStateChange((event, session) => {
     Promise.resolve().then(async () => {
       if (supabaseAuthLifecycleClient !== client) return;
+      const recoveryOtpVerificationPending = window.__nimrRecoveryOtpVerificationPending === true;
       if (typeof markSupabaseAuthSessionRecovered === "function" && session?.user?.id) {
-        markSupabaseAuthSessionRecovered(event, session);
+        markSupabaseAuthSessionRecovered(
+          recoveryOtpVerificationPending ? "PASSWORD_RECOVERY" : event,
+          session,
+        );
       }
       if (event === "SIGNED_OUT") {
         if (typeof clearSupabaseAuthFlowSessionMarker === "function") clearSupabaseAuthFlowSessionMarker();
@@ -2862,10 +2866,10 @@ function bindSupabaseAuthLifecycle() {
       const passwordSetupMode = typeof getSupabasePasswordSetupMode === "function"
         ? getSupabasePasswordSetupMode(session?.user)
         : "";
-      if (event === "PASSWORD_RECOVERY" || passwordSetupMode) {
+      if (event === "PASSWORD_RECOVERY" || recoveryOtpVerificationPending || passwordSetupMode) {
         stopSupabaseLiveSync({ status: "waiting_auth" });
         if (typeof showSupabasePasswordSetupGate === "function") {
-          showSupabasePasswordSetupGate(event === "PASSWORD_RECOVERY" ? "recovery" : passwordSetupMode);
+          showSupabasePasswordSetupGate(event === "PASSWORD_RECOVERY" ? "recovery" : recoveryOtpVerificationPending ? "recovery" : passwordSetupMode);
         }
         return;
       }

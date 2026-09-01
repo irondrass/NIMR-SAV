@@ -1736,11 +1736,13 @@ function isUserSessionOverlayVisible() {
   const firstAccess = document.getElementById("first-access-overlay");
   const login = document.getElementById("user-login-overlay");
   const change = document.getElementById("user-pin-change-overlay");
+  const recoveryOtp = document.getElementById("supabase-recovery-otp-overlay");
   const passwordSetup = document.getElementById("supabase-password-setup-overlay");
   return Boolean(
     (firstAccess && !firstAccess.hidden)
     || (login && !login.hidden)
     || (change && !change.hidden)
+    || (recoveryOtp && !recoveryOtp.hidden)
     || (passwordSetup && !passwordSetup.hidden)
   );
 }
@@ -1907,6 +1909,53 @@ async function convergeAndRevalidateSupabaseIdentity(authUser, cloudReason) {
   }
 }
 
+function showSupabaseRecoveryOtpGate(email = "") {
+  const overlay = document.getElementById("supabase-recovery-otp-overlay");
+  const cleanEmail = String(email || "").trim().toLowerCase();
+  if (!overlay || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(cleanEmail)) return false;
+  captureUserSessionReturnFocus();
+  bindUserSessionOverlayKeyboard(overlay);
+  window.__nimrValidatedAuthUserId = "";
+  if (typeof clearAccountAccessRuntimeContext === "function") clearAccountAccessRuntimeContext();
+  if (typeof stopSupabaseLiveSync === "function") stopSupabaseLiveSync({ status: "waiting_auth" });
+  [
+    "first-access-overlay",
+    "user-login-overlay",
+    "user-pin-change-overlay",
+    "supabase-password-setup-overlay",
+  ].forEach((id) => {
+    const other = document.getElementById(id);
+    if (other) other.hidden = true;
+  });
+  const form = document.getElementById("supabase-recovery-otp-form");
+  if (form?.elements?.email) form.elements.email.value = cleanEmail;
+  if (form?.elements?.token) form.elements.token.value = "";
+  const status = document.getElementById("supabase-recovery-otp-status");
+  if (status) status.textContent = "";
+  overlay.hidden = false;
+  document.querySelector(".app-shell")?.setAttribute("inert", "");
+  focusUserSessionDialog(overlay, "input[name='token']");
+  return true;
+}
+window.showSupabaseRecoveryOtpGate = showSupabaseRecoveryOtpGate;
+
+function hideSupabaseRecoveryOtpGate(options = {}) {
+  const overlay = document.getElementById("supabase-recovery-otp-overlay");
+  if (!overlay) return;
+  const form = document.getElementById("supabase-recovery-otp-form");
+  if (form?.elements?.email) form.elements.email.value = "";
+  if (form?.elements?.token) form.elements.token.value = "";
+  const status = document.getElementById("supabase-recovery-otp-status");
+  if (status) status.textContent = "";
+  overlay.hidden = true;
+  if (options.returnToSource === true) {
+    showFirstAccessRecovery();
+  }
+  checkOverlaysInertState();
+  restoreUserSessionReturnFocus();
+}
+window.hideSupabaseRecoveryOtpGate = hideSupabaseRecoveryOtpGate;
+
 function showSupabasePasswordSetupGate(mode = "invitation") {
   const overlay = document.getElementById("supabase-password-setup-overlay");
   if (!overlay) return false;
@@ -1916,11 +1965,24 @@ function showSupabasePasswordSetupGate(mode = "invitation") {
   window.__nimrValidatedAuthUserId = "";
   if (typeof clearAccountAccessRuntimeContext === "function") clearAccountAccessRuntimeContext();
   if (typeof stopSupabaseLiveSync === "function") stopSupabaseLiveSync({ status: "waiting_auth" });
-  ["first-access-overlay", "user-login-overlay", "user-pin-change-overlay"].forEach((id) => {
+  ["first-access-overlay", "user-login-overlay", "user-pin-change-overlay", "supabase-recovery-otp-overlay"].forEach((id) => {
     const other = document.getElementById(id);
     if (other) other.hidden = true;
   });
   overlay.dataset.mode = mode === "recovery" ? "recovery" : "invitation";
+  const recoveryMode = overlay.dataset.mode === "recovery";
+  const title = document.getElementById("supabase-password-setup-title");
+  const description = document.getElementById("supabase-password-setup-description");
+  const submitButton = overlay.querySelector('button[type="submit"]');
+  if (title) title.textContent = recoveryMode ? "Choisir un nouveau mot de passe" : "Activer votre compte NIMR SAV";
+  if (description) {
+    description.textContent = recoveryMode
+      ? "Définissez votre nouveau mot de passe pour récupérer l’accès à NIMR SAV."
+      : "Choisissez votre mot de passe pour terminer l’activation de votre accès.";
+  }
+  if (submitButton) submitButton.textContent = recoveryMode ? "Enregistrer le nouveau mot de passe" : "Activer mon compte";
+  const recoveryForm = document.getElementById("supabase-recovery-otp-form");
+  if (recoveryForm?.elements?.token) recoveryForm.elements.token.value = "";
   overlay.hidden = false;
   document.querySelector(".app-shell")?.setAttribute("inert", "");
   if (wasHidden) {
@@ -1959,10 +2021,17 @@ async function checkUserSessionStartup() {
   const firstAccessOverlay = document.getElementById("first-access-overlay");
   const loginOverlay = document.getElementById("user-login-overlay");
   const pinChangeOverlay = document.getElementById("user-pin-change-overlay");
+  const recoveryOtpOverlay = document.getElementById("supabase-recovery-otp-overlay");
   const passwordSetupOverlay = document.getElementById("supabase-password-setup-overlay");
   const appShell = document.querySelector(".app-shell");
   if (appShell && typeof appShell.contains === "function") {
-    if (appShell.contains(firstAccessOverlay) || appShell.contains(loginOverlay) || appShell.contains(pinChangeOverlay) || appShell.contains(passwordSetupOverlay)) {
+    if (
+      appShell.contains(firstAccessOverlay)
+      || appShell.contains(loginOverlay)
+      || appShell.contains(pinChangeOverlay)
+      || appShell.contains(recoveryOtpOverlay)
+      || appShell.contains(passwordSetupOverlay)
+    ) {
       console.error("DOM CONSTRAINT VIOLATION: Overlays must be siblings of .app-shell, not children!");
     }
   }
@@ -2173,11 +2242,13 @@ function checkOverlaysInertState() {
   const firstAccess = document.getElementById("first-access-overlay");
   const login = document.getElementById("user-login-overlay");
   const change = document.getElementById("user-pin-change-overlay");
+  const recoveryOtp = document.getElementById("supabase-recovery-otp-overlay");
   const passwordSetup = document.getElementById("supabase-password-setup-overlay");
   const localLock = document.getElementById("local-lock-overlay");
   const anyVisible = (firstAccess && !firstAccess.hidden) ||
                       (login && !login.hidden) ||
                       (change && !change.hidden) ||
+                      (recoveryOtp && !recoveryOtp.hidden) ||
                       (passwordSetup && !passwordSetup.hidden) ||
                       (localLock && !localLock.hidden);
   if (!anyVisible) {
@@ -2437,12 +2508,56 @@ function bindUserSessionActions() {
       hideFirstAccessRecovery();
       if (typeof refreshSupabasePermissionState === "function") refreshSupabasePermissionState("password-setup");
       resetUserSessionIdleTimer();
-      quietNotify("Compte activé. Votre accès atelier est prêt.", "success");
+      const completedSetupMode = String(
+        document.getElementById("supabase-password-setup-overlay")?.dataset?.mode || "invitation",
+      );
+      quietNotify(
+        completedSetupMode === "recovery"
+          ? "Mot de passe mis à jour. Votre accès atelier est prêt."
+          : "Compte activé. Votre accès atelier est prêt.",
+        "success",
+      );
     } catch (error) {
       if (status) status.textContent = error?.message || "Activation du compte impossible.";
     } finally {
       if (submitButton) submitButton.disabled = false;
     }
+  });
+
+  const recoveryOtpForm = document.getElementById("supabase-recovery-otp-form");
+  recoveryOtpForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const status = document.getElementById("supabase-recovery-otp-status");
+    if (status) status.textContent = "";
+    const email = String(recoveryOtpForm.elements.email?.value || "").trim();
+    const token = String(recoveryOtpForm.elements.token?.value || "").replace(/\s+/gu, "");
+    if (!/^\d{6}$/u.test(token)) {
+      if (status) status.textContent = "Saisissez le code de récupération à 6 chiffres.";
+      return;
+    }
+    const submitButton = recoveryOtpForm.querySelector('button[type="submit"]');
+    if (submitButton) submitButton.disabled = true;
+    try {
+      if (typeof verifySupabaseRecoveryOtp !== "function") {
+        throw new Error("Service de vérification Supabase indisponible.");
+      }
+      const verification = await verifySupabaseRecoveryOtp(email, token);
+      recoveryOtpForm.elements.token.value = "";
+      if (!verification?.ok) {
+        if (status) status.textContent = verification?.message || "Code invalide ou expiré.";
+        return;
+      }
+      showSupabasePasswordSetupGate("recovery");
+    } catch (error) {
+      recoveryOtpForm.elements.token.value = "";
+      if (status) status.textContent = error?.message || "Vérification du code impossible.";
+    } finally {
+      if (submitButton) submitButton.disabled = false;
+    }
+  });
+
+  document.getElementById("supabase-recovery-otp-cancel")?.addEventListener("click", () => {
+    hideSupabaseRecoveryOtpGate({ returnToSource: true });
   });
 
   const bindPasswordRecoveryButton = (buttonId, formId, statusId) => {
@@ -2458,9 +2573,18 @@ function bindUserSessionActions() {
           throw new Error("Service de récupération Supabase indisponible.");
         }
         const result = await requestSupabasePasswordRecovery(email);
+        if (result?.ok) {
+          if (
+            typeof showSupabaseRecoveryOtpGate !== "function"
+            || !showSupabaseRecoveryOtpGate(email)
+          ) {
+            throw new Error("Écran de vérification du code indisponible.");
+          }
+          return;
+        }
         if (status) status.textContent = result?.message || "Demande de récupération impossible.";
         if (!status && typeof setSupabaseStatus === "function") {
-          setSupabaseStatus(result?.message || "Demande de récupération impossible.", result?.ok ? "ok" : "error");
+          setSupabaseStatus(result?.message || "Demande de récupération impossible.", "error");
         }
       } catch (error) {
         const message = error?.message || "Demande de récupération impossible.";

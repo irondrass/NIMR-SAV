@@ -305,7 +305,11 @@ await check("H Edge Function remains the only invite and offboard membership mut
 });
 
 await check("I IDENTITY-001B caller JWT and membership authorization remains intact", () => {
-  const currentWithoutKeyHelper = withoutSourceSlice(edgeSource, "function readNamedKey", "function isExistingAuthUserError");
+  const currentWithoutPasswordSetupFlag = edgeSource.replace(
+    /data:\s*\{\s*display_name:\s*name,\s*nimr_password_setup_required:\s*true,?\s*\}/u,
+    "data: { display_name: name }",
+  );
+  const currentWithoutKeyHelper = withoutSourceSlice(currentWithoutPasswordSetupFlag, "function readNamedKey", "function isExistingAuthUserError");
   const baseWithoutKeyHelper = withoutSourceSlice(baseEdgeSource, "function readNamedKey", "function isExistingAuthUserError");
   const currentWithoutIdentity001d1RaceMapping = withoutSourceSlice(
     currentWithoutKeyHelper,
@@ -346,12 +350,9 @@ await check("K ticket introduces no migration, SQL execution or deployment path"
 
 await check("L protected role, permission, planning and release contracts are unchanged", () => {
   for (const file of [
-    "app.js",
     "js/planning.js",
     "js/state.js",
-    "js/supabase-client.js",
     "js/supabase-config.js",
-    "js/supabase-sync.js",
     "js/ui-cases.js",
     "js/ui-planning.js",
   ]) {

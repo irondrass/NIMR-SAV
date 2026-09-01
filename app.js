@@ -1736,7 +1736,13 @@ function isUserSessionOverlayVisible() {
   const firstAccess = document.getElementById("first-access-overlay");
   const login = document.getElementById("user-login-overlay");
   const change = document.getElementById("user-pin-change-overlay");
-  return Boolean((firstAccess && !firstAccess.hidden) || (login && !login.hidden) || (change && !change.hidden));
+  const passwordSetup = document.getElementById("supabase-password-setup-overlay");
+  return Boolean(
+    (firstAccess && !firstAccess.hidden)
+    || (login && !login.hidden)
+    || (change && !change.hidden)
+    || (passwordSetup && !passwordSetup.hidden)
+  );
 }
 
 function captureUserSessionReturnFocus() {
@@ -1901,6 +1907,48 @@ async function convergeAndRevalidateSupabaseIdentity(authUser, cloudReason) {
   }
 }
 
+function showSupabasePasswordSetupGate(mode = "invitation") {
+  const overlay = document.getElementById("supabase-password-setup-overlay");
+  if (!overlay) return false;
+  const wasHidden = overlay.hidden;
+  captureUserSessionReturnFocus();
+  bindUserSessionOverlayKeyboard(overlay);
+  window.__nimrValidatedAuthUserId = "";
+  if (typeof clearAccountAccessRuntimeContext === "function") clearAccountAccessRuntimeContext();
+  if (typeof stopSupabaseLiveSync === "function") stopSupabaseLiveSync({ status: "waiting_auth" });
+  ["first-access-overlay", "user-login-overlay", "user-pin-change-overlay"].forEach((id) => {
+    const other = document.getElementById(id);
+    if (other) other.hidden = true;
+  });
+  overlay.dataset.mode = mode === "recovery" ? "recovery" : "invitation";
+  overlay.hidden = false;
+  document.querySelector(".app-shell")?.setAttribute("inert", "");
+  if (wasHidden) {
+    const form = document.getElementById("supabase-password-setup-form");
+    if (form?.elements?.newPassword) form.elements.newPassword.value = "";
+    if (form?.elements?.confirmPassword) form.elements.confirmPassword.value = "";
+    const status = document.getElementById("supabase-password-setup-status");
+    if (status) status.textContent = "";
+  }
+  focusUserSessionDialog(overlay, "input[name='newPassword']");
+  return true;
+}
+window.showSupabasePasswordSetupGate = showSupabasePasswordSetupGate;
+
+function hideSupabasePasswordSetupGate() {
+  const overlay = document.getElementById("supabase-password-setup-overlay");
+  if (!overlay) return;
+  const form = document.getElementById("supabase-password-setup-form");
+  if (form?.elements?.newPassword) form.elements.newPassword.value = "";
+  if (form?.elements?.confirmPassword) form.elements.confirmPassword.value = "";
+  const status = document.getElementById("supabase-password-setup-status");
+  if (status) status.textContent = "";
+  overlay.hidden = true;
+  checkOverlaysInertState();
+  restoreUserSessionReturnFocus();
+}
+window.hideSupabasePasswordSetupGate = hideSupabasePasswordSetupGate;
+
 async function checkUserSessionStartup() {
   if (typeof isLocalSessionUnlocked === "function" && !isLocalSessionUnlocked()) {
     // PIN local activé et verrouillé -> priorité au PIN, on attend le déverrouillage
@@ -1911,10 +1959,19 @@ async function checkUserSessionStartup() {
   const firstAccessOverlay = document.getElementById("first-access-overlay");
   const loginOverlay = document.getElementById("user-login-overlay");
   const pinChangeOverlay = document.getElementById("user-pin-change-overlay");
+  const passwordSetupOverlay = document.getElementById("supabase-password-setup-overlay");
   const appShell = document.querySelector(".app-shell");
   if (appShell && typeof appShell.contains === "function") {
-    if (appShell.contains(firstAccessOverlay) || appShell.contains(loginOverlay) || appShell.contains(pinChangeOverlay)) {
+    if (appShell.contains(firstAccessOverlay) || appShell.contains(loginOverlay) || appShell.contains(pinChangeOverlay) || appShell.contains(passwordSetupOverlay)) {
       console.error("DOM CONSTRAINT VIOLATION: Overlays must be siblings of .app-shell, not children!");
+    }
+  }
+
+  if (typeof getSupabaseSessionPasswordSetupMode === "function") {
+    const recoveredPasswordSetupMode = await getSupabaseSessionPasswordSetupMode();
+    if (recoveredPasswordSetupMode) {
+      showSupabasePasswordSetupGate(recoveredPasswordSetupMode);
+      return { ok: false, code: "PASSWORD_SETUP_REQUIRED" };
     }
   }
 
@@ -1939,6 +1996,14 @@ async function checkUserSessionStartup() {
       const authUser = await getSupabaseUser();
       if (!authUser?.id) {
         return denyStartup("Connexion NIMR SAV requise pour accéder à cet atelier.", "NO_CLOUD_SESSION");
+      }
+
+      const passwordSetupMode = typeof getSupabasePasswordSetupMode === "function"
+        ? getSupabasePasswordSetupMode(authUser)
+        : "";
+      if (passwordSetupMode) {
+        showSupabasePasswordSetupGate(passwordSetupMode);
+        return { ok: false, code: "PASSWORD_SETUP_REQUIRED" };
       }
 
       if (typeof resolveSupabaseWorkshopMembership !== "function") {
@@ -2108,10 +2173,12 @@ function checkOverlaysInertState() {
   const firstAccess = document.getElementById("first-access-overlay");
   const login = document.getElementById("user-login-overlay");
   const change = document.getElementById("user-pin-change-overlay");
+  const passwordSetup = document.getElementById("supabase-password-setup-overlay");
   const localLock = document.getElementById("local-lock-overlay");
   const anyVisible = (firstAccess && !firstAccess.hidden) ||
                       (login && !login.hidden) ||
                       (change && !change.hidden) ||
+                      (passwordSetup && !passwordSetup.hidden) ||
                       (localLock && !localLock.hidden);
   if (!anyVisible) {
     document.querySelector(".app-shell")?.removeAttribute("inert");
@@ -2322,6 +2389,91 @@ function renderCurrentSessionIndicator() {
 }
 
 function bindUserSessionActions() {
+  const passwordSetupForm = document.getElementById("supabase-password-setup-form");
+  passwordSetupForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const status = document.getElementById("supabase-password-setup-status");
+    if (status) status.textContent = "";
+    const newPassword = String(passwordSetupForm.elements.newPassword?.value || "");
+    const confirmation = String(passwordSetupForm.elements.confirmPassword?.value || "");
+    if (newPassword.length < 10) {
+      if (status) status.textContent = "Le mot de passe doit contenir au moins 10 caractères.";
+      return;
+    }
+    if (newPassword !== confirmation) {
+      if (status) status.textContent = "Les deux mots de passe ne correspondent pas.";
+      return;
+    }
+    const submitButton = passwordSetupForm.querySelector("button[type='submit']");
+    if (submitButton) submitButton.disabled = true;
+    try {
+      if (typeof completeSupabasePasswordSetup !== "function") {
+        throw new Error("Module d’activation Supabase non disponible.");
+      }
+      const setupResult = await completeSupabasePasswordSetup(newPassword);
+      if (!setupResult?.ok) {
+        if (status) status.textContent = setupResult?.message || "Activation du compte impossible.";
+        return;
+      }
+      const syncResult = await persistValidatedSupabaseIdentity(
+        setupResult.user,
+        setupResult.membership,
+        "password-setup-membership",
+      );
+      if (!syncResult?.ok) {
+        if (status) status.textContent = syncResult?.message || "Validation locale de l’identité impossible.";
+        return;
+      }
+      const convergedIdentity = await convergeAndRevalidateSupabaseIdentity(setupResult.user, "password-setup");
+      if (!convergedIdentity?.ok) {
+        if (status) status.textContent = convergedIdentity?.message || "Validation finale de l’appartenance atelier impossible.";
+        return;
+      }
+      window.__nimrValidatedAuthUserId = setupResult.user.id;
+      sessionStorage.setItem("nimr-user-pin-unlocked", convergedIdentity.user.id);
+      ensureCurrentTabAllowed();
+      render();
+      hideSupabasePasswordSetupGate();
+      hideFirstAccessRecovery();
+      if (typeof refreshSupabasePermissionState === "function") refreshSupabasePermissionState("password-setup");
+      resetUserSessionIdleTimer();
+      quietNotify("Compte activé. Votre accès atelier est prêt.", "success");
+    } catch (error) {
+      if (status) status.textContent = error?.message || "Activation du compte impossible.";
+    } finally {
+      if (submitButton) submitButton.disabled = false;
+    }
+  });
+
+  const bindPasswordRecoveryButton = (buttonId, formId, statusId) => {
+    document.getElementById(buttonId)?.addEventListener("click", async () => {
+      const form = document.getElementById(formId);
+      const email = String(form?.elements?.email?.value || "").trim();
+      const status = statusId ? document.getElementById(statusId) : null;
+      if (status) status.textContent = "";
+      const button = document.getElementById(buttonId);
+      if (button) button.disabled = true;
+      try {
+        if (typeof requestSupabasePasswordRecovery !== "function") {
+          throw new Error("Service de récupération Supabase indisponible.");
+        }
+        const result = await requestSupabasePasswordRecovery(email);
+        if (status) status.textContent = result?.message || "Demande de récupération impossible.";
+        if (!status && typeof setSupabaseStatus === "function") {
+          setSupabaseStatus(result?.message || "Demande de récupération impossible.", result?.ok ? "ok" : "error");
+        }
+      } catch (error) {
+        const message = error?.message || "Demande de récupération impossible.";
+        if (status) status.textContent = message;
+        if (!status && typeof setSupabaseStatus === "function") setSupabaseStatus(message, "error");
+      } finally {
+        if (button) button.disabled = false;
+      }
+    });
+  };
+  bindPasswordRecoveryButton("first-access-password-recovery", "first-access-form", "first-access-status");
+  bindPasswordRecoveryButton("supabase-password-recovery", "supabase-login-form", "");
+
   const firstAccessForm = document.getElementById("first-access-form");
   firstAccessForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -2342,6 +2494,11 @@ function bindUserSessionActions() {
       const authResult = await authenticateSupabaseUser(email, password);
       if (!authResult.ok) {
         if (status) status.textContent = authResult.message || "Échec de l'authentification.";
+        return;
+      }
+      if (authResult.passwordSetupRequired) {
+        firstAccessForm.elements.password.value = "";
+        showSupabasePasswordSetupGate(authResult.passwordSetupMode || "invitation");
         return;
       }
       const syncRes = await persistValidatedSupabaseIdentity(

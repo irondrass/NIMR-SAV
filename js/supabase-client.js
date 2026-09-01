@@ -1,4 +1,22 @@
 let nimrSupabaseClient = null;
+const NIMR_SUPABASE_PERSISTENT_SETUP_KEY = "nimr-auth-password-setup-required";
+const NIMR_SUPABASE_AUTH_FLOW_SESSION_KEY = "nimr-auth-activation-flow";
+const NIMR_SUPABASE_AUTH_URL_KEYS = [
+  "access_token",
+  "refresh_token",
+  "expires_in",
+  "expires_at",
+  "token_type",
+  "token",
+  "token_hash",
+  "type",
+  "code",
+  "error",
+  "error_code",
+  "error_description",
+];
+let nimrSupabaseAuthUrlFlow = "";
+let nimrSupabaseSessionRecovered = false;
 const SEC001_SERVER_WORKSHOP_ROLES = new Set([
   "admin_technique",
   "directeur",
@@ -17,6 +35,210 @@ function getSupabaseWorkshopId() {
   const config = getSupabaseConfig();
   return String(config.workshopId || window.NIMR_DEFAULT_WORKSHOP_ID || "00000000-0000-0000-0000-000000000001").trim();
 }
+
+function hasSupabaseAuthCallbackEvidence() {
+  if (typeof window === "undefined" || typeof URL !== "function" || !window.location?.href) return false;
+  try {
+    const url = new URL(window.location.href);
+    const hash = new URLSearchParams(String(url.hash || "").replace(/^#/u, ""));
+    return hash.has("access_token") && hash.has("refresh_token");
+  } catch (error) {
+    return false;
+  }
+}
+window.hasSupabaseAuthCallbackEvidence = hasSupabaseAuthCallbackEvidence;
+
+function detectSupabaseAuthUrlFlow() {
+  if (!hasSupabaseAuthCallbackEvidence()) return "";
+  try {
+    const url = new URL(window.location.href);
+    const hash = new URLSearchParams(String(url.hash || "").replace(/^#/u, ""));
+    const flowType = String(hash.get("type") || url.searchParams.get("type") || "").trim().toLowerCase();
+    if (flowType === "recovery") return "recovery";
+    if (["invite", "signup"].includes(flowType)) return "invitation";
+  } catch (error) {
+    return "";
+  }
+  return "";
+}
+
+function readPersistentPasswordSetupRequirement(userId = "") {
+  if (typeof localStorage === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(NIMR_SUPABASE_PERSISTENT_SETUP_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+    const markerUserId = String(parsed.user_id || "").trim();
+    const mode = String(parsed.mode || "").trim().toLowerCase();
+    if (!markerUserId || !["recovery", "invitation"].includes(mode)) return null;
+    if (userId && markerUserId !== String(userId).trim()) return null;
+    return { user_id: markerUserId, mode };
+  } catch (error) {
+    return null;
+  }
+}
+window.readPersistentPasswordSetupRequirement = readPersistentPasswordSetupRequirement;
+
+function writePersistentPasswordSetupRequirement(userId, mode = "recovery") {
+  const cleanUserId = String(userId || "").trim();
+  if (!cleanUserId || !["recovery", "invitation"].includes(mode)) return;
+  if (typeof localStorage === "undefined") return;
+  try {
+    const marker = {
+      user_id: cleanUserId,
+      mode,
+      created_at: new Date().toISOString(),
+    };
+    localStorage.setItem(NIMR_SUPABASE_PERSISTENT_SETUP_KEY, JSON.stringify(marker));
+  } catch (error) {
+    /* Ignorer si localStorage est indisponible */
+  }
+}
+window.writePersistentPasswordSetupRequirement = writePersistentPasswordSetupRequirement;
+
+function clearPersistentPasswordSetupRequirement(userId = "") {
+  if (typeof localStorage === "undefined") return;
+  try {
+    if (!userId) {
+      localStorage.removeItem(NIMR_SUPABASE_PERSISTENT_SETUP_KEY);
+      return;
+    }
+    const current = readPersistentPasswordSetupRequirement(userId);
+    if (current && current.user_id === String(userId).trim()) {
+      localStorage.removeItem(NIMR_SUPABASE_PERSISTENT_SETUP_KEY);
+    }
+  } catch (error) {
+    /* Aucun secret */
+  }
+}
+window.clearPersistentPasswordSetupRequirement = clearPersistentPasswordSetupRequirement;
+
+function readSupabaseAuthFlowSessionMarker(userId = "") {
+  try {
+    const raw = sessionStorage.getItem(NIMR_SUPABASE_AUTH_FLOW_SESSION_KEY);
+    if (!raw) return "";
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return "";
+    const markerUserId = String(parsed.user_id || "").trim();
+    const mode = String(parsed.mode || "").trim().toLowerCase();
+    if (!markerUserId || !["invitation", "recovery"].includes(mode)) return "";
+    if (userId && markerUserId !== String(userId).trim()) return "";
+    return mode;
+  } catch (error) {
+    return "";
+  }
+}
+
+function writeSupabaseAuthFlowSessionMarker(userId, mode) {
+  const cleanUserId = String(userId || "").trim();
+  if (!cleanUserId || !["invitation", "recovery"].includes(mode)) return;
+  try {
+    sessionStorage.setItem(NIMR_SUPABASE_AUTH_FLOW_SESSION_KEY, JSON.stringify({
+      user_id: cleanUserId,
+      mode,
+    }));
+  } catch (error) {
+    /* Mémoire uniquement si indisponible. */
+  }
+}
+
+function clearSupabaseAuthFlowSessionMarker(userId = "") {
+  try {
+    if (!userId) {
+      sessionStorage.removeItem(NIMR_SUPABASE_AUTH_FLOW_SESSION_KEY);
+      return;
+    }
+    const raw = sessionStorage.getItem(NIMR_SUPABASE_AUTH_FLOW_SESSION_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (String(parsed?.user_id || "").trim() === String(userId).trim()) {
+      sessionStorage.removeItem(NIMR_SUPABASE_AUTH_FLOW_SESSION_KEY);
+    }
+  } catch (error) {
+    /* Aucun secret à nettoyer. */
+  }
+}
+window.clearSupabaseAuthFlowSessionMarker = clearSupabaseAuthFlowSessionMarker;
+
+function clearSupabasePasswordSetupRequirement(userId = "") {
+  nimrSupabaseAuthUrlFlow = "";
+  clearSupabaseAuthFlowSessionMarker(userId);
+  if (userId) clearPersistentPasswordSetupRequirement(userId);
+}
+window.clearSupabasePasswordSetupRequirement = clearSupabasePasswordSetupRequirement;
+
+function cleanSensitiveSupabaseAuthUrlAfterSessionRecovery() {
+  if (!nimrSupabaseSessionRecovered || !hasSupabaseAuthCallbackEvidence() || typeof URL !== "function" || !window.location?.href || !window.history?.replaceState) {
+    return false;
+  }
+  try {
+    const url = new URL(window.location.href);
+    let changed = false;
+    NIMR_SUPABASE_AUTH_URL_KEYS.forEach((key) => {
+      if (url.searchParams.has(key)) {
+        url.searchParams.delete(key);
+        changed = true;
+      }
+    });
+
+    const rawHash = String(url.hash || "").replace(/^#/u, "");
+    const hashParams = new URLSearchParams(rawHash);
+    const authHash = NIMR_SUPABASE_AUTH_URL_KEYS.some((key) => hashParams.has(key));
+    if (authHash) {
+      NIMR_SUPABASE_AUTH_URL_KEYS.forEach((key) => hashParams.delete(key));
+      const remainingHash = hashParams.toString();
+      url.hash = remainingHash ? `#${remainingHash}` : "";
+      changed = true;
+    }
+    if (!changed) return false;
+    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+window.cleanSensitiveSupabaseAuthUrlAfterSessionRecovery = cleanSensitiveSupabaseAuthUrlAfterSessionRecovery;
+
+function markSupabaseAuthSessionRecovered(event, session) {
+  if (!session?.user?.id) return "";
+  nimrSupabaseSessionRecovered = true;
+  const eventName = String(event || "").trim().toUpperCase();
+  const userId = String(session.user.id).trim();
+  let mode = "";
+  if (eventName === "PASSWORD_RECOVERY") {
+    mode = "recovery";
+    writePersistentPasswordSetupRequirement(userId, "recovery");
+  } else {
+    const persistent = readPersistentPasswordSetupRequirement(userId);
+    mode = (persistent && persistent.mode) || nimrSupabaseAuthUrlFlow || readSupabaseAuthFlowSessionMarker(userId);
+    if (mode === "recovery") {
+      writePersistentPasswordSetupRequirement(userId, "recovery");
+    }
+  }
+  if (mode) writeSupabaseAuthFlowSessionMarker(userId, mode);
+  cleanSensitiveSupabaseAuthUrlAfterSessionRecovery();
+  return mode;
+}
+window.markSupabaseAuthSessionRecovered = markSupabaseAuthSessionRecovered;
+
+function getSupabasePasswordSetupMode(user) {
+  const userId = String(user?.id || "").trim();
+  if (userId) {
+    const persistentMarker = readPersistentPasswordSetupRequirement(userId);
+    if (persistentMarker?.mode) return persistentMarker.mode;
+  }
+  const sessionMode = readSupabaseAuthFlowSessionMarker(userId);
+  if (sessionMode) return sessionMode;
+  if (user?.user_metadata?.nimr_password_setup_required === true) return "invitation";
+  return "";
+}
+window.getSupabasePasswordSetupMode = getSupabasePasswordSetupMode;
+
+function isSupabasePasswordSetupRequired(user) {
+  return Boolean(getSupabasePasswordSetupMode(user));
+}
+window.isSupabasePasswordSetupRequired = isSupabasePasswordSetupRequired;
 
 function decodeSupabaseJwtPayload(key = "") {
   const part = String(key || "").split(".")[1];
@@ -51,6 +273,7 @@ function getSupabaseClient() {
   if (!isSupabaseConfigured()) return null;
   if (!window.supabase?.createClient) return null;
   if (!nimrSupabaseClient) {
+    nimrSupabaseAuthUrlFlow = detectSupabaseAuthUrlFlow();
     const config = getSupabaseConfig();
     nimrSupabaseClient = window.supabase.createClient(config.url, config.anonKey, {
       auth: {
@@ -81,8 +304,124 @@ async function getSupabaseUser() {
   if (!client) return null;
   const { data, error } = await client.auth.getUser();
   if (error) return null;
-  return data?.user || null;
+  const user = data?.user || null;
+  if (user?.id) markSupabaseAuthSessionRecovered("USER_RECOVERED", { user });
+  return user;
 }
+
+async function getSupabaseSessionPasswordSetupMode() {
+  const client = getSupabaseClient();
+  if (!client?.auth?.getSession) return "";
+  try {
+    const { data, error } = await client.auth.getSession();
+    const session = data?.session;
+    if (error || !session?.user?.id) return "";
+    markSupabaseAuthSessionRecovered("SESSION_RECOVERED", session);
+    return getSupabasePasswordSetupMode(session.user);
+  } catch (error) {
+    return "";
+  }
+}
+window.getSupabaseSessionPasswordSetupMode = getSupabaseSessionPasswordSetupMode;
+
+function getCurrentSupabaseApplicationBaseUrl() {
+  if (typeof URL !== "function" || !window.location?.href) return "";
+  try {
+    const url = new URL(window.location.href);
+    url.search = "";
+    url.hash = "";
+    if (!url.pathname.endsWith("/")) {
+      url.pathname = url.pathname.replace(/\/[^/]*$/u, "/");
+    }
+    return url.href;
+  } catch (error) {
+    return "";
+  }
+}
+window.getCurrentSupabaseApplicationBaseUrl = getCurrentSupabaseApplicationBaseUrl;
+
+async function requestSupabasePasswordRecovery(email) {
+  const client = getSupabaseClient();
+  if (!client?.auth?.resetPasswordForEmail) {
+    return { ok: false, code: "NO_CLIENT", message: "Service de récupération Supabase indisponible." };
+  }
+  const cleanEmail = String(email || "").trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(cleanEmail)) {
+    return { ok: false, code: "INVALID_EMAIL", message: "Saisissez une adresse email valide." };
+  }
+  const redirectTo = getCurrentSupabaseApplicationBaseUrl();
+  if (!redirectTo) {
+    return { ok: false, code: "INVALID_REDIRECT", message: "Adresse de retour de l’application indisponible." };
+  }
+  try {
+    const { error } = await client.auth.resetPasswordForEmail(cleanEmail, { redirectTo });
+    if (error) {
+      return { ok: false, code: "RECOVERY_REQUEST_FAILED", message: error.message || "Envoi du lien impossible." };
+    }
+    return {
+      ok: true,
+      message: "Si ce compte existe, un email de récupération vient d’être envoyé.",
+    };
+  } catch (error) {
+    return { ok: false, code: "RECOVERY_REQUEST_FAILED", message: error?.message || "Envoi du lien impossible." };
+  }
+}
+window.requestSupabasePasswordRecovery = requestSupabasePasswordRecovery;
+
+async function completeSupabasePasswordSetup(password) {
+  const newPassword = String(password || "");
+  if (newPassword.length < 10) {
+    return { ok: false, code: "WEAK_PASSWORD", message: "Le mot de passe doit contenir au moins 10 caractères." };
+  }
+  const client = getSupabaseClient();
+  if (!client?.auth?.getSession || !client.auth?.updateUser || !client.auth?.getUser) {
+    return { ok: false, code: "NO_CLIENT", message: "Service d’activation Supabase indisponible." };
+  }
+  try {
+    const { data: sessionData, error: sessionError } = await client.auth.getSession();
+    if (sessionError || !sessionData?.session?.user?.id) {
+      return { ok: false, code: "UNAUTHENTICATED", message: "Le lien n’a pas établi de session valide. Demandez un nouveau lien." };
+    }
+    const { data: currentData, error: currentError } = await client.auth.getUser();
+    const currentUser = currentData?.user;
+    if (currentError || !currentUser?.id || currentUser.id !== sessionData.session.user.id) {
+      return { ok: false, code: "UNAUTHENTICATED", message: "La session d’activation n’est plus valide." };
+    }
+    const existingMetadata = currentUser.user_metadata && typeof currentUser.user_metadata === "object"
+      ? currentUser.user_metadata
+      : {};
+    const { error: updateError } = await client.auth.updateUser({
+      password: newPassword,
+      data: {
+        ...existingMetadata,
+        nimr_password_setup_required: false,
+        nimr_password_setup_completed_at: new Date().toISOString(),
+      },
+    });
+    if (updateError) {
+      return { ok: false, code: "PASSWORD_UPDATE_FAILED", message: updateError.message || "Mise à jour du mot de passe refusée." };
+    }
+
+    const { data: confirmedData, error: confirmedError } = await client.auth.getUser();
+    const confirmedUser = confirmedData?.user;
+    if (confirmedError || !confirmedUser?.id || confirmedUser.id !== currentUser.id) {
+      return { ok: false, code: "AUTH_REVALIDATION_FAILED", message: "Impossible de confirmer l’identité après activation." };
+    }
+    const membershipResult = await resolveSupabaseWorkshopMembership(confirmedUser);
+    if (!membershipResult?.ok || !membershipResult.membership) {
+      return {
+        ok: false,
+        code: membershipResult?.code || "MEMBERSHIP_DENIED",
+        message: membershipResult?.message || "Aucune appartenance atelier active n’autorise ce compte.",
+      };
+    }
+    clearSupabasePasswordSetupRequirement(confirmedUser.id);
+    return { ok: true, user: confirmedUser, membership: membershipResult.membership };
+  } catch (error) {
+    return { ok: false, code: "PASSWORD_SETUP_FAILED", message: error?.message || "Activation du compte impossible." };
+  }
+}
+window.completeSupabasePasswordSetup = completeSupabasePasswordSetup;
 
 async function resolveSupabaseWorkshopMembership(authUser) {
   if (!authUser?.id) {
@@ -228,6 +567,11 @@ async function authenticateSupabaseUser(email, password) {
     if (error || !data?.user) {
       return { ok: false, message: error?.message || "Identifiants invalides." };
     }
+    markSupabaseAuthSessionRecovered("SIGNED_IN", data.session || { user: data.user });
+    const passwordSetupMode = getSupabasePasswordSetupMode(data.user);
+    if (passwordSetupMode) {
+      return { ok: true, user: data.user, passwordSetupRequired: true, passwordSetupMode };
+    }
     const membershipRes = await resolveSupabaseWorkshopMembership(data.user);
     if (!membershipRes.ok) {
       return { ok: false, message: membershipRes.message, code: membershipRes.code, authUser: data.user };
@@ -244,6 +588,15 @@ async function signOutSupabaseSession() {
   if (!client?.auth?.signOut) {
     return { ok: false, message: "Session Supabase indisponible : déconnexion non confirmée." };
   }
+  let signingOutUserId = "";
+  try {
+    const { data } = typeof client.auth.getSession === "function"
+      ? await client.auth.getSession()
+      : { data: null };
+    signingOutUserId = String(data?.session?.user?.id || "").trim();
+  } catch (error) {
+    signingOutUserId = "";
+  }
   try {
     const result = await client.auth.signOut();
     if (!result || typeof result !== "object") {
@@ -257,6 +610,7 @@ async function signOutSupabaseSession() {
         message: result.error.message || "Déconnexion Supabase refusée.",
       };
     }
+    clearSupabasePasswordSetupRequirement(signingOutUserId);
     return { ok: true };
   } catch (error) {
     console.warn("Exception déconnexion session Supabase", error);
@@ -291,6 +645,12 @@ async function refreshSupabasePanel() {
   }
   const user = await getSupabaseUser();
   if (user) {
+    const passwordSetupMode = getSupabasePasswordSetupMode(user);
+    if (passwordSetupMode) {
+      setSupabaseStatus("Activation du compte requise.", "warn");
+      setSupabaseDetails("Choisissez votre mot de passe puis l’appartenance atelier sera de nouveau vérifiée avant l’accès.");
+      return;
+    }
     const membershipRes = await resolveSupabaseWorkshopMembership(user);
     if (membershipRes.ok) {
       if (typeof syncLocalUserFromSupabaseMembership === "function") {

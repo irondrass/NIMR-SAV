@@ -882,6 +882,7 @@
                       Mot de passe
                       <input name="password" type="password" autocomplete="current-password" placeholder="Mot de passe Supabase" />
                     </label>
+                    <button class="ghost-button" type="button" id="supabase-password-recovery">Mot de passe oublié ?</button>
                     <button class="primary-button" type="submit">Connexion Supabase</button>
                   </form>
                   <div class="backup-actions supabase-actions">
@@ -988,9 +989,27 @@
           Mot de passe
           <input name="password" type="password" autocomplete="current-password" required placeholder="Mot de passe" />
         </label>
+        <button class="ghost-button" type="button" id="first-access-password-recovery">Mot de passe oublié ?</button>
         <button class="primary-button" type="submit" style="width: 100%;">Se connecter</button>
         <p class="muted" style="font-size: 0.85rem; margin-top: 8px;">Votre rôle et vos autorisations sont attribués par l’administration NIMR SAV.</p>
         <p class="muted status-error" id="first-access-status" role="alert"></p>
+      </form>
+    </div>
+    <div class="local-lock-overlay" id="supabase-password-setup-overlay" hidden>
+      <form class="local-lock-dialog" id="supabase-password-setup-form" role="dialog" aria-modal="true" aria-labelledby="supabase-password-setup-title" aria-describedby="supabase-password-setup-description">
+        <div class="local-lock-logo">🔐</div>
+        <h2 id="supabase-password-setup-title">Activer votre compte NIMR SAV</h2>
+        <p id="supabase-password-setup-description">Choisissez votre mot de passe pour terminer l’activation de votre accès.</p>
+        <label>
+          Nouveau mot de passe
+          <input name="newPassword" type="password" autocomplete="new-password" minlength="10" required />
+        </label>
+        <label>
+          Confirmer le mot de passe
+          <input name="confirmPassword" type="password" autocomplete="new-password" minlength="10" required />
+        </label>
+        <button class="primary-button" type="submit">Activer mon compte</button>
+        <p class="status-error" id="supabase-password-setup-status" role="alert" aria-live="assertive"></p>
       </form>
     </div>
     <div class="local-lock-overlay" id="user-login-overlay" hidden>

@@ -18,7 +18,7 @@ async function signInSupabaseFromForm(event) {
     return;
   }
   setSupabaseStatus("Connexion en cours...");
-  const { error } = await client.auth.signInWithPassword({ email, password });
+  const { data, error } = await client.auth.signInWithPassword({ email, password });
   if (error) {
     console.error("Connexion Supabase impossible", error);
     setSupabaseStatus(`Connexion refusée : ${error.message}`, "error");
@@ -26,6 +26,18 @@ async function signInSupabaseFromForm(event) {
     return;
   }
   form.elements.password.value = "";
+  if (typeof markSupabaseAuthSessionRecovered === "function") {
+    markSupabaseAuthSessionRecovered("SIGNED_IN", data?.session || { user: data?.user });
+  }
+  const passwordSetupMode = typeof getSupabasePasswordSetupMode === "function"
+    ? getSupabasePasswordSetupMode(data?.user)
+    : "";
+  if (passwordSetupMode) {
+    stopSupabaseLiveSync({ status: "waiting_auth" });
+    if (typeof showSupabasePasswordSetupGate === "function") showSupabasePasswordSetupGate(passwordSetupMode);
+    setSupabaseStatus("Activation du compte requise.", "warn");
+    return;
+  }
   if (typeof hydrateLargeStateIfAvailable === "function") await hydrateLargeStateIfAvailable();
   if (typeof loadDurableOutboxOperations === "function") await loadDurableOutboxOperations();
   await refreshSupabasePanel();
@@ -2524,6 +2536,10 @@ async function startSupabaseLiveSync() {
     stopSupabaseLiveSync({ status: "waiting_auth", workshopId });
     return false;
   }
+  if (typeof isSupabasePasswordSetupRequired === "function" && isSupabasePasswordSetupRequired(user)) {
+    stopSupabaseLiveSync({ status: "waiting_auth", workshopId });
+    return false;
+  }
   const identity = `${workshopId}:${user.id}`;
   if (
     supabaseLiveSyncChannel
@@ -2835,8 +2851,22 @@ function bindSupabaseAuthLifecycle() {
   const { data } = client.auth.onAuthStateChange((event, session) => {
     Promise.resolve().then(async () => {
       if (supabaseAuthLifecycleClient !== client) return;
+      if (typeof markSupabaseAuthSessionRecovered === "function" && session?.user?.id) {
+        markSupabaseAuthSessionRecovered(event, session);
+      }
       if (event === "SIGNED_OUT") {
+        if (typeof clearSupabaseAuthFlowSessionMarker === "function") clearSupabaseAuthFlowSessionMarker();
         stopSupabaseLiveSync({ status: "stopped" });
+        return;
+      }
+      const passwordSetupMode = typeof getSupabasePasswordSetupMode === "function"
+        ? getSupabasePasswordSetupMode(session?.user)
+        : "";
+      if (event === "PASSWORD_RECOVERY" || passwordSetupMode) {
+        stopSupabaseLiveSync({ status: "waiting_auth" });
+        if (typeof showSupabasePasswordSetupGate === "function") {
+          showSupabasePasswordSetupGate(event === "PASSWORD_RECOVERY" ? "recovery" : passwordSetupMode);
+        }
         return;
       }
       if (["INITIAL_SESSION", "SIGNED_IN", "TOKEN_REFRESHED", "USER_UPDATED"].includes(event)) {
@@ -3462,6 +3492,7 @@ async function pullLatestSupabaseBackup(reason = "poll") {
     const client = getSupabaseClient();
     const user = await getSupabaseUser();
     if (!client || !user) return false;
+    if (typeof isSupabasePasswordSetupRequired === "function" && isSupabasePasswordSetupRequired(user)) return false;
     const workshopId = getSupabaseWorkshopId();
     const bootstrapKey = getGranularSyncMetadataKey(workshopId, "bootstrap");
     const bootstrapMeta = await loadSyncMetadata(bootstrapKey);

@@ -288,7 +288,10 @@ await check("I Invite uses Auth Admin only server-side and inserts server-valida
   assert.equal(result.body.ok, true);
   assert.deepEqual(result.fixture.events, ["auth_invite", "membership_insert"]);
   assert.equal(result.fixture.lastInvite.email, "new@example.test");
-  assert.deepEqual(result.fixture.lastInvite.options.data, { display_name: "New Member" });
+  assert.deepEqual(result.fixture.lastInvite.options.data, {
+    display_name: "New Member",
+    nimr_password_setup_required: true,
+  });
   const member = result.fixture.memberships.at(-1);
   assert.deepEqual(
     { workshop_id: member.workshop_id, role: member.role, resource_id: member.resource_id, created_by: member.created_by, deleted_at: member.deleted_at, sync_source: member.sync_source },

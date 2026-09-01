@@ -263,7 +263,10 @@ async function handleInviteMember(
   if (!resourceValidation.ok) return resourceValidation.response;
 
   const { data: inviteData, error: inviteError } = await adminClient.auth.admin.inviteUserByEmail(email, {
-    data: { display_name: name },
+    data: {
+      display_name: name,
+      nimr_password_setup_required: true,
+    },
   });
   if (inviteError || !inviteData?.user?.id) {
     if (isExistingAuthUserError(inviteError)) {

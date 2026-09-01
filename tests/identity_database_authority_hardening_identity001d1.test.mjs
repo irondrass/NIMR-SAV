@@ -274,10 +274,15 @@ await check("M private SECURITY DEFINER helper has no direct public execution pa
 });
 
 await check("N Edge race mapping is narrow and preserves revoke-before-Auth cleanup", async () => {
+  const currentInvite = sourceSlice(edgeSource, "async function handleInviteMember", "async function handleOffboardMember")
+    .replace(
+      /data:\s*\{\s*display_name:\s*name,\s*nimr_password_setup_required:\s*true,?\s*\}/u,
+      "data: { display_name: name }",
+    );
   assert.equal(
-    sourceSlice(edgeSource, "async function handleInviteMember", "async function handleOffboardMember"),
+    currentInvite,
     sourceSlice(baseEdgeSource, "async function handleInviteMember", "async function handleOffboardMember"),
-    "invitation behavior must remain unchanged",
+    "invitation behavior outside the IDENTITY-001D2-E onboarding flag must remain unchanged",
   );
   const offboarding = sourceSlice(edgeSource, "async function handleOffboardMember", "export function createWorkshopUserAdminHandler");
   assert.match(offboarding, /revokeError[\s\S]*?\.message[\s\S]*?NIMR_LAST_ADMIN_FORBIDDEN[\s\S]*?LAST_ADMIN_FORBIDDEN[\s\S]*?409[\s\S]*?membership_revoked:\s*false/u);
@@ -303,6 +308,14 @@ await check("N Edge race mapping is narrow and preserves revoke-before-Auth clea
     "supabase/functions/workshop-user-admin/index.ts",
     "tests/identity_database_authority_hardening_identity001d1.test.mjs",
     "tests/identity_production_authority_hardening_identity001c.test.mjs",
+    "tests/identity_accounts_access_foundation_identity001a.test.mjs",
+    "tests/identity_secure_provisioning_offboarding_identity001b.test.mjs",
+    "tests/identity_invited_user_password_onboarding_identity001d2e.test.mjs",
+    "app.js",
+    "index.html",
+    "js/supabase-client.js",
+    "js/supabase-sync.js",
+    "sw.js",
   ].includes(file.replaceAll("\\", "/")) || fetchedHistoricalMigrations.has(file.replaceAll("\\", "/"))), true);
   const forbiddenCommands = [
     ["supabase", "db", "push"].join(" "),

@@ -1,3 +1,4 @@
+// IDENTITY-001D2-E source refresh: prompt installed PWAs to fetch the updated authentication UI.
 const CACHE_NAME = "nimr-sav-v23.3.20";
 const ASSETS = [
   "./",

@@ -1,5 +1,6 @@
 // IDENTITY-001D2-E source refresh: prompt installed PWAs to fetch the updated authentication UI.
 // IDENTITY-001D2-F source refresh: refresh the recovery OTP UI without changing the v23.3.20 cache contract.
+// PERF-001 source refresh: render the cached PWA shell immediately while GitHub Pages revalidates in background.
 const CACHE_NAME = "nimr-sav-v23.3.20";
 const ASSETS = [
   "./",
@@ -70,14 +71,35 @@ async function networkFirst(request) {
   }
 }
 
+async function refreshCachedRequest(request) {
+  try {
+    const response = await fetch(request);
+    if (response && response.ok && request.url.startsWith(self.location.origin)) {
+      const cache = await caches.open(CACHE_NAME);
+      await cache.put(request, response.clone());
+    }
+  } catch {
+    // Best effort only: cached UI must remain immediately usable.
+  }
+}
+
 async function cacheFirst(request) {
   const cached = await caches.match(request);
   if (cached) {
-    fetch(request).then((response) => {
-      if (response && response.ok && request.url.startsWith(self.location.origin)) {
-        caches.open(CACHE_NAME).then((cache) => cache.put(request, response.clone()));
-      }
-    }).catch(() => null);
+    refreshCachedRequest(request).catch(() => null);
+    return cached;
+  }
+  return networkFirst(request);
+}
+
+const APP_BASE_PATH = new URL("./", self.location.href).pathname;
+
+async function appNavigationFirst(request) {
+  const cached = await caches.match(request)
+    || await caches.match("./index.html")
+    || await caches.match("./");
+  if (cached) {
+    refreshCachedRequest(request).catch(() => null);
     return cached;
   }
   return networkFirst(request);
@@ -87,8 +109,20 @@ self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return;
-  const isCriticalAsset = event.request.mode === "navigate" || /\/(index\.html|offline\.html|app\.js|styles\.css|sw\.js|manifest\.webmanifest)$/.test(url.pathname) || /\/js\/.*\.js$/.test(url.pathname);
-  event.respondWith(isCriticalAsset ? networkFirst(event.request) : cacheFirst(event.request));
+
+  const isAppNavigation = event.request.mode === "navigate"
+    && (url.pathname === APP_BASE_PATH || url.pathname === `${APP_BASE_PATH}index.html`);
+  if (isAppNavigation) {
+    event.respondWith(appNavigationFirst(event.request));
+    return;
+  }
+
+  if (event.request.mode === "navigate") {
+    event.respondWith(networkFirst(event.request));
+    return;
+  }
+
+  event.respondWith(cacheFirst(event.request));
 });
 
 self.addEventListener("message", (event) => {

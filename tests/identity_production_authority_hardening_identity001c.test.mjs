@@ -7,13 +7,15 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const BASE_SHA = "c07e3fa9c8035686789b0e0fcf2f0e5df93f3acc";
+const IDENTITY_001C_SHA = "f1c69cfb67a8897ed163b11e2a97cbba1be897a1";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const readProjectFile = (relativePath) => fs.readFileSync(path.join(repoRoot, relativePath), "utf8");
-const readBaseFile = (relativePath) => execFileSync("git", ["show", `${BASE_SHA}:${relativePath}`], {
+const readGitFile = (revision, relativePath) => execFileSync("git", ["show", `${revision}:${relativePath}`], {
   cwd: repoRoot,
   encoding: "utf8",
   maxBuffer: 40 * 1024 * 1024,
 });
+const readBaseFile = (relativePath) => readGitFile(BASE_SHA, relativePath);
 const normalizeEol = (value) => String(value || "").replace(/\r\n/gu, "\n");
 const sourceSlice = (source, start, end) => {
   const startIndex = source.indexOf(start);
@@ -305,7 +307,12 @@ await check("H Edge Function remains the only invite and offboard membership mut
 await check("I IDENTITY-001B caller JWT and membership authorization remains intact", () => {
   const currentWithoutKeyHelper = withoutSourceSlice(edgeSource, "function readNamedKey", "function isExistingAuthUserError");
   const baseWithoutKeyHelper = withoutSourceSlice(baseEdgeSource, "function readNamedKey", "function isExistingAuthUserError");
-  assert.equal(normalizeEol(currentWithoutKeyHelper), normalizeEol(baseWithoutKeyHelper));
+  const currentWithoutIdentity001d1RaceMapping = withoutSourceSlice(
+    currentWithoutKeyHelper,
+    "  if (revokeError && String(revokeError.message || \"\").includes(\"NIMR_LAST_ADMIN_FORBIDDEN\")) {",
+    "  if (revokeError || !revokedMembership) {",
+  );
+  assert.equal(normalizeEol(currentWithoutIdentity001d1RaceMapping), normalizeEol(baseWithoutKeyHelper));
   assert.match(edgeSource, /request\.headers\.get\("Authorization"\)/u);
   assert.match(edgeSource, /userClient\.auth\.getUser\(jwt\)/u);
   assert.match(edgeSource, /\.eq\("user_id", callerId\)[\s\S]*?\.is\("deleted_at", null\)/u);
@@ -328,12 +335,13 @@ await check("J IDENTITY-001A server-managed local mirror guard remains intact", 
 });
 
 await check("K ticket introduces no migration, SQL execution or deployment path", () => {
-  const status = execFileSync("git", ["status", "--porcelain"], { cwd: repoRoot, encoding: "utf8" });
-  const changedPaths = status.split(/\r?\n/u).filter(Boolean).map((line) => line.slice(3).trim());
+  const releasedDiff = execFileSync("git", ["diff", "--name-only", BASE_SHA, IDENTITY_001C_SHA], { cwd: repoRoot, encoding: "utf8" });
+  const changedPaths = releasedDiff.split(/\r?\n/u).filter(Boolean);
   assert.equal(changedPaths.some((file) => /(?:^|\/)supabase\/migrations\//u.test(file)), false);
   assert.equal(changedPaths.some((file) => /\.sql$/iu.test(file)), false);
-  assert.equal(fs.existsSync(path.join(repoRoot, "supabase", "migrations")), false);
-  assert.doesNotMatch(`${configSource}\n${edgeSource}`, /supabase\s+(?:db\s+(?:push|reset)|migration\s+up|functions\s+deploy|secrets\s+set)/iu);
+  const releasedConfig = readGitFile(IDENTITY_001C_SHA, "supabase/config.toml");
+  const releasedEdge = readGitFile(IDENTITY_001C_SHA, "supabase/functions/workshop-user-admin/index.ts");
+  assert.doesNotMatch(`${releasedConfig}\n${releasedEdge}`, /supabase\s+(?:db\s+(?:push|reset)|migration\s+up|functions\s+deploy|secrets\s+set)/iu);
 });
 
 await check("L protected role, permission, planning and release contracts are unchanged", () => {

@@ -364,6 +364,14 @@ async function handleOffboardMember(
     .is("deleted_at", null)
     .select("workshop_id, user_id, role, resource_id, deleted_at")
     .maybeSingle();
+  if (revokeError && String(revokeError.message || "").includes("NIMR_LAST_ADMIN_FORBIDDEN")) {
+    return failure(
+      "LAST_ADMIN_FORBIDDEN",
+      "Le dernier administrateur technique actif ne peut pas être retiré.",
+      409,
+      { membership_revoked: false },
+    );
+  }
   if (revokeError || !revokedMembership) {
     return failure("MEMBERSHIP_REVOKE_FAILED", "La révocation de l’appartenance atelier a échoué.", 500);
   }

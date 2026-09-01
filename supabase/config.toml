@@ -1,0 +1,2 @@
+[functions.workshop-user-admin]
+verify_jwt = true

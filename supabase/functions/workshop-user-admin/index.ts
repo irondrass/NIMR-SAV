@@ -73,14 +73,13 @@ function isValidMemberName(value: string): boolean {
 }
 
 function readNamedKey(environment: { get(name: string): string | undefined }, dictionaryName: string, singleName: string): string {
-  const dictionary = String(environment.get(dictionaryName) || "").trim();
-  if (dictionary) {
+  const dictionary = environment.get(dictionaryName);
+  if (dictionary !== undefined) {
     try {
-      const parsed = JSON.parse(dictionary) as Record<string, unknown>;
-      const preferred = String(parsed.default || "").trim();
-      if (preferred) return preferred;
-      const first = Object.values(parsed).find((value) => String(value || "").trim());
-      if (first) return String(first).trim();
+      const parsed = JSON.parse(dictionary) as unknown;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return "";
+      const defaultKey = (parsed as Record<string, unknown>).default;
+      return typeof defaultKey === "string" ? defaultKey.trim() : "";
     } catch {
       return "";
     }

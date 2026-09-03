@@ -3799,7 +3799,7 @@ function normalizeSyncConflictEntry(entry = {}) {
   let resolvedAt = entry.resolvedAt || "";
   let resolvedBy = entry.resolvedBy || "";
 
-  if (localNorm === remoteNorm) {
+  if (entry.type !== "server_entity_conflict" && status !== "resolved" && localNorm && localNorm === remoteNorm) {
     status = "resolved";
     decision = "auto_resolved";
     if (!resolvedAt) {
@@ -3870,6 +3870,12 @@ function normalizeSyncConflictEntry(entry = {}) {
     actorName: entry.actorName || "Système",
     label,
     details,
+    workshopId: entry.workshopId || "",
+    serverConflictId: entry.serverConflictId || "",
+    localOperationId: entry.localOperationId || "",
+    pendingResolution: Boolean(entry.pendingResolution),
+    resolutionStage: entry.resolutionStage || "",
+    replacementOperationId: entry.replacementOperationId || "",
   };
   normalized.conflictKey = buildSyncConflictKey({ ...entry, ...normalized });
   return normalized;
@@ -3882,7 +3888,7 @@ function resolveKeptConflictsAfterPush() {
 
   const updated = state.syncConflicts.map((entry) => {
     const normalized = normalizeSyncConflictEntry(entry);
-    if (normalized.status === "open" && ["kept_local", "kept_remote"].includes(normalized.decision)) {
+    if (normalized.status === "open" && ["kept_local", "kept_remote"].includes(normalized.decision) && !normalized.pendingResolution && normalized.type !== "server_entity_conflict") {
       normalized.status = "resolved";
       normalized.resolvedAt = normalized.resolvedAt || now;
       normalized.resolvedBy = normalized.resolvedBy || "Système (Sync)";
@@ -3939,7 +3945,14 @@ function applySyncConflictRemoteValue(item, field, value) {
 
 function resolveSyncConflict(conflictIdOrKey, action = "mark_resolved") {
   const conflicts = normalizeSyncConflicts(state.syncConflicts);
-  const index = conflicts.findIndex((conflict) => conflict.id === conflictIdOrKey || conflict.conflictKey === conflictIdOrKey);
+  let index = conflicts.findIndex((conflict) => conflict.id === conflictIdOrKey || conflict.conflictKey === conflictIdOrKey);
+  if (index < 0 && String(conflictIdOrKey).startsWith("group-")) {
+    const keyPart = String(conflictIdOrKey).slice("group-".length);
+    index = conflicts.findIndex((c) => {
+      const cKey = `${c.workshopId || ""}:${c.entityType || ""}:${c.entityId || c.caseId || ""}`;
+      return cKey === keyPart;
+    });
+  }
   if (index < 0) return { ok: false, message: "Conflit introuvable." };
   const conflict = { ...conflicts[index] };
   if (conflict.type === "server_entity_conflict") {
@@ -3951,20 +3964,48 @@ function resolveSyncConflict(conflictIdOrKey, action = "mark_resolved") {
     }
     const completion = Promise.resolve(resolveCanonicalConcurrencyConflict(conflict, action)).then((result) => {
       const latest = normalizeSyncConflicts(state.syncConflicts);
-      const latestIndex = latest.findIndex((entry) => entry.id === conflict.id || entry.conflictKey === conflict.conflictKey);
-      if (latestIndex >= 0) {
-        latest[latestIndex] = {
-          ...latest[latestIndex],
-          status: "resolved",
-          decision: action === "accept_cloud" ? "accepted_cloud" : "kept_local",
-          resolution: action === "accept_cloud" ? "accept_server" : "keep_local",
-          replacementOperationId: result.replacementOperationId || "",
-          resolvedAt: new Date().toISOString(),
-          resolvedBy: typeof getCurrentActor === "function" ? (getCurrentActor()?.userName || "Atelier") : "Atelier",
-        };
-        state.syncConflicts = normalizeSyncConflicts(latest);
-        saveState({ skipCloud: true, skipSnapshot: true, boundedEntityDetection: true });
-      }
+      const localConflictIds = new Set((Array.isArray(result?.localConflictIds) ? result.localConflictIds : []).map(String));
+      const operationIds = new Set((Array.isArray(result?.replacesOperationIds)
+        ? result.replacesOperationIds
+        : (Array.isArray(result?.settledOperationIds) ? result.settledOperationIds : [])).map(String));
+      const serverConflictIds = new Set((Array.isArray(result?.replacesConflictIds)
+        ? result.replacesConflictIds
+        : (Array.isArray(result?.serverConflictIds) ? result.serverConflictIds : [])).map(String));
+      const hasSagaMembership = localConflictIds.size > 0 || operationIds.size > 0 || serverConflictIds.size > 0;
+      const isMatch = (entry) => hasSagaMembership
+        ? localConflictIds.has(String(entry.id || ""))
+          || operationIds.has(String(entry.localOperationId || ""))
+          || serverConflictIds.has(String(entry.serverConflictId || ""))
+        : entry.id === conflict.id || entry.conflictKey === conflict.conflictKey;
+      latest.forEach((entry, idx) => {
+        if (isMatch(entry)) {
+          if (action === "keep_local") {
+            latest[idx] = {
+              ...entry,
+              status: "open",
+              pendingResolution: true,
+              resolutionStage: "awaiting_ack",
+              decision: "kept_local",
+              replacementOperationId: result?.replacementOperationId || "",
+              lastError: "",
+            };
+          } else {
+            latest[idx] = {
+              ...entry,
+              status: "resolved",
+              pendingResolution: false,
+              resolutionStage: "",
+              decision: "accepted_cloud",
+              resolution: "accept_server",
+              replacementOperationId: result?.replacementOperationId || "",
+              resolvedAt: new Date().toISOString(),
+              resolvedBy: typeof getCurrentActor === "function" ? (getCurrentActor()?.userName || "Atelier") : "Atelier",
+            };
+          }
+        }
+      });
+      state.syncConflicts = normalizeSyncConflicts(latest);
+      saveState({ skipCloud: true, skipSnapshot: true, boundedEntityDetection: true });
       if (typeof renderSyncStatusStrip === "function") renderSyncStatusStrip();
       return result;
     }).catch((error) => {

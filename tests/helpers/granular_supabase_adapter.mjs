@@ -6,6 +6,7 @@ export function createGranularSupabaseAdapter(options = {}) {
   const settings = new Map();
   const receipts = new Map();
   const conflicts = new Map();
+  const serverConflicts = new Map();
   let serverVersion = 0;
   let failure = options.failure || null;
   let projectionFailure = options.projectionFailure || null;
@@ -238,6 +239,8 @@ export function createGranularSupabaseAdapter(options = {}) {
         rows = [...settings.values()].filter(matchFilter);
       } else if (table === "audit_logs") {
         rows = [...audits.values()].filter(matchFilter);
+      } else if (table === "sync_entity_conflicts") {
+        rows = [...serverConflicts.values()].filter(matchFilter);
       }
       if (orFilter && (table === "sync_entities" || table === "audit_logs")) {
         const gtMatch = orFilter.match(/updated_at\.gt\.([^,)]+)/);
@@ -271,6 +274,33 @@ export function createGranularSupabaseAdapter(options = {}) {
       recordCall({ table, operation: "select", rows: [], filters, columns, ordering, pagination: rowLimit == null ? null : { pageSize: rowLimit } });
       const rows = selectedRows();
       const limited = rowLimit == null ? rows : rows.slice(0, rowLimit);
+      if (table === "sync_entity_conflicts" && columns && columns !== "*") {
+        const allowed = new Set([
+          "id", "workshop_id", "entity_type", "entity_id", "local_operation_id",
+          "status", "resolution", "resolved_at", "created_at", "updated_at",
+          "base_version", "server_version", "local_payload", "server_payload",
+        ]);
+        const selections = String(columns).split(",").map((part) => {
+          const [aliasOrColumn, sourceColumn] = part.trim().split(":").map((value) => value.trim());
+          return sourceColumn
+            ? { output: aliasOrColumn, source: sourceColumn }
+            : { output: aliasOrColumn, source: aliasOrColumn };
+        });
+        const invalid = selections.find((selection) => !allowed.has(selection.source));
+        if (invalid) {
+          return { data: null, error: new Error(`column sync_entity_conflicts.${invalid.source} does not exist`) };
+        }
+        const projected = limited.map((row) => Object.fromEntries(
+          selections.map((selection) => [selection.output, row[selection.source]]),
+        ));
+        if (single && projected.length > 1) {
+          return { data: null, error: new Error("JSON object requested, multiple rows returned") };
+        }
+        return { data: single ? structuredClone(projected[0] || null) : structuredClone(projected), error: null };
+      }
+      if (single && limited.length > 1) {
+        return { data: null, error: new Error("JSON object requested, multiple rows returned") };
+      }
       return { data: single ? structuredClone(limited[0] || null) : structuredClone(limited), error: null };
     };
     const query = {
@@ -291,7 +321,20 @@ export function createGranularSupabaseAdapter(options = {}) {
       if (name === "nimr_apply_workshop_settings_v2") {
         return { data: applySettingsCasOperation({ workshopId: args.p_workshop_id, entityType: "workshop_settings", entityId: "workshop_settings", baseVersion: args.p_base_version == null ? null : Number(args.p_base_version), operationId: args.p_operation_id, payload: args.p_payload || {} }), error: null };
       }
-      if (name === "nimr_resolve_sync_entity_conflict") return { data: { status: "resolved" }, error: null };
+      if (name === "nimr_resolve_sync_entity_conflict") {
+        if (failure) return { data: null, error: failure };
+        const conflictId = String(args.p_conflict_id || "");
+        const existing = serverConflicts.get(conflictId);
+        if (!existing || String(existing.workshop_id || "") !== String(args.p_workshop_id || "")) {
+          return { data: null, error: null };
+        }
+        if (existing.status !== "resolved") {
+          existing.status = "resolved";
+          existing.resolution = args.p_resolution;
+          existing.resolved_at = new Date().toISOString();
+        }
+        return { data: structuredClone(existing), error: null };
+      }
       if (name !== "nimr_apply_sync_entity_v2") return { data: null, error: new Error(`Unsupported RPC: ${name}`) };
       const outcome = applyCasOperation({
         workshopId: args.p_workshop_id,
@@ -395,9 +438,18 @@ export function createGranularSupabaseAdapter(options = {}) {
     settings,
     receipts,
     conflicts,
+    serverConflicts,
+    recordServerConflict(conflict) {
+      if (!conflict?.id) throw new Error("sync_entity_conflicts.id is required by the production schema adapter");
+      if (Object.hasOwn(conflict, "conflict_id") || Object.hasOwn(conflict, "resolved_by")) {
+        throw new Error("Production sync_entity_conflicts has no conflict_id/resolved_by columns");
+      }
+      serverConflicts.set(String(conflict.id), structuredClone(conflict));
+    },
     send,
     page,
     injectFailure(nextFailure) { failure = nextFailure; },
+    clearFailure() { failure = null; },
     injectProjectionFailure(nextFailure) { projectionFailure = nextFailure; },
     canonical(workshopId, entityType, entityId) {
       const row = entities.get(`${workshopId}|${entityType}|${entityId}`);

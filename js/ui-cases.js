@@ -1699,24 +1699,30 @@ function renderSyncStatusStrip() {
   const cloudError = safeLocalStorageGet(`${STORAGE_KEY}:last-cloud-autosave-error`);
   const configured = typeof isSupabaseConfigured === "function" ? isSupabaseConfigured() : false;
   const online = typeof navigator === "undefined" ? true : navigator.onLine !== false;
-  const openConflicts = typeof getOpenSyncConflicts === "function" ? getOpenSyncConflicts().length : 0;
-
   let pendingCasesCount = 0;
   if (state && Array.isArray(state.cases)) {
     pendingCasesCount = state.cases.filter(c => Number(c.localRevision || 0) > Number(c.syncRevision || 0)).length;
   }
-
+  const rawConflicts = typeof getOpenSyncConflicts === "function" ? getOpenSyncConflicts() : [];
+  const openConflicts = rawConflicts.length;
   const durableOutbox = typeof readDurableOutboxMirror === "function" ? readDurableOutboxMirror() : [];
-  const pendingOfflineCount = durableOutbox.filter((action) => ["pending", "failed", "processing", "conflict"].includes(action.syncStatus)).length;
-  const outboxConflictCount = durableOutbox.filter((action) => action.syncStatus === "conflict").length;
+  const pendingOfflineCount = durableOutbox.filter((action) => (
+    typeof isActiveDurableOutboxSyncStatus === "function"
+      ? isActiveDurableOutboxSyncStatus(action.syncStatus)
+      : ["pending", "processing", "settling", "failed", "conflicted", "conflict"].includes(action.syncStatus)
+  )).length;
+  const groupedConflicts = typeof groupConflictedEntities === "function"
+    ? groupConflictedEntities(rawConflicts, durableOutbox)
+    : null;
+  const outboxConflictCount = durableOutbox.filter((action) => ["conflicted", "conflict"].includes(action.syncStatus)).length;
+  const totalConflicts = groupedConflicts ? groupedConflicts.length : (rawConflicts.length + outboxConflictCount);
 
   let cloudLabel = "Prêt";
   let cloudState = "ok";
   if (!configured) {
     cloudLabel = "Non configuré";
     cloudState = "muted";
-  } else if (openConflicts + outboxConflictCount > 0) {
-    const totalConflicts = openConflicts + outboxConflictCount;
+  } else if (totalConflicts > 0) {
     cloudLabel = totalConflicts === 1 ? "— 1 conflit détecté — Résoudre" : `— ${totalConflicts} conflits détectés — Résoudre`;
     cloudState = "warn";
   } else if (cloudError) {

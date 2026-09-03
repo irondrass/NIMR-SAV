@@ -307,6 +307,14 @@ async function createProductionResolutionFixture({ entityType = "case", localMar
       : { ...canonical, payload: makeHarnessCase({ id: X, nextAction: "historical-V101" }), entity_version: 101 },
   });
   await fixture.context.putDurableOutboxOperation(operation);
+  adapter.recordServerConflict({
+    id: operation.conflictId,
+    workshop_id: W,
+    local_operation_id: operationId,
+    entity_type: entityType,
+    entity_id: operation.entityId,
+    status: "open",
+  });
   const conflict = {
     id: `local-${operationId}`,
     localOperationId: operationId,
@@ -378,7 +386,7 @@ const productionSettingsKeepResult = await productionSettingsKeep.fixture.contex
 const productionSettingsReplacement = (await productionSettingsKeep.fixture.context.loadDurableOutboxOperations())
   .find((entry) => entry.operationId === productionSettingsKeepResult.replacementOperationId);
 assert.equal(productionSettingsReplacement.baseVersion, 202);
-assert.equal(productionSettingsReplacement.payload.entity.settings.concurrencyMarker, "A-settings-keep");
+assert.equal(productionSettingsReplacement.payload.entity.concurrencyMarker, "A-settings-keep");
 
 const productionTerminalDb = createMemoryIndexedDb();
 const productionTerminalVm = createNimrVmContext({ filename: "p0-010-production-terminal-conflict.js" });
@@ -410,7 +418,7 @@ const productionTerminalRetained = (await productionTerminalVm.context.loadDurab
   .find((entry) => entry.operationId === productionTerminalOperation.operationId);
 assert.equal(productionTerminalRetained.syncStatus, "conflicted");
 assert.equal(productionTerminalRetained.conflictServerVersion, 101);
-assert.match(syncSource, /\.filter\(\(entry\) => \["pending", "processing", "failed"\]\.includes\(entry\.syncStatus\)\)/);
+assert.match(syncSource, /\.filter\(\(entry\) => \["pending", "processing", "settling", "failed"\]\.includes\(entry\.syncStatus\)\)/);
 
 function seed({ booking = false, workshopId = W } = {}) {
   const harness = createMultiClientSyncHarness({ baseTimeMs: BASE });

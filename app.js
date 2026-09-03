@@ -1547,7 +1547,11 @@ function renderActivityLog() {
 
   function renderConflictPanel() {
     if (!conflictPanel) return;
-    const conflicts = typeof getOpenSyncConflicts === "function" ? getOpenSyncConflicts() : [];
+    const rawConflicts = typeof getOpenSyncConflicts === "function" ? getOpenSyncConflicts() : [];
+    const outbox = typeof readDurableOutboxMirror === "function" ? readDurableOutboxMirror() : [];
+    const conflicts = typeof groupConflictedEntities === "function"
+      ? groupConflictedEntities(rawConflicts, outbox)
+      : rawConflicts;
     conflictPanel.hidden = conflicts.length === 0;
     if (!conflicts.length) {
       conflictPanel.innerHTML = "";
@@ -1562,18 +1566,36 @@ function renderActivityLog() {
       </div>
       <div class="sync-conflict-list">
         ${conflicts.map((conflict) => {
-          if (conflict.type === "case_conflict") {
-            const locDate = conflict.localCase?.updatedAt ? new Date(conflict.localCase.updatedAt).toLocaleString() : "Inconnue";
-            const locUser = conflict.localCase?.updatedBy || "Non spécifié";
-            const locRev = conflict.localCase?.localRevision ?? 0;
-            const rmtDate = conflict.remoteCase?.updatedAt ? new Date(conflict.remoteCase.updatedAt).toLocaleString() : "Inconnue";
-            const rmtUser = conflict.remoteCase?.updatedBy || "Non spécifié";
-            const rmtRev = conflict.remoteCase?.localRevision ?? 0;
+          const isCase = conflict.type === "case_conflict" || conflict.entityType === "case";
+          if (isCase) {
+            const currentLocalCase = Array.isArray(state?.cases) ? state.cases.find((c) => c.id === (conflict.caseId || conflict.entityId)) : null;
+            const locDate = currentLocalCase?.updatedAt
+              ? new Date(currentLocalCase.updatedAt).toLocaleString()
+              : (conflict.localCase?.updatedAt ? new Date(conflict.localCase.updatedAt).toLocaleString() : "Inconnue");
+            const locUser = currentLocalCase?.updatedBy || conflict.localCase?.updatedBy || "Non spécifié";
+            const locRev = currentLocalCase?.localRevision ?? conflict.localCase?.localRevision ?? conflict.localValue?.localRevision ?? 0;
+            const locStatus = currentLocalCase?.status || conflict.localCase?.status || conflict.localValue?.status || "Inconnu";
+            const locHistoryCount = currentLocalCase?.history ? currentLocalCase.history.length : (conflict.localCase?.history ? conflict.localCase.history.length : 0);
 
-            const showManualDownload = (
-              conflict.type === "case_conflict" &&
-              (conflict.localCase || conflict.localValue) &&
-              (conflict.remoteCase || conflict.remoteValue)
+            const rmtDate = conflict.remoteCase?.updatedAt
+              ? new Date(conflict.remoteCase.updatedAt).toLocaleString()
+              : (conflict.conflictCanonical?.updated_at ? new Date(conflict.conflictCanonical.updated_at).toLocaleString() : "Inconnue");
+            const rmtUser = conflict.remoteCase?.updatedBy || conflict.conflictCanonical?.last_operation_id || "Non spécifié";
+            const rmtRev = conflict.remoteCase?.localRevision ?? conflict.conflictServerVersion ?? conflict.serverVersion ?? 0;
+            const rmtStatus = conflict.remoteCase?.status || conflict.conflictCanonical?.payload?.status || "Inconnu";
+
+            const historyCount = conflict.historicalCount || conflict.historyCount || 1;
+            const titleHeader = historyCount > 1
+              ? `[Dossier] ${escapeHtml(conflict.caseNumber || conflict.caseId || conflict.entityId || "Dossier")} — 1 dossier en conflit — ${historyCount} versions historiques`
+              : `[Dossier] ${escapeHtml(conflict.caseNumber || conflict.caseId || conflict.entityId || "Dossier")}`;
+
+            const revListStr = Array.isArray(conflict.historicalRevisions) && conflict.historicalRevisions.length > 1
+              ? `Révisions historiques en conflit : ${conflict.historicalRevisions.join(", ")}`
+              : "";
+
+            const showManualDownload = Boolean(
+              (currentLocalCase || conflict.localCase || conflict.localValue) &&
+              (conflict.remoteCase || conflict.remoteValue || conflict.conflictCanonical)
             );
             const hasExportPermission = typeof guardSensitiveAction === "function"
               ? guardSensitiveAction("export.backup", {}, { notify: false }).ok
@@ -1581,21 +1603,25 @@ function renderActivityLog() {
 
             return `
               <article class="sync-conflict-card case-conflict-card" style="margin-bottom: 15px; padding: 15px; background: var(--bg-card, #ffffff); border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); border: 1px solid var(--border-color, #eef2f6);">
-                <strong style="display: block; font-size: 1.1em; margin-bottom: 5px;">[Dossier] ${escapeHtml(conflict.caseNumber || conflict.caseId || conflict.entityId || "Dossier inconnu")}</strong>
-                <small style="color: var(--text-muted, #718096); display: block; margin-bottom: 10px;">${escapeHtml(conflict.reason || "Modifications concurrentes locales et cloud.")}</small>
+                <strong style="display: block; font-size: 1.1em; margin-bottom: 5px;">${escapeHtml(titleHeader)}</strong>
+                <small style="color: var(--text-muted, #718096); display: block; margin-bottom: 10px;">${escapeHtml(conflict.reason || (historyCount > 1 ? `${historyCount} opérations en attente de décision unifiée.` : "Modifications concurrentes locales et cloud."))}</small>
+                ${revListStr ? `<div style="font-size: 0.85em; color: var(--text-muted, #718096); margin-bottom: 8px;">${escapeHtml(revListStr)}</div>` : ""}
 
                 <div class="sync-conflict-meta-compare" style="display: flex; gap: 15px; margin: 10px 0; font-size: 0.9em; flex-wrap: wrap;">
                   <div class="meta-column local-meta" style="flex: 1; min-width: 200px; padding: 8px; background: rgba(76, 175, 80, 0.05); border-left: 3px solid #4caf50; border-radius: 4px; display: flex; flex-direction: column; gap: 2px;">
-                    <strong style="color: #4caf50; margin-bottom: 4px;">Version Locale</strong>
+                    <strong style="color: #4caf50; margin-bottom: 4px;">Version Locale Actuelle</strong>
+                    <span>Statut : ${escapeHtml(locStatus)}</span>
                     <span>Date : ${escapeHtml(locDate)}</span>
                     <span>Modifié par : ${escapeHtml(locUser)}</span>
                     <span>Révision : ${escapeHtml(locRev)}</span>
+                    ${locHistoryCount ? `<span>Historique : ${escapeHtml(locHistoryCount)} entrées</span>` : ""}
                   </div>
                   <div class="meta-column remote-meta" style="flex: 1; min-width: 200px; padding: 8px; background: rgba(33, 150, 243, 0.05); border-left: 3px solid #2196f3; border-radius: 4px; display: flex; flex-direction: column; gap: 2px;">
                     <strong style="color: #2196f3; margin-bottom: 4px;">Version Cloud</strong>
+                    <span>Statut serveur : ${escapeHtml(rmtStatus)}</span>
                     <span>Date : ${escapeHtml(rmtDate)}</span>
                     <span>Modifié par : ${escapeHtml(rmtUser)}</span>
-                    <span>Révision : ${escapeHtml(rmtRev)}</span>
+                    <span>Version serveur : ${escapeHtml(rmtRev)}</span>
                   </div>
                 </div>
 
@@ -1604,12 +1630,18 @@ function renderActivityLog() {
                   <span class="muted" style="display: block; margin-bottom: 6px;">Une copie de sécurité locale est conservée dans l’application. Vous pouvez la télécharger manuellement si nécessaire.</span>
                   <button type="button" class="tiny-button" data-sync-conflict-download-id="${escapeAttr(conflict.id)}" ${hasExportPermission ? '' : 'disabled title="Export non autorisé" style="opacity:0.5; cursor:not-allowed;"'}>Télécharger copie locale avant remplacement</button>
                 </div>
-                ` : ''}
+                ` : ""}
+
+                ${conflict.pendingResolution ? `
+                <div class="sync-conflict-pending-banner" style="margin: 8px 0; padding: 6px 10px; background: rgba(255, 193, 7, 0.15); border-left: 3px solid #ffc107; border-radius: 4px; font-weight: 500; font-size: 0.9em; color: #b78103;">
+                  ⏳ Résolution en attente de synchronisation
+                </div>
+                ` : ""}
 
                 <div class="sync-conflict-actions" style="display: flex; gap: 10px; margin-top: 10px;">
-                  <button type="button" class="tiny-button" data-sync-conflict-action="keep_local" data-sync-conflict-id="${escapeAttr(conflict.id)}">Conserver version locale</button>
-                  <button type="button" class="tiny-button" data-sync-conflict-action="accept_cloud" data-sync-conflict-id="${escapeAttr(conflict.id)}">Conserver version cloud</button>
-                  <button type="button" class="tiny-button ghost" data-sync-conflict-action="defer_manual_merge" data-sync-conflict-id="${escapeAttr(conflict.id)}">Fusion manuelle plus tard</button>
+                  <button type="button" class="tiny-button" data-sync-conflict-action="keep_local" data-sync-conflict-id="${escapeAttr(conflict.id)}" ${conflict.pendingResolution ? 'disabled style="opacity:0.6; cursor:not-allowed;"' : ''}>Conserver version locale</button>
+                  <button type="button" class="tiny-button" data-sync-conflict-action="accept_cloud" data-sync-conflict-id="${escapeAttr(conflict.id)}" ${conflict.pendingResolution ? 'disabled style="opacity:0.6; cursor:not-allowed;"' : ''}>Conserver version cloud</button>
+                  <button type="button" class="tiny-button ghost" data-sync-conflict-action="defer_manual_merge" data-sync-conflict-id="${escapeAttr(conflict.id)}" ${conflict.pendingResolution ? 'disabled style="opacity:0.6; cursor:not-allowed;"' : ''}>Fusion manuelle plus tard</button>
                 </div>
               </article>
             `;

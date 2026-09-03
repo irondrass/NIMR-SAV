@@ -130,7 +130,7 @@ function bindSyncConflictUsability() {
 
 function configurePdfWorker() {
   if (window.pdfjsLib?.GlobalWorkerOptions) {
-    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.21";
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.22";
   }
 }
 
@@ -1419,7 +1419,7 @@ function registerServiceWorker() {
   });
   const registerCurrentServiceWorker = async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=23.3.21", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=23.3.22", { updateViaCache: "none" });
       const refreshRegistration = async () => {
         try {
           await registration.update?.();
@@ -1812,6 +1812,11 @@ function handleUserSessionOverlayKeydown(event) {
   if (event.key === "Escape" && overlay.id === "user-pin-change-overlay") {
     event.preventDefault();
     document.getElementById("user-pin-change-cancel")?.click();
+    return;
+  }
+  if (event.key === "Escape" && overlay.id === "supabase-recovery-otp-overlay") {
+    event.preventDefault();
+    document.getElementById("supabase-recovery-otp-cancel")?.click();
     return;
   }
   if (typeof trapFocusWithin === "function") trapFocusWithin(form, event);

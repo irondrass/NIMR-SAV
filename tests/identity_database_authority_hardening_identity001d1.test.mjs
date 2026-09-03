@@ -319,6 +319,7 @@ await check("N Edge race mapping is narrow and preserves revoke-before-Auth clea
     "tests/sync_equivalent_cas_auto_reconcile_sync0021.test.mjs",
     "tests/sync_clean_reload_localrevision_drift_sync0022.test.mjs",
     "tests/pwa_deploy_asset_version_consistency_cache001.test.mjs",
+    "tests/security_xss_accessibility_secux001.test.mjs",
     "tests/pwa_cache_version_contract.test.mjs",
     "tests/offline_concurrency_chaos_p010.test.mjs",
     "tests/helpers/granular_supabase_adapter.mjs",
@@ -330,6 +331,8 @@ await check("N Edge race mapping is narrow and preserves revoke-before-Auth clea
     "js/supabase-client.js",
     "js/supabase-sync.js",
     "js/ui-cases.js",
+    "js/ui-planning.js",
+    "js/exports.js",
     "js/utils.js",
     "js/version.js",
     "js/estimate-import.js",
@@ -343,7 +346,7 @@ await check("N Edge race mapping is narrow and preserves revoke-before-Auth clea
     ["supabase", "secrets", "set"].join(" "),
   ];
   for (const command of forbiddenCommands) assert.equal(`${migrationSql}\n${edgeSource}`.includes(command), false, command);
-  assert.match(readProjectFile("js/version.js"), /^window\.APP_VERSION = "v23\.3\.21";$/mu);
+  assert.match(readProjectFile("js/version.js"), /^window\.APP_VERSION = "v23\.3\.22";$/mu);
 });
 
 assert.equal(passed.length + failures.length, 14, "IDENTITY-001D1 must contain exactly checks A-N");

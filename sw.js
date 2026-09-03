@@ -3,37 +3,38 @@
 // PERF-001 source refresh: render the cached PWA shell immediately while GitHub Pages revalidates in background.
 // UX-010 source refresh: deliver the 2026 visual system and overlap hardening without changing the v23.3.20 cache contract.
 // CACHE-001 source refresh: atomic worker-aligned release v23.3.21 with active cache isolation and immutable assets.
-const CACHE_NAME = "nimr-sav-v23.3.21";
+// SECUX-001 source refresh: atomic worker-aligned release v23.3.22 with XSS and keyboard accessibility hardening.
+const CACHE_NAME = "nimr-sav-v23.3.22";
 const ASSETS = [
   "./",
   "./index.html",
   "./offline.html",
   "./rescue.html",
-  "./styles.css?v=23.3.21",
-  "./app.js?v=23.3.21",
+  "./styles.css?v=23.3.22",
+  "./app.js?v=23.3.22",
   "./manifest.webmanifest",
-  "./js/version.js?v=23.3.21",
+  "./js/version.js?v=23.3.22",
   "./supabase-schema.sql",
   "./assets/icon.svg",
   "./assets/icon-192.png",
   "./assets/icon-512.png",
   "./assets/apple-touch-icon.png",
-  "./vendor/pdf.min.js?v=23.3.21",
-  "./vendor/pdf.worker.min.js?v=23.3.21",
-  "./js/utils.js?v=23.3.21",
-  "./js/state.js?v=23.3.21",
-  "./js/ui-cases.js?v=23.3.21",
-  "./js/estimate-import.js?v=23.3.21",
-  "./js/ui-planning.js?v=23.3.21",
-  "./js/photos.js?v=23.3.21",
-  "./js/storage.js?v=23.3.21",
-  "./js/work-hours-sync.js?v=23.3.21",
-  "./js/planning.js?v=23.3.21",
-  "./js/exports.js?v=23.3.21",
-  "./js/business-rules-v2187.js?v=23.3.21",
-  "./js/supabase-config.js?v=23.3.21",
-  "./js/supabase-client.js?v=23.3.21",
-  "./js/supabase-sync.js?v=23.3.21",
+  "./vendor/pdf.min.js?v=23.3.22",
+  "./vendor/pdf.worker.min.js?v=23.3.22",
+  "./js/utils.js?v=23.3.22",
+  "./js/state.js?v=23.3.22",
+  "./js/ui-cases.js?v=23.3.22",
+  "./js/estimate-import.js?v=23.3.22",
+  "./js/ui-planning.js?v=23.3.22",
+  "./js/photos.js?v=23.3.22",
+  "./js/storage.js?v=23.3.22",
+  "./js/work-hours-sync.js?v=23.3.22",
+  "./js/planning.js?v=23.3.22",
+  "./js/exports.js?v=23.3.22",
+  "./js/business-rules-v2187.js?v=23.3.22",
+  "./js/supabase-config.js?v=23.3.22",
+  "./js/supabase-client.js?v=23.3.22",
+  "./js/supabase-sync.js?v=23.3.22",
 ];
 
 async function precache() {
@@ -62,7 +63,7 @@ self.addEventListener("activate", (event) => {
 function isReleaseAsset(url) {
   try {
     const parsed = new URL(url);
-    return parsed.searchParams.get("v") === "23.3.21";
+    return parsed.searchParams.get("v") === "23.3.22";
   } catch {
     return false;
   }

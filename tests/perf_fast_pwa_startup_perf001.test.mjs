@@ -46,7 +46,7 @@ function fixture(cached = []) {
     caches: {
       async open() { return cache; },
       async match(req) { return cache.match(req); },
-      async keys() { return ["nimr-sav-v23.3.20"]; },
+      async keys() { return ["nimr-sav-v23.3.21"]; },
       async delete() { return true; },
     },
     fetch(req) { calls.push(req); return fetcher(req); },
@@ -65,10 +65,10 @@ function dispatch(fx, request) {
   return p;
 }
 
-await check("A cache and app version remain v23.3.20", () => {
+await check("A cache and app version remain v23.3.21", () => {
   assert.match(sw, /PERF-001 source refresh/u);
-  assert.match(sw, /const CACHE_NAME = "nimr-sav-v23\.3\.20"/u);
-  assert.match(read("js/version.js"), /^window\.APP_VERSION = "v23\.3\.20";$/mu);
+  assert.match(sw, /const CACHE_NAME = "nimr-sav-v23\.3\.21"/u);
+  assert.match(read("js/version.js"), /^window\.APP_VERSION = "v23\.3\.21";$/mu);
 });
 
 await check("B D2-F service-worker marker remains intact", () => {
@@ -101,7 +101,7 @@ await check("F cached root resolves while GitHub revalidation is stalled", async
 });
 
 await check("G cached app.js resolves while GitHub revalidation is stalled", async () => {
-  const u = "https://irondrass.github.io/NIMR-SAV/app.js?v=23.3.20";
+  const u = "https://irondrass.github.io/NIMR-SAV/app.js?v=23.3.21";
   const fx = fixture([u]);
   fx.setFetcher(() => new Promise(() => {}));
   const p = dispatch(fx, { method: "GET", mode: "same-origin", url: u });

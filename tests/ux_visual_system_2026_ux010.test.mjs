@@ -201,6 +201,7 @@ await check("L changed paths are limited to the approved UX-010 surfaces", () =>
     "tests/ux_visual_system_2026_ux010.test.mjs",
     "tests/sync_granular_bootstrap_self_heal_sync001.test.mjs",
     "tests/sync_conflict_reconcile_and_collapse_sync002.test.mjs",
+    "tests/sync_equivalent_cas_auto_reconcile_sync0021.test.mjs",
     "tests/offline_concurrency_chaos_p010.test.mjs",
     "tests/helpers/granular_supabase_adapter.mjs",
   ]);

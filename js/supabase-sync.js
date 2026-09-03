@@ -4046,6 +4046,96 @@ function normalizeConflictResolutionRpcRow(data) {
   return data && typeof data === "object" ? data : null;
 }
 
+function areCanonicalConflictPayloadsEquivalent(operationOrLocal, outcomeOrServer = {}) {
+  try {
+    const stringify = typeof stableConflictStringify === "function"
+      ? stableConflictStringify
+      : (typeof window !== "undefined" && typeof window.stableConflictStringify === "function"
+        ? window.stableConflictStringify
+        : null);
+    if (typeof stringify !== "function") return false;
+
+    // Direct payload-to-payload comparison mode for tests
+    if (
+      operationOrLocal
+      && typeof operationOrLocal === "object"
+      && !Object.hasOwn(operationOrLocal, "operationId")
+      && !Object.hasOwn(operationOrLocal, "entityType")
+      && outcomeOrServer
+      && typeof outcomeOrServer === "object"
+      && !Object.hasOwn(outcomeOrServer, "conflict")
+      && !Object.hasOwn(outcomeOrServer, "conflictId")
+    ) {
+      const unwrap = (p) => (p && typeof p === "object" && !Array.isArray(p) && p.entity && typeof p.entity === "object" && !Array.isArray(p.entity) ? p.entity : p);
+      const l = stringify(operationOrLocal);
+      const s = stringify(outcomeOrServer);
+      if (typeof l === "string" && l === s) return true;
+      const ul = stringify(unwrap(operationOrLocal));
+      const us = stringify(unwrap(outcomeOrServer));
+      return typeof ul === "string" && ul === us;
+    }
+
+    const operation = operationOrLocal;
+    const outcome = outcomeOrServer;
+
+    if (!outcome || outcome.conflict !== true) return false;
+    const conflictId = String(outcome.conflictId || "");
+    if (!isProvenServerConflictId(conflictId)) return false;
+
+    if (!operation || !operation.workshopId || !operation.entityType || !operation.entityId) {
+      return false;
+    }
+
+    if (outcome.canonical && typeof outcome.canonical === "object") {
+      const canonicalWorkshop = outcome.canonical.workshop_id || outcome.canonical.workshopId;
+      const canonicalType = outcome.canonical.entity_type || outcome.canonical.entityType;
+      const canonicalId = outcome.canonical.entity_id || outcome.canonical.entityId;
+      if (canonicalWorkshop && String(canonicalWorkshop) !== String(operation.workshopId)) return false;
+      if (canonicalType && String(canonicalType) !== String(operation.entityType)) return false;
+      if (canonicalId && String(canonicalId) !== String(operation.entityId)) return false;
+    }
+
+    const localPayload = outcome.localPayload
+      ?? (operation.action === "delete"
+        ? (operation.payload?.projectionLocalId ? { projectionLocalId: operation.payload.projectionLocalId } : {})
+        : (operation.payload?.entity ?? operation.payload));
+
+    const serverPayload = outcome.serverPayload
+      ?? outcome.conflictCanonical?.payload
+      ?? outcome.canonical?.payload
+      ?? outcome.conflictCanonical?.value
+      ?? outcome.canonical?.value;
+
+    if (localPayload === null || localPayload === undefined || serverPayload === null || serverPayload === undefined) {
+      return false;
+    }
+    if (typeof localPayload !== "object" || typeof serverPayload !== "object") {
+      return false;
+    }
+
+    const unwrap = (p) => (p && typeof p === "object" && !Array.isArray(p) && p.entity && typeof p.entity === "object" && !Array.isArray(p.entity) ? p.entity : p);
+    const localJson = stringify(localPayload);
+    const serverJson = stringify(serverPayload);
+    if (typeof localJson === "string" && localJson === serverJson) {
+      return true;
+    }
+
+    const unwrappedLocal = unwrap(localPayload);
+    const unwrappedServer = unwrap(serverPayload);
+    if (unwrappedLocal !== localPayload || unwrappedServer !== serverPayload) {
+      const unwrappedLocalJson = stringify(unwrappedLocal);
+      const unwrappedServerJson = stringify(unwrappedServer);
+      if (typeof unwrappedLocalJson === "string" && unwrappedLocalJson === unwrappedServerJson) {
+        return true;
+      }
+    }
+
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 async function resolveServerEntityConflict(client, workshopId, conflictId, resolution) {
   if (!client || !isProvenServerConflictId(conflictId)) {
     throw new Error(`Identifiant de conflit serveur non prouvé: ${conflictId || "absent"}`);
@@ -4529,21 +4619,79 @@ async function resolveCanonicalConcurrencyConflict(conflict, action) {
   }
 }
 
+async function getReplacementHistoricalConflictCoverage(client, workshopId, operation, allOperations = []) {
+  const hasReplacesOpIds = Array.isArray(operation.replacesOperationIds) && operation.replacesOperationIds.length > 0;
+  const hasReplacesConflictIds = Array.isArray(operation.replacesConflictIds) && operation.replacesConflictIds.length > 0;
+
+  if (!hasReplacesOpIds && !hasReplacesConflictIds) {
+    return [];
+  }
+
+  // 1. PRIMARY: durable persisted replacesConflictIds
+  if (hasReplacesConflictIds) {
+    const rawOperationIds = Array.isArray(operation.replacesOperationIds)
+      ? operation.replacesOperationIds.map((id) => String(id || "").trim())
+      : [];
+    const operationIdsValid =
+      rawOperationIds.length === 0
+      || (
+        rawOperationIds.every(Boolean)
+        && rawOperationIds.length === new Set(rawOperationIds).size
+      );
+
+    const rawConflictIds = Array.isArray(operation.replacesConflictIds)
+      ? operation.replacesConflictIds.map((id) => String(id || "").trim())
+      : [];
+    const conflictIdsValid =
+      rawConflictIds.length > 0
+      && rawConflictIds.every(Boolean)
+      && rawConflictIds.every(isProvenServerConflictId)
+      && rawConflictIds.length === new Set(rawConflictIds).size;
+
+    const countConsistent =
+      rawOperationIds.length === 0
+        ? conflictIdsValid
+        : (
+            operationIdsValid
+            && conflictIdsValid
+            && rawOperationIds.length === rawConflictIds.length
+          );
+
+    if (countConsistent) {
+      return rawConflictIds;
+    }
+  }
+
+  // 2. FALLBACK: reconstruct from still-existing historical operations
+  const historicalOperationIds = Array.isArray(operation.replacesOperationIds)
+    ? operation.replacesOperationIds.map((id) => String(id || "").trim()).filter(Boolean)
+    : [];
+  const historicalOperations = historicalOperationIds
+    .map((operationId) => allOperations.find((entry) => entry.operationId === operationId))
+    .filter(Boolean);
+
+  if (!historicalOperationIds.length || historicalOperations.length !== historicalOperationIds.length) {
+    throw new Error(`Couverture des conflits serveur incomplète (${historicalOperations.length}/${historicalOperationIds.length}).`);
+  }
+
+  const coverage = await establishServerConflictCoverage(client, workshopId, historicalOperations);
+  return coverage.conflictIds;
+}
+
 async function resumeReplacementSettlementSaga(client, operation) {
   const workshopId = operation.workshopId;
   const allOperations = typeof loadDurableOutboxOperations === "function" ? await loadDurableOutboxOperations() : [];
   const historicalOperationIds = Array.isArray(operation.replacesOperationIds)
     ? operation.replacesOperationIds.map(String).filter(Boolean)
     : [];
-  const historicalOperations = historicalOperationIds
-    .map((operationId) => allOperations.find((entry) => entry.operationId === operationId))
-    .filter(Boolean);
-  let coverage;
+
+  const equivalentConflictId = isProvenServerConflictId(operation.equivalentConflictId)
+    ? String(operation.equivalentConflictId).trim()
+    : "";
+
+  let targetConflictIds = [];
   try {
-    if (!historicalOperationIds.length || historicalOperations.length !== historicalOperationIds.length) {
-      throw new Error(`Couverture des conflits serveur incomplète (${historicalOperations.length}/${historicalOperationIds.length}).`);
-    }
-    coverage = await establishServerConflictCoverage(client, workshopId, historicalOperations);
+    targetConflictIds = await getReplacementHistoricalConflictCoverage(client, workshopId, operation, allOperations);
   } catch (error) {
     await updateDurableOutboxOperation(operation.operationId, {
       syncStatus: "settling",
@@ -4551,14 +4699,36 @@ async function resumeReplacementSettlementSaga(client, operation) {
     });
     throw error;
   }
-  const targetConflictIds = coverage.conflictIds;
+
   const alreadyResolved = new Set(Array.isArray(operation.resolvedConflictIds) ? operation.resolvedConflictIds : []);
 
   operation = await updateDurableOutboxOperation(operation.operationId, {
     syncStatus: "settling",
-    replacesConflictIds: targetConflictIds,
+    ...(targetConflictIds.length ? { replacesConflictIds: targetConflictIds } : {}),
+    ...(equivalentConflictId ? { equivalentConflictId } : {}),
   }) || operation;
 
+  // 1. If an equivalent conflict was generated, resolve it as accept_server
+  if (equivalentConflictId && !alreadyResolved.has(equivalentConflictId)) {
+    if (client) {
+      try {
+        await resolveServerEntityConflict(client, workshopId, equivalentConflictId, "accept_server");
+      } catch (error) {
+        await updateDurableOutboxOperation(operation.operationId, {
+          syncStatus: "settling",
+          lastError: `Settlement RPC error for equivalent conflict ${equivalentConflictId}: ${error.message || error}`,
+          resolvedConflictIds: Array.from(alreadyResolved),
+        });
+        throw new Error(`Échec de règlement du conflit serveur équivalent ${equivalentConflictId}: ${error.message || error}`);
+      }
+      alreadyResolved.add(equivalentConflictId);
+      await updateDurableOutboxOperation(operation.operationId, {
+        resolvedConflictIds: Array.from(alreadyResolved),
+      });
+    }
+  }
+
+  // 2. Resolve historical conflicts as keep_local
   for (const conflictId of targetConflictIds) {
     if (alreadyResolved.has(conflictId)) continue;
     if (client) {
@@ -4591,13 +4761,15 @@ async function resumeReplacementSettlementSaga(client, operation) {
   const ack = operation.casAcknowledgement || { accepted: true, serverVersion: observed.serverVersion };
 
   await completeDurableOutboxOperationAtomically(operation.operationId, observed, ack);
-  markGroupConflictsResolved(operation.workshopId, operation.entityType, operation.entityId, "keep_local", operation.operationId, {
-    localConflictIds: operation.replacesLocalConflictIds,
-    operationIds: historicalOperationIds,
-    serverConflictIds: targetConflictIds,
-  });
+  if (targetConflictIds.length > 0 || historicalOperationIds.length > 0) {
+    markGroupConflictsResolved(operation.workshopId, operation.entityType, operation.entityId, "keep_local", operation.operationId, {
+      localConflictIds: operation.replacesLocalConflictIds,
+      operationIds: historicalOperationIds,
+      serverConflictIds: targetConflictIds,
+    });
+  }
   rememberGranularServerConfirmation();
-  return { acknowledged: true, settled: true, operationId: operation.operationId };
+  return { acknowledged: true, settled: true, operationId: operation.operationId, autoReconciled: Boolean(equivalentConflictId) };
 }
 
 async function settleAcknowledgedReplacementOperation(client, replacementOperationId, acknowledgement = {}) {
@@ -4766,7 +4938,11 @@ async function sendGranularOutboxOperation(client, user, operation) {
 
 async function processGranularOutboxOperation(client, user, operation) {
   if (operation.syncStatus === "settling" || operation.casAcknowledged) {
-    return resumeReplacementSettlementSaga(client, operation);
+    try {
+      return await resumeReplacementSettlementSaga(client, operation);
+    } catch (error) {
+      return { acknowledged: false, operationId: operation.operationId, settling: true, error: String(error?.message || error) };
+    }
   }
   const processing = await updateDurableOutboxOperation(operation.operationId, {
     syncStatus: "processing",
@@ -4778,6 +4954,18 @@ async function processGranularOutboxOperation(client, user, operation) {
     if (acknowledgement.cas) {
       const observed = observedMetadataFromCasOutcome(processing, acknowledgement);
       if (acknowledgement.conflict) {
+        if (areCanonicalConflictPayloadsEquivalent(processing, acknowledgement)) {
+          const settlingOp = await updateDurableOutboxOperation(processing.operationId, {
+            syncStatus: "settling",
+            casAcknowledged: true,
+            casObserved: observed,
+            casAcknowledgement: acknowledgement,
+            equivalentConflictId: acknowledgement.conflictId,
+            resolvedConflictIds: processing.resolvedConflictIds || [],
+          });
+          rememberObservedGranularEntityMetadata(observed);
+          return await resumeReplacementSettlementSaga(client, settlingOp || processing);
+        }
         await conflictDurableOutboxOperationAtomically(processing.operationId, observed, {
           conflictId: acknowledgement.conflictId,
           serverVersion: acknowledgement.serverVersion,
@@ -4804,7 +4992,7 @@ async function processGranularOutboxOperation(client, user, operation) {
           resolvedConflictIds: [],
         });
         rememberObservedGranularEntityMetadata(observed);
-        return resumeReplacementSettlementSaga(client, settlingOp || processing);
+        return await resumeReplacementSettlementSaga(client, settlingOp || processing);
       } else {
         await completeDurableOutboxOperationAtomically(processing.operationId, observed, acknowledgement);
         markGroupConflictsResolved(processing.workshopId, processing.entityType, processing.entityId, "keep_local", processing.operationId, {
@@ -5604,6 +5792,9 @@ if (typeof window !== "undefined") {
   window.reconcileServerResolvedConflicts = reconcileServerResolvedConflicts;
   window.settleAcknowledgedReplacementOperation = settleAcknowledgedReplacementOperation;
   window.markGroupConflictsResolved = markGroupConflictsResolved;
+  window.areCanonicalConflictPayloadsEquivalent = areCanonicalConflictPayloadsEquivalent;
+  window.resumeReplacementSettlementSaga = resumeReplacementSettlementSaga;
+  window.getReplacementHistoricalConflictCoverage = getReplacementHistoricalConflictCoverage;
   window.NIMR_GRANULAR_SYNC_TEST_API = Object.freeze({
     applyRemoteEntityRow,
     buildGranularCursorFilter,
@@ -5620,6 +5811,9 @@ if (typeof window !== "undefined") {
     reconcileServerResolvedConflicts,
     settleAcknowledgedReplacementOperation,
     markGroupConflictsResolved,
+    areCanonicalConflictPayloadsEquivalent,
+    resumeReplacementSettlementSaga,
+    getReplacementHistoricalConflictCoverage,
   });
   window.logSyncConflict = logSyncConflict;
   window.offlineQueue = offlineQueue;

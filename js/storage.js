@@ -1202,6 +1202,7 @@ function normalizeDurableOutboxOperation(input = {}) {
     casObserved: input.casObserved && typeof input.casObserved === "object" ? cloneGranularSyncValue(input.casObserved) : null,
     casAcknowledgement: input.casAcknowledgement && typeof input.casAcknowledgement === "object" ? cloneGranularSyncValue(input.casAcknowledgement) : null,
     resolvedConflictIds: Array.isArray(input.resolvedConflictIds) ? input.resolvedConflictIds.map(String) : [],
+    equivalentConflictId: String(input.equivalentConflictId || ""),
     description: String(input.description || "Mise à jour des données"),
   };
 }

@@ -4284,6 +4284,7 @@ if (typeof window !== "undefined") {
   window.resolveSyncConflict = resolveSyncConflict;
   window.resolveKeptConflictsAfterPush = resolveKeptConflictsAfterPush;
   window.hasRealBooking = hasRealBooking;
+  window.stableConflictStringify = stableConflictStringify;
 }
 
 function getComparableCaseJSON(caseItem) {

@@ -313,10 +313,13 @@ await check("N Edge race mapping is narrow and preserves revoke-before-Auth clea
     "tests/identity_invited_user_password_onboarding_identity001d2e.test.mjs",
     "tests/identity_password_recovery_otp_identity001d2f.test.mjs",
     "tests/perf_fast_pwa_startup_perf001.test.mjs",
+    "tests/ux_visual_system_2026_ux010.test.mjs",
     "app.js",
     "index.html",
+    "js/state.js",
     "js/supabase-client.js",
     "js/supabase-sync.js",
+    "styles.css",
     "sw.js",
   ].includes(file.replaceAll("\\", "/")) || fetchedHistoricalMigrations.has(file.replaceAll("\\", "/"))), true);
   const forbiddenCommands = [

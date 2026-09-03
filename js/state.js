@@ -785,17 +785,7 @@ function updateSaveStatusIndicator(message, variant = "saved") {
 }
 
 function quietNotify(message, variant = "success") {
-  if (variant === "error" || variant === "warn") {
-    notifyUser(message, variant);
-    return;
-  }
-
-  let indicatorVariant = "saved";
-  if (variant === "success") indicatorVariant = "saved";
-  else if (variant === "info") indicatorVariant = "syncing";
-  else indicatorVariant = variant;
-
-  updateSaveStatusIndicator(message, indicatorVariant);
+  notifyUser(message, variant);
 }
 
 function bytesToBase64(bytes) {

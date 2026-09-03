@@ -223,24 +223,61 @@ export function createGranularSupabaseAdapter(options = {}) {
 
   function createSelectQuery(table, columns) {
     const filters = {};
+    const ordering = [];
+    let orFilter = null;
     let rowLimit = null;
     const selectedRows = () => {
+      let rows = [];
+      const matchFilter = (row) => Object.entries(filters).every(([column, value]) => {
+        if (value === null) return row[column] === null || row[column] === undefined;
+        return row[column] === value;
+      });
       if (table === "sync_entities") {
-        return [...entities.values()].filter((row) => Object.entries(filters).every(([column, value]) => row[column] === value));
+        rows = [...entities.values()].filter(matchFilter);
+      } else if (table === "app_settings") {
+        rows = [...settings.values()].filter(matchFilter);
+      } else if (table === "audit_logs") {
+        rows = [...audits.values()].filter(matchFilter);
       }
-      if (table === "app_settings") {
-        return [...settings.values()].filter((row) => Object.entries(filters).every(([column, value]) => row[column] === value));
+      if (orFilter && (table === "sync_entities" || table === "audit_logs")) {
+        const gtMatch = orFilter.match(/updated_at\.gt\.([^,)]+)/);
+        const eqMatch = orFilter.match(/updated_at\.eq\.([^,)]+)/);
+        const idGtMatch = orFilter.match(/entity_id\.gt\.([^,)]+)/) || orFilter.match(/local_id\.gt\.([^,)]+)/);
+        if (gtMatch && eqMatch && idGtMatch) {
+          const minUpdatedAt = gtMatch[1];
+          const eqUpdatedAt = eqMatch[1];
+          const minId = idGtMatch[1];
+          rows = rows.filter((r) => {
+            const u = String(r.updated_at || "");
+            const id = String(r.entity_id || r.local_id || "");
+            return u > minUpdatedAt || (u === eqUpdatedAt && id > minId);
+          });
+        }
       }
-      return [];
+      if (ordering.length > 0) {
+        rows.sort((a, b) => {
+          for (const ord of ordering) {
+            const valA = a[ord.column] ?? "";
+            const valB = b[ord.column] ?? "";
+            const cmp = String(valA).localeCompare(String(valB));
+            if (cmp !== 0) return ord.ascending ? cmp : -cmp;
+          }
+          return 0;
+        });
+      }
+      return rows;
     };
     const execute = (single = false) => {
-      recordCall({ table, operation: "select", rows: [], filters, columns, ordering: [], pagination: rowLimit == null ? null : { pageSize: rowLimit } });
+      recordCall({ table, operation: "select", rows: [], filters, columns, ordering, pagination: rowLimit == null ? null : { pageSize: rowLimit } });
       const rows = selectedRows();
       const limited = rowLimit == null ? rows : rows.slice(0, rowLimit);
       return { data: single ? structuredClone(limited[0] || null) : structuredClone(limited), error: null };
     };
     const query = {
       eq(column, value) { filters[column] = value; return query; },
+      is(column, value) { filters[column] = value === null ? null : value; return query; },
+      order(column, options = {}) { ordering.push({ column, ascending: options.ascending !== false }); return query; },
+      or(expr) { orFilter = expr; return query; },
       limit(value) { rowLimit = Number(value); return query; },
       maybeSingle() { return Promise.resolve(execute(true)); },
       then(resolve, reject) { return Promise.resolve().then(() => execute(false)).then(resolve, reject); },

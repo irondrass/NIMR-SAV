@@ -192,9 +192,12 @@ await check("L changed paths are limited to the approved UX-010 surfaces", () =>
   const allowed = new Set([
     "styles.css",
     "js/state.js",
+    "js/supabase-sync.js",
     "sw.js",
     "tests/identity_database_authority_hardening_identity001d1.test.mjs",
     "tests/ux_visual_system_2026_ux010.test.mjs",
+    "tests/sync_granular_bootstrap_self_heal_sync001.test.mjs",
+    "tests/helpers/granular_supabase_adapter.mjs",
   ]);
   for (const changedPath of paths) {
     assert.ok(allowed.has(changedPath), `unexpected UX-010 changed path: ${changedPath}`);

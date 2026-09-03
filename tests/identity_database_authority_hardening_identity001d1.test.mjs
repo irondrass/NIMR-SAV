@@ -314,6 +314,8 @@ await check("N Edge race mapping is narrow and preserves revoke-before-Auth clea
     "tests/identity_password_recovery_otp_identity001d2f.test.mjs",
     "tests/perf_fast_pwa_startup_perf001.test.mjs",
     "tests/ux_visual_system_2026_ux010.test.mjs",
+    "tests/sync_granular_bootstrap_self_heal_sync001.test.mjs",
+    "tests/helpers/granular_supabase_adapter.mjs",
     "app.js",
     "index.html",
     "js/state.js",

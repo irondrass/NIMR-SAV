@@ -3321,10 +3321,28 @@ function observedMetadataFromCanonicalRow(row) {
   };
 }
 
+async function probeActiveRemoteGranularEntity(client, workshopId, entityType) {
+  try {
+    const { data, error } = await client
+      .from("sync_entities")
+      .select("entity_id")
+      .eq("workshop_id", workshopId)
+      .eq("entity_type", entityType)
+      .is("deleted_at", null)
+      .limit(1);
+    if (error) return null;
+    return Array.isArray(data) && data.length > 0;
+  } catch {
+    return null;
+  }
+}
+
 async function applyRemoteEntityRow(row, options = {}) {
   const entityType = String(row?.entity_type || "");
   const entityId = String(row?.entity_id || "");
-  if (!entityId || !["case", "booking"].includes(entityType)) return false;
+  if (!entityId || !["case", "booking"].includes(entityType)) {
+    return { applied: false, accounted: false, status: "unaccounted", reason: "invalid-entity" };
+  }
   const remoteVersion = Math.max(0, Number(row.entity_version || 0));
   const workshopId = String(row.workshop_id || getSupabaseWorkshopId());
   const envelopeKey = `${workshopId}\u0000${entityType}\u0000${entityId}`;
@@ -3332,13 +3350,24 @@ async function applyRemoteEntityRow(row, options = {}) {
     ? getObservedGranularEntityMetadata(workshopId, entityType, entityId)
     : null;
   const priorEnvelope = persistedPrior || appliedGranularEntityEnvelopes.get(envelopeKey);
-  if (priorEnvelope?.version > remoteVersion) return false;
+  const collectionName = entityType === "case" ? "cases" : "bookings";
+  const collection = Array.isArray(state[collectionName]) ? state[collectionName] : [];
+  const existingIndex = collection.findIndex((entry) => String(entry?.id || "") === entityId);
+  const isMissingLocally = existingIndex < 0 && !row.deleted_at;
+
+  if (!options.force && !isMissingLocally && priorEnvelope?.version > remoteVersion) {
+    return { applied: false, accounted: true, status: "older_version_skipped", reason: "older-version" };
+  }
   const priorVersion = Number(priorEnvelope?.serverVersion ?? priorEnvelope?.version ?? -1);
   const priorOperationId = String(priorEnvelope?.lastOperationId || "");
   const remoteOperationId = String(row.last_operation_id || "");
-  if (!options.force && priorVersion > remoteVersion) return false;
-  if (!options.force && priorVersion === remoteVersion) {
-    if (priorOperationId === remoteOperationId && priorEnvelope.deleted === Boolean(row.deleted_at)) return false;
+  if (!options.force && !isMissingLocally && priorVersion > remoteVersion) {
+    return { applied: false, accounted: true, status: "older_version_skipped", reason: "older-server-version" };
+  }
+  if (!options.force && !isMissingLocally && priorVersion === remoteVersion) {
+    if (priorOperationId === remoteOperationId && priorEnvelope.deleted === Boolean(row.deleted_at)) {
+      return { applied: false, accounted: true, status: "already_present_same_canonical_version", reason: "identical-already-applied" };
+    }
     // A server sequence cannot legitimately produce the same version for two
     // different operations or contradictory tombstone state. Never guess.
     window.NIMR_GRANULAR_RECONCILE_REQUIRED = {
@@ -3346,16 +3375,14 @@ async function applyRemoteEntityRow(row, options = {}) {
       reason: "equal-version-contradiction",
       detectedAt: new Date().toISOString(),
     };
-    return false;
+    return { applied: false, accounted: false, status: "unaccounted", reason: "equal-version-contradiction" };
   }
   const localOperation = typeof findActiveDurableOutboxOperationForEntity === "function"
     ? await findActiveDurableOutboxOperationForEntity(workshopId, entityType, entityId)
     : null;
   const observed = observedMetadataFromCanonicalRow(row);
   if (!options.force && localOperation && remoteOperationId !== localOperation.operationId) {
-    // Another workstation advanced the canonical row while local intent is
-    // pending. Preserve the local entity/payload and advance only its observed
-    // base. The unchanged durable operation will then fail CAS explicitly.
+    // Another workstation advanced the canonical row while local intent is pending.
     if (typeof rememberObservedGranularEntityMetadata === "function") {
       await rememberObservedGranularEntityMetadata(observed);
     }
@@ -3366,11 +3393,37 @@ async function applyRemoteEntityRow(row, options = {}) {
       deleted: Boolean(row.deleted_at),
       pendingLocalOperationId: localOperation.operationId,
     });
-    return false;
+
+    if (localOperation.action === "delete") {
+      // Pending DELETE: local absence is intentional and safely accounted.
+      if (existingIndex >= 0) collection.splice(existingIndex, 1);
+      return { applied: existingIndex >= 0, accounted: true, status: "pending_local_intent_preserved", deleted: true, reason: "local-outbox-pending-delete" };
+    }
+
+    // Pending UPSERT:
+    if (!isMissingLocally) {
+      // Entity is already physically present: preserve local intent and outbox unchanged.
+      return { applied: false, accounted: true, status: "pending_local_intent_preserved", deleted: false, reason: "local-outbox-pending" };
+    }
+
+    // Entity is physically missing locally: reconstruct from durable outbox operation payload if valid.
+    const candidate = localOperation.payload?.entity || localOperation.payload;
+    const isValidSchema = candidate
+      && typeof candidate === "object"
+      && (String(candidate.id || "") === entityId || (!candidate.id && entityId));
+
+    if (isValidSchema) {
+      const materializedEntity = { ...candidate, id: entityId };
+      collection.push(materializedEntity);
+      if (entityType === "case" && typeof markEntityCaseDirty === "function") markEntityCaseDirty(materializedEntity, { skipCloud: true });
+      if (entityType === "booking" && typeof markEntityBookingDirty === "function") markEntityBookingDirty(materializedEntity, { skipCloud: true });
+      if (entityType === "case") rememberRemoteCaseComparable(entityId, materializedEntity);
+      return { applied: true, accounted: true, status: "pending_local_intent_materialized", deleted: false, reason: "local-outbox-intent-materialized" };
+    }
+
+    // Safe reconstruction is impossible: do NOT advance past it, do NOT certify bootstrap.
+    return { applied: false, accounted: false, status: "unaccounted", reason: "local-outbox-intent-unreconstructible" };
   }
-  const collectionName = entityType === "case" ? "cases" : "bookings";
-  const collection = Array.isArray(state[collectionName]) ? state[collectionName] : [];
-  const existingIndex = collection.findIndex((entry) => String(entry?.id || "") === entityId);
   if (row.deleted_at) {
     if (existingIndex >= 0) collection.splice(existingIndex, 1);
     if (entityType === "case" && typeof markEntityCaseDeleted === "function") markEntityCaseDeleted(entityId, { skipCloud: true });
@@ -3378,7 +3431,7 @@ async function applyRemoteEntityRow(row, options = {}) {
     if (entityType === "case") rememberRemoteCaseComparable(entityId);
     appliedGranularEntityEnvelopes.set(envelopeKey, { version: remoteVersion, serverVersion: remoteVersion, lastOperationId: remoteOperationId, deleted: true });
     if (typeof rememberObservedGranularEntityMetadata === "function") await rememberObservedGranularEntityMetadata(observed);
-    return existingIndex >= 0;
+    return { applied: existingIndex >= 0, accounted: true, status: "tombstone_accounted", deleted: true, reason: "tombstone" };
   }
   const remoteEntity = { ...(row.payload || {}), id: entityId };
   if (existingIndex >= 0) collection[existingIndex] = remoteEntity;
@@ -3388,40 +3441,165 @@ async function applyRemoteEntityRow(row, options = {}) {
   if (entityType === "case") rememberRemoteCaseComparable(entityId, remoteEntity);
   appliedGranularEntityEnvelopes.set(envelopeKey, { version: remoteVersion, serverVersion: remoteVersion, lastOperationId: remoteOperationId, deleted: false });
   if (typeof rememberObservedGranularEntityMetadata === "function") await rememberObservedGranularEntityMetadata(observed);
-  return true;
+  return { applied: true, accounted: true, status: "materialized", deleted: false, reason: "materialized" };
 }
 
-async function persistRemoteGranularPage(rows, reason = "incremental-pull") {
+async function persistRemoteGranularPage(rows, reason = "incremental-pull", options = {}) {
   let changed = false;
+  let appliedCount = 0;
+  let accountedCount = 0;
+  let materializedCount = 0;
+  let sameVersionNoopCount = 0;
+  let tombstoneAccountedCount = 0;
+  let pendingIntentPreservedCount = 0;
+  let unaccountedCount = 0;
+  let activeCount = 0;
+  let lastAccountedIndex = -1;
+
   applyingRemoteSupabaseState = true;
   try {
-    for (const row of rows) changed = (await applyRemoteEntityRow(row)) || changed;
-    if (!changed) return false;
-    if (typeof invalidateStateReplacementIndexes === "function") invalidateStateReplacementIndexes();
-    await saveState({ skipCloud: true, skipSnapshot: true, boundedEntityDetection: true, cloudReason: reason });
-    if (typeof render === "function") render();
-    return true;
+    for (let index = 0; index < rows.length; index += 1) {
+      const row = rows[index];
+      if (row?.deleted_at) {
+        // tombstone
+      } else {
+        activeCount += 1;
+      }
+      const outcome = await applyRemoteEntityRow(row, options);
+      const isApplied = typeof outcome === "object" ? outcome.applied : Boolean(outcome);
+      const isAccounted = typeof outcome === "object" ? outcome.accounted : Boolean(outcome);
+      const status = typeof outcome === "object" ? outcome.status : (isApplied ? "materialized" : "unaccounted");
+
+      if (isApplied) {
+        changed = true;
+        appliedCount += 1;
+      }
+      if (isAccounted) {
+        accountedCount += 1;
+        lastAccountedIndex = index;
+        if (status === "materialized") materializedCount += 1;
+        else if (status === "already_present_same_canonical_version") sameVersionNoopCount += 1;
+        else if (status === "tombstone_accounted") tombstoneAccountedCount += 1;
+        else if (status === "pending_local_intent_preserved") pendingIntentPreservedCount += 1;
+      } else {
+        unaccountedCount += 1;
+        break;
+      }
+    }
+    let persisted = false;
+    if (changed) {
+      if (typeof invalidateStateReplacementIndexes === "function") invalidateStateReplacementIndexes();
+      await saveState({ skipCloud: true, skipSnapshot: true, boundedEntityDetection: true, cloudReason: reason });
+      if (typeof render === "function") render();
+      persisted = true;
+    }
+    return {
+      changed,
+      persisted,
+      applied: appliedCount,
+      accounted: accountedCount,
+      materialized: materializedCount,
+      sameVersionNoop: sameVersionNoopCount,
+      tombstoneAccounted: tombstoneAccountedCount,
+      pendingIntentPreserved: pendingIntentPreservedCount,
+      unaccounted: unaccountedCount,
+      active: activeCount,
+      lastAccountedIndex,
+      fullyAccounted: unaccountedCount === 0 && accountedCount === rows.length,
+    };
   } finally {
     applyingRemoteSupabaseState = false;
   }
 }
 
-async function pullGranularEntityGroup(client, entityType, pageSize, bootstrap = false) {
+async function pullGranularEntityGroup(client, entityType, pageSize, bootstrap = false, options = {}) {
   const workshopId = getSupabaseWorkshopId();
   const metadataKey = getGranularSyncMetadataKey(workshopId, entityType);
-  const metadata = bootstrap ? null : await loadSyncMetadata(metadataKey);
+  const metadata = (bootstrap || options.resetCursor) ? null : await loadSyncMetadata(metadataKey);
   let cursor = metadata?.cursor || null;
-  let pulled = 0;
+  const stats = {
+    entityType,
+    fetched: 0,
+    applied: 0,
+    accounted: 0,
+    materialized: 0,
+    sameVersionNoop: 0,
+    tombstoneAccounted: 0,
+    pendingIntentPreserved: 0,
+    unaccounted: 0,
+    active: 0,
+    persisted: 0,
+    serverEmpty: false,
+    cursor: null,
+    groupCertified: false,
+  };
+  let pageIndex = 0;
+  let allPagesFullyAccounted = true;
+
   while (true) {
     const page = await fetchGranularEntityPage(client, entityType, cursor, pageSize);
-    if (!page.rows.length) break;
-    await persistRemoteGranularPage(page.rows, `${bootstrap ? "bootstrap" : "incremental"}:${entityType}`);
-    cursor = page.cursor;
-    pulled += page.rows.length;
-    await putSyncMetadata(metadataKey, { cursor, initialized: true });
+    stats.fetched += page.rows.length;
+    if (!page.rows.length) {
+      if (pageIndex === 0 && !cursor) {
+        stats.serverEmpty = true;
+      }
+      break;
+    }
+    const pageOutcome = await persistRemoteGranularPage(
+      page.rows,
+      `${bootstrap ? "bootstrap" : "incremental"}:${entityType}`,
+      { force: Boolean(options.force), entityType }
+    );
+    const fullyAccounted = Boolean(pageOutcome?.fullyAccounted);
+    const lastAccountedIndex = pageOutcome?.lastAccountedIndex ?? -1;
+
+    stats.applied += pageOutcome?.applied || 0;
+    stats.accounted += pageOutcome?.accounted || 0;
+    stats.materialized += pageOutcome?.materialized || 0;
+    stats.sameVersionNoop += pageOutcome?.sameVersionNoop || 0;
+    stats.tombstoneAccounted += pageOutcome?.tombstoneAccounted || 0;
+    stats.pendingIntentPreserved += pageOutcome?.pendingIntentPreserved || 0;
+    stats.unaccounted += pageOutcome?.unaccounted || 0;
+    stats.active += pageOutcome?.active || 0;
+    if (pageOutcome?.persisted) stats.persisted += pageOutcome?.applied || 0;
+
+    if (fullyAccounted) {
+      cursor = page.cursor;
+      stats.cursor = cursor;
+      await putSyncMetadata(metadataKey, { cursor, initialized: true });
+    } else {
+      allPagesFullyAccounted = false;
+      if (lastAccountedIndex >= 0 && lastAccountedIndex < page.rows.length) {
+        const lastRow = page.rows[lastAccountedIndex];
+        cursor = { updatedAt: lastRow.updated_at, entityId: lastRow.entity_id };
+        stats.cursor = cursor;
+        await putSyncMetadata(metadataKey, { cursor, initialized: false });
+      }
+      break;
+    }
+    pageIndex += 1;
     if (!page.hasMore) break;
   }
-  return pulled;
+  stats.cursor = cursor;
+
+  const collectionName = entityType === "case" ? "cases" : "bookings";
+  const localCount = Array.isArray(state[collectionName]) ? state[collectionName].length : 0;
+
+  if (!bootstrap) {
+    stats.groupCertified = allPagesFullyAccounted;
+  } else if (stats.serverEmpty) {
+    stats.groupCertified = true;
+  } else if (allPagesFullyAccounted && stats.unaccounted === 0) {
+    if (stats.active > 0) {
+      stats.groupCertified = localCount > 0 || stats.pendingIntentPreserved > 0;
+    } else {
+      stats.groupCertified = true;
+    }
+  } else {
+    stats.groupCertified = false;
+  }
+
+  return stats;
 }
 
 async function pullGranularAuditGroup(client, bootstrap = false) {
@@ -3500,27 +3678,110 @@ async function pullLatestSupabaseBackup(reason = "poll") {
     const workshopId = getSupabaseWorkshopId();
     const bootstrapKey = getGranularSyncMetadataKey(workshopId, "bootstrap");
     const bootstrapMeta = await loadSyncMetadata(bootstrapKey);
-    const bootstrap = bootstrapMeta?.initialized !== true;
+    let bootstrap = bootstrapMeta?.initialized !== true;
+
+    // Tombstone-Safe Active Probe:
+    // If bootstrap metadata says initialized, but local case state is empty:
+    const localCasesCount = Array.isArray(state?.cases) ? state.cases.length : 0;
+    const caseMetadataKey = getGranularSyncMetadataKey(workshopId, "case");
+    const caseMeta = await loadSyncMetadata(caseMetadataKey);
+
+    let selfHealRequired = false;
+    let probeUnknown = false;
+    if (!bootstrap && localCasesCount === 0 && caseMeta?.cursor) {
+      // Probe sync_entities for active (deleted_at IS NULL) case records
+      const hasActiveRemoteCases = await probeActiveRemoteGranularEntity(client, workshopId, "case");
+      if (hasActiveRemoteCases === true) {
+        selfHealRequired = true;
+        bootstrap = true;
+      } else if (hasActiveRemoteCases === null) {
+        // Probe failed (network error, timeout, etc). Remote state is UNKNOWN.
+        // Fail closed: do NOT certify the stale incremental state, do NOT
+        // advance/replace the cursor, preserve local outbox, return safely.
+        probeUnknown = true;
+      }
+    }
+
+    // If probe returned unknown, skip granular pull entirely and return
+    // a safe "probe-unknown" result without certifying or advancing cursor.
+    if (probeUnknown) {
+      return {
+        granular: true,
+        reason,
+        cases: 0,
+        bookings: 0,
+        casesApplied: 0,
+        bookingsApplied: 0,
+        caseStats: null,
+        bookingStats: null,
+        audit: 0,
+        bootstrap: false,
+        initialized: false,
+        selfHealed: false,
+        probeUnknown: true,
+        legacyAttempted: Boolean(bootstrapMeta?.legacyAttempted),
+        legacyApplied: false,
+      };
+    }
+
     try {
-      const cases = await pullGranularEntityGroup(client, "case", GRANULAR_CASE_PAGE_SIZE, bootstrap);
-      const bookings = await pullGranularEntityGroup(client, "booking", GRANULAR_BOOKING_PAGE_SIZE, bootstrap);
+      const caseStats = await pullGranularEntityGroup(client, "case", GRANULAR_CASE_PAGE_SIZE, bootstrap, { resetCursor: selfHealRequired });
+      const bookingStats = await pullGranularEntityGroup(client, "booking", GRANULAR_BOOKING_PAGE_SIZE, bootstrap, { resetCursor: selfHealRequired });
       const audit = await pullGranularAuditGroup(client, bootstrap);
       await restoreGranularWorkshopSettings(client);
+
+      const casesPulled = typeof caseStats === "object" ? caseStats.fetched : Number(caseStats || 0);
+      const bookingsPulled = typeof bookingStats === "object" ? bookingStats.fetched : Number(bookingStats || 0);
+      const casesApplied = typeof caseStats === "object" ? caseStats.applied : 0;
+      const bookingsApplied = typeof bookingStats === "object" ? bookingStats.applied : 0;
+
+      const caseCertified = typeof caseStats === "object" ? caseStats.groupCertified : (casesPulled > 0 || !bootstrap);
+      const bookingCertified = typeof bookingStats === "object" ? bookingStats.groupCertified : (bookingsPulled > 0 || !bootstrap);
+
+      // Legacy cloud backup fallback: if granular pulled zero rows during
+      // bootstrap (regardless of whether granular tables are empty or absent),
+      // check the legacy cloud backup once.
       let legacyAttempted = Boolean(bootstrapMeta?.legacyAttempted);
       let legacyApplied = false;
-      if (bootstrap && cases + bookings === 0) {
+      if (bootstrap && casesPulled + bookingsPulled === 0) {
         legacyAttempted = true;
         legacyApplied = await performLegacyCloudBootstrap(client, "legacy-bootstrap");
       }
-      const initialized = !bootstrap || cases + bookings > 0 || legacyApplied === true;
+
+      // STRICT PER-GROUP BOOTSTRAP INVARIANT:
+      // Global workshop bootstrap is initialized ONLY if:
+      // 1. Not in bootstrap, OR
+      // 2. Both case AND booking groups are certified (booking success NEVER masks case failure), OR
+      // 3. Legacy backup was applied.
+      const initialized = !bootstrap
+        || legacyApplied === true
+        || (caseCertified === true && bookingCertified === true);
+
       await putSyncMetadata(bootstrapKey, {
         initialized,
         legacyAttempted,
         legacyApplied,
+        selfHealed: selfHealRequired ? true : Boolean(bootstrapMeta?.selfHealed),
         lastAttemptAt: new Date().toISOString(),
       });
       rememberGranularServerConfirmation();
-      return { granular: true, reason, cases, bookings, audit, bootstrap, initialized, legacyAttempted, legacyApplied };
+      return {
+        granular: true,
+        reason,
+        cases: casesPulled,
+        bookings: bookingsPulled,
+        casesApplied,
+        bookingsApplied,
+        caseStats,
+        bookingStats,
+        audit,
+        bootstrap,
+        initialized,
+        selfHealed: selfHealRequired,
+        probeUnknown: false,
+        legacyAttempted,
+        legacyApplied,
+      };
     } catch (error) {
       if (bootstrap) {
         const restored = await performLegacyCloudBootstrap(client, "legacy-schema-fallback");
@@ -4782,6 +5043,10 @@ if (typeof window !== "undefined") {
     applyRemoteEntityRow,
     buildGranularCursorFilter,
     fetchGranularEntityPage,
+    probeActiveRemoteGranularEntity,
+    persistRemoteGranularPage,
+    pullGranularEntityGroup,
+    pullLatestSupabaseBackup,
     processGranularOutboxBatch,
     sendGranularOutboxOperation,
     normalizeCanonicalCasOutcome,

@@ -3156,7 +3156,11 @@ async function renderSupabaseSyncHealth() {
   const client = getSupabaseClient();
   const user = client ? await getSupabaseUser() : null;
   const operations = typeof loadDurableOutboxOperations === "function" ? await loadDurableOutboxOperations() : [];
-  const pending = operations.filter((entry) => ["pending", "processing", "failed", "conflicted"].includes(entry.syncStatus)).length;
+  const pending = operations.filter((entry) => (
+    typeof isActiveDurableOutboxSyncStatus === "function"
+      ? isActiveDurableOutboxSyncStatus(entry.syncStatus)
+      : ["pending", "processing", "settling", "failed", "conflicted", "conflict"].includes(entry.syncStatus)
+  )).length;
   const outboxConflicts = operations.filter((entry) => entry.syncStatus === "conflicted").length;
   const stateConflicts = typeof getOpenSyncConflicts === "function" ? getOpenSyncConflicts().length : 0;
   const actor = typeof getCurrentActor === "function" ? getCurrentActor() : {};
@@ -3729,6 +3733,7 @@ async function pullLatestSupabaseBackup(reason = "poll") {
       const bookingStats = await pullGranularEntityGroup(client, "booking", GRANULAR_BOOKING_PAGE_SIZE, bootstrap, { resetCursor: selfHealRequired });
       const audit = await pullGranularAuditGroup(client, bootstrap);
       await restoreGranularWorkshopSettings(client);
+      await reconcileServerResolvedConflicts(client, workshopId);
 
       const casesPulled = typeof caseStats === "object" ? caseStats.fetched : Number(caseStats || 0);
       const bookingsPulled = typeof bookingStats === "object" ? bookingStats.fetched : Number(bookingStats || 0);
@@ -4028,42 +4033,429 @@ async function applyCurrentCanonicalForAcceptedServer(operation, canonical) {
   }
 }
 
+function isProvenServerConflictId(id) {
+  if (!id || typeof id !== "string") return false;
+  const s = id.trim();
+  if (!s || s === "undefined" || s === "null") return false;
+  if (s.startsWith("group-") || s.startsWith("conflict-local") || s.startsWith("local-") || s.startsWith("sync-conflict-")) return false;
+  return true;
+}
+
+function normalizeConflictResolutionRpcRow(data) {
+  if (Array.isArray(data)) return data.length === 1 ? data[0] : null;
+  return data && typeof data === "object" ? data : null;
+}
+
+async function resolveServerEntityConflict(client, workshopId, conflictId, resolution) {
+  if (!client || !isProvenServerConflictId(conflictId)) {
+    throw new Error(`Identifiant de conflit serveur non prouvé: ${conflictId || "absent"}`);
+  }
+  const { data, error } = await client.rpc("nimr_resolve_sync_entity_conflict", {
+    p_workshop_id: workshopId,
+    p_conflict_id: conflictId,
+    p_resolution: resolution,
+  });
+  if (error) {
+    throw new Error(`RPC de résolution impossible pour ${conflictId}: ${error.message || error}`);
+  }
+  const row = normalizeConflictResolutionRpcRow(data);
+  const validEvidence = Boolean(
+    row
+    && String(row.id || "") === String(conflictId)
+    && row.status === "resolved"
+    && row.resolution === resolution
+  );
+  if (!validEvidence) {
+    throw new Error(`Preuve positive de résolution absente ou invalide pour ${conflictId}.`);
+  }
+  return row;
+}
+
+async function establishServerConflictCoverage(client, workshopId, operations = []) {
+  const historicalOperations = Array.isArray(operations) ? operations : [];
+  const mappings = [];
+  const missingOperationIds = [];
+
+  for (const operation of historicalOperations) {
+    const operationId = String(operation?.operationId || "");
+    let conflictId = isProvenServerConflictId(operation?.conflictId)
+      ? String(operation.conflictId).trim()
+      : "";
+    if (!conflictId && client && operationId) {
+      const { data, error } = await client
+        .from("sync_entity_conflicts")
+        .select("id, workshop_id, local_operation_id")
+        .eq("workshop_id", workshopId)
+        .eq("local_operation_id", operationId)
+        .maybeSingle();
+      if (error) {
+        throw new Error(`Correspondance du conflit serveur impossible pour ${operationId}: ${error.message || error}`);
+      }
+      if (
+        data
+        && String(data.workshop_id || "") === String(workshopId)
+        && String(data.local_operation_id || "") === operationId
+        && isProvenServerConflictId(data.id)
+      ) {
+        conflictId = String(data.id).trim();
+      }
+    }
+    if (!operationId || !conflictId) {
+      missingOperationIds.push(operationId || "operation-id-absent");
+      continue;
+    }
+    mappings.push({ operationId, conflictId });
+  }
+
+  const uniqueConflictIds = [...new Set(mappings.map((entry) => entry.conflictId))];
+  if (
+    missingOperationIds.length > 0
+    || mappings.length !== historicalOperations.length
+    || uniqueConflictIds.length !== historicalOperations.length
+  ) {
+    const missing = missingOperationIds.length ? missingOperationIds.join(", ") : "correspondance non unique";
+    throw new Error(`Couverture des conflits serveur incomplète (${mappings.length}/${historicalOperations.length}): ${missing}.`);
+  }
+  return { mappings, conflictIds: uniqueConflictIds };
+}
+
+function collectLocalConflictResolutionMembers(conflict, operationIds = [], serverConflictIds = []) {
+  const explicitLocalIds = new Set([
+    ...(Array.isArray(conflict?.conflictIds) ? conflict.conflictIds : []),
+    ...(Array.isArray(conflict?.conflicts) ? conflict.conflicts.map((entry) => entry?.id) : []),
+    conflict?.id,
+  ].filter(Boolean).map(String));
+  const operationIdSet = new Set(operationIds.map(String));
+  const serverConflictIdSet = new Set(serverConflictIds.map(String));
+  return (Array.isArray(state?.syncConflicts) ? state.syncConflicts : [])
+    .filter((entry) => entry.status === "open")
+    .filter((entry) => (
+      explicitLocalIds.has(String(entry.id || ""))
+      || operationIdSet.has(String(entry.localOperationId || ""))
+      || serverConflictIdSet.has(String(entry.serverConflictId || ""))
+    ))
+    .map((entry) => String(entry.id || ""))
+    .filter(Boolean);
+}
+
+function groupConflictedEntities(conflicts = [], outboxOperations = []) {
+  const groups = new Map();
+  const rawConflicts = Array.isArray(conflicts) ? conflicts : [];
+  const rawOutbox = Array.isArray(outboxOperations) ? outboxOperations : [];
+  const conflictedOutbox = rawOutbox.filter((op) => op.syncStatus === "conflicted" || op.syncStatus === "conflict");
+
+  conflictedOutbox.forEach((op) => {
+    const key = `${op.workshopId || ""}:${op.entityType || ""}:${op.entityId || ""}`;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        groupKey: key,
+        workshopId: op.workshopId,
+        entityType: op.entityType,
+        entityId: op.entityId,
+        caseId: op.entityType === "case" ? op.entityId : "",
+        operations: [],
+        operationIds: [],
+        conflicts: [],
+        conflictIds: [],
+        serverConflictIds: [],
+        historicalRevisions: [],
+      });
+    }
+    const group = groups.get(key);
+    group.operations.push(op);
+    group.operationIds.push(op.operationId);
+    if (op.conflictId && isProvenServerConflictId(op.conflictId) && !group.serverConflictIds.includes(op.conflictId)) {
+      group.serverConflictIds.push(op.conflictId);
+    }
+    const rev = op.payload?.entity?.localRevision ?? op.payload?.localRevision;
+    if (rev !== undefined && rev !== null && !group.historicalRevisions.includes(rev)) group.historicalRevisions.push(rev);
+  });
+
+  rawConflicts.forEach((conflict) => {
+    const entityType = conflict.entityType || (conflict.type === "case_conflict" ? "case" : "");
+    const entityId = conflict.entityId || conflict.caseId || "";
+    const workshopId = conflict.workshopId || (typeof getSupabaseWorkshopId === "function" ? getSupabaseWorkshopId() : "");
+    const key = `${workshopId}:${entityType}:${entityId}`;
+
+    let group = groups.get(key);
+    if (!group) {
+      for (const g of groups.values()) {
+        if (conflict.localOperationId && g.operationIds.includes(conflict.localOperationId)) {
+          group = g;
+          break;
+        }
+        if (conflict.serverConflictId && g.serverConflictIds.includes(conflict.serverConflictId)) {
+          group = g;
+          break;
+        }
+      }
+    }
+
+    if (!group) {
+      group = {
+        groupKey: key || conflict.id,
+        workshopId,
+        entityType,
+        entityId,
+        caseId: entityType === "case" ? entityId : "",
+        operations: [],
+        operationIds: conflict.localOperationId ? [conflict.localOperationId] : [],
+        conflicts: [],
+        conflictIds: [],
+        serverConflictIds: (conflict.serverConflictId && isProvenServerConflictId(conflict.serverConflictId)) ? [conflict.serverConflictId] : [],
+        historicalRevisions: [],
+      };
+      groups.set(key || conflict.id, group);
+    }
+
+    group.conflicts.push(conflict);
+    group.conflictIds.push(conflict.id);
+    if (conflict.serverConflictId && isProvenServerConflictId(conflict.serverConflictId) && !group.serverConflictIds.includes(conflict.serverConflictId)) {
+      group.serverConflictIds.push(conflict.serverConflictId);
+    }
+    const rev = conflict.localCase?.localRevision ?? conflict.localValue?.localRevision;
+    if (rev !== undefined && rev !== null && !group.historicalRevisions.includes(rev)) {
+      group.historicalRevisions.push(rev);
+    }
+  });
+
+  return Array.from(groups.values()).map((group) => {
+    const historyCount = Math.max(group.operations.length, group.conflicts.length, 1);
+    const newestOperation = group.operations.at(-1) || null;
+    const primaryConflict = group.conflicts[0] || null;
+    const primaryId = primaryConflict?.id || newestOperation?.operationId || `group-${group.groupKey}`;
+
+    return {
+      ...primaryConflict,
+      id: primaryId,
+      groupKey: group.groupKey,
+      isGrouped: historyCount > 1,
+      historicalCount: historyCount,
+      historyCount,
+      operations: group.operations,
+      operationIds: [...new Set(group.operationIds)],
+      conflicts: group.conflicts,
+      conflictIds: [...new Set(group.conflictIds)],
+      serverConflictIds: [...new Set(group.serverConflictIds)],
+      historicalRevisions: group.historicalRevisions,
+      workshopId: group.workshopId,
+      entityType: group.entityType,
+      entityId: group.entityId,
+      caseId: group.caseId,
+      type: primaryConflict?.type || (group.entityType === "case" ? "server_entity_conflict" : "sync_conflict"),
+      localOperationId: newestOperation?.operationId || primaryConflict?.localOperationId || group.operationIds[0] || "",
+      serverConflictId: group.serverConflictIds[0] || (primaryConflict?.serverConflictId && isProvenServerConflictId(primaryConflict.serverConflictId) ? primaryConflict.serverConflictId : ""),
+    };
+  });
+}
+
+function markGroupConflictsResolved(workshopId, entityType, entityId, resolution = "keep_local", replacementOpId = "", members = {}) {
+  if (!state || !Array.isArray(state.syncConflicts)) return;
+  const localConflictIds = new Set((Array.isArray(members.localConflictIds) ? members.localConflictIds : []).map(String));
+  const operationIds = new Set((Array.isArray(members.operationIds) ? members.operationIds : []).map(String));
+  const serverConflictIds = new Set((Array.isArray(members.serverConflictIds) ? members.serverConflictIds : []).map(String));
+  if (!localConflictIds.size && !operationIds.size && !serverConflictIds.size) return;
+  let changed = false;
+  state.syncConflicts.forEach((entry) => {
+    const isSameEntity = entry.workshopId === workshopId
+      && entry.entityType === entityType
+      && (entry.entityId === entityId || entry.caseId === entityId);
+    const isMember = localConflictIds.has(String(entry.id || ""))
+      || operationIds.has(String(entry.localOperationId || ""))
+      || serverConflictIds.has(String(entry.serverConflictId || ""));
+    if (isSameEntity && isMember) {
+      entry.status = "resolved";
+      entry.pendingResolution = false;
+      entry.resolutionStage = "";
+      entry.decision = resolution === "keep_local" ? "kept_local" : "accepted_cloud";
+      entry.resolution = resolution === "keep_local" ? "keep_local" : "accept_server";
+      entry.resolvedAt = new Date().toISOString();
+      entry.resolvedBy = typeof getCurrentActor === "function" ? (getCurrentActor()?.userName || "Atelier") : "Atelier";
+      if (replacementOpId) entry.replacementOperationId = replacementOpId;
+      changed = true;
+    }
+  });
+  if (changed) {
+    state.syncConflicts = normalizeSyncConflicts(state.syncConflicts);
+    if (typeof saveState === "function") {
+      saveState({ skipCloud: true, skipSnapshot: true, boundedEntityDetection: true });
+    }
+    if (typeof renderSyncStatusStrip === "function") renderSyncStatusStrip();
+  }
+}
+
+async function reconcileServerResolvedConflicts(client = getSupabaseClient(), workshopId = getSupabaseWorkshopId()) {
+  if (!client || !workshopId) return { reconciled: 0 };
+  const openConflicts = (Array.isArray(state?.syncConflicts) ? state.syncConflicts : [])
+    .filter((c) => c.status === "open" && c.type === "server_entity_conflict");
+  if (!openConflicts.length) return { reconciled: 0 };
+
+  const { data: serverRows, error } = await client
+    .from("sync_entity_conflicts")
+    .select("id, workshop_id, local_operation_id, entity_type, entity_id, status, resolution, resolved_at")
+    .eq("workshop_id", workshopId);
+
+  if (error || !Array.isArray(serverRows)) return { reconciled: 0, error };
+
+  let reconciledCount = 0;
+
+  openConflicts.forEach((localConflict) => {
+    // Priority 1: local.serverConflictId === server.id
+    let matchingRow = null;
+    if (localConflict.serverConflictId && isProvenServerConflictId(localConflict.serverConflictId)) {
+      matchingRow = serverRows.find((r) => r.id === localConflict.serverConflictId);
+    }
+
+    // Priority 2: local.id === server.id when local entry is server_entity_conflict
+    if (!matchingRow && localConflict.id && isProvenServerConflictId(localConflict.id)) {
+      matchingRow = serverRows.find((r) => r.id === localConflict.id);
+    }
+
+    // Priority 3: local.localOperationId === server.local_operation_id
+    if (!matchingRow && localConflict.localOperationId) {
+      matchingRow = serverRows.find((r) => r.local_operation_id === localConflict.localOperationId);
+    }
+
+    if (matchingRow) {
+      if (matchingRow.status === "resolved") {
+        localConflict.status = "resolved";
+        localConflict.pendingResolution = false;
+        localConflict.resolution = matchingRow.resolution || "accept_server";
+        localConflict.decision = matchingRow.resolution === "keep_local" ? "kept_local" : "accepted_cloud";
+        localConflict.resolvedAt = matchingRow.resolved_at || new Date().toISOString();
+        localConflict.resolvedBy = "Serveur (Reconciled)";
+        if (matchingRow.id) localConflict.serverConflictId = matchingRow.id;
+        if (matchingRow.local_operation_id) localConflict.localOperationId = matchingRow.local_operation_id;
+        reconciledCount += 1;
+      }
+      return;
+    }
+
+    // Safe entity-only fallback for damaged historical records:
+    const entityId = localConflict.entityId || localConflict.caseId;
+    const candidates = serverRows.filter((r) => r.entity_type === localConflict.entityType && r.entity_id === entityId);
+    if (!candidates.length) return;
+
+    // Mixed resolved/open rows for the same entity MUST NOT auto-close
+    const hasOpenRows = candidates.some((r) => r.status === "open");
+    if (hasOpenRows) return;
+
+    // All candidate server conflict rows must be resolved
+    const allResolved = candidates.every((r) => r.status === "resolved");
+    if (!allResolved) return;
+
+    // Resolutions must be compatible (all rows have identical resolution)
+    const firstResolution = candidates[0].resolution;
+    const allCompatible = candidates.every((r) => r.resolution === firstResolution);
+    if (!allCompatible) return;
+
+    const representative = candidates[0];
+    localConflict.status = "resolved";
+    localConflict.pendingResolution = false;
+    localConflict.resolution = representative.resolution || "accept_server";
+    localConflict.decision = representative.resolution === "keep_local" ? "kept_local" : "accepted_cloud";
+    localConflict.resolvedAt = representative.resolved_at || new Date().toISOString();
+    localConflict.resolvedBy = "Serveur (Reconciled Entity)";
+    if (representative.id) localConflict.serverConflictId = representative.id;
+    if (representative.local_operation_id) localConflict.localOperationId = representative.local_operation_id;
+    reconciledCount += 1;
+  });
+
+  if (reconciledCount > 0) {
+    state.syncConflicts = normalizeSyncConflicts(state.syncConflicts);
+    await saveState({ skipCloud: true, skipSnapshot: true, boundedEntityDetection: true, cloudReason: "reconciled-server-conflicts" });
+    if (typeof renderSyncStatusStrip === "function") renderSyncStatusStrip();
+  }
+
+  return { reconciled: reconciledCount };
+}
+
 async function resolveCanonicalConcurrencyConflict(conflict, action) {
-  const operationId = String(conflict?.localOperationId || "");
   const operations = typeof loadDurableOutboxOperations === "function" ? await loadDurableOutboxOperations() : [];
+  const operationId = String(conflict?.localOperationId || "");
   const normalizedConflictId = String(conflict?.serverConflictId || conflict?.id || "");
+  const targetWorkshopId = conflict?.workshopId || (typeof getSupabaseWorkshopId === "function" ? getSupabaseWorkshopId() : "");
+  const targetEntityType = conflict?.entityType || (conflict?.type === "case_conflict" ? "case" : "");
+  const targetEntityId = String(conflict?.entityId || conflict?.caseId || "");
+
   const oldOperation = operations.find((entry) => entry.operationId === operationId)
-    || operations.find((entry) => normalizedConflictId && entry.conflictId === normalizedConflictId);
+    || operations.find((entry) => normalizedConflictId && entry.conflictId === normalizedConflictId)
+    || operations.find((entry) => entry.workshopId === targetWorkshopId && entry.entityType === targetEntityType && entry.entityId === targetEntityId && entry.syncStatus === "conflicted");
+
   if (!oldOperation || oldOperation.syncStatus !== "conflicted") {
     throw new Error("Opération conflictuelle durable introuvable.");
   }
-  const resolvedOperationId = oldOperation.operationId;
+
+  const workshopId = oldOperation.workshopId;
+  const entityType = oldOperation.entityType;
+  const entityId = oldOperation.entityId;
+
+  // Collapse all conflicted operations in the outbox sharing workshopId + entityType + entityId
+  const groupOperations = operations.filter((entry) => (
+    entry.workshopId === workshopId
+    && entry.entityType === entityType
+    && entry.entityId === entityId
+    && entry.syncStatus === "conflicted"
+  ));
+  const groupOperationIds = groupOperations.length ? groupOperations.map((o) => o.operationId) : [oldOperation.operationId];
+
   if (!["keep_local", "accept_cloud"].includes(action)) {
     throw new Error("Résolution de conflit serveur non prise en charge.");
   }
+
+  const client = getSupabaseClient();
+  const coverage = await establishServerConflictCoverage(client, workshopId, groupOperations);
+  const groupServerConflictIds = coverage.conflictIds;
+  const groupLocalConflictIds = collectLocalConflictResolutionMembers(
+    conflict,
+    groupOperationIds,
+    groupServerConflictIds,
+  );
+
   // Conflict snapshots are immutable evidence. Resolution authority is always
   // an exact, RLS-scoped read of the current canonical row.
-  const client = getSupabaseClient();
   const canonical = await fetchCurrentCanonicalForConflict(client, oldOperation);
   const serverVersion = canonical?.entity_version ?? null;
   const observed = {
-    workshopId: oldOperation.workshopId,
-    entityType: oldOperation.entityType,
-    entityId: oldOperation.entityId,
+    workshopId,
+    entityType,
+    entityId,
     serverVersion,
     lastOperationId: String(canonical?.last_operation_id || ""),
     deleted: Boolean(canonical?.deleted_at),
     updatedAt: canonical?.updated_at || new Date().toISOString(),
   };
+
   let replacement = null;
   if (action === "keep_local") {
+    let replacementPayload = null;
+    if (entityType === "case") {
+      const currentLocalCase = Array.isArray(state?.cases) ? state.cases.find((c) => c.id === entityId) : null;
+      if (!currentLocalCase) {
+        throw new Error("Entité locale introuvable dans l'état actuel: impossible de résoudre en conservant le local.");
+      }
+      replacementPayload = {
+        entity: cloneGranularSyncValue(currentLocalCase),
+        projectionLocalId: caseSyncLocalId(currentLocalCase),
+      };
+    } else if (entityType === "workshop_settings") {
+      const currentLocalSettings = state?.settings || {};
+      replacementPayload = {
+        ...(oldOperation.payload || {}),
+        entity: cloneGranularSyncValue(currentLocalSettings),
+      };
+    } else {
+      replacementPayload = cloneGranularSyncValue(oldOperation.payload || {});
+    }
+
     const operationIdSuffix = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
       ? crypto.randomUUID()
       : `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+    const replacementOperationId = `operation-${operationIdSuffix}`;
     replacement = normalizeDurableOutboxOperation({
       ...oldOperation,
-      operationId: `operation-${operationIdSuffix}`,
-      idempotencyKey: `${oldOperation.workshopId}:operation-${operationIdSuffix}`,
+      operationId: replacementOperationId,
+      idempotencyKey: `${workshopId}:${replacementOperationId}`,
       baseVersion: serverVersion,
       expectedVersion: serverVersion,
       entityVersion: null,
@@ -4079,24 +4471,160 @@ async function resolveCanonicalConcurrencyConflict(conflict, action) {
       conflictLocalPayload: null,
       conflictServerPayload: null,
       conflictDetectedAt: null,
+      payload: replacementPayload,
+      replacesOperationIds: groupOperationIds,
+      replacesConflictIds: groupServerConflictIds,
+      replacesLocalConflictIds: groupLocalConflictIds,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
+
+    // Preserve old conflicted records until replacement is acknowledged.
+    if (typeof enqueueReplacementOutboxOperation === "function") {
+      await enqueueReplacementOutboxOperation(replacement, observed);
+    } else {
+      await putDurableOutboxOperation(replacement);
+    }
+
+    return {
+      ok: true,
+      pending: true,
+      replacementOperationId: replacement.operationId,
+      serverVersion,
+      replacesOperationIds: groupOperationIds,
+      replacesConflictIds: groupServerConflictIds,
+      localConflictIds: groupLocalConflictIds,
+    };
   }
-  if (action === "accept_cloud") await applyCurrentCanonicalForAcceptedServer(oldOperation, canonical);
-  const serverConflictId = String(conflict?.serverConflictId || oldOperation.conflictId || conflict?.id || "");
-  if (client && serverConflictId) {
-    const { error } = await client.rpc("nimr_resolve_sync_entity_conflict", {
-      p_workshop_id: oldOperation.workshopId,
-      p_conflict_id: serverConflictId,
-      p_resolution: action === "accept_cloud" ? "accept_server" : "keep_local",
+
+  if (action === "accept_cloud") {
+    await applyCurrentCanonicalForAcceptedServer(oldOperation, canonical);
+    const resolvedConflictIds = new Set(Array.isArray(conflict?.resolvedConflictIds) ? conflict.resolvedConflictIds : []);
+    for (const scId of groupServerConflictIds) {
+      if (resolvedConflictIds.has(scId)) continue;
+      if (client && scId) {
+        await resolveServerEntityConflict(client, workshopId, scId, "accept_server");
+        resolvedConflictIds.add(scId);
+      }
+    }
+    if (typeof settleConflictedOutboxGroupAtomically === "function") {
+      await settleConflictedOutboxGroupAtomically(groupOperationIds, observed);
+    } else {
+      for (const opId of groupOperationIds) {
+        await resolveConflictedOutboxOperationAtomically(opId, observed, null);
+      }
+    }
+    markGroupConflictsResolved(workshopId, entityType, entityId, "accept_server", "", {
+      localConflictIds: groupLocalConflictIds,
+      operationIds: groupOperationIds,
+      serverConflictIds: groupServerConflictIds,
     });
-    if (error) throw new Error(`Résolution du conflit serveur impossible: ${error.message || error}`);
+    return {
+      ok: true,
+      serverVersion,
+      settledOperationIds: groupOperationIds,
+      localConflictIds: groupLocalConflictIds,
+      serverConflictIds: groupServerConflictIds,
+    };
   }
-  // Remove/swap the durable conflicted operation only after the fresh read and
-  // any accepted-server local persistence have succeeded.
-  await resolveConflictedOutboxOperationAtomically(resolvedOperationId, observed, replacement);
-  return { ok: true, replacementOperationId: replacement?.operationId || "", serverVersion };
+}
+
+async function resumeReplacementSettlementSaga(client, operation) {
+  const workshopId = operation.workshopId;
+  const allOperations = typeof loadDurableOutboxOperations === "function" ? await loadDurableOutboxOperations() : [];
+  const historicalOperationIds = Array.isArray(operation.replacesOperationIds)
+    ? operation.replacesOperationIds.map(String).filter(Boolean)
+    : [];
+  const historicalOperations = historicalOperationIds
+    .map((operationId) => allOperations.find((entry) => entry.operationId === operationId))
+    .filter(Boolean);
+  let coverage;
+  try {
+    if (!historicalOperationIds.length || historicalOperations.length !== historicalOperationIds.length) {
+      throw new Error(`Couverture des conflits serveur incomplète (${historicalOperations.length}/${historicalOperationIds.length}).`);
+    }
+    coverage = await establishServerConflictCoverage(client, workshopId, historicalOperations);
+  } catch (error) {
+    await updateDurableOutboxOperation(operation.operationId, {
+      syncStatus: "settling",
+      lastError: String(error?.message || error),
+    });
+    throw error;
+  }
+  const targetConflictIds = coverage.conflictIds;
+  const alreadyResolved = new Set(Array.isArray(operation.resolvedConflictIds) ? operation.resolvedConflictIds : []);
+
+  operation = await updateDurableOutboxOperation(operation.operationId, {
+    syncStatus: "settling",
+    replacesConflictIds: targetConflictIds,
+  }) || operation;
+
+  for (const conflictId of targetConflictIds) {
+    if (alreadyResolved.has(conflictId)) continue;
+    if (client) {
+      try {
+        await resolveServerEntityConflict(client, workshopId, conflictId, "keep_local");
+      } catch (error) {
+        await updateDurableOutboxOperation(operation.operationId, {
+          syncStatus: "settling",
+          lastError: `Settlement RPC error for ${conflictId}: ${error.message || error}`,
+          resolvedConflictIds: Array.from(alreadyResolved),
+        });
+        throw new Error(`Échec de règlement du conflit serveur ${conflictId}: ${error.message || error}`);
+      }
+      alreadyResolved.add(conflictId);
+      await updateDurableOutboxOperation(operation.operationId, {
+        resolvedConflictIds: Array.from(alreadyResolved),
+      });
+    }
+  }
+
+  const observed = operation.casObserved || {
+    workshopId: operation.workshopId,
+    entityType: operation.entityType,
+    entityId: operation.entityId,
+    serverVersion: operation.baseVersion,
+    lastOperationId: operation.operationId,
+    deleted: operation.action === "delete",
+    updatedAt: new Date().toISOString(),
+  };
+  const ack = operation.casAcknowledgement || { accepted: true, serverVersion: observed.serverVersion };
+
+  await completeDurableOutboxOperationAtomically(operation.operationId, observed, ack);
+  markGroupConflictsResolved(operation.workshopId, operation.entityType, operation.entityId, "keep_local", operation.operationId, {
+    localConflictIds: operation.replacesLocalConflictIds,
+    operationIds: historicalOperationIds,
+    serverConflictIds: targetConflictIds,
+  });
+  rememberGranularServerConfirmation();
+  return { acknowledged: true, settled: true, operationId: operation.operationId };
+}
+
+async function settleAcknowledgedReplacementOperation(client, replacementOperationId, acknowledgement = {}) {
+  const operations = typeof loadDurableOutboxOperations === "function" ? await loadDurableOutboxOperations() : [];
+  let replacement = operations.find((op) => op.operationId === replacementOperationId);
+  if (!replacement) return { settled: false, reason: "replacement-not-found" };
+  const observed = {
+    workshopId: replacement.workshopId,
+    entityType: replacement.entityType,
+    entityId: replacement.entityId,
+    serverVersion: acknowledgement.serverVersion ?? acknowledgement.accepted_version ?? replacement.baseVersion,
+    lastOperationId: replacement.operationId,
+    deleted: replacement.action === "delete",
+    updatedAt: acknowledgement.updatedAt || new Date().toISOString(),
+  };
+
+  replacement = await updateDurableOutboxOperation(replacement.operationId, {
+    syncStatus: "settling",
+    casAcknowledged: true,
+    casObserved: observed,
+    casAcknowledgement: acknowledgement,
+    resolvedConflictIds: replacement.resolvedConflictIds || [],
+  }) || replacement;
+
+  const result = await resumeReplacementSettlementSaga(client, replacement);
+  const remaining = typeof loadDurableOutboxOperations === "function" ? await loadDurableOutboxOperations() : [];
+  return { settled: true, remaining };
 }
 
 async function deleteCaseProjectionFromSupabase(client, canonical, fallbackWorkshopId = "") {
@@ -4237,6 +4765,9 @@ async function sendGranularOutboxOperation(client, user, operation) {
 }
 
 async function processGranularOutboxOperation(client, user, operation) {
+  if (operation.syncStatus === "settling" || operation.casAcknowledged) {
+    return resumeReplacementSettlementSaga(client, operation);
+  }
   const processing = await updateDurableOutboxOperation(operation.operationId, {
     syncStatus: "processing",
     lastError: "",
@@ -4263,7 +4794,25 @@ async function processGranularOutboxOperation(client, user, operation) {
         return { acknowledged: false, conflicted: true, operationId: processing.operationId, conflictId: acknowledgement.conflictId };
       }
       if (!acknowledgement.accepted) throw new Error("Résultat CAS serveur invalide: ni accepté ni conflit.");
-      await completeDurableOutboxOperationAtomically(processing.operationId, observed, acknowledgement);
+      const hasReplacedConflicts = Array.isArray(processing.replacesConflictIds) && processing.replacesConflictIds.filter(isProvenServerConflictId).length > 0;
+      if (hasReplacedConflicts) {
+        const settlingOp = await updateDurableOutboxOperation(processing.operationId, {
+          syncStatus: "settling",
+          casAcknowledged: true,
+          casObserved: observed,
+          casAcknowledgement: acknowledgement,
+          resolvedConflictIds: [],
+        });
+        rememberObservedGranularEntityMetadata(observed);
+        return resumeReplacementSettlementSaga(client, settlingOp || processing);
+      } else {
+        await completeDurableOutboxOperationAtomically(processing.operationId, observed, acknowledgement);
+        markGroupConflictsResolved(processing.workshopId, processing.entityType, processing.entityId, "keep_local", processing.operationId, {
+          localConflictIds: processing.replacesLocalConflictIds,
+          operationIds: processing.replacesOperationIds,
+          serverConflictIds: processing.replacesConflictIds,
+        });
+      }
     } else {
       await acknowledgeDurableOutboxOperation(processing.operationId, acknowledgement);
     }
@@ -4273,6 +4822,9 @@ async function processGranularOutboxOperation(client, user, operation) {
     const retained = typeof loadDurableOutboxOperations === "function"
       ? (await loadDurableOutboxOperations()).find((entry) => entry.operationId === processing.operationId)
       : null;
+    if (retained && retained.syncStatus === "settling") {
+      return { acknowledged: false, operationId: processing.operationId, settling: true, error: String(error?.message || error) };
+    }
     // A successfully persisted conflict is terminal for automatic sending.
     // Rendering/state failures after that transition must not make it retryable.
     if (retained?.syncStatus !== "conflicted") {
@@ -4355,7 +4907,7 @@ async function autoBackupToSupabase(reason = "autosave", options = {}) {
     const pending = records
       // A processing envelope can survive a workstation crash. Replaying its
       // immutable operationId is safe and required for restart recovery.
-      .filter((entry) => ["pending", "processing", "failed"].includes(entry.syncStatus))
+      .filter((entry) => ["pending", "processing", "settling", "failed"].includes(entry.syncStatus))
       .slice(0, GRANULAR_OUTBOX_BATCH_SIZE);
     const results = await processGranularOutboxBatch(client, user, pending);
     const failures = results.filter((result) => !result.acknowledged);
@@ -4616,7 +5168,11 @@ function legacyEnqueueOfflineAction(type = "sync_push", description = "Mise à j
             || action.payload?.snapshotFingerprint
             || "",
         };
-        return ["pending", "processing", "failed", "conflicted", "conflict"].includes(action.status || action.syncStatus)
+        const actionStatus = action.status || action.syncStatus;
+        const active = typeof isActiveDurableOutboxSyncStatus === "function"
+          ? isActiveDurableOutboxSyncStatus(actionStatus)
+          : ["pending", "processing", "settling", "failed", "conflicted", "conflict"].includes(actionStatus);
+        return active
           && (
             areOfflineSnapshotOperationsSameTarget(candidate, reference)
             || (typeof areDurableOutboxOperationsEquivalent === "function"
@@ -4741,7 +5297,12 @@ async function legacyProcessOfflineQueue() {
       : loadOfflineQueue();
     offlineQueue = records;
     window.offlineQueue = offlineQueue;
-    const pending = offlineQueue.filter((action) => ["pending", "processing", "failed"].includes(action.syncStatus || action.status));
+    const pending = offlineQueue.filter((action) => {
+      const actionStatus = action.syncStatus || action.status;
+      return typeof isSendableDurableOutboxSyncStatus === "function"
+        ? isSendableDurableOutboxSyncStatus(actionStatus)
+        : actionStatus === "pending" || actionStatus === "processing" || actionStatus === "failed";
+    });
     if (!pending.length) return { processed: 0 };
 
     if (typeof navigator !== "undefined" && navigator.onLine === false) {
@@ -5039,6 +5600,10 @@ if (typeof window !== "undefined") {
   window.handleRemoteCaseChange = handleRemoteCaseChange;
   window.handleRemoteBookingChange = handleRemoteBookingChange;
   window.resolveCanonicalConcurrencyConflict = resolveCanonicalConcurrencyConflict;
+  window.groupConflictedEntities = groupConflictedEntities;
+  window.reconcileServerResolvedConflicts = reconcileServerResolvedConflicts;
+  window.settleAcknowledgedReplacementOperation = settleAcknowledgedReplacementOperation;
+  window.markGroupConflictsResolved = markGroupConflictsResolved;
   window.NIMR_GRANULAR_SYNC_TEST_API = Object.freeze({
     applyRemoteEntityRow,
     buildGranularCursorFilter,
@@ -5051,6 +5616,10 @@ if (typeof window !== "undefined") {
     sendGranularOutboxOperation,
     normalizeCanonicalCasOutcome,
     resolveCanonicalConcurrencyConflict,
+    groupConflictedEntities,
+    reconcileServerResolvedConflicts,
+    settleAcknowledgedReplacementOperation,
+    markGroupConflictsResolved,
   });
   window.logSyncConflict = logSyncConflict;
   window.offlineQueue = offlineQueue;

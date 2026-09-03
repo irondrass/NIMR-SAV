@@ -14,6 +14,8 @@ const ENTITY_STATE_FORMAT = "nimr-sav-entity-state";
 const ENTITY_STATE_FORMAT_VERSION = 1;
 const DURABLE_OUTBOX_MIRROR_KEY = "nimr-sav-outbox-mirror:v2";
 const DURABLE_OUTBOX_FALLBACK_KEY = "nimr-sav-outbox-fallback:v2";
+const DURABLE_OUTBOX_ACTIVE_SYNC_STATUSES = new Set(["pending", "processing", "settling", "failed", "conflicted", "conflict"]);
+const DURABLE_OUTBOX_SENDABLE_SYNC_STATUSES = new Set(["pending", "processing", "failed"]);
 const LARGE_STATE_CASE_THRESHOLD = 250;
 const LARGE_STATE_BYTE_THRESHOLD = 2 * 1024 * 1024;
 
@@ -343,11 +345,19 @@ function getObservedGranularServerVersion(workshopId, entityType, entityId) {
   return getObservedGranularEntityMetadata(workshopId, entityType, entityId)?.serverVersion ?? null;
 }
 
+function isActiveDurableOutboxSyncStatus(status) {
+  return DURABLE_OUTBOX_ACTIVE_SYNC_STATUSES.has(String(status || ""));
+}
+
+function isSendableDurableOutboxSyncStatus(status) {
+  return DURABLE_OUTBOX_SENDABLE_SYNC_STATUSES.has(String(status || ""));
+}
+
 function getMutationBaseVersion(workshopId, entityType, entityId) {
   const key = [workshopId, entityType, entityId].map((value) => String(value || "")).join("|");
   if (!durableOutboxEntityBaseVersions.size && typeof readDurableOutboxMirror === "function") {
     readDurableOutboxMirror().forEach((entry) => {
-      if (!["pending", "processing", "failed", "conflicted", "conflict"].includes(entry.syncStatus || entry.status)) return;
+      if (!isActiveDurableOutboxSyncStatus(entry.syncStatus || entry.status)) return;
       const entryKey = [entry.workshopId, entry.entityType, entry.entityId].map((value) => String(value || "")).join("|");
       if (!durableOutboxEntityBaseVersions.has(entryKey)) {
         durableOutboxEntityBaseVersions.set(entryKey, normalizeOutboxExpectedVersion(entry.baseVersion ?? entry.expectedVersion));
@@ -1126,7 +1136,7 @@ async function acknowledgeEquivalentDurableOutboxOperations(reference, acknowled
   return runDurableOutboxMutation(async () => {
     const records = await loadDurableOutboxOperations();
     const equivalent = records.filter((entry) => (
-      ["pending", "processing", "failed"].includes(entry.syncStatus)
+      isSendableDurableOutboxSyncStatus(entry.syncStatus)
       && areDurableOutboxOperationsEquivalent(entry, reference)
     ));
     const equivalentIds = new Set(equivalent.map((entry) => entry.operationId));
@@ -1173,7 +1183,7 @@ function normalizeDurableOutboxOperation(input = {}) {
     lastError: String(input.lastError || input.error || ""),
     createdAt,
     updatedAt: input.updatedAt || createdAt,
-    syncStatus: ["pending", "processing", "failed", "conflicted", "conflict", "acknowledged"].includes(input.syncStatus || input.status)
+    syncStatus: ["pending", "processing", "settling", "failed", "conflicted", "conflict", "acknowledged"].includes(input.syncStatus || input.status)
       ? ((input.syncStatus || input.status) === "conflict" ? "conflicted" : (input.syncStatus || input.status))
       : "pending",
     conflictId: String(input.conflictId || ""),
@@ -1185,6 +1195,13 @@ function normalizeDurableOutboxOperation(input = {}) {
     conflictLocalPayload: input.conflictLocalPayload && typeof input.conflictLocalPayload === "object" ? cloneGranularSyncValue(input.conflictLocalPayload) : null,
     conflictServerPayload: input.conflictServerPayload && typeof input.conflictServerPayload === "object" ? cloneGranularSyncValue(input.conflictServerPayload) : null,
     conflictDetectedAt: input.conflictDetectedAt || null,
+    replacesOperationIds: Array.isArray(input.replacesOperationIds) ? input.replacesOperationIds.map(String) : [],
+    replacesConflictIds: Array.isArray(input.replacesConflictIds) ? input.replacesConflictIds.map(String) : [],
+    replacesLocalConflictIds: Array.isArray(input.replacesLocalConflictIds) ? input.replacesLocalConflictIds.map(String) : [],
+    casAcknowledged: Boolean(input.casAcknowledged),
+    casObserved: input.casObserved && typeof input.casObserved === "object" ? cloneGranularSyncValue(input.casObserved) : null,
+    casAcknowledgement: input.casAcknowledgement && typeof input.casAcknowledgement === "object" ? cloneGranularSyncValue(input.casAcknowledgement) : null,
+    resolvedConflictIds: Array.isArray(input.resolvedConflictIds) ? input.resolvedConflictIds.map(String) : [],
     description: String(input.description || "Mise à jour des données"),
   };
 }
@@ -1220,7 +1237,7 @@ function publishDurableOutboxMirror(records = []) {
   }));
   durableOutboxEntityBaseVersions.clear();
   compact.forEach((entry) => {
-    if (!["pending", "processing", "failed", "conflicted"].includes(entry.syncStatus)) return;
+    if (!isActiveDurableOutboxSyncStatus(entry.syncStatus)) return;
     const entityKey = [entry.workshopId, entry.entityType, entry.entityId].map((value) => String(value || "")).join("|");
     if (!durableOutboxEntityBaseVersions.has(entityKey)) {
       durableOutboxEntityBaseVersions.set(entityKey, entry.baseVersion);
@@ -1250,7 +1267,7 @@ function publishDurableOutboxMirror(records = []) {
     // Le miroir compact est informatif ; IndexedDB reste la source durable.
   }
   window.NIMR_OUTBOX_STATUS = {
-    pending: compact.filter((entry) => ["pending", "processing", "failed", "conflicted"].includes(entry.syncStatus)).length,
+    pending: compact.filter((entry) => isActiveDurableOutboxSyncStatus(entry.syncStatus)).length,
     conflicts: compact.filter((entry) => entry.syncStatus === "conflicted").length,
     failed: compact.filter((entry) => entry.syncStatus === "failed").length,
     lastError: compact.slice().reverse().find((entry) => entry.lastError)?.lastError || "",
@@ -1488,7 +1505,7 @@ async function findActiveDurableOutboxOperationForEntity(workshopId, entityType,
     entry.workshopId === String(workshopId || "")
     && entry.entityType === String(entityType || "")
     && entry.entityId === String(entityId || "")
-    && ["pending", "processing", "failed", "conflicted"].includes(entry.syncStatus)
+    && isActiveDurableOutboxSyncStatus(entry.syncStatus)
   )) || null;
 }
 
@@ -1507,7 +1524,8 @@ async function completeDurableOutboxOperationAtomically(operationId, observedVal
     const journalKey = `nimr-sav-cas-commit:${id}`;
     localStorage.setItem(journalKey, JSON.stringify({ operationId: id, observed: settledObserved }));
     await putSyncMetadata(settledObserved.key, settledObserved);
-    const retained = records.filter((entry) => entry.operationId !== id);
+    const deleteIds = new Set([id, ...(Array.isArray(matched.replacesOperationIds) ? matched.replacesOperationIds : [])]);
+    const retained = records.filter((entry) => !deleteIds.has(entry.operationId));
     writeOutboxFallback(retained);
     localStorage.removeItem(journalKey);
     observedGranularEntityMetadata.set(settledObserved.key, settledObserved);
@@ -1530,6 +1548,11 @@ async function completeDurableOutboxOperationAtomically(operationId, observedVal
             settledObserved = selectMonotonicObservedGranularMetadata(metadataRequest.result, observed);
             stores[SYNC_METADATA_STORE].put(settledObserved);
             stores[DURABLE_OUTBOX_STORE].delete(id);
+            if (Array.isArray(acknowledged.replacesOperationIds)) {
+              acknowledged.replacesOperationIds.forEach((oldId) => {
+                stores[DURABLE_OUTBOX_STORE].delete(String(oldId));
+              });
+            }
           };
         };
         return null;
@@ -1656,6 +1679,76 @@ async function resolveConflictedOutboxOperationAtomically(operationId, observedV
   return { resolved, replacement: resolved ? replacement : null };
 }
 
+async function enqueueReplacementOutboxOperation(replacementInput, observedValue = {}) {
+  const replacement = normalizeDurableOutboxOperation(replacementInput);
+  const observed = normalizeObservedGranularMetadata(observedValue);
+  if (!replacement || !replacement.operationId) throw new Error("Opération de remplacement invalide.");
+  if (typeof indexedDB === "undefined") {
+    const records = readOutboxFallback();
+    const next = records.filter((entry) => entry.operationId !== replacement.operationId);
+    next.push(replacement);
+    const currentObserved = await loadSyncMetadata(observed.key);
+    const settledObserved = selectMonotonicObservedGranularMetadata(currentObserved, observed);
+    await putSyncMetadata(settledObserved.key, settledObserved);
+    writeOutboxFallback(next);
+    observedGranularEntityMetadata.set(settledObserved.key, settledObserved);
+    publishDurableOutboxMirror(next);
+    return replacement;
+  }
+  await runDurableOutboxMutation(async () => {
+    await runIndexedDbStoresTransaction(
+      [DURABLE_OUTBOX_STORE, SYNC_METADATA_STORE],
+      "readwrite",
+      (stores) => {
+        stores[DURABLE_OUTBOX_STORE].put(replacement);
+        const metadataRequest = stores[SYNC_METADATA_STORE].get(observed.key);
+        metadataRequest.onsuccess = () => {
+          const settledObserved = selectMonotonicObservedGranularMetadata(metadataRequest.result, observed);
+          stores[SYNC_METADATA_STORE].put(settledObserved);
+        };
+      },
+    );
+    await loadDurableOutboxOperations();
+  });
+  return replacement;
+}
+
+async function settleConflictedOutboxGroupAtomically(operationIds = [], observedValue = {}) {
+  const ids = Array.isArray(operationIds) ? operationIds.map(String).filter(Boolean) : [];
+  const observed = normalizeObservedGranularMetadata(observedValue);
+  if (typeof indexedDB === "undefined") {
+    const records = readOutboxFallback();
+    const idSet = new Set(ids);
+    const next = records.filter((entry) => !idSet.has(entry.operationId));
+    const currentObserved = await loadSyncMetadata(observed.key);
+    const settledObserved = selectMonotonicObservedGranularMetadata(currentObserved, observed);
+    await putSyncMetadata(settledObserved.key, settledObserved);
+    writeOutboxFallback(next);
+    observedGranularEntityMetadata.set(settledObserved.key, settledObserved);
+    publishDurableOutboxMirror(next);
+    return { settled: ids, remaining: next };
+  }
+  let settledObserved = null;
+  await runDurableOutboxMutation(async () => {
+    await runIndexedDbStoresTransaction(
+      [DURABLE_OUTBOX_STORE, SYNC_METADATA_STORE],
+      "readwrite",
+      (stores) => {
+        ids.forEach((id) => stores[DURABLE_OUTBOX_STORE].delete(id));
+        const metadataRequest = stores[SYNC_METADATA_STORE].get(observed.key);
+        metadataRequest.onsuccess = () => {
+          settledObserved = selectMonotonicObservedGranularMetadata(metadataRequest.result, observed);
+          stores[SYNC_METADATA_STORE].put(settledObserved);
+        };
+      },
+    );
+    await loadDurableOutboxOperations();
+  });
+  if (settledObserved) observedGranularEntityMetadata.set(settledObserved.key, settledObserved);
+  const remaining = await loadDurableOutboxOperations();
+  return { settled: ids, remaining };
+}
+
 async function updateDurableOutboxOperation(operationId, changes = {}) {
   return runDurableOutboxMutation(async () => {
     const records = await loadDurableOutboxOperations();
@@ -1692,7 +1785,7 @@ function readDurableOutboxMirror() {
 }
 
 function getPendingOutboxCount() {
-  return readDurableOutboxMirror().filter((entry) => ["pending", "processing", "failed", "conflicted"].includes(entry.syncStatus)).length;
+  return readDurableOutboxMirror().filter((entry) => isActiveDurableOutboxSyncStatus(entry.syncStatus)).length;
 }
 
 window.estimateStateJsonBytes = estimateStateJsonBytes;
@@ -1738,6 +1831,8 @@ window.findActiveDurableOutboxOperationForEntity = findActiveDurableOutboxOperat
 window.completeDurableOutboxOperationAtomically = completeDurableOutboxOperationAtomically;
 window.conflictDurableOutboxOperationAtomically = conflictDurableOutboxOperationAtomically;
 window.resolveConflictedOutboxOperationAtomically = resolveConflictedOutboxOperationAtomically;
+window.enqueueReplacementOutboxOperation = enqueueReplacementOutboxOperation;
+window.settleConflictedOutboxGroupAtomically = settleConflictedOutboxGroupAtomically;
 
 window.getDurableOutboxEquivalenceKey = getDurableOutboxEquivalenceKey;
 window.areDurableOutboxOperationsEquivalent = areDurableOutboxOperationsEquivalent;
@@ -1745,6 +1840,8 @@ window.consolidateDurableOutboxOperations = consolidateDurableOutboxOperations;
 window.acknowledgeEquivalentDurableOutboxOperations = acknowledgeEquivalentDurableOutboxOperations;
 window.readDurableOutboxMirror = readDurableOutboxMirror;
 window.getPendingOutboxCount = getPendingOutboxCount;
+window.isActiveDurableOutboxSyncStatus = isActiveDurableOutboxSyncStatus;
+window.isSendableDurableOutboxSyncStatus = isSendableDurableOutboxSyncStatus;
 window.getSyncStateFingerprint = getSyncStateFingerprint;
 window.cloneSyncStateSnapshot = cloneSyncStateSnapshot;
 window.buildSyncFingerprintState = buildSyncFingerprintState;

@@ -3081,7 +3081,7 @@ function renderCases() {
           ? `RDV ${formatDateTime(item.appointment.start)}`
           : "RDV non planifié";
         return `
-          <button class="case-card${active}${isCaseBlocked(item) ? " blocked-case" : ""}" type="button" data-case="${item.id}">
+          <button class="case-card${active}${isCaseBlocked(item) ? " blocked-case" : ""}" type="button" data-case="${escapeAttr(item.id)}">
             <span class="case-card-head">
               <strong class="case-card-client">${escapeHtml(item.clientName || "Client sans nom")}</strong>
               <span class="tag case-status-tag">${escapeHtml(statusLabels[status] || status)}</span>
@@ -5178,11 +5178,17 @@ async function openPhotoPreview(item, index) {
     notifyUser("Photo indisponible dans le stockage local.", "error");
     return;
   }
+  const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const appShell = document.querySelector(".app-shell");
+  const wasInert = Boolean(appShell?.hasAttribute("inert"));
+  if (appShell) appShell.setAttribute("inert", "");
+
   const url = URL.createObjectURL(record.blob);
   const modal = document.createElement("div");
   modal.className = "photo-preview-modal";
   modal.setAttribute("role", "dialog");
   modal.setAttribute("aria-modal", "true");
+  modal.setAttribute("aria-label", `Aperçu de la photo : ${photo.name || "Photo dossier"}`);
   modal.innerHTML = `
     <div class="photo-preview-dialog">
       <div class="photo-preview-header">
@@ -5192,19 +5198,39 @@ async function openPhotoPreview(item, index) {
       <img src="${url}" alt="${escapeAttr(photo.name || "Photo dossier")}" />
     </div>
   `;
+  let isCleanedUp = false;
   const close = () => {
+    if (isCleanedUp) return;
+    isCleanedUp = true;
     URL.revokeObjectURL(url);
     modal.remove();
     document.removeEventListener("keydown", onKeyDown);
+    if (!wasInert && appShell) {
+      appShell.removeAttribute("inert");
+    }
+    if (previousFocus && previousFocus.isConnected && typeof previousFocus.focus === "function") {
+      previousFocus.focus();
+    }
   };
   const onKeyDown = (event) => {
-    if (event.key === "Escape") close();
+    if (event.key === "Escape") {
+      event.preventDefault();
+      close();
+      return;
+    }
+    if (event.key === "Tab") {
+      trapFocusWithin(modal, event);
+    }
   };
   modal.addEventListener("click", (event) => {
     if (event.target === modal || event.target.closest("[data-close-photo-preview]")) close();
   });
   document.addEventListener("keydown", onKeyDown);
   document.body.appendChild(modal);
+  const closeBtn = modal.querySelector("[data-close-photo-preview]");
+  if (closeBtn && typeof closeBtn.focus === "function") {
+    closeBtn.focus();
+  }
 }
 
 function getAssignedResourceNamesForStep(item, key) {
@@ -6349,7 +6375,7 @@ function renderProposals(root, item) {
         <p class="muted">Fin estimée ${formatDateTime(proposal.delivery)}</p>
       </div>
       <ol>
-        ${proposal.steps.map((step) => `<li>${step.title}: ${formatDateTime(step.start)} → ${formatDateTime(step.end)}</li>`).join("")}
+        ${proposal.steps.map((step) => `<li>${escapeHtml(step.title)}: ${formatDateTime(step.start)} → ${formatDateTime(step.end)}</li>`).join("")}
       </ol>
       <button class="primary-button" type="button" data-accept-main-proposal>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg>

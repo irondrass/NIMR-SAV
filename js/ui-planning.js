@@ -400,11 +400,11 @@ function renderResources() {
           <div class="resource-edit-grid">
             <label>
               Nom
-              <input data-resource-field="name" data-resource-id="${resource.id}" value="${escapeAttr(resource.name)}" ${canEditPlanning ? "" : `disabled title="${escapeAttr(deniedTitle)}"`} />
+              <input data-resource-field="name" data-resource-id="${escapeAttr(resource.id)}" value="${escapeAttr(resource.name)}" ${canEditPlanning ? "" : `disabled title="${escapeAttr(deniedTitle)}"`} />
             </label>
             <label>
               Rôle
-              <select data-resource-field="role" data-resource-id="${resource.id}" ${canEditPlanning ? "" : `disabled title="${escapeAttr(deniedTitle)}"`}>
+              <select data-resource-field="role" data-resource-id="${escapeAttr(resource.id)}" ${canEditPlanning ? "" : `disabled title="${escapeAttr(deniedTitle)}"`}>
                 ${Object.entries(ROLE_LABELS)
                   .map(([value, label]) => `<option value="${value}" ${resource.role === value ? "selected" : ""}>${label}</option>`)
                   .join("")}
@@ -412,27 +412,27 @@ function renderResources() {
             </label>
             <label>
               Emplacement
-              <input data-resource-field="location" data-resource-id="${resource.id}" value="${escapeAttr(resource.location || "")}" ${canEditPlanning ? "" : `disabled title="${escapeAttr(deniedTitle)}"`} />
+              <input data-resource-field="location" data-resource-id="${escapeAttr(resource.id)}" value="${escapeAttr(resource.location || "")}" ${canEditPlanning ? "" : `disabled title="${escapeAttr(deniedTitle)}"`} />
             </label>
             <label>
               Site
-              <select data-resource-field="site" data-resource-id="${resource.id}" ${canEditPlanning ? "" : `disabled title="${escapeAttr(deniedTitle)}"`}>
+              <select data-resource-field="site" data-resource-id="${escapeAttr(resource.id)}" ${canEditPlanning ? "" : `disabled title="${escapeAttr(deniedTitle)}"`}>
                 <option value="internal" ${resource.site !== "external" ? "selected" : ""}>Interne atelier</option>
                 <option value="external" ${resource.site === "external" ? "selected" : ""}>Sous-traitant externe</option>
               </select>
             </label>
             <label>
               Capacité simultanée
-              <input type="number" min="1" step="1" data-resource-field="capacity" data-resource-id="${resource.id}" value="${Math.max(1, Number(resource.capacity || 1))}" ${canEditPlanning ? "" : `disabled title="${escapeAttr(deniedTitle)}"`} />
+              <input type="number" min="1" step="1" data-resource-field="capacity" data-resource-id="${escapeAttr(resource.id)}" value="${Math.max(1, Number(resource.capacity || 1))}" ${canEditPlanning ? "" : `disabled title="${escapeAttr(deniedTitle)}"`} />
             </label>
             <label>
               Capacité journalière (min)
-              <input type="number" min="0" step="15" data-resource-field="dailyCapacityMinutes" data-resource-id="${resource.id}" value="${Number(resource.dailyCapacityMinutes || 0) || ""}" placeholder="Selon calendrier" ${canEditPlanning ? "" : `disabled title="${escapeAttr(deniedTitle)}"`} />
+              <input type="number" min="0" step="15" data-resource-field="dailyCapacityMinutes" data-resource-id="${escapeAttr(resource.id)}" value="${Number(resource.dailyCapacityMinutes || 0) || ""}" placeholder="Selon calendrier" ${canEditPlanning ? "" : `disabled title="${escapeAttr(deniedTitle)}"`} />
             </label>
             ${resource.site === "external" ? `
-              <label>Transfert aller (min)<input type="number" min="0" step="15" data-resource-field="transferOutMinutes" data-resource-id="${resource.id}" value="${Number(resource.transferOutMinutes || 0)}" ${canEditPlanning ? "" : `disabled title="${escapeAttr(deniedTitle)}"`} /></label>
-              <label>Transfert retour (min)<input type="number" min="0" step="15" data-resource-field="transferReturnMinutes" data-resource-id="${resource.id}" value="${Number(resource.transferReturnMinutes || 0)}" ${canEditPlanning ? "" : `disabled title="${escapeAttr(deniedTitle)}"`} /></label>
-              <label>Délai standard (min)<input type="number" min="0" step="15" data-resource-field="standardLeadTimeMinutes" data-resource-id="${resource.id}" value="${Number(resource.standardLeadTimeMinutes || 0)}" ${canEditPlanning ? "" : `disabled title="${escapeAttr(deniedTitle)}"`} /></label>
+              <label>Transfert aller (min)<input type="number" min="0" step="15" data-resource-field="transferOutMinutes" data-resource-id="${escapeAttr(resource.id)}" value="${Number(resource.transferOutMinutes || 0)}" ${canEditPlanning ? "" : `disabled title="${escapeAttr(deniedTitle)}"`} /></label>
+              <label>Transfert retour (min)<input type="number" min="0" step="15" data-resource-field="transferReturnMinutes" data-resource-id="${escapeAttr(resource.id)}" value="${Number(resource.transferReturnMinutes || 0)}" ${canEditPlanning ? "" : `disabled title="${escapeAttr(deniedTitle)}"`} /></label>
+              <label>Délai standard (min)<input type="number" min="0" step="15" data-resource-field="standardLeadTimeMinutes" data-resource-id="${escapeAttr(resource.id)}" value="${Number(resource.standardLeadTimeMinutes || 0)}" ${canEditPlanning ? "" : `disabled title="${escapeAttr(deniedTitle)}"`} /></label>
             ` : ""}
             <span class="case-meta">
               ${resource.fastLane ? `<span class="tag ok">Fast Lane</span>` : ""}

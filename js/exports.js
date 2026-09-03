@@ -1707,7 +1707,7 @@ function printTechnicianTaskSheet(item, bookingId, technicianId = "") {
   }
   const technicianName = getBookingTechnicianName(booking, technicianId);
   const equipment = getBookingEquipmentNames(booking) || "-";
-  const notes = (booking.notes || []).map((note) => `${formatDateTime(note.at)} - ${getResource(note.by)?.name || note.by || "Technicien"} : ${escapeHtml(note.text)}`).join("<br>") || "Aucune note.";
+  const notes = (booking.notes || []).map((note) => `${formatDateTime(note.at)} - ${escapeHtml(getResource(note.by)?.name || note.by || "Technicien")} : ${escapeHtml(note.text)}`).join("<br>") || "Aucune note.";
   const status = typeof getTechnicianTaskStatus === "function" ? getTechnicianTaskStatus(item, booking) : getBookingOperationalStatus(booking);
   const statusLabel = typeof getTechnicianStatusLabel === "function" ? getTechnicianStatusLabel(status) : getBookingStatusLabel(booking);
   const popup = window.open("", "_blank", "width=900,height=1100");

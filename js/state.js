@@ -21,7 +21,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v23.3.21";
+const APP_VERSION = "v23.3.22";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const CURRENT_DATA_SCHEMA_VERSION = 2;
@@ -4850,7 +4850,16 @@ function showPromptModal(htmlMessage, expectedText) {
     input.autocomplete = "off";
     body.appendChild(input);
 
+    const onInputKeyDown = (event) => {
+      if (event.key === "Enter" && !event.isComposing) {
+        event.preventDefault();
+        onConfirm();
+      }
+    };
+    input.addEventListener("keydown", onInputKeyDown);
+
     const cleanup = () => {
+      input.removeEventListener("keydown", onInputKeyDown);
       cancelBtn.removeEventListener("click", onCancel);
       confirmBtn.removeEventListener("click", onConfirm);
       closeAccessibleCustomModal();

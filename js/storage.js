@@ -2088,8 +2088,8 @@ function renderAutosaveHealthStatus() {
     <strong>${ok ? "Sauvegarde automatique OK" : "Contrôle sauvegarde à vérifier"}</strong><br />
     Dernière sauvegarde locale : ${formatBackupDate(health.lastSavedAt)} · Version : ${health.appVersion} · Dossiers : ${health.casesCount}<br />
     Principal : ${health.principal ? "OK" : "manquant"} · Cache IndexedDB : ${health.indexedDb ? "OK (primaire)" : "indisponible"} · Miroir : ${health.mirror ? "OK" : "manquant"} · Points de restauration : ${health.snapshots}<br />
-    Cloud auto : ${health.cloud ? formatBackupDate(health.cloud) : "non configuré"}${health.cloudError ? ` · Dernière erreur cloud : ${health.cloudError}` : ""}
-    ${health.errors.length ? `<br />Erreurs : ${health.errors.join(", ")}` : ""}
+    Cloud auto : ${health.cloud ? formatBackupDate(health.cloud) : "non configuré"}${health.cloudError ? ` · Dernière erreur cloud : ${escapeHtml(health.cloudError)}` : ""}
+    ${health.errors.length ? `<br />Erreurs : ${health.errors.map(escapeHtml).join(", ")}` : ""}
   `;
 }
 
@@ -2188,9 +2188,13 @@ async function restoreLatestAutomaticSnapshot() {
 
 function getBackupPasswordFromUser(title, message, options = {}) {
   return new Promise((resolve) => {
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const appShell = document.querySelector(".app-shell");
+    const wasInert = Boolean(appShell?.hasAttribute("inert"));
+    if (appShell) appShell.setAttribute("inert", "");
+
     const overlay = document.createElement("div");
     overlay.className = "custom-modal-overlay";
-    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     overlay.innerHTML = `
       <form class="custom-modal-content password-modal" role="dialog" aria-modal="true" aria-label="${escapeAttr(title)}">
         <h3>${escapeHtml(title)}</h3>
@@ -2208,15 +2212,29 @@ function getBackupPasswordFromUser(title, message, options = {}) {
     `;
     const form = overlay.querySelector("form");
     const status = overlay.querySelector("[data-password-status]");
+    let isCleanedUp = false;
     const close = (value) => {
+      if (isCleanedUp) return;
+      isCleanedUp = true;
+      document.removeEventListener("keydown", onGlobalKeyDown);
       overlay.remove();
+      if (!wasInert && appShell) {
+        appShell.removeAttribute("inert");
+      }
       previousFocus?.focus?.();
       resolve(value);
+    };
+    const onGlobalKeyDown = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        close(null);
+      }
     };
     overlay.addEventListener("click", (event) => {
       if (event.target === overlay || event.target.closest("[data-password-cancel]")) close(null);
     });
     form.addEventListener("keydown", (event) => trapFocusWithin(form, event));
+    document.addEventListener("keydown", onGlobalKeyDown);
     form.addEventListener("submit", (event) => {
       event.preventDefault();
       const password = form.elements.password.value;

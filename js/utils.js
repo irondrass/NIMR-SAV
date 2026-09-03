@@ -452,10 +452,16 @@ function setupServiceWorkerUpdates(registration) {
       }
     });
   });
-  navigator.serviceWorker.addEventListener("controllerchange", () => {
-    if (!window.__nimrReloadingForUpdate) {
-      window.__nimrReloadingForUpdate = true;
-      forceEmergencyAutosave();
+  navigator.serviceWorker.addEventListener("controllerchange", async () => {
+    if (window.__nimrReloadingForUpdate) return;
+    window.__nimrReloadingForUpdate = true;
+    try {
+      if (typeof forceEmergencyAutosave === "function") {
+        await Promise.resolve(forceEmergencyAutosave());
+      }
+    } catch (error) {
+      console.warn("Erreur sauvegarde d'urgence avant rechargement PWA:", error);
+    } finally {
       window.location.reload();
     }
   });

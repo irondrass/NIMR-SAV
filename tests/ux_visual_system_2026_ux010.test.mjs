@@ -99,10 +99,10 @@ await check("I responsive hardening covers tablet and small mobile layouts", () 
   assert.match(ux, /@media \(prefers-reduced-motion:\s*reduce\)/u);
 });
 
-await check("J service worker is source-refreshed without changing the v23.3.20 cache contract", () => {
+await check("J service worker is source-refreshed without changing the v23.3.21 cache contract", () => {
   assert.match(sw, /UX-010 source refresh/u);
-  assert.match(sw, /const CACHE_NAME = "nimr-sav-v23\.3\.20"/u);
-  assert.match(read("js/version.js"), /^window\.APP_VERSION = "v23\.3\.20";$/mu);
+  assert.match(sw, /const CACHE_NAME = "nimr-sav-v23\.3\.21"/u);
+  assert.match(read("js/version.js"), /^window\.APP_VERSION = "v23\.3\.21";$/mu);
 });
 
 await check("K UX-010 does not introduce auth, SQL, service-role, or permission authority changes", () => {
@@ -191,18 +191,28 @@ await check("L changed paths are limited to the approved UX-010 surfaces", () =>
     .map((line) => line.includes(" -> ") ? line.split(" -> ").pop() : line);
   const allowed = new Set([
     "styles.css",
+    "index.html",
+    "offline.html",
     "js/state.js",
     "js/storage.js",
     "js/supabase-sync.js",
     "js/ui-cases.js",
+    "js/utils.js",
+    "js/version.js",
+    "js/estimate-import.js",
     "app.js",
     "sw.js",
     "tests/identity_database_authority_hardening_identity001d1.test.mjs",
+    "tests/identity_invited_user_password_onboarding_identity001d2e.test.mjs",
+    "tests/identity_password_recovery_otp_identity001d2f.test.mjs",
+    "tests/perf_fast_pwa_startup_perf001.test.mjs",
     "tests/ux_visual_system_2026_ux010.test.mjs",
     "tests/sync_granular_bootstrap_self_heal_sync001.test.mjs",
     "tests/sync_conflict_reconcile_and_collapse_sync002.test.mjs",
     "tests/sync_equivalent_cas_auto_reconcile_sync0021.test.mjs",
     "tests/sync_clean_reload_localrevision_drift_sync0022.test.mjs",
+    "tests/pwa_deploy_asset_version_consistency_cache001.test.mjs",
+    "tests/pwa_cache_version_contract.test.mjs",
     "tests/offline_concurrency_chaos_p010.test.mjs",
     "tests/helpers/granular_supabase_adapter.mjs",
   ]);

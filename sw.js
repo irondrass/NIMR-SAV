@@ -2,37 +2,38 @@
 // IDENTITY-001D2-F source refresh: refresh the recovery OTP UI without changing the v23.3.20 cache contract.
 // PERF-001 source refresh: render the cached PWA shell immediately while GitHub Pages revalidates in background.
 // UX-010 source refresh: deliver the 2026 visual system and overlap hardening without changing the v23.3.20 cache contract.
-const CACHE_NAME = "nimr-sav-v23.3.20";
+// CACHE-001 source refresh: atomic worker-aligned release v23.3.21 with active cache isolation and immutable assets.
+const CACHE_NAME = "nimr-sav-v23.3.21";
 const ASSETS = [
   "./",
   "./index.html",
   "./offline.html",
   "./rescue.html",
-  "./styles.css?v=23.3.20",
-  "./app.js?v=23.3.20",
+  "./styles.css?v=23.3.21",
+  "./app.js?v=23.3.21",
   "./manifest.webmanifest",
-  "./js/version.js?v=23.3.20",
+  "./js/version.js?v=23.3.21",
   "./supabase-schema.sql",
   "./assets/icon.svg",
   "./assets/icon-192.png",
   "./assets/icon-512.png",
   "./assets/apple-touch-icon.png",
-  "./vendor/pdf.min.js?v=23.3.20",
-  "./vendor/pdf.worker.min.js?v=23.3.20",
-  "./js/utils.js?v=23.3.20",
-  "./js/state.js?v=23.3.20",
-  "./js/ui-cases.js?v=23.3.20",
-  "./js/estimate-import.js?v=23.3.20",
-  "./js/ui-planning.js?v=23.3.20",
-  "./js/photos.js?v=23.3.20",
-  "./js/storage.js?v=23.3.20",
-  "./js/work-hours-sync.js?v=23.3.20",
-  "./js/planning.js?v=23.3.20",
-  "./js/exports.js?v=23.3.20",
-  "./js/business-rules-v2187.js?v=23.3.20",
-  "./js/supabase-config.js?v=23.3.20",
-  "./js/supabase-client.js?v=23.3.20",
-  "./js/supabase-sync.js?v=23.3.20",
+  "./vendor/pdf.min.js?v=23.3.21",
+  "./vendor/pdf.worker.min.js?v=23.3.21",
+  "./js/utils.js?v=23.3.21",
+  "./js/state.js?v=23.3.21",
+  "./js/ui-cases.js?v=23.3.21",
+  "./js/estimate-import.js?v=23.3.21",
+  "./js/ui-planning.js?v=23.3.21",
+  "./js/photos.js?v=23.3.21",
+  "./js/storage.js?v=23.3.21",
+  "./js/work-hours-sync.js?v=23.3.21",
+  "./js/planning.js?v=23.3.21",
+  "./js/exports.js?v=23.3.21",
+  "./js/business-rules-v2187.js?v=23.3.21",
+  "./js/supabase-config.js?v=23.3.21",
+  "./js/supabase-client.js?v=23.3.21",
+  "./js/supabase-sync.js?v=23.3.21",
 ];
 
 async function precache() {
@@ -47,12 +48,25 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
   event.waitUntil((async () => {
     const keys = await caches.keys();
-    await Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key)));
+    await Promise.all(
+      keys
+        .filter((key) => key.startsWith("nimr-sav-") && key !== CACHE_NAME)
+        .map((key) => caches.delete(key))
+    );
     await self.clients.claim();
     const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
     clients.forEach((client) => client.postMessage({ type: "APP_UPDATED", cacheName: CACHE_NAME }));
   })());
 });
+
+function isReleaseAsset(url) {
+  try {
+    const parsed = new URL(url);
+    return parsed.searchParams.get("v") === "23.3.21";
+  } catch {
+    return false;
+  }
+}
 
 async function networkFirst(request) {
   const cache = await caches.open(CACHE_NAME);
@@ -63,32 +77,26 @@ async function networkFirst(request) {
     }
     return response;
   } catch (error) {
-    const cached = await caches.match(request);
+    const cached = await cache.match(request);
     if (cached) return cached;
     if (request.mode === "navigate") {
-      return (await caches.match("./index.html")) || caches.match("./offline.html");
+      return (await cache.match("./index.html")) || cache.match("./offline.html");
     }
     return Response.error();
   }
 }
 
-async function refreshCachedRequest(request) {
-  try {
-    const response = await fetch(request);
-    if (response && response.ok && request.url.startsWith(self.location.origin)) {
-      const cache = await caches.open(CACHE_NAME);
-      await cache.put(request, response.clone());
-    }
-  } catch {
-    // Best effort only: cached UI must remain immediately usable.
-  }
-}
-
 async function cacheFirst(request) {
-  const cached = await caches.match(request);
+  const cache = await caches.open(CACHE_NAME);
+  const cached = await cache.match(request);
   if (cached) {
-    refreshCachedRequest(request).catch(() => null);
+    // IMMUTABLE RELEASE ASSET: Never revalidate versioned code against mutable origin
     return cached;
+  }
+  if (isReleaseAsset(request.url)) {
+    // FAIL CLOSED on missing active-release executable asset:
+    // Never fetch mutable origin or pollute active cache with foreign bytes
+    return Response.error();
   }
   return networkFirst(request);
 }
@@ -96,14 +104,17 @@ async function cacheFirst(request) {
 const APP_BASE_PATH = new URL("./", self.location.href).pathname;
 
 async function appNavigationFirst(request) {
-  const cached = await caches.match(request)
-    || await caches.match("./index.html")
-    || await caches.match("./");
+  const cache = await caches.open(CACHE_NAME);
+  const cached = await cache.match(request)
+    || await cache.match("./index.html")
+    || await cache.match("./");
   if (cached) {
-    refreshCachedRequest(request).catch(() => null);
+    // Active worker serves its own immutable release shell without background revalidation
     return cached;
   }
-  return networkFirst(request);
+  const offline = await cache.match("./offline.html");
+  if (offline) return offline;
+  return Response.error();
 }
 
 self.addEventListener("fetch", (event) => {
@@ -128,5 +139,7 @@ self.addEventListener("fetch", (event) => {
 
 self.addEventListener("message", (event) => {
   if (event.data?.type === "SKIP_WAITING") self.skipWaiting();
-  if (event.data?.type === "CHECK_UPDATE") precache().then(() => event.source?.postMessage({ type: "CACHE_REFRESHED", cacheName: CACHE_NAME })).catch(() => null);
+  // CHECK_UPDATE is a legacy no-op: actual update discovery uses registration.update() from app.js.
+  // CRITICAL: Do NOT call precache(), cache.put(), or fetch release assets here.
+  // Do NOT emit CACHE_REFRESHED — no cache refresh occurs.
 });

@@ -10,6 +10,7 @@ const offlineSource = fs.readFileSync(`${repositoryRoot}/offline.html`, "utf8");
 const appSource = fs.readFileSync(`${repositoryRoot}/app.js`, "utf8");
 const estimateImportSource = fs.readFileSync(`${repositoryRoot}/js/estimate-import.js`, "utf8");
 const versionSource = fs.readFileSync(`${repositoryRoot}/js/version.js`, "utf8");
+const stateSource = fs.readFileSync(`${repositoryRoot}/js/state.js`, "utf8");
 const storedResponses = new Map();
 
 function absoluteCacheKey(input) {
@@ -33,6 +34,9 @@ const cache = {
   async put(request, response) {
     storedResponses.set(absoluteCacheKey(request), response);
   },
+  async match(request) {
+    return storedResponses.get(absoluteCacheKey(request));
+  },
 };
 
 const listeners = new Map();
@@ -48,7 +52,7 @@ const context = {
   },
   fetch: async () => { throw new Error("offline"); },
   self: {
-    location: { origin },
+    location: { origin, href: `${origin}/sw.js` },
     addEventListener: (type, listener) => listeners.set(type, listener),
     clients: {
       claim: async () => {},
@@ -68,6 +72,30 @@ assert.equal(declaredCacheName, currentBuild.cacheName, "le service worker doit 
 assert.equal(new Set(declaredAssets).size, declaredAssets.length, "le précache ne doit contenir aucun doublon");
 assert.doesNotMatch(versionSource, /caches\.delete/u, "l'ancien cache doit rester disponible jusqu'à l'activation du nouveau service worker");
 assert.doesNotMatch(swSource, /cache\.add\([^)]*\)\.catch/u, "un précache partiel ne doit jamais être accepté");
+
+// Verify js/state.js APP_VERSION matches currentBuild
+const stateAppVersionMatch = stateSource.match(/const\s+APP_VERSION\s*=\s*["']([^"']+)["']/u);
+assert.ok(stateAppVersionMatch, "js/state.js doit déclarer const APP_VERSION");
+assert.equal(stateAppVersionMatch[1], currentBuild.appVersion, "js/state.js APP_VERSION doit correspondre au build actuel");
+
+// Verify active release cache lookup is scoped to CACHE_NAME
+assert.match(swSource, /const\s+cache\s*=\s*await\s+caches\.open\(CACHE_NAME\)/u, "l'accès au cache doit être scopé à CACHE_NAME");
+
+// Verify release assets are not stale-while-revalidated
+assert.doesNotMatch(swSource, /refreshCachedRequest/u, "la revalidation en arrière-plan des exécutables est interdite");
+
+// Verify CHECK_UPDATE cannot call precache on active release
+// Scope to the message listener block; check executable code only (exclude comment lines)
+const messageBlock = swSource.match(/self\.addEventListener\(\s*["']message["'][\s\S]*?\n\}\);/u)?.[0] || "";
+const messageExecLines = messageBlock.split("\n").filter((l) => !l.trim().startsWith("//")).join("\n");
+assert.doesNotMatch(messageExecLines, /precache\s*\(/u, "CHECK_UPDATE ne doit jamais re-précacher la release active");
+
+// Verify CHECK_UPDATE does not emit semantically false CACHE_REFRESHED (executable code only)
+assert.doesNotMatch(messageExecLines, /CACHE_REFRESHED/u, "CHECK_UPDATE ne doit pas prétendre qu'un rafraîchissement a eu lieu");
+
+// Verify automatic skipWaiting is absent from install
+const installBlock = swSource.match(/self\.addEventListener\(\s*["']install["'][\s\S]*?\n\}\);/u)?.[0] || "";
+assert.doesNotMatch(installBlock, /skipWaiting/u, "skipWaiting automatique interdit à l'installation");
 
 const versionedIndexAssets = [
   ...indexSource.matchAll(/<(?:script|link)\b[^>]*(?:src|href)=["']([^"']+\?v=[^"']+)["'][^>]*>/giu),

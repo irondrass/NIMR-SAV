@@ -1,6 +1,7 @@
 // IDENTITY-001D2-E source refresh: prompt installed PWAs to fetch the updated authentication UI.
 // IDENTITY-001D2-F source refresh: refresh the recovery OTP UI without changing the v23.3.20 cache contract.
 // PERF-001 source refresh: render the cached PWA shell immediately while GitHub Pages revalidates in background.
+// UX-010 source refresh: deliver the 2026 visual system and overlap hardening without changing the v23.3.20 cache contract.
 const CACHE_NAME = "nimr-sav-v23.3.20";
 const ASSETS = [
   "./",

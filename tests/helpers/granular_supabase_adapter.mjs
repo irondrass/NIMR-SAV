@@ -81,18 +81,35 @@ export function createGranularSupabaseAdapter(options = {}) {
       ? operation.baseVersion === current.entity_version
       : operation.baseVersion === null;
     if (!baseMatches) {
+      const conflictId = `conflict:${operation.operationId}`;
+      const localPayload = operation.action === "delete"
+        ? structuredClone(operation.payload || {})
+        : structuredClone(operation.payload?.entity ?? operation.payload ?? {});
+      const serverPayload = structuredClone(current?.payload || {});
       const conflict = {
         status: "conflict", accepted: false, idempotent: false, conflict: true,
-        conflict_id: `conflict:${operation.operationId}`,
+        conflict_id: conflictId,
         base_version: operation.baseVersion,
-        local_payload: structuredClone(operation.payload || {}),
-        server_payload: structuredClone(current?.payload || {}),
+        local_payload: localPayload,
+        server_payload: serverPayload,
         detected_at: new Date().toISOString(),
         conflict_server_version: current?.entity_version ?? null,
         conflict_canonical: structuredClone(current),
         server_version: current?.entity_version ?? null,
         canonical: structuredClone(current),
       };
+      serverConflicts.set(conflictId, {
+        id: conflictId,
+        workshop_id: operation.workshopId,
+        entity_type: operation.entityType,
+        entity_id: operation.entityId,
+        local_operation_id: operation.operationId,
+        status: "open",
+        resolution: null,
+        local_payload: conflict.local_payload,
+        server_payload: conflict.server_payload,
+        created_at: conflict.detected_at,
+      });
       conflicts.set(receiptKey, {
         ...conflict,
         server_version: undefined,
@@ -153,18 +170,33 @@ export function createGranularSupabaseAdapter(options = {}) {
       ? operation.baseVersion === current.entity_version
       : operation.baseVersion === null;
     if (!baseMatches) {
+      const conflictId = `conflict:${operation.operationId}`;
+      const localPayload = structuredClone(operation.payload?.entity ?? operation.payload ?? {});
+      const serverPayload = structuredClone(current?.value || {});
       const conflict = {
         status: "conflict", accepted: false, idempotent: false, conflict: true,
-        conflict_id: `conflict:${operation.operationId}`,
+        conflict_id: conflictId,
         base_version: operation.baseVersion,
-        local_payload: structuredClone(operation.payload || {}),
-        server_payload: structuredClone(current?.value || {}),
+        local_payload: localPayload,
+        server_payload: serverPayload,
         detected_at: new Date().toISOString(),
         conflict_server_version: current?.entity_version ?? null,
         conflict_canonical: structuredClone(current),
         server_version: current?.entity_version ?? null,
         canonical: structuredClone(current),
       };
+      serverConflicts.set(conflictId, {
+        id: conflictId,
+        workshop_id: operation.workshopId,
+        entity_type: "workshop_settings",
+        entity_id: "workshop_settings",
+        local_operation_id: operation.operationId,
+        status: "open",
+        resolution: null,
+        local_payload: conflict.local_payload,
+        server_payload: conflict.server_payload,
+        created_at: conflict.detected_at,
+      });
       conflicts.set(receiptKey, {
         ...conflict,
         server_version: undefined,

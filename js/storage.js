@@ -913,6 +913,9 @@ async function hydrateLargeStateIfAvailable() {
     : record.state;
   state = normalizeState(migrated);
   if (record.entityPersistence) adoptHydratedEntityState(state, record.entityPersistence);
+  if (typeof initializeLastKnownCasesComparable === "function") {
+    initializeLastKnownCasesComparable();
+  }
   if (typeof reconcileActiveCaseSelection === "function") reconcileActiveCaseSelection(previousSelection);
   return { hydrated: true, record };
 }

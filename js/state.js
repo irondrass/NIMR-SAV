@@ -3012,6 +3012,7 @@ function normalizeBookingTaskProvenance(booking = {}) {
     if (sourceKind) provenance.sourceKind = sourceKind;
   }
   if (Object.hasOwn(booking, "source")) provenance.source = String(booking.source || "");
+  if (Array.isArray(booking.sourceClaimIds)) provenance.sourceClaimIds = normalizeStringList(booking.sourceClaimIds);
   if (Array.isArray(booking.sourceLineIds)) provenance.sourceLineIds = normalizeStringList(booking.sourceLineIds);
   if (Array.isArray(booking.sourceOperations)) provenance.sourceOperations = normalizeStringList(booking.sourceOperations);
   if (Object.hasOwn(booking, "sourceLaborHours")) {

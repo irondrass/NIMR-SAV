@@ -358,6 +358,7 @@ function buildPlanningTaskProvenance(value = {}) {
   const sourceKind = normalizeCanonicalTaskSourceKind(value.sourceKind);
   if (sourceKind) provenance.sourceKind = sourceKind;
   if (Object.hasOwn(value, "source")) provenance.source = String(value.source || "");
+  if (Array.isArray(value.sourceClaimIds)) provenance.sourceClaimIds = normalizeStringList(value.sourceClaimIds);
   if (Array.isArray(value.sourceLineIds)) provenance.sourceLineIds = normalizeStringList(value.sourceLineIds);
   if (Array.isArray(value.sourceOperations)) provenance.sourceOperations = normalizeStringList(value.sourceOperations);
   if (Object.hasOwn(value, "sourceLaborHours")) {
@@ -388,6 +389,7 @@ function makePlanningStep(item, template, match, options = {}) {
     requiredRole: options.requiredRole || template.role || "",
     requiredCategory: options.requiredCategory || "",
     ...buildPlanningTaskProvenance(options),
+    sourceClaimIds: Array.isArray(options.sourceClaimIds) ? [...options.sourceClaimIds] : [],
     sourceLineIds: Array.isArray(options.sourceLineIds) ? [...options.sourceLineIds] : [],
     sourceOperations: Array.isArray(options.sourceOperations) ? [...options.sourceOperations] : [],
     sourceLaborHours: Number(options.sourceLaborHours || 0),
@@ -478,9 +480,41 @@ function scheduleSingleStep(item, template, cursor, duration, tempBookings, assi
   return step;
 }
 
+function getActivatableCanonicalPlanningTasks(item) {
+  if (!item || typeof item !== "object") return [];
+  if (getExplicitPlanningTasks(item).length) return [];
+  const accessor = typeof getCasePlanningTasks === "function"
+    ? getCasePlanningTasks
+    : (typeof window !== "undefined" && typeof window.getCasePlanningTasks === "function" ? window.getCasePlanningTasks : null);
+  if (!accessor) return [];
+  const tasks = accessor(item);
+  if (!Array.isArray(tasks) || !tasks.length) return [];
+  const allCanonical = tasks.every((task) => (
+    typeof isCanonicalTaskModel === "function"
+      ? isCanonicalTaskModel(task)
+      : Number(task?.taskModelVersion) === CANONICAL_TASK_MODEL_VERSION
+  ));
+  if (!allCanonical) return [];
+  const hasRealCanonicalWork = tasks.some((task) => (
+    task?.kind === "operation"
+    || task?.kind === "preparation_batch"
+    || task?.kind === "paint_batch"
+  ));
+  if (!hasRealCanonicalWork) return [];
+  return tasks;
+}
+
 function schedulePipeline(item, startAfter, bookings) {
-  const graphTasks = getExplicitPlanningTasks(item);
-  if (graphTasks.length) return scheduleTaskGraph(item, graphTasks, startAfter, bookings);
+  const explicitTasks = getExplicitPlanningTasks(item);
+  if (explicitTasks.length) {
+    return scheduleTaskGraph(item, explicitTasks, startAfter, bookings);
+  }
+
+  const canonicalTasks = getActivatableCanonicalPlanningTasks(item);
+  if (canonicalTasks.length) {
+    return scheduleTaskGraph(item, canonicalTasks, startAfter, bookings);
+  }
+
   return scheduleSequentialPipeline(item, startAfter, bookings);
 }
 
@@ -3767,6 +3801,7 @@ function normalizePlanningTask(task, index = 0) {
     ...(modern ? { taskModelVersion: CANONICAL_TASK_MODEL_VERSION } : {}),
     sourceKind,
     source: String(task?.source || ""),
+    sourceClaimIds: Array.isArray(task?.sourceClaimIds) ? normalizeStringList(task.sourceClaimIds) : [],
     sourceLineIds: Array.isArray(task?.sourceLineIds) ? [...new Set(task.sourceLineIds.filter(Boolean).map(String))] : [],
     sourceOperations: Array.isArray(task?.sourceOperations) ? [...new Set(task.sourceOperations.filter(Boolean).map(String))] : [],
     sourceLaborHours: Number(task?.sourceLaborHours ?? task?.laborHours ?? 0) || 0,
@@ -3913,6 +3948,7 @@ function buildInternalTaskStep(item, task, startAfter, bookings, assignment = cr
     taskModelVersion: task.taskModelVersion,
     sourceKind: task.sourceKind,
     source: task.source,
+    sourceClaimIds: task.sourceClaimIds,
     sourceLineIds: task.sourceLineIds,
     sourceOperations: task.sourceOperations,
     sourceLaborHours: task.sourceLaborHours,
@@ -4495,7 +4531,9 @@ function collectEstimatedDeliveryReasons(item, bookings, referenceDate) {
     if (!codes.includes(code)) codes.push(code);
     if (!reasons.includes(message)) reasons.push(message);
   };
-  const graphTasks = getExplicitPlanningTasks(item).map(normalizePlanningTask);
+  const explicitTasks = getExplicitPlanningTasks(item);
+  const activeTasks = explicitTasks.length ? explicitTasks : getActivatableCanonicalPlanningTasks(item);
+  const graphTasks = activeTasks.map(normalizePlanningTask);
   if (!bookings.length) add("dependency_unplanned", "Dépendance non planifiée ou planning absent.");
   if (graphTasks.some((task) => task.durationMinutes <= 0)) add("missing_duration", "Durée manquante.");
   graphTasks.forEach((task) => {
@@ -4601,4 +4639,8 @@ function recalculateEstimatedDelivery(item, reason = "Recalcul automatique du pl
     }
   }
   return { ok: Boolean(current), initial: estimate.initial, current, revised: current, status, reasons, reasonCodes: codes, delayMinutes: estimate.delayMinutes, changed };
+}
+
+if (typeof window !== "undefined") {
+  window.getActivatableCanonicalPlanningTasks = getActivatableCanonicalPlanningTasks;
 }

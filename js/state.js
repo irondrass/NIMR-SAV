@@ -21,7 +21,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v23.3.25";
+const APP_VERSION = "v23.3.26";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const CURRENT_DATA_SCHEMA_VERSION = 2;
@@ -3012,6 +3012,7 @@ function normalizeBookingTaskProvenance(booking = {}) {
     if (sourceKind) provenance.sourceKind = sourceKind;
   }
   if (Object.hasOwn(booking, "source")) provenance.source = String(booking.source || "");
+  if (Array.isArray(booking.sourceClaimIds)) provenance.sourceClaimIds = normalizeStringList(booking.sourceClaimIds);
   if (Array.isArray(booking.sourceLineIds)) provenance.sourceLineIds = normalizeStringList(booking.sourceLineIds);
   if (Array.isArray(booking.sourceOperations)) provenance.sourceOperations = normalizeStringList(booking.sourceOperations);
   if (Object.hasOwn(booking, "sourceLaborHours")) {

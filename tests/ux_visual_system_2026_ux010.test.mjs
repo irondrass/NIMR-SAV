@@ -99,10 +99,10 @@ await check("I responsive hardening covers tablet and small mobile layouts", () 
   assert.match(ux, /@media \(prefers-reduced-motion:\s*reduce\)/u);
 });
 
-await check("J service worker is source-refreshed without changing the v23.3.25 cache contract", () => {
+await check("J service worker is source-refreshed without changing the v23.3.26 cache contract", () => {
   assert.match(sw, /UX-010 source refresh/u);
-  assert.match(sw, /const CACHE_NAME = "nimr-sav-v23\.3\.25"/u);
-  assert.match(read("js/version.js"), /^window\.APP_VERSION = "v23\.3\.25";$/mu);
+  assert.match(sw, /const CACHE_NAME = "nimr-sav-v23\.3\.26"/u);
+  assert.match(read("js/version.js"), /^window\.APP_VERSION = "v23\.3\.26";$/mu);
 });
 
 await check("K UX-010 does not introduce auth, SQL, service-role, or permission authority changes", () => {

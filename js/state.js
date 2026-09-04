@@ -21,16 +21,25 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v23.3.22";
+const APP_VERSION = "v23.3.23";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const CURRENT_DATA_SCHEMA_VERSION = 2;
 const CANONICAL_TASK_MODEL_VERSION = 1;
+const CANONICAL_TASK_KINDS = new Set([
+  "operation",
+  "preparation_batch",
+  "paint_batch",
+  "legacy_step",
+]);
 const CANONICAL_TASK_SOURCE_KINDS = new Set([
   "pdf_estimate",
   "canonical_graph",
   "manual",
   "legacy_unknown",
+  "estimate_provenance",
+  "applied_estimate",
+  "legacy_duration_fallback",
 ]);
 const WORKSHOP_NAME = "NIMR SAV";
 const MAX_ESTIMATE_IMPORT_SIZE = 10 * 1024 * 1024;
@@ -1312,6 +1321,11 @@ function normalizeCanonicalTaskSourceKind(value) {
   return CANONICAL_TASK_SOURCE_KINDS.has(normalized) ? normalized : "";
 }
 
+function normalizeCanonicalTaskKind(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return CANONICAL_TASK_KINDS.has(normalized) ? normalized : "";
+}
+
 function isCanonicalTaskModel(task) {
   return Number(task?.taskModelVersion) === CANONICAL_TASK_MODEL_VERSION;
 }
@@ -1360,10 +1374,57 @@ function normalizeCasePlanningTask(task, index = 0) {
     normalized.taskId = legacyId;
   }
 
+  if (task.kind !== undefined) {
+    const normKind = normalizeCanonicalTaskKind(task.kind);
+    if (normKind) {
+      normalized.kind = normKind;
+    } else {
+      delete normalized.kind;
+    }
+  }
+  if (task.bodyZone) {
+    normalized.bodyZone = String(task.bodyZone || "").trim();
+  }
+  if (Array.isArray(task.elements)) {
+    normalized.elements = normalizeStringList(task.elements);
+  }
+  if (Array.isArray(task.sourceClaimIds)) {
+    normalized.sourceClaimIds = normalizeStringList(task.sourceClaimIds);
+  }
   if (Array.isArray(task.sourceLineIds)) normalized.sourceLineIds = normalizeStringList(task.sourceLineIds);
   if (Array.isArray(task.sourceOperations)) normalized.sourceOperations = normalizeStringList(task.sourceOperations);
   if (Object.hasOwn(task, "sourceLaborHours")) {
     normalized.sourceLaborHours = Number(task.sourceLaborHours || 0) || 0;
+  }
+  if (Object.hasOwn(task, "rawContributionHours")) {
+    normalized.rawContributionHours = Number(task.rawContributionHours || 0) || 0;
+  }
+  if (Object.hasOwn(task, "laborHours")) {
+    normalized.laborHours = Number(task.laborHours || 0) || 0;
+  }
+  if (Object.hasOwn(task, "durationMinutes")) {
+    normalized.durationMinutes = Math.max(0, Math.round(Number(task.durationMinutes || 0) || 0));
+  }
+  if (Array.isArray(task.bodyZones)) {
+    normalized.bodyZones = normalizeStringList(task.bodyZones);
+  }
+  if (Array.isArray(task.paintGroups)) {
+    normalized.paintGroups = task.paintGroups.map((g) => ({
+      zone: String(g?.zone || "").trim(),
+      rawContributionHours: Number(g?.rawContributionHours || 0) || 0,
+      elements: normalizeStringList(g?.elements),
+      sourceLineIds: normalizeStringList(g?.sourceLineIds),
+    }));
+  }
+  if (task.sourceKinds !== undefined) {
+    if (Array.isArray(task.sourceKinds)) {
+      const validKinds = task.sourceKinds
+        .map((k) => normalizeCanonicalTaskSourceKind(k))
+        .filter(Boolean);
+      normalized.sourceKinds = [...new Set(validKinds)].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    } else {
+      delete normalized.sourceKinds;
+    }
   }
   return normalized;
 }
@@ -1438,6 +1499,23 @@ function normalizePdfPlanningTasksForCase(tasks = []) {
     dependencies:
       index > 0 ? [normalized[index - 1].taskId] : [],
   }));
+}
+
+function getCasePlanningTasks(item = {}, options = {}) {
+  if (typeof window !== "undefined" && typeof window.getCasePlanningTasks === "function" && window.getCasePlanningTasks !== getCasePlanningTasks) {
+    return window.getCasePlanningTasks(item, options);
+  }
+  const force = options?.force === true;
+  if (!force && Array.isArray(item?.planningTasks) && item.planningTasks.length > 0) {
+    return normalizeCasePlanningTasks(item);
+  }
+  if (typeof deriveCanonicalPlanningTasks === "function") {
+    return deriveCanonicalPlanningTasks(item, options);
+  }
+  if (typeof window !== "undefined" && typeof window.deriveCanonicalPlanningTasks === "function") {
+    return window.deriveCanonicalPlanningTasks(item, options);
+  }
+  return normalizeCasePlanningTasks(item);
 }
 
 function normalizeWorkshopCaseStatus(value, item = {}) {
@@ -5442,4 +5520,7 @@ if (typeof window !== "undefined") {
   window.guardUserSwitch = guardUserSwitch;
   window.getCaseNotesForRole = getCaseNotesForRole;
   window.updateCaseNote = updateCaseNote;
+  window.CANONICAL_TASK_KINDS = CANONICAL_TASK_KINDS;
+  window.normalizeCanonicalTaskKind = normalizeCanonicalTaskKind;
+  window.getCasePlanningTasks = getCasePlanningTasks;
 }

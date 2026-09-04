@@ -99,10 +99,10 @@ await check("I responsive hardening covers tablet and small mobile layouts", () 
   assert.match(ux, /@media \(prefers-reduced-motion:\s*reduce\)/u);
 });
 
-await check("J service worker is source-refreshed without changing the v23.3.22 cache contract", () => {
+await check("J service worker is source-refreshed without changing the v23.3.23 cache contract", () => {
   assert.match(sw, /UX-010 source refresh/u);
-  assert.match(sw, /const CACHE_NAME = "nimr-sav-v23\.3\.22"/u);
-  assert.match(read("js/version.js"), /^window\.APP_VERSION = "v23\.3\.22";$/mu);
+  assert.match(sw, /const CACHE_NAME = "nimr-sav-v23\.3\.23"/u);
+  assert.match(read("js/version.js"), /^window\.APP_VERSION = "v23\.3\.23";$/mu);
 });
 
 await check("K UX-010 does not introduce auth, SQL, service-role, or permission authority changes", () => {
@@ -204,6 +204,8 @@ await check("L changed paths are limited to the approved UX-010 surfaces", () =>
     "js/ui-planning.js",
     "app.js",
     "sw.js",
+    "js/business-rules-v2187.js",
+    "tests/workshop_operation_centric_domain_workshop001a.test.mjs",
     "tests/identity_database_authority_hardening_identity001d1.test.mjs",
     "tests/identity_invited_user_password_onboarding_identity001d2e.test.mjs",
     "tests/identity_password_recovery_otp_identity001d2f.test.mjs",

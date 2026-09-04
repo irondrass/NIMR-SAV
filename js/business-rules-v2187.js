@@ -833,10 +833,6 @@
           matchedPreps = (lineMatches.length > 0 || elementMatches.length > 0)
             ? [...new Set([...lineMatches, ...elementMatches])]
             : prepBatches.filter((p) => isZoneCompatible(p.bodyZone, paint.bodyZone));
-
-          if (matchedPreps.length === 0 && prepBatches.length === 1) {
-            matchedPreps = [prepBatches[0]];
-          }
         }
 
         if (matchedPreps.length > 0) {

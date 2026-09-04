@@ -1169,6 +1169,173 @@ console.log('--- STARTING WORKSHOP-001B DEPENDENCY DAG TESTS ---');
   assert.ok(!quality.dependencies.includes(reassembly.id), 'Transitive reduction must prune reassembly from quality dependencies');
 }
 
+// 30. Single-zone paint ignores unrelated sole preparation batch
+{
+  console.log('Test 30: Single-zone paint ignores unrelated sole preparation batch');
+  const testCase = {
+    id: 'case-unrelated-prep-single-zone',
+    claims: [{
+      id: 'claim-1',
+      estimate: {
+        originalLines: [
+          {
+            id: 'L-front-prep',
+            operation: 'REPARATION ET PREPARATION PARE-CHOC AVANT',
+            laborHours: 2.0,
+            paintGroup: 'front',
+            selectedPhases: ['body', 'prep'],
+            allocations: [
+              { phase: 'body', laborHours: 1.0 },
+              { phase: 'prep', laborHours: 1.0 },
+            ],
+          },
+          {
+            id: 'L-rear-paint',
+            operation: 'REPARATION ET PEINTURE AILE ARRIERE',
+            laborHours: 3.0,
+            paintGroup: 'rear',
+            selectedPhases: ['body', 'paint'],
+            allocations: [
+              { phase: 'body', laborHours: 1.5 },
+              { phase: 'paint', laborHours: 1.5 },
+            ],
+          },
+        ],
+      },
+    }],
+    durations: {},
+  };
+  win.recomputeCaseDurationsFromClaims(testCase);
+
+  const derived = win.deriveCanonicalPlanningTasks(testCase);
+  validateGraphInvariants(derived);
+
+  // 1. Exactly one paint batch
+  const paintBatches = derived.filter((t) => t.phase === 'paint');
+  assert.equal(paintBatches.length, 1);
+  const paintRear = paintBatches[0];
+
+  // 2. Paint batch zone = rear
+  assert.equal(paintRear.bodyZone, 'rear');
+  assert.ok(paintRear.id.includes('batch-paint') && paintRear.id.includes('rear'));
+
+  // 3. Front prep exists
+  const prepBatches = derived.filter((t) => t.phase === 'prep');
+  assert.equal(prepBatches.length, 1);
+  const prepFront = prepBatches[0];
+  assert.equal(prepFront.bodyZone, 'front');
+
+  // 4. Rear body exists
+  const bodyRear = derived.find((t) => t.phase === 'body' && t.sourceLineIds.includes('L-rear-paint'));
+  assert.ok(bodyRear);
+
+  // 5. Rear prep does NOT exist
+  const prepRear = derived.find((t) => t.phase === 'prep' && t.bodyZone === 'rear');
+  assert.equal(prepRear, undefined);
+
+  // 6. Paint rear does NOT directly depend on front prep
+  assert.ok(!paintRear.dependencies.includes(prepFront.id), 'Paint rear must NOT directly depend on front prep');
+
+  // 7. Front prep is NOT transitively reachable from paint rear
+  assert.ok(!isReachable(paintRear.id, prepFront.id, derived), 'Front prep must NOT be reachable from paint rear');
+
+  // 8. Paint rear depends on / reaches relevant rear body
+  assert.ok(paintRear.dependencies.includes(bodyRear.id), 'Paint rear must depend on rear body');
+  assert.ok(isReachable(paintRear.id, bodyRear.id, derived), 'Paint rear must reach rear body');
+
+  // 9-11. (no dangling, no cycles, no self-deps validated by validateGraphInvariants)
+  // 12. Duration conservation unchanged
+  const rawTasks30 = derived.map((t) => ({ ...t, dependencies: [] }));
+  const reprocessed30 = win.applyCanonicalTaskDependencies(rawTasks30);
+  for (let i = 0; i < derived.length; i++) {
+    assert.equal(derived[i].laborHours, reprocessed30[i].laborHours);
+    assert.equal(derived[i].durationMinutes, reprocessed30[i].durationMinutes);
+  }
+}
+
+// 31. Single-zone paint ignores unrelated sole preparation batch — mirrored case
+{
+  console.log('Test 31: Single-zone paint ignores unrelated sole preparation batch — mirrored case');
+  const testCase = {
+    id: 'case-unrelated-prep-single-zone-mirrored',
+    claims: [{
+      id: 'claim-1',
+      estimate: {
+        originalLines: [
+          {
+            id: 'L-rear-prep',
+            operation: 'REPARATION ET PREPARATION PARE-CHOC ARRIERE',
+            laborHours: 2.0,
+            paintGroup: 'rear',
+            selectedPhases: ['body', 'prep'],
+            allocations: [
+              { phase: 'body', laborHours: 1.0 },
+              { phase: 'prep', laborHours: 1.0 },
+            ],
+          },
+          {
+            id: 'L-front-paint',
+            operation: 'REPARATION ET PEINTURE CAPOT AVANT',
+            laborHours: 3.0,
+            paintGroup: 'front',
+            selectedPhases: ['body', 'paint'],
+            allocations: [
+              { phase: 'body', laborHours: 1.5 },
+              { phase: 'paint', laborHours: 1.5 },
+            ],
+          },
+        ],
+      },
+    }],
+    durations: {},
+  };
+  win.recomputeCaseDurationsFromClaims(testCase);
+
+  const derived = win.deriveCanonicalPlanningTasks(testCase);
+  validateGraphInvariants(derived);
+
+  // 1. Exactly one paint batch
+  const paintBatches = derived.filter((t) => t.phase === 'paint');
+  assert.equal(paintBatches.length, 1);
+  const paintFront = paintBatches[0];
+
+  // 2. Paint batch zone = front
+  assert.equal(paintFront.bodyZone, 'front');
+  assert.ok(paintFront.id.includes('batch-paint') && paintFront.id.includes('front'));
+
+  // 3. Rear prep exists
+  const prepBatches = derived.filter((t) => t.phase === 'prep');
+  assert.equal(prepBatches.length, 1);
+  const prepRear = prepBatches[0];
+  assert.equal(prepRear.bodyZone, 'rear');
+
+  // 4. Front body exists
+  const bodyFront = derived.find((t) => t.phase === 'body' && t.sourceLineIds.includes('L-front-paint'));
+  assert.ok(bodyFront);
+
+  // 5. Front prep does NOT exist
+  const prepFront = derived.find((t) => t.phase === 'prep' && t.bodyZone === 'front');
+  assert.equal(prepFront, undefined);
+
+  // 6. Paint front does NOT directly depend on rear prep
+  assert.ok(!paintFront.dependencies.includes(prepRear.id), 'Paint front must NOT directly depend on rear prep');
+
+  // 7. Rear prep is NOT transitively reachable from paint front
+  assert.ok(!isReachable(paintFront.id, prepRear.id, derived), 'Rear prep must NOT be reachable from paint front');
+
+  // 8. Paint front depends on / reaches relevant front body
+  assert.ok(paintFront.dependencies.includes(bodyFront.id), 'Paint front must depend on front body');
+  assert.ok(isReachable(paintFront.id, bodyFront.id, derived), 'Paint front must reach front body');
+
+  // 12. Duration conservation
+  const rawTasks31 = derived.map((t) => ({ ...t, dependencies: [] }));
+  const reprocessed31 = win.applyCanonicalTaskDependencies(rawTasks31);
+  for (let i = 0; i < derived.length; i++) {
+    assert.equal(derived[i].laborHours, reprocessed31[i].laborHours);
+    assert.equal(derived[i].durationMinutes, reprocessed31[i].durationMinutes);
+  }
+}
+
 // HARD BASELINE GUARDS
 console.log('--- RUNNING HARD BASELINE GUARDS ---');
 {

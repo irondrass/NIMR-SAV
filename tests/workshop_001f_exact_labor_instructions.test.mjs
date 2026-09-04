@@ -128,3 +128,14 @@ test("14 functional phase keeps v23.3.28 release identity", () => {
 test("15 no diagnostic duration or complaint workflow is introduced in 001F", () => {
   assert.doesNotMatch(collector + renderer, /DIAG-30|DIAG-60|DIAG-90|customerConcern|diagnosticEnvelope/);
 });
+
+test("16 canonical marker without source provenance never inherits every estimate line", () => {
+  assert.match(collector, /if \(!wantedLineIds\.size && !sourceOperations\.length\) return \[\];/);
+  assert.match(collector, /if \(wantedLineIds\.size\) \{/);
+  assert.match(collector, /if \(!wantedLineIds\.has\(lineId\)\) return;/);
+});
+
+test("17 fallback exact labor text comes only from sourceOperations", () => {
+  assert.match(collector, /return sourceOperations/);
+  assert.doesNotMatch(collector, /if \(wantedLineIds\.size && !wantedLineIds\.has\(lineId\)\)/);
+});

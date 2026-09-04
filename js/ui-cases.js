@@ -5452,44 +5452,50 @@ function collectTechnicianExactLaborLines(row = {}) {
   const provenance = collectPlanningTaskProvenance(family, item);
   const wantedLineIds = new Set((provenance.sourceLineIds || []).map(String));
   const wantedClaimIds = new Set((provenance.sourceClaimIds || []).map(String));
+  const sourceOperations = (provenance.sourceOperations || []).map((value) => String(value || "").trim()).filter(Boolean);
+
+  // A canonical/task-model marker alone is not provenance. Residual legacy
+  // tasks deliberately carry empty sourceLineIds/sourceOperations and must not
+  // inherit every estimate line from the case.
+  if (!wantedLineIds.size && !sourceOperations.length) return [];
+
   const rows = [];
   const seen = new Set();
 
-  (item.claims || []).forEach((claim) => {
-    const claimId = String(claim?.id || "");
-    if (wantedClaimIds.size && !wantedClaimIds.has(claimId)) return;
-    const claimLabel = [claim?.number, claim?.title].filter(Boolean).join(" · ").trim();
-    const originalLines = Array.isArray(claim?.estimate?.originalLines) ? claim.estimate.originalLines : [];
-    originalLines.forEach((line) => {
-      const lineId = String(line?.id || "");
-      if (wantedLineIds.size && !wantedLineIds.has(lineId)) return;
-      if (!lineId && wantedLineIds.size) return;
-      const operation = String(line?.operation || line?.rawText || "").trim();
-      const rawText = String(line?.rawText || "").trim();
-      if (!operation && !rawText) return;
-      const key = [claimId, lineId || operation || rawText].join("::");
-      if (seen.has(key)) return;
-      seen.add(key);
-      rows.push({
-        claimId,
-        claimLabel,
-        lineId,
-        code: String(line?.code || "").trim(),
-        operation: operation || rawText,
-        rawText,
-        laborHours: Math.max(0, Number(line?.laborHours || 0) || 0),
-        source: String(line?.source || "").trim(),
+  if (wantedLineIds.size) {
+    (item.claims || []).forEach((claim) => {
+      const claimId = String(claim?.id || "");
+      if (wantedClaimIds.size && !wantedClaimIds.has(claimId)) return;
+      const claimLabel = [claim?.number, claim?.title].filter(Boolean).join(" · ").trim();
+      const originalLines = Array.isArray(claim?.estimate?.originalLines) ? claim.estimate.originalLines : [];
+      originalLines.forEach((line) => {
+        const lineId = String(line?.id || "");
+        if (!wantedLineIds.has(lineId)) return;
+        const operation = String(line?.operation || line?.rawText || "").trim();
+        const rawText = String(line?.rawText || "").trim();
+        if (!operation && !rawText) return;
+        const key = [claimId, lineId || operation || rawText].join("::");
+        if (seen.has(key)) return;
+        seen.add(key);
+        rows.push({
+          claimId,
+          claimLabel,
+          lineId,
+          code: String(line?.code || "").trim(),
+          operation: operation || rawText,
+          rawText,
+          laborHours: Math.max(0, Number(line?.laborHours || 0) || 0),
+          source: String(line?.source || "").trim(),
+        });
       });
     });
-  });
+  }
 
   if (rows.length) return rows;
 
   // Applied-estimate / source-aware fallback: preserve the exact operation text
   // carried by the canonical task even when originalLines are unavailable.
-  return (provenance.sourceOperations || [])
-    .map((operation, index) => String(operation || "").trim())
-    .filter(Boolean)
+  return sourceOperations
     .map((operation, index) => ({
       claimId: provenance.sourceClaimIds?.[0] || "",
       claimLabel: provenance.claimLabels?.[0] || "",

@@ -23,6 +23,10 @@ test("10 paused family exposes reprise", () => assert.match(uiCases, /En pause �
 test("11 dependency context is visible", () => assert.match(uiCases, /getBusinessTaskDependencyLabel/u));
 test("12 dependency helper is read-only", () => { const b=uiCases.slice(uiCases.indexOf("function getBusinessTaskDependencyLabel"),uiCases.indexOf("function getValidatedAppointmentRows")); assert.doesNotMatch(b,/\bstate\s*=|saveState\(/u); });
 test("13 legacy fallback remains phase-first", () => assert.match(uiCases, /return phase \|\| rawTitle \|\| "Étape planning"/u));
+test("13b legacy_unknown never activates operation-centric display", () => {
+  assert.match(uiCases, /sourceKind && sourceKind !== "legacy_unknown"/u);
+  assert.match(uiPlanning, /sourceKind && sourceKind !== "legacy_unknown"/u);
+});
 test("14 Gantt uses operation-first identity", () => { assert.match(uiPlanning,/const stage = identity\.operation/u); assert.match(uiPlanning,/<strong>\$\{escapeHtml\(stage\)\}<\/strong>/u); });
 test("15 legacy Gantt keeps safe fallback", () => assert.match(uiPlanning,/operation: canonical && normalizedTitle \? normalizedTitle : \(phase \|\| rawTitle \|\| "Étape planning"\)/u));
 test("16 mobile planning uses operation title", () => assert.match(uiPlanning,/mobile-planning-title[\s\S]*escapeHtml\(stage\)/u));
@@ -34,4 +38,4 @@ test("21 hostile text uses escaping paths", () => { assert.match(uiCases,/escape
 test("22 deterministic ordering remains", () => assert.match(uiCases,/\.sort\(\(a, b\) => new Date\(a\.start\) - new Date\(b\.start\)\)/u));
 test("23 planner and business-rule baselines unchanged", () => { for (const rel of ["js/planning.js","js/business-rules-v2187.js"]) assert.equal(unchanged(rel),true,rel); });
 test("24 release identity stays v23.3.27", () => { assert.match(version,/^window\.APP_VERSION = "v23\.3\.27";$/mu); assert.match(version,/^window\.NIMR_BUILD = "v23\.3\.27";$/mu); assert.match(version,/^window\.NIMR_CACHE_NAME = "nimr-sav-v23\.3\.27";$/mu); });
-console.log("WORKSHOP-001D COCKPIT SUITE: 24 CHECKS DECLARED");
+console.log("WORKSHOP-001D COCKPIT SUITE: 25 CHECKS DECLARED");

@@ -5355,9 +5355,10 @@ function buildImportedLaborAllocationSummary(row) {
 // WORKSHOP-001D: operation-centric cockpit read model.
 function isOperationCentricBooking(booking) {
   if (!booking || typeof booking !== "object") return false;
+  const sourceKind = String(booking.sourceKind || "").trim().toLowerCase();
   return Boolean(
     Number(booking.taskModelVersion || 0) > 0
-    || booking.sourceKind
+    || (sourceKind && sourceKind !== "legacy_unknown")
     || (Array.isArray(booking.sourceClaimIds) && booking.sourceClaimIds.length)
     || (Array.isArray(booking.sourceLineIds) && booking.sourceLineIds.length)
     || (Array.isArray(booking.sourceOperations) && booking.sourceOperations.length)

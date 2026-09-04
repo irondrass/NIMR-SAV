@@ -120,9 +120,9 @@ test("13 exact labor UI has dedicated responsive styles", () => {
   assert.match(css, /@media \(max-width: 768px\)/);
 });
 
-test("14 functional phase keeps v23.3.28 release identity", () => {
-  assert.match(version, /APP_VERSION\s*=\s*"v23\.3\.28"/);
-  assert.match(version, /NIMR_BUILD\s*=\s*"v23\.3\.28"/);
+test("14 packaged release identity is v23.3.29", () => {
+  assert.match(version, /APP_VERSION\s*=\s*"v23\.3\.29"/);
+  assert.match(version, /NIMR_BUILD\s*=\s*"v23\.3\.29"/);
 });
 
 test("15 no diagnostic duration or complaint workflow is introduced in 001F", () => {

@@ -37,5 +37,5 @@ test("20 no scheduling/DAG duplicated in UI", () => { const a=uiCases.slice(uiCa
 test("21 hostile text uses escaping paths", () => { assert.match(uiCases,/escapeHtml\(row\.title\)/u); assert.match(uiPlanning,/escapeHtml\(stage\)/u); assert.match(uiPlanning,/escapeAttr\(bookingTitle\)/u); });
 test("22 deterministic ordering remains", () => assert.match(uiCases,/\.sort\(\(a, b\) => new Date\(a\.start\) - new Date\(b\.start\)\)/u));
 test("23 planner and business-rule baselines unchanged", () => { for (const rel of ["js/planning.js","js/business-rules-v2187.js"]) assert.equal(unchanged(rel),true,rel); });
-test("24 release identity stays v23.3.28", () => { assert.match(version,/^window\.APP_VERSION = "v23\.3\.28";$/mu); assert.match(version,/^window\.NIMR_BUILD = "v23\.3\.28";$/mu); assert.match(version,/^window\.NIMR_CACHE_NAME = "nimr-sav-v23\.3\.28";$/mu); });
+test("24 release identity stays v23.3.29", () => { assert.match(version,/^window\.APP_VERSION = "v23\.3\.29";$/mu); assert.match(version,/^window\.NIMR_BUILD = "v23\.3\.29";$/mu); assert.match(version,/^window\.NIMR_CACHE_NAME = "nimr-sav-v23\.3\.29";$/mu); });
 console.log("WORKSHOP-001D COCKPIT SUITE: 25 CHECKS DECLARED");

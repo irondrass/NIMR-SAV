@@ -343,11 +343,11 @@ await check("S this ticket introduces no SQL, migration or service-role authorit
   assert.match(d1Source, /tests\/identity_password_recovery_otp_identity001d2f\.test\.mjs/u);
 });
 
-await check("T PWA source refresh changes without changing the v23.3.25 cache/version contract", () => {
+await check("T PWA source refresh changes without changing the v23.3.26 cache/version contract", () => {
   assert.match(serviceWorkerSource, /IDENTITY-001D2-F source refresh/u);
-  assert.match(serviceWorkerSource, /const CACHE_NAME = "nimr-sav-v23\.3\.25"/u);
-  assert.match(readProjectFile("js/version.js"), /^window\.APP_VERSION = "v23\.3\.25";$/mu);
-  assert.match(indexSource, /app\.js\?v=23\.3\.25/u);
+  assert.match(serviceWorkerSource, /const CACHE_NAME = "nimr-sav-v23\.3\.26"/u);
+  assert.match(readProjectFile("js/version.js"), /^window\.APP_VERSION = "v23\.3\.26";$/mu);
+  assert.match(indexSource, /app\.js\?v=23\.3\.26/u);
 });
 
 assert.equal(passed.length + failures.length, 20, "IDENTITY-001D2-F must contain exactly checks A-T");

@@ -21,7 +21,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v23.3.23";
+const APP_VERSION = "v23.3.24";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const CURRENT_DATA_SCHEMA_VERSION = 2;
@@ -1414,6 +1414,7 @@ function normalizeCasePlanningTask(task, index = 0) {
       rawContributionHours: Number(g?.rawContributionHours || 0) || 0,
       elements: normalizeStringList(g?.elements),
       sourceLineIds: normalizeStringList(g?.sourceLineIds),
+      sourceClaimIds: normalizeStringList(g?.sourceClaimIds),
     }));
   }
   if (task.sourceKinds !== undefined) {

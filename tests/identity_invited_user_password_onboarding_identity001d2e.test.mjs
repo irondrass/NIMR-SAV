@@ -281,11 +281,11 @@ await check("O browser changes add no service-role secret or privileged Supabase
   assert.doesNotMatch(additions.join("\n"), /SUPABASE_SECRET|auth\.admin|service[_-]?role/iu);
 });
 
-await check("P the service-worker source changes while the v23.3.23 cache contract stays fixed", () => {
+await check("P the service-worker source changes while the v23.3.24 cache contract stays fixed", () => {
   assert.match(serviceWorkerSource, /IDENTITY-001D2-E source refresh/u);
-  assert.match(serviceWorkerSource, /const CACHE_NAME = "nimr-sav-v23\.3\.23"/u);
-  assert.match(readProjectFile("js/version.js"), /^window\.APP_VERSION = "v23\.3\.23";$/mu);
-  assert.match(indexSource, /app\.js\?v=23\.3\.23/u);
+  assert.match(serviceWorkerSource, /const CACHE_NAME = "nimr-sav-v23\.3\.24"/u);
+  assert.match(readProjectFile("js/version.js"), /^window\.APP_VERSION = "v23\.3\.24";$/mu);
+  assert.match(indexSource, /app\.js\?v=23\.3\.24/u);
 });
 
 await check("Q auth URL detection requires genuine auth token material and ignores arbitrary type query or hash alone", () => {

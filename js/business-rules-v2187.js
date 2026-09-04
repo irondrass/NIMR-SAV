@@ -665,6 +665,389 @@
     return `task-${cleanCategory}|${encodedParts.join('|')}`;
   }
 
+  function applyCanonicalTaskDependencies(tasks = []) {
+    if (!Array.isArray(tasks) || tasks.length === 0) return [];
+
+    const taskMap = new Map();
+    tasks.forEach((t) => {
+      if (t && t.id) {
+        taskMap.set(String(t.id), t);
+      }
+    });
+
+    const phaseOrder = ['body', 'oilService', 'mechanical', 'electrical', 'prep', 'paint', 'reassembly', 'finish', 'quality'];
+    const productivePhases = new Set(['body', 'oilService', 'mechanical', 'electrical', 'prep', 'paint', 'reassembly']);
+
+    function hasIntersection(arrA, arrB) {
+      if (!Array.isArray(arrA) || !Array.isArray(arrB) || arrA.length === 0 || arrB.length === 0) return false;
+      if (arrA.length === 1 && arrB.length === 1) return arrA[0] === arrB[0];
+      if (arrA.length < 5) return arrA.some((a) => arrB.includes(a));
+      const setB = new Set(arrB.filter(Boolean));
+      return arrA.some((item) => Boolean(item) && setB.has(item));
+    }
+
+    function hasClaimScopedLineIntersection(a, b) {
+      if (!a || !b) return false;
+      const linesA = Array.isArray(a.sourceLineIds) ? a.sourceLineIds : [];
+      const linesB = Array.isArray(b.sourceLineIds) ? b.sourceLineIds : [];
+      if (!hasIntersection(linesA, linesB)) return false;
+
+      const claimsA = Array.isArray(a.sourceClaimIds) ? a.sourceClaimIds.filter(Boolean) : [];
+      const claimsB = Array.isArray(b.sourceClaimIds) ? b.sourceClaimIds.filter(Boolean) : [];
+      if (claimsA.length > 0 && claimsB.length > 0) {
+        return hasIntersection(claimsA, claimsB);
+      }
+      return true;
+    }
+
+    function isZoneCompatible(zoneA, zoneB) {
+      const a = String(zoneA || '').trim();
+      const b = String(zoneB || '').trim();
+      if (!a || !b || a === 'general' || b === 'general') return true;
+      return a === b;
+    }
+
+    const bodyTasks = tasks.filter((t) => t.phase === 'body');
+    const prepBatches = tasks.filter((t) => t.kind === 'preparation_batch' || t.phase === 'prep');
+    const paintBatches = tasks.filter((t) => t.kind === 'paint_batch' || t.phase === 'paint');
+    const finishTasks = tasks.filter((t) => t.phase === 'finish');
+
+    // Index body tasks by sourceLineId and element for O(1) lookup
+    const bodyByLineId = new Map();
+    const bodyByElement = new Map();
+    bodyTasks.forEach((b) => {
+      (b.sourceLineIds || []).forEach((lid) => {
+        if (lid) {
+          if (!bodyByLineId.has(lid)) bodyByLineId.set(lid, []);
+          bodyByLineId.get(lid).push(b);
+        }
+      });
+      (b.elements || []).forEach((el) => {
+        if (el) {
+          if (!bodyByElement.has(el)) bodyByElement.set(el, []);
+          bodyByElement.get(el).push(b);
+        }
+      });
+    });
+
+    function findRelevantBodyTasks(target) {
+      const matched = new Set();
+      (target.sourceLineIds || []).forEach((lid) => {
+        const list = bodyByLineId.get(lid);
+        if (list) {
+          list.forEach((b) => {
+            if (hasClaimScopedLineIntersection(target, b)) {
+              matched.add(b);
+            }
+          });
+        }
+      });
+      (target.elements || []).forEach((el) => {
+        const list = bodyByElement.get(el);
+        if (list) list.forEach((b) => matched.add(b));
+      });
+      if (matched.size > 0) {
+        return [...matched];
+      }
+      return bodyTasks.filter((b) => isZoneCompatible(b.bodyZone, target.bodyZone));
+    }
+
+    const rawDeps = new Map();
+    tasks.forEach((t) => rawDeps.set(t.id, new Set()));
+
+    // Rule A: Same source estimate line for canonical operation tasks (claim-scoped)
+    const tasksBySourceLineId = new Map();
+    tasks.forEach((t) => {
+      const isOpTask = t.kind === 'operation' || (!t.kind && t.phase !== 'prep' && t.phase !== 'paint' && t.phase !== 'finish' && t.phase !== 'quality');
+      if (isOpTask && Array.isArray(t.sourceLineIds)) {
+        const claimIds = Array.isArray(t.sourceClaimIds) && t.sourceClaimIds.filter(Boolean).length > 0
+          ? [...new Set(t.sourceClaimIds.filter(Boolean))]
+          : [''];
+        claimIds.forEach((cid) => {
+          t.sourceLineIds.forEach((lid) => {
+            if (lid) {
+              const key = cid ? `${cid}:::${lid}` : `*:::${lid}`;
+              if (!tasksBySourceLineId.has(key)) tasksBySourceLineId.set(key, []);
+              tasksBySourceLineId.get(key).push(t);
+            }
+          });
+        });
+      }
+    });
+
+    tasksBySourceLineId.forEach((rawLineTasks) => {
+      const lineTasks = [...new Set(rawLineTasks)];
+      if (lineTasks.length < 2) return;
+      for (let i = 0; i < lineTasks.length; i++) {
+        const taskA = lineTasks[i];
+        const rankA = phaseOrder.indexOf(taskA.phase);
+        if (rankA === -1) continue;
+        for (let j = 0; j < lineTasks.length; j++) {
+          if (i === j) continue;
+          const taskB = lineTasks[j];
+          const rankB = phaseOrder.indexOf(taskB.phase);
+          if (rankB === -1 || rankB <= rankA) continue;
+          rawDeps.get(taskB.id).add(taskA.id);
+        }
+      }
+    });
+
+    // Rule B: Preparation Batch
+    prepBatches.forEach((prep) => {
+      const relevantBody = findRelevantBodyTasks(prep);
+      relevantBody.forEach((b) => {
+        if (b.id !== prep.id) {
+          rawDeps.get(prep.id).add(b.id);
+        }
+      });
+    });
+
+    // Rule C & D: Paint Batch (Single-zone and Global)
+    paintBatches.forEach((paint) => {
+      const isGlobal = (Array.isArray(paint.bodyZones) && paint.bodyZones.length > 1) ||
+                       String(paint.id).includes('batch-paint-global');
+
+      if (isGlobal) {
+        // Collect contributing paint groups
+        const groups = (Array.isArray(paint.paintGroups) && paint.paintGroups.length > 0)
+          ? paint.paintGroups
+          : (Array.isArray(paint.bodyZones) && paint.bodyZones.length > 0
+              ? paint.bodyZones.map((z) => ({ zone: z, elements: [], sourceLineIds: [], sourceClaimIds: paint.sourceClaimIds || [] }))
+              : [{ zone: 'general', elements: paint.elements || [], sourceLineIds: paint.sourceLineIds || [], sourceClaimIds: paint.sourceClaimIds || [] }]);
+
+        groups.forEach((group) => {
+          const groupZone = group.zone || 'general';
+
+          // 1. If an applicable preparation batch exists for this paint group:
+          let matchedPreps = [];
+          if (prepBatches.length > 0) {
+            const lineMatches = prepBatches.filter((p) => hasClaimScopedLineIntersection(p, group));
+            const elementMatches = prepBatches.filter((p) => hasIntersection(p.elements, group.elements));
+            matchedPreps = (lineMatches.length > 0 || elementMatches.length > 0)
+              ? [...new Set([...lineMatches, ...elementMatches])]
+              : prepBatches.filter((p) => isZoneCompatible(p.bodyZone, groupZone));
+
+            if (groupZone !== 'general') {
+              matchedPreps = matchedPreps.filter((p) => p.bodyZone === groupZone || p.bodyZone === 'general');
+            }
+          }
+
+          if (matchedPreps.length > 0) {
+            matchedPreps.forEach((p) => {
+              if (p.id !== paint.id) {
+                rawDeps.get(paint.id).add(p.id);
+              }
+            });
+          } else {
+            // 2. Otherwise: use the strongest relevant upstream body provenance for that paint group
+            const relevantBody = findRelevantBodyTasks({
+              sourceClaimIds: group.sourceClaimIds,
+              sourceLineIds: group.sourceLineIds,
+              elements: group.elements,
+              bodyZone: groupZone,
+            });
+            relevantBody.forEach((b) => {
+              if (b.id !== paint.id) {
+                rawDeps.get(paint.id).add(b.id);
+              }
+            });
+          }
+        });
+      } else {
+        // Single-zone paint batch
+        let matchedPreps = [];
+        if (prepBatches.length > 0) {
+          const lineMatches = prepBatches.filter((p) => hasClaimScopedLineIntersection(p, paint));
+          const elementMatches = prepBatches.filter((p) => hasIntersection(p.elements, paint.elements));
+          matchedPreps = (lineMatches.length > 0 || elementMatches.length > 0)
+            ? [...new Set([...lineMatches, ...elementMatches])]
+            : prepBatches.filter((p) => isZoneCompatible(p.bodyZone, paint.bodyZone));
+        }
+
+        if (matchedPreps.length > 0) {
+          matchedPreps.forEach((p) => {
+            if (p.id !== paint.id) {
+              rawDeps.get(paint.id).add(p.id);
+            }
+          });
+        } else {
+          // Fallback: relevant body provenance
+          const relevantBody = findRelevantBodyTasks(paint);
+          relevantBody.forEach((b) => {
+            if (b.id !== paint.id) {
+              rawDeps.get(paint.id).add(b.id);
+            }
+          });
+        }
+      }
+    });
+
+    // Rule E: Reassembly
+    const globalPaintBatch = paintBatches.find((p) =>
+      (Array.isArray(p.bodyZones) && p.bodyZones.length > 1) || String(p.id).includes('batch-paint-global')
+    );
+
+    tasks.filter((t) => t.phase === 'reassembly').forEach((reassembly) => {
+      let matchedPaint = null;
+      if (paintBatches.length > 0) {
+        if (globalPaintBatch && (
+          hasClaimScopedLineIntersection(reassembly, globalPaintBatch) ||
+          hasIntersection(reassembly.elements, globalPaintBatch.elements)
+        )) {
+          matchedPaint = globalPaintBatch;
+        } else {
+          matchedPaint = paintBatches.find((p) =>
+            hasClaimScopedLineIntersection(reassembly, p) ||
+            hasIntersection(reassembly.elements, p.elements)
+          );
+        }
+      }
+
+      if (matchedPaint) {
+        rawDeps.get(reassembly.id).add(matchedPaint.id);
+      } else {
+        const matched = new Set();
+        (reassembly.sourceLineIds || []).forEach((lid) => {
+          const list = bodyByLineId.get(lid);
+          if (list) {
+            list.forEach((b) => {
+              if (hasClaimScopedLineIntersection(reassembly, b)) {
+                matched.add(b);
+              }
+            });
+          }
+        });
+        (reassembly.elements || []).forEach((el) => {
+          const list = bodyByElement.get(el);
+          if (list) list.forEach((b) => matched.add(b));
+        });
+        matched.forEach((b) => {
+          if (b.id !== reassembly.id) {
+            rawDeps.get(reassembly.id).add(b.id);
+          }
+        });
+      }
+    });
+
+    // Productive tasks: terminal discovery
+    const productiveTasks = tasks.filter((t) => productivePhases.has(t.phase));
+    const productiveTaskIds = new Set(productiveTasks.map((t) => t.id));
+
+    const sortedProductive = productiveTasks.slice().sort((a, b) => {
+      const rA = phaseOrder.indexOf(a.phase);
+      const rB = phaseOrder.indexOf(b.phase);
+      return rA - rB;
+    });
+
+    const allPrereqsMap = new Map();
+    tasks.forEach((t) => allPrereqsMap.set(t.id, new Set()));
+
+    sortedProductive.forEach((t) => {
+      const prereqs = allPrereqsMap.get(t.id);
+      const direct = rawDeps.get(t.id);
+      if (direct) {
+        direct.forEach((depId) => {
+          prereqs.add(depId);
+          const nested = allPrereqsMap.get(depId);
+          if (nested) {
+            nested.forEach((nId) => prereqs.add(nId));
+          }
+        });
+      }
+    });
+
+    const nonTerminalProductiveIds = new Set();
+    productiveTasks.forEach((t) => {
+      const prereqs = allPrereqsMap.get(t.id);
+      if (prereqs) {
+        prereqs.forEach((id) => {
+          if (productiveTaskIds.has(id)) {
+            nonTerminalProductiveIds.add(id);
+          }
+        });
+      }
+    });
+
+    const terminalProductiveTasks = productiveTasks
+      .filter((t) => !nonTerminalProductiveIds.has(t.id))
+      .sort((a, b) => compareStableText(a.id, b.id));
+
+    // Rule F: Finish
+    finishTasks.forEach((f) => {
+      terminalProductiveTasks.forEach((prod) => {
+        if (prod.id !== f.id) {
+          rawDeps.get(f.id).add(prod.id);
+        }
+      });
+    });
+
+    // Rule G: Quality
+    const qualityTasks = tasks.filter((t) => t.phase === 'quality');
+    qualityTasks.forEach((q) => {
+      if (finishTasks.length > 0) {
+        finishTasks.forEach((f) => {
+          if (f.id !== q.id) {
+            rawDeps.get(q.id).add(f.id);
+          }
+        });
+      } else {
+        terminalProductiveTasks.forEach((prod) => {
+          if (prod.id !== q.id) {
+            rawDeps.get(q.id).add(prod.id);
+          }
+        });
+      }
+    });
+
+    // Transitive reduction for the full graph
+    const allSorted = tasks.slice().sort((a, b) => {
+      const rA = phaseOrder.indexOf(a.phase);
+      const rB = phaseOrder.indexOf(b.phase);
+      if (rA !== rB) return (rA === -1 ? 99 : rA) - (rB === -1 ? 99 : rB);
+      return compareStableText(a.id, b.id);
+    });
+
+    allSorted.forEach((t) => {
+      const fullPrereqs = allPrereqsMap.get(t.id);
+      const direct = rawDeps.get(t.id);
+      if (direct) {
+        direct.forEach((depId) => {
+          if (depId !== t.id && taskMap.has(depId)) {
+            fullPrereqs.add(depId);
+            const nested = allPrereqsMap.get(depId);
+            if (nested) {
+              nested.forEach((nId) => fullPrereqs.add(nId));
+            }
+          }
+        });
+      }
+    });
+
+    const finalDepsMap = new Map();
+    tasks.forEach((t) => {
+      const directSet = rawDeps.get(t.id);
+      if (!directSet || directSet.size === 0) {
+        finalDepsMap.set(t.id, []);
+        return;
+      }
+      const direct = [...directSet].filter((depId) => depId !== t.id && taskMap.has(depId));
+      if (direct.length <= 1) {
+        finalDepsMap.set(t.id, direct);
+        return;
+      }
+      const reduced = direct.filter((d) => {
+        return !direct.some((other) => other !== d && (allPrereqsMap.get(other)?.has(d) ?? false));
+      });
+      reduced.sort(compareStableText);
+      finalDepsMap.set(t.id, reduced);
+    });
+
+    return tasks.map((task) => ({
+      ...task,
+      dependencies: finalDepsMap.get(task.id) || [],
+    }));
+  }
+
   function deriveCanonicalPlanningTasks(item, options = {}) {
     if (!item || typeof item !== 'object') return [];
     const caseId = String(item.id || 'case');
@@ -962,6 +1345,7 @@
         rawContributionHours: g.rawContribution,
         elements: g.elements.slice().sort(compareStableText),
         sourceLineIds: g.sourceLineIds.slice().sort(compareStableText),
+        sourceClaimIds: (g.sourceClaimIds || []).slice().sort(compareStableText),
       })).sort((a, b) => compareStableText(a.zone, b.zone));
       const rawContributionTotal = roundHours(groupContributions.reduce((sum, g) => sum + g.rawContribution, 0));
       const sourceLaborHoursTotal = roundHours(groupContributions.reduce((sum, g) => sum + g.sourceLaborHours, 0));
@@ -1057,12 +1441,14 @@
     });
     }
 
-    return [...derivedTasks, ...residualTasks].sort((a, b) => {
+    const sortedTasks = [...derivedTasks, ...residualTasks].sort((a, b) => {
       const aRank = phaseOrder.indexOf(a.phase);
       const bRank = phaseOrder.indexOf(b.phase);
       if (aRank !== bRank) return (aRank === -1 ? 99 : aRank) - (bRank === -1 ? 99 : bRank);
       return compareStableText(a.id, b.id);
     });
+
+    return applyCanonicalTaskDependencies(sortedTasks);
   }
 
   function getCasePlanningTasks(item = {}, options = {}) {
@@ -1083,6 +1469,7 @@
   window.formatPreparationBatchTitle = formatPreparationBatchTitle;
   window.formatPaintBatchTitle = formatPaintBatchTitle;
   window.deriveCanonicalPlanningTasks = deriveCanonicalPlanningTasks;
+  window.applyCanonicalTaskDependencies = applyCanonicalTaskDependencies;
   window.getCasePlanningTasks = getCasePlanningTasks;
   window.normalizeOriginalLineForPlanning = normalizeOriginalLineForPlanning;
 

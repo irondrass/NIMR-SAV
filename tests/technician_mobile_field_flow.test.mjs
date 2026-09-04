@@ -37,6 +37,9 @@ const { result, errors } = await runMobileCdpTest({
     assert.notEqual(timerAfterWait, initial.timer, "le chronomètre doit progresser");
 
     await evaluate(`forceEmergencyAutosave()`);
+    await send("Page.addScriptToEvaluateOnNewDocument", {
+      source: `Object.defineProperty(Navigator.prototype, "onLine", { configurable: true, get: () => false });`,
+    }, sessionId);
     await send("Page.reload", { ignoreCache: false }, sessionId);
     await waitFor("window.__nimrAppReady === true", "reprise technicien après reload", 120);
     await waitFor("Boolean(document.querySelector('[data-technician-current-task]'))", "tâche actuelle restaurée", 80);

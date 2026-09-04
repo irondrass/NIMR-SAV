@@ -2392,6 +2392,8 @@ function renderTechnicianFieldFocus(currentRow, nextRow) {
   const nextOperationTitle = nextBooking ? getPlanningOperationTitle(nextBooking) : "";
   const nextPhaseLabel = nextBooking ? getPlanningPhaseLabel(nextBooking) : "";
   const nextCanonicalOperation = nextBooking ? isOperationCentricBooking(nextBooking) : false;
+  const currentLaborInstruction = renderTechnicianExactLaborInstruction(currentRow);
+  const nextLaborInstruction = nextRow ? renderTechnicianExactLaborInstruction(nextRow, { compact: true }) : "";
   return `
     <article class="technician-current-task" data-technician-current-task data-current-booking-id="${escapeAttr(booking.id)}">
       <div class="technician-field-head">
@@ -2402,6 +2404,7 @@ function renderTechnicianFieldFocus(currentRow, nextRow) {
         <strong>${escapeHtml(item.vehicle || "Véhicule à compléter")}</strong>
         <span>${escapeHtml(item.plate || item.vin || "Sans immatriculation")} · ${escapeHtml(getPrintOrderReference(item))}</span>
       </div>
+      ${currentLaborInstruction}
       <dl class="technician-field-grid">
         <div><dt>Durée prévue</dt><dd>${formatLocalizedDecimal(Number(currentRow.plannedMinutes || 0) / 60)} h</dd></div>
         <div><dt>Temps écoulé</dt><dd class="technician-live-timer" data-technician-elapsed-booking="${escapeAttr(booking.id)}">${formatTechnicianElapsedTime(getTechnicianFamilyElapsedMilliseconds(booking.id))}</dd></div>
@@ -2418,6 +2421,7 @@ function renderTechnicianFieldFocus(currentRow, nextRow) {
       <article class="technician-next-task" data-technician-next-task>
         <div><span class="eyebrow">Opération suivante</span><h3>${escapeHtml(nextOperationTitle)}</h3>${nextCanonicalOperation && nextPhaseLabel !== nextOperationTitle ? `<small class="muted">Phase · ${escapeHtml(nextPhaseLabel)}</small>` : ""}</div>
         <p><strong>${escapeHtml(nextItem.vehicle || "Véhicule à compléter")}</strong> · ${escapeHtml(nextItem.plate || nextItem.vin || "Sans immatriculation")} · ${formatTime(new Date(nextBooking.start))}</p>
+        ${nextLaborInstruction}
       </article>
     ` : ""}
   `;
@@ -2545,6 +2549,7 @@ function renderTechnicianTaskCard(row, options = {}) {
   const phaseLabel = getPlanningPhaseLabel(booking);
   const canonicalOperation = isOperationCentricBooking(booking);
   const note = row.latestNote ? `<p class="technician-note">Note : ${escapeHtml(row.latestNote)}</p>` : "";
+  const exactLaborInstruction = renderTechnicianExactLaborInstruction(row);
   return `
     <article class="technician-task-card task-status-${escapeAttr(row.status)} ${row.late ? "is-late" : ""} ${options.isCurrent ? "is-current-field-task" : ""}">
       <div class="technician-task-main">
@@ -2566,6 +2571,7 @@ function renderTechnicianTaskCard(row, options = {}) {
         <div><dt>Technicien</dt><dd>${escapeHtml(techName)}</dd></div>
         <div><dt>Ressources</dt><dd>${escapeHtml(resources || "-")}</dd></div>
       </dl>
+      ${exactLaborInstruction}
       ${booking.pauseReason ? `<p class="technician-note">Pause : ${escapeHtml(booking.pauseReason)}</p>` : ""}
       ${row.pauseRemainder ? '<p class="technician-note">Reprise planifiée après pause.</p>' : ""}
       ${booking.blockDetails ? `<p class="technician-note danger-text">Blocage : ${escapeHtml(booking.blockDetails)}</p>` : ""}
@@ -5428,6 +5434,115 @@ function renderPlanningTaskProvenance(provenance = {}) {
   return chunks.length
     ? `<small class="operation-provenance">${chunks.map((chunk) => escapeHtml(chunk)).join(" · ")}</small>`
     : "";
+}
+
+/**
+ * WORKSHOP-001F — technician exact labor instructions.
+ * Read-only adapter over the canonical booking provenance already persisted by
+ * WORKSHOP-001A/001C. It never creates, mutates or re-plans a task.
+ */
+function collectTechnicianExactLaborLines(row = {}) {
+  const item = row?.item;
+  const displayBooking = row?.displayBooking || row?.booking || null;
+  if (!item || !displayBooking || !isOperationCentricBooking(displayBooking)) return [];
+
+  const family = Array.isArray(row?.family) && row.family.length
+    ? row.family
+    : (Array.isArray(row?.bookings) && row.bookings.length ? row.bookings : [displayBooking]);
+  const provenance = collectPlanningTaskProvenance(family, item);
+  const wantedLineIds = new Set((provenance.sourceLineIds || []).map(String));
+  const wantedClaimIds = new Set((provenance.sourceClaimIds || []).map(String));
+  const rows = [];
+  const seen = new Set();
+
+  (item.claims || []).forEach((claim) => {
+    const claimId = String(claim?.id || "");
+    if (wantedClaimIds.size && !wantedClaimIds.has(claimId)) return;
+    const claimLabel = [claim?.number, claim?.title].filter(Boolean).join(" · ").trim();
+    const originalLines = Array.isArray(claim?.estimate?.originalLines) ? claim.estimate.originalLines : [];
+    originalLines.forEach((line) => {
+      const lineId = String(line?.id || "");
+      if (wantedLineIds.size && !wantedLineIds.has(lineId)) return;
+      if (!lineId && wantedLineIds.size) return;
+      const operation = String(line?.operation || line?.rawText || "").trim();
+      const rawText = String(line?.rawText || "").trim();
+      if (!operation && !rawText) return;
+      const key = [claimId, lineId || operation || rawText].join("::");
+      if (seen.has(key)) return;
+      seen.add(key);
+      rows.push({
+        claimId,
+        claimLabel,
+        lineId,
+        code: String(line?.code || "").trim(),
+        operation: operation || rawText,
+        rawText,
+        laborHours: Math.max(0, Number(line?.laborHours || 0) || 0),
+        source: String(line?.source || "").trim(),
+      });
+    });
+  });
+
+  if (rows.length) return rows;
+
+  // Applied-estimate / source-aware fallback: preserve the exact operation text
+  // carried by the canonical task even when originalLines are unavailable.
+  return (provenance.sourceOperations || [])
+    .map((operation, index) => String(operation || "").trim())
+    .filter(Boolean)
+    .map((operation, index) => ({
+      claimId: provenance.sourceClaimIds?.[0] || "",
+      claimLabel: provenance.claimLabels?.[0] || "",
+      lineId: provenance.sourceLineIds?.[index] || "",
+      code: "",
+      operation,
+      rawText: "",
+      laborHours: 0,
+      source: provenance.sourceKind || "",
+    }));
+}
+
+function renderTechnicianExactLaborInstruction(row, options = {}) {
+  const booking = row?.displayBooking || row?.booking || null;
+  if (!booking || !isOperationCentricBooking(booking)) return "";
+  const lines = collectTechnicianExactLaborLines(row);
+  if (!lines.length) return "";
+
+  const phaseLabel = getPlanningPhaseLabel(booking);
+  const plannedHours = Math.max(0, Number(row?.plannedMinutes || 0) || 0) / 60;
+  const compact = options.compact === true;
+  const lineLabel = lines.length > 1 ? "Lignes MO exactes" : "Ligne MO exacte";
+  const sourceItems = lines.map((line) => {
+    const title = [line.code, line.operation].filter(Boolean).join(" · ");
+    const normalizeDisplayText = (value) => String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
+    const rawDiffers = line.rawText
+      && normalizeDisplayText(line.rawText) !== normalizeDisplayText(line.operation);
+    const meta = [
+      line.claimLabel ? `OR · ${line.claimLabel}` : "",
+      line.laborHours > 0 ? `MO devis · ${formatLocalizedDecimal(line.laborHours)} h` : "",
+    ].filter(Boolean);
+    return `
+      <li class="technician-labor-source-line">
+        <strong>${escapeHtml(title || line.rawText || "Opération source")}</strong>
+        ${rawDiffers ? `<span class="technician-labor-raw">Ligne source · ${escapeHtml(line.rawText)}</span>` : ""}
+        ${meta.length ? `<small>${meta.map((value) => escapeHtml(value)).join(" · ")}</small>` : ""}
+      </li>
+    `;
+  }).join("");
+
+  return `
+    <section class="technician-labor-instruction ${compact ? "is-compact" : ""}" data-technician-labor-instruction>
+      <div class="technician-labor-instruction-head">
+        <strong>${lineLabel}</strong>
+        <span>${lines.length} source${lines.length > 1 ? "s" : ""}</span>
+      </div>
+      <ul class="technician-labor-source-list">${sourceItems}</ul>
+      <div class="technician-labor-assignment">
+        <span><b>Votre intervention</b> · ${escapeHtml(phaseLabel)}</span>
+        <span><b>Temps affecté</b> · ${formatLocalizedDecimal(plannedHours)} h</span>
+      </div>
+    </section>
+  `;
 }
 
 function buildBusinessTaskDependencyIndex(rows = []) {

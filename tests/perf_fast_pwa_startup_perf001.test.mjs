@@ -46,7 +46,7 @@ function fixture(cached = []) {
     caches: {
       async open() { return cache; },
       async match(req) { return cache.match(req); },
-      async keys() { return ["nimr-sav-v23.3.24"]; },
+      async keys() { return ["nimr-sav-v23.3.25"]; },
       async delete() { return true; },
     },
     fetch(req) { calls.push(req); return fetcher(req); },
@@ -65,10 +65,10 @@ function dispatch(fx, request) {
   return p;
 }
 
-await check("A cache and app version remain v23.3.24", () => {
+await check("A cache and app version remain v23.3.25", () => {
   assert.match(sw, /PERF-001 source refresh/u);
-  assert.match(sw, /const CACHE_NAME = "nimr-sav-v23\.3\.24"/u);
-  assert.match(read("js/version.js"), /^window\.APP_VERSION = "v23\.3\.24";$/mu);
+  assert.match(sw, /const CACHE_NAME = "nimr-sav-v23\.3\.25"/u);
+  assert.match(read("js/version.js"), /^window\.APP_VERSION = "v23\.3\.25";$/mu);
 });
 
 await check("B D2-F service-worker marker remains intact", () => {

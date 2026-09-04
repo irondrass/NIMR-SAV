@@ -21,7 +21,12 @@ const swSource = read("sw.js");
 const estimateSource = read("js/estimate-import.js");
 const offlineSource = read("offline.html");
 
-console.log("Starting SECUX-001 Phase 2.1 Behavioral & Static Test Suite (v23.3.24)...\n");
+import {
+  computeReleaseFingerprint,
+  SEALED_RELEASE_FINGERPRINTS,
+} from "./helpers/release-fingerprint.mjs";
+
+console.log("Starting SECUX-001 Phase 2.1 Behavioral & Static Test Suite (v23.3.25)...\n");
 
 const passed = [];
 const failed = [];
@@ -946,52 +951,21 @@ await check("GUARD-8", "UI text never falsely claims PIN encrypts local data", (
   assert.equal(/PIN\s+(?:qui\s+)?chiffre\s+les\s+donn[eé]es\s+locales/i.test(stateSource), false);
 });
 
-await check("GUARD-9", "Release v23.3.24 is synchronized across 7 files, sealed fingerprint validates, styles.css unchanged", () => {
-  assert.match(versionSource, /^window\.APP_VERSION = "v23\.3\.24";$/m);
-  assert.match(versionSource, /^window\.NIMR_BUILD = "v23\.3\.24";$/m);
-  assert.match(versionSource, /^window\.NIMR_CACHE_NAME = "nimr-sav-v23\.3\.24";$/m);
-  assert.match(stateSource, /const APP_VERSION = "v23\.3\.24";/);
-  assert.match(swSource, /const CACHE_NAME = "nimr-sav-v23\.3\.24";/);
-  assert.match(appSource, /vendor\/pdf\.worker\.min\.js\?v=23\.3\.24/);
-  assert.match(appSource, /sw\.js\?v=23\.3\.24/);
-  assert.match(estimateSource, /vendor\/pdf\.worker\.min\.js\?v=23\.3\.24/);
-  assert.match(offlineSource, /styles\.css\?v=23\.3\.24/);
-  assert.match(indexSource, /styles\.css\?v=23\.3\.24/);
+await check("GUARD-9", "Release v23.3.25 is synchronized across 7 files, sealed fingerprint validates, styles.css unchanged", () => {
+  assert.match(versionSource, /^window\.APP_VERSION = "v23\.3\.25";$/m);
+  assert.match(versionSource, /^window\.NIMR_BUILD = "v23\.3\.25";$/m);
+  assert.match(versionSource, /^window\.NIMR_CACHE_NAME = "nimr-sav-v23\.3\.25";$/m);
+  assert.match(stateSource, /const APP_VERSION = "v23\.3\.25";/);
+  assert.match(swSource, /const CACHE_NAME = "nimr-sav-v23\.3\.25";/);
+  assert.match(appSource, /vendor\/pdf\.worker\.min\.js\?v=23\.3\.25/);
+  assert.match(appSource, /sw\.js\?v=23\.3\.25/);
+  assert.match(estimateSource, /vendor\/pdf\.worker\.min\.js\?v=23\.3\.25/);
+  assert.match(offlineSource, /styles\.css\?v=23\.3\.25/);
+  assert.match(indexSource, /styles\.css\?v=23\.3\.25/);
 
-  const RELEASE_OWNED_RUNTIME_FILES = [
-    "index.html",
-    "offline.html",
-    "styles.css",
-    "app.js",
-    "sw.js",
-    "manifest.webmanifest",
-    "js/version.js",
-    "js/utils.js",
-    "js/state.js",
-    "js/ui-cases.js",
-    "js/estimate-import.js",
-    "js/ui-planning.js",
-    "js/photos.js",
-    "js/storage.js",
-    "js/work-hours-sync.js",
-    "js/planning.js",
-    "js/exports.js",
-    "js/business-rules-v2187.js",
-    "js/supabase-config.js",
-    "js/supabase-client.js",
-    "js/supabase-sync.js",
-    "vendor/pdf.min.js",
-    "vendor/pdf.worker.min.js",
-  ].sort();
-
-  const hash = crypto.createHash("sha256");
-  for (const file of RELEASE_OWNED_RUNTIME_FILES) {
-    hash.update(`${file}\n`);
-    hash.update(fs.readFileSync(path.join(root, file)));
-  }
-  const actualFingerprint = hash.digest("hex");
-  const EXPECTED_FINGERPRINT = "028175939cba065dffea3d236d08ff5d6fe81b562cb95a2aa20fb6fe00660e4c";
-  assert.equal(actualFingerprint, EXPECTED_FINGERPRINT, "v23.3.24 fingerprint must match sealed release registry");
+  const actualFingerprint = computeReleaseFingerprint(root);
+  const EXPECTED_FINGERPRINT = SEALED_RELEASE_FINGERPRINTS["v23.3.25"];
+  assert.equal(actualFingerprint, EXPECTED_FINGERPRINT, "v23.3.25 fingerprint must match sealed release registry");
 
   const baselineDiff = execFileSync("git", ["diff", "204587ad2a59eb05918f73c5895db0092cc19d27", "--", "styles.css"], { cwd: root, encoding: "utf8" });
   assert.equal(baselineDiff.trim(), "", "styles.css must remain byte-identical to baseline");

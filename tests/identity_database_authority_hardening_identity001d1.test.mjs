@@ -338,6 +338,8 @@ await check("N Edge race mapping is narrow and preserves revoke-before-Auth clea
     "js/estimate-import.js",
     "styles.css",
     "sw.js",
+    "js/business-rules-v2187.js",
+    "tests/workshop_operation_centric_domain_workshop001a.test.mjs",
   ].includes(file.replaceAll("\\", "/")) || fetchedHistoricalMigrations.has(file.replaceAll("\\", "/"))), true);
   const forbiddenCommands = [
     ["supabase", "db", "push"].join(" "),
@@ -346,7 +348,7 @@ await check("N Edge race mapping is narrow and preserves revoke-before-Auth clea
     ["supabase", "secrets", "set"].join(" "),
   ];
   for (const command of forbiddenCommands) assert.equal(`${migrationSql}\n${edgeSource}`.includes(command), false, command);
-  assert.match(readProjectFile("js/version.js"), /^window\.APP_VERSION = "v23\.3\.22";$/mu);
+  assert.match(readProjectFile("js/version.js"), /^window\.APP_VERSION = "v23\.3\.23";$/mu);
 });
 
 assert.equal(passed.length + failures.length, 14, "IDENTITY-001D1 must contain exactly checks A-N");

@@ -591,6 +591,501 @@
   }
   window.renderPaintOptimizationSummary = renderPaintOptimizationSummary;
 
+  function roundHours(val) {
+    return Math.round(Number(val || 0) * 100) / 100;
+  }
+
+  function extractBodyshopElement(operationText) {
+    if (!operationText || typeof operationText !== 'string') return '';
+    let clean = operationText.trim();
+    clean = clean.replace(/^(?:MO[-/][A-Z0-9]+|[A-Z]{2,4}[-/][A-Z0-9]+|\d{4,}[A-Z0-9/-]*)\s+/i, '');
+    clean = clean.replace(
+      /^(?:D\s*\/\s*P\s+ET\s+PREPARATION|D\s*\/\s*P\s+ET\s+REMPLACEMENT|PEINTURE\s+ET\s+F(?:I)?NITION|DEPOSE\s+ET\s+REPOSE|DEPOSE\s+REPOSE|D\s*\/\s*P|DEPOSE|REPOSE|DEMONTAGE|REMONTAGE|PREPARAT(?:ION|IN)|CHANGEMENT|REMPLACEMENT|REPARATION|REDRESSAGE|DRESSAGE|CONTROLE|REMPL?)\s+/i,
+      ''
+    );
+    clean = clean.replace(/\s+/g, ' ').trim();
+    if (!clean) return operationText.trim();
+    if (/^PARE\s*CHOCS?\s*AR/i.test(clean)) return 'Pare-chocs AR';
+    if (/^PARE\s*CHOCS?\s*AV/i.test(clean)) return 'Pare-chocs AV';
+    if (/^MALLE\s*AR/i.test(clean)) return 'Malle AR';
+    if (/^LUNETTE\s*AR/i.test(clean)) return 'Lunette AR';
+    if (/^CAPOT/i.test(clean)) return 'Capot';
+    if (/^AILE\s*AR\s*D/i.test(clean) || /^AILE\s*ARD/i.test(clean)) return 'Aile ARD';
+    if (/^AILE\s*AR\s*G/i.test(clean) || /^AILE\s*ARG/i.test(clean)) return 'Aile ARG';
+    if (/^AILE\s*AV\s*D/i.test(clean) || /^AILE\s*AVD/i.test(clean)) return 'Aile AVD';
+    if (/^AILE\s*AV\s*G/i.test(clean) || /^AILE\s*AVG/i.test(clean)) return 'Aile AVG';
+    if (/^PORTE\s*AV\s*D/i.test(clean) || /^PORTE\s*AVD/i.test(clean)) return 'Porte AVD';
+    if (/^PORTE\s*AV\s*G/i.test(clean) || /^PORTE\s*AVG/i.test(clean)) return 'Porte AVG';
+    if (/^PORTE\s*AR\s*D/i.test(clean) || /^PORTE\s*ARD/i.test(clean)) return 'Porte ARD';
+    if (/^PORTE\s*AR\s*G/i.test(clean) || /^PORTE\s*ARG/i.test(clean)) return 'Porte ARG';
+    return clean.charAt(0).toUpperCase() + clean.slice(1);
+  }
+
+  function formatPreparationBatchTitle(bodyZone) {
+    const zoneLabels = {
+      front: 'LOT AVANT',
+      rear: 'LOT ARRIÈRE',
+      left: 'LOT CÔTÉ GAUCHE',
+      right: 'LOT CÔTÉ DROIT',
+      center: 'LOT CAPOT / CENTRE',
+      general: 'LOT GÉNÉRAL',
+    };
+    const label = zoneLabels[bodyZone] || (bodyZone ? `LOT ${String(bodyZone).toUpperCase()}` : 'LOT GÉNÉRAL');
+    return `PRÉPARATION GLOBALE — ${label}`;
+  }
+
+  function formatPaintBatchTitle(bodyZone) {
+    const zoneLabels = {
+      front: 'LOT AVANT',
+      rear: 'LOT ARRIÈRE',
+      left: 'LOT CÔTÉ GAUCHE',
+      right: 'LOT CÔTÉ DROIT',
+      center: 'LOT CAPOT / CENTRE',
+      general: 'LOT GÉNÉRAL',
+    };
+    const label = zoneLabels[bodyZone] || (bodyZone ? `LOT ${String(bodyZone).toUpperCase()}` : 'LOT GÉNÉRAL');
+    return `PEINTURE + VERNIS — ${label}`;
+  }
+
+  function compareStableText(a, b) {
+    const left = String(a ?? '');
+    const right = String(b ?? '');
+    return left < right ? -1 : left > right ? 1 : 0;
+  }
+
+  function canonicalLaborMinutes(hours) {
+    const value = Number(hours || 0);
+    if (value <= 0) return 0;
+    return Math.max(1, Math.round(value * 60));
+  }
+
+  function buildCanonicalTaskId(category, ...parts) {
+    const cleanCategory = encodeURIComponent(String(category ?? '').trim());
+    const encodedParts = parts.map((part) => encodeURIComponent(String(part ?? '')));
+    return `task-${cleanCategory}|${encodedParts.join('|')}`;
+  }
+
+  function deriveCanonicalPlanningTasks(item, options = {}) {
+    if (!item || typeof item !== 'object') return [];
+    const caseId = String(item.id || 'case');
+    const claims = Array.isArray(item.claims) ? item.claims.filter((c) => c && c.includeInPlanning !== false) : [];
+
+    const phaseOrder = ['body', 'oilService', 'mechanical', 'electrical', 'prep', 'paint', 'reassembly', 'finish', 'quality'];
+
+    const unitTasks = [];
+    const prepGroups = new Map();
+    const paintGroups = new Map();
+    const zoneOptimizerTotals = new Map();
+    let totalOptimizerClaimPaintHours = 0;
+    let hasLineTasks = false;
+
+    claims.forEach((claim, claimIndex) => {
+      const claimId = String(claim.id || `claim-${claimIndex + 1}`);
+      const originalLines = Array.isArray(claim.estimate?.originalLines) ? claim.estimate.originalLines : [];
+      const appliedLines = Array.isArray(claim.estimate?.lines) ? claim.estimate.lines : [];
+
+      if (originalLines.length > 0) {
+        hasLineTasks = true;
+        const optimized = (typeof optimizeEstimateAllocationsFromOriginalLines === 'function')
+          ? optimizeEstimateAllocationsFromOriginalLines(originalLines)
+          : { totals: {}, lines: [], paintOptimization: [] };
+
+        totalOptimizerClaimPaintHours = roundHours(totalOptimizerClaimPaintHours + Number(optimized.totals?.paint || 0));
+
+        (optimized.paintOptimization || []).forEach((g) => {
+          const zone = String(g.group || 'general');
+          const prev = zoneOptimizerTotals.get(zone) || 0;
+          zoneOptimizerTotals.set(zone, roundHours(prev + Number(g.total || 0)));
+        });
+
+        const normalizedLines = originalLines.map(normalizeOriginalLineForPlanning);
+
+        normalizedLines.forEach((line, lineIndex) => {
+          const lineId = String(line.id || `line-${claimIndex + 1}-${lineIndex + 1}`);
+          const operation = String(line.operation || line.rawText || 'Opération devis');
+          const element = extractBodyshopElement(operation);
+          const bodyZone = String(line.paintGroup || line.bodyZone || inferPaintGroup(operation) || 'general');
+          const allocations = Array.isArray(line.allocations) && line.allocations.length
+            ? line.allocations
+            : makeWeightedAllocations(operation, Number(line.laborHours || 0), line.selectedPhases);
+
+          allocations.forEach((allocation) => {
+            const phase = String(allocation.phase || 'body');
+            const hours = Number(allocation.laborHours || 0);
+            if (hours <= 0 || phase === 'quality') return;
+
+            if (phase === 'prep') {
+              if (!prepGroups.has(bodyZone)) prepGroups.set(bodyZone, []);
+              prepGroups.get(bodyZone).push({
+                claimId,
+                lineId,
+                operation,
+                element,
+                hours,
+                sourceLineIds: [lineId],
+                sourceOperations: [operation],
+                sourceKind: 'estimate_provenance',
+              });
+              return;
+            }
+
+            if (phase === 'paint') {
+              if (!paintGroups.has(bodyZone)) paintGroups.set(bodyZone, []);
+              paintGroups.get(bodyZone).push({
+                claimId,
+                lineId,
+                operation,
+                element,
+                rawHours: hours,
+                sourceLineIds: [lineId],
+                sourceOperations: [operation],
+                sourceKind: 'estimate_provenance',
+              });
+              return;
+            }
+
+            const taskId = buildCanonicalTaskId('op', caseId, claimId, lineId, phase);
+            unitTasks.push({
+              id: taskId,
+              taskId,
+              kind: 'operation',
+              key: phase,
+              phase,
+              title: operation,
+              laborHours: roundHours(hours),
+              durationMinutes: canonicalLaborMinutes(hours),
+              sourceClaimIds: [claimId],
+              sourceLineIds: [lineId],
+              sourceOperations: [operation],
+              elements: element ? [element] : [],
+              bodyZone: bodyZone !== 'general' ? bodyZone : '',
+              requiredRole: allocation.requiredRole || line.requiredRole || REQUIRED_ROLE_BY_PHASE[phase] || 'tolier',
+              dependencies: [],
+              vehicleExclusive: true,
+              parallelizable: false,
+              sourceKind: 'estimate_provenance',
+              sourceKinds: ['estimate_provenance'],
+              taskModelVersion: 1,
+            });
+          });
+        });
+      } else if (appliedLines.length > 0) {
+        hasLineTasks = true;
+        appliedLines.forEach((line, lineIndex) => {
+          const lineId = String(line.id || `applied-${claimIndex + 1}-${lineIndex + 1}`);
+          const operation = String(line.operation || line.rawText || phaseLabel(line.phase) || 'Opération devis');
+          const element = extractBodyshopElement(operation);
+          const bodyZone = String(line.paintGroup || line.bodyZone || inferPaintGroup(operation) || 'general');
+          const phase = String(line.phase || 'body');
+          const hours = Number(line.laborHours || line.hours || 0);
+          if (hours <= 0 || phase === 'quality') return;
+
+          const sourceLineIds = Array.isArray(line.sourceLineIds) && line.sourceLineIds.length ? line.sourceLineIds : [lineId];
+          const sourceOperations = Array.isArray(line.sourceOperations) && line.sourceOperations.length ? line.sourceOperations : [operation];
+
+          if (phase === 'prep') {
+            if (!prepGroups.has(bodyZone)) prepGroups.set(bodyZone, []);
+            prepGroups.get(bodyZone).push({
+              claimId,
+              lineId,
+              operation,
+              element,
+              hours,
+              sourceLineIds,
+              sourceOperations,
+              sourceKind: 'applied_estimate',
+            });
+            return;
+          }
+
+          if (phase === 'paint') {
+            if (!paintGroups.has(bodyZone)) paintGroups.set(bodyZone, []);
+            paintGroups.get(bodyZone).push({
+              claimId,
+              lineId,
+              operation,
+              element,
+              rawHours: hours,
+              sourceLineIds,
+              sourceOperations,
+              sourceKind: 'applied_estimate',
+            });
+            totalOptimizerClaimPaintHours = roundHours(totalOptimizerClaimPaintHours + hours);
+            const prev = zoneOptimizerTotals.get(bodyZone) || 0;
+            zoneOptimizerTotals.set(bodyZone, roundHours(prev + hours));
+            return;
+          }
+
+          const taskId = buildCanonicalTaskId('op', caseId, claimId, lineId, phase);
+          unitTasks.push({
+            id: taskId,
+            taskId,
+            kind: 'operation',
+            key: phase,
+            phase,
+            title: operation,
+            laborHours: roundHours(hours),
+            durationMinutes: canonicalLaborMinutes(hours),
+            sourceClaimIds: [claimId],
+            sourceLineIds,
+            sourceOperations,
+            elements: element ? [element] : [],
+            bodyZone: bodyZone !== 'general' ? bodyZone : '',
+            requiredRole: line.requiredRole || REQUIRED_ROLE_BY_PHASE[phase] || 'tolier',
+            dependencies: [],
+            vehicleExclusive: true,
+            parallelizable: false,
+            sourceKind: 'applied_estimate',
+            sourceKinds: ['applied_estimate'],
+            taskModelVersion: 1,
+          });
+        });
+      }
+    });
+
+    const prepBatches = [];
+    const sortedPrepZones = [...prepGroups.keys()].sort(compareStableText);
+    sortedPrepZones.forEach((zone) => {
+      const items = prepGroups.get(zone) || [];
+      const batchId = buildCanonicalTaskId('batch-prep', caseId, zone);
+      const totalHours = roundHours(items.reduce((sum, it) => sum + it.hours, 0));
+      const sourceLineIds = [...new Set(items.flatMap((it) => it.sourceLineIds || [it.lineId]))].sort(compareStableText);
+      const sourceOperations = [...new Set(items.flatMap((it) => it.sourceOperations || [it.operation]))].sort(compareStableText);
+      const elements = [...new Set(items.map((it) => it.element).filter(Boolean))].sort(compareStableText);
+      const sourceClaimIds = [...new Set(items.map((it) => it.claimId))].sort(compareStableText);
+      const contributingSourceKinds = [...new Set(items.map((it) => it.sourceKind).filter(Boolean))].sort(compareStableText);
+      const batchSourceKind = contributingSourceKinds.length > 1
+        ? 'canonical_graph'
+        : (contributingSourceKinds[0] || 'estimate_provenance');
+
+      prepBatches.push({
+        id: batchId,
+        taskId: batchId,
+        kind: 'preparation_batch',
+        key: 'prep',
+        phase: 'prep',
+        title: formatPreparationBatchTitle(zone),
+        laborHours: totalHours,
+        durationMinutes: canonicalLaborMinutes(totalHours),
+        sourceClaimIds,
+        sourceLineIds,
+        sourceOperations,
+        elements,
+        bodyZone: zone,
+        requiredRole: 'peintre',
+        equipmentRole: 'zone_preparation',
+        dependencies: [],
+        vehicleExclusive: true,
+        parallelizable: false,
+        sourceKind: batchSourceKind,
+        sourceKinds: contributingSourceKinds,
+        taskModelVersion: 1,
+      });
+    });
+
+    const paintBatches = [];
+    const sortedPaintZones = [...paintGroups.keys()].sort(compareStableText);
+    const groupContributions = [];
+
+    sortedPaintZones.forEach((zone) => {
+      const items = paintGroups.get(zone) || [];
+      const rawContribution = zoneOptimizerTotals.has(zone)
+        ? zoneOptimizerTotals.get(zone)
+        : roundHours(items.reduce((sum, it) => sum + it.rawHours, 0));
+      const rawHoursTotal = roundHours(items.reduce((sum, it) => sum + it.rawHours, 0));
+      const sourceLineIds = [...new Set(items.flatMap((it) => it.sourceLineIds || [it.lineId]))].sort(compareStableText);
+      const sourceOperations = [...new Set(items.flatMap((it) => it.sourceOperations || [it.operation]))].sort(compareStableText);
+      const elements = [...new Set(items.map((it) => it.element).filter(Boolean))].sort(compareStableText);
+      const sourceClaimIds = [...new Set(items.map((it) => it.claimId))].sort(compareStableText);
+      const contributingSourceKinds = [...new Set(items.map((it) => it.sourceKind).filter(Boolean))].sort(compareStableText);
+      const groupSourceKind = contributingSourceKinds.length > 1
+        ? 'canonical_graph'
+        : (contributingSourceKinds[0] || 'estimate_provenance');
+
+      groupContributions.push({
+        zone,
+        items,
+        rawContribution,
+        sourceLaborHours: rawHoursTotal,
+        sourceLineIds,
+        sourceOperations,
+        elements,
+        sourceClaimIds,
+        sourceKind: groupSourceKind,
+        sourceKinds: contributingSourceKinds,
+      });
+    });
+
+    let totalCasePaintHours = Number(item.durations?.paint ?? 0);
+    if (!totalCasePaintHours && groupContributions.length) {
+      totalCasePaintHours = roundHours(totalOptimizerClaimPaintHours);
+    }
+
+    if (groupContributions.length === 1) {
+      const group = groupContributions[0];
+      const batchId = buildCanonicalTaskId('batch-paint', caseId, group.zone);
+      const finalHours = totalCasePaintHours > 0 ? totalCasePaintHours : group.rawContribution;
+      paintBatches.push({
+        id: batchId,
+        taskId: batchId,
+        kind: 'paint_batch',
+        key: 'paint',
+        phase: 'paint',
+        title: formatPaintBatchTitle(group.zone),
+        laborHours: finalHours,
+        durationMinutes: canonicalLaborMinutes(finalHours),
+        rawContributionHours: group.rawContribution,
+        sourceLaborHours: group.sourceLaborHours,
+        sourceClaimIds: group.sourceClaimIds,
+        sourceLineIds: group.sourceLineIds,
+        sourceOperations: group.sourceOperations,
+        elements: group.elements,
+        bodyZone: group.zone,
+        requiredRole: 'peintre',
+        equipmentRole: 'cabine',
+        dependencies: [],
+        vehicleExclusive: true,
+        parallelizable: false,
+        sourceKind: group.sourceKind,
+        sourceKinds: group.sourceKinds,
+        taskModelVersion: 1,
+      });
+    } else if (groupContributions.length > 1) {
+      const batchId = buildCanonicalTaskId('batch-paint-global', caseId);
+      const allClaimIds = [...new Set(groupContributions.flatMap((g) => g.sourceClaimIds))].sort(compareStableText);
+      const allLineIds = [...new Set(groupContributions.flatMap((g) => g.sourceLineIds))].sort(compareStableText);
+      const allOperations = [...new Set(groupContributions.flatMap((g) => g.sourceOperations))].sort(compareStableText);
+      const allElements = [...new Set(groupContributions.flatMap((g) => g.elements))].sort(compareStableText);
+      const bodyZones = groupContributions.map((g) => g.zone).sort(compareStableText);
+      const paintGroupsMeta = groupContributions.map((g) => ({
+        zone: g.zone,
+        rawContributionHours: g.rawContribution,
+        elements: g.elements.slice().sort(compareStableText),
+        sourceLineIds: g.sourceLineIds.slice().sort(compareStableText),
+      })).sort((a, b) => compareStableText(a.zone, b.zone));
+      const rawContributionTotal = roundHours(groupContributions.reduce((sum, g) => sum + g.rawContribution, 0));
+      const sourceLaborHoursTotal = roundHours(groupContributions.reduce((sum, g) => sum + g.sourceLaborHours, 0));
+      const contributingSourceKinds = [...new Set(groupContributions.flatMap((g) => g.sourceKinds || [g.sourceKind]).filter(Boolean))].sort(compareStableText);
+      const batchSourceKind = contributingSourceKinds.length > 1
+        ? 'canonical_graph'
+        : (contributingSourceKinds[0] || 'estimate_provenance');
+
+      paintBatches.push({
+        id: batchId,
+        taskId: batchId,
+        kind: 'paint_batch',
+        key: 'paint',
+        phase: 'paint',
+        title: 'PEINTURE + VERNIS — LOT GLOBAL',
+        laborHours: totalCasePaintHours,
+        durationMinutes: canonicalLaborMinutes(totalCasePaintHours),
+        rawContributionHours: rawContributionTotal,
+        sourceLaborHours: sourceLaborHoursTotal,
+        sourceClaimIds: allClaimIds,
+        sourceLineIds: allLineIds,
+        sourceOperations: allOperations,
+        elements: allElements,
+        bodyZone: 'general',
+        bodyZones,
+        paintGroups: paintGroupsMeta,
+        requiredRole: 'peintre',
+        equipmentRole: 'cabine',
+        dependencies: [],
+        vehicleExclusive: true,
+        parallelizable: false,
+        sourceKind: batchSourceKind,
+        sourceKinds: contributingSourceKinds,
+        taskModelVersion: 1,
+      });
+    }
+
+    const derivedTasks = [...unitTasks, ...prepBatches, ...paintBatches];
+    const residualTasks = [];
+    const TOLERANCE = 0.01;
+    const hasExplicitDurations = Boolean(
+      item?.durations &&
+      typeof item.durations === 'object' &&
+      Object.keys(item.durations).length > 0
+    );
+
+    if (hasExplicitDurations) {
+      const durations = item.durations;
+      phaseOrder.forEach((phase) => {
+        const authoritativeHours = roundHours(Number(durations[phase] || 0));
+        const derivedHours = roundHours(
+          derivedTasks.filter((t) => t.phase === phase).reduce((sum, t) => sum + Number(t.laborHours || 0), 0)
+        );
+        const residual = roundHours(authoritativeHours - derivedHours);
+
+      if (Math.abs(residual) <= TOLERANCE) {
+        return;
+      }
+      if (residual > TOLERANCE) {
+        const taskId = (hasLineTasks || derivedHours > 0)
+          ? buildCanonicalTaskId('legacy-residual', caseId, phase)
+          : buildCanonicalTaskId('legacy', caseId, phase);
+        residualTasks.push({
+          id: taskId,
+          taskId,
+          kind: 'legacy_step',
+          key: phase,
+          phase,
+          title: (typeof phaseLabel === 'function' && phaseLabel(phase)) || phase,
+          laborHours: residual,
+          durationMinutes: canonicalLaborMinutes(residual),
+          sourceClaimIds: [],
+          sourceLineIds: [],
+          sourceOperations: [],
+          elements: [],
+          bodyZone: '',
+          requiredRole: REQUIRED_ROLE_BY_PHASE[phase] || 'tolier',
+          equipmentRole: phase === 'paint' ? 'cabine' : (phase === 'prep' ? 'zone_preparation' : ''),
+          dependencies: [],
+          vehicleExclusive: true,
+          parallelizable: false,
+          sourceKind: 'legacy_duration_fallback',
+          sourceKinds: ['legacy_duration_fallback'],
+          taskModelVersion: 1,
+        });
+        return;
+      }
+      if (residual < -TOLERANCE) {
+        throw new Error(
+          `Duration invariant violation for phase "${phase}": derived hours (${derivedHours} h) exceed authoritative case duration (${authoritativeHours} h) by ${Math.abs(residual)} h`
+        );
+      }
+    });
+    }
+
+    return [...derivedTasks, ...residualTasks].sort((a, b) => {
+      const aRank = phaseOrder.indexOf(a.phase);
+      const bRank = phaseOrder.indexOf(b.phase);
+      if (aRank !== bRank) return (aRank === -1 ? 99 : aRank) - (bRank === -1 ? 99 : bRank);
+      return compareStableText(a.id, b.id);
+    });
+  }
+
+  function getCasePlanningTasks(item = {}, options = {}) {
+    const force = options?.force === true;
+    if (!force && Array.isArray(item?.planningTasks) && item.planningTasks.length > 0) {
+      if (typeof normalizeCasePlanningTasks === 'function') {
+        return normalizeCasePlanningTasks(item);
+      }
+      return item.planningTasks;
+    }
+    return deriveCanonicalPlanningTasks(item, options);
+  }
+
+  window.buildCanonicalTaskId = buildCanonicalTaskId;
+  window.compareStableText = compareStableText;
+  window.canonicalLaborMinutes = canonicalLaborMinutes;
+  window.extractBodyshopElement = extractBodyshopElement;
+  window.formatPreparationBatchTitle = formatPreparationBatchTitle;
+  window.formatPaintBatchTitle = formatPaintBatchTitle;
+  window.deriveCanonicalPlanningTasks = deriveCanonicalPlanningTasks;
+  window.getCasePlanningTasks = getCasePlanningTasks;
+  window.normalizeOriginalLineForPlanning = normalizeOriginalLineForPlanning;
+
   window.NIMR_BUSINESS_RULES_VERSION = APP_RULE_VERSION;
 })();
 

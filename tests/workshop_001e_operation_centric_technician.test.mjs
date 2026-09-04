@@ -131,11 +131,11 @@ test("19 canonical state schema and task model are untouched", () => {
   assert.ok(businessRules.length > 0);
 });
 
-test("20 packaged release identity is v23.3.28", () => {
-  assert.match(version, /^window\.APP_VERSION = "v23\.3\.28";$/mu);
-  assert.match(version, /^window\.NIMR_BUILD = "v23\.3\.28";$/mu);
-  assert.match(version, /^window\.NIMR_CACHE_NAME = "nimr-sav-v23\.3\.28";$/mu);
-  assert.match(sw, /const CACHE_NAME = "nimr-sav-v23\.3\.28";/u);
+test("20 packaged release identity is v23.3.29", () => {
+  assert.match(version, /^window\.APP_VERSION = "v23\.3\.29";$/mu);
+  assert.match(version, /^window\.NIMR_BUILD = "v23\.3\.29";$/mu);
+  assert.match(version, /^window\.NIMR_CACHE_NAME = "nimr-sav-v23\.3\.29";$/mu);
+  assert.match(sw, /const CACHE_NAME = "nimr-sav-v23\.3\.29";/u);
 });
 
 test("21 mobile technician fixture cannot roll the next task into tomorrow", () => {

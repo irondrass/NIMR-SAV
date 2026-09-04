@@ -8109,3 +8109,93 @@ select:focus {
 .booking > strong { overflow: hidden; text-overflow: ellipsis; }
 .mobile-planning-title strong { color: #08253a; line-height: 1.25; }
 @media (max-width: 980px) { .operation-title-cell { grid-column: 1 / -1; } }
+
+
+/* WORKSHOP-001F exact labor instructions */
+.technician-labor-instruction {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--brand);
+  border-radius: var(--radius-sm);
+  background: var(--soft);
+}
+
+.technician-labor-instruction.is-compact {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+}
+
+.technician-labor-instruction-head,
+.technician-labor-assignment {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  flex-wrap: wrap;
+}
+
+.technician-labor-instruction-head strong {
+  color: var(--brand);
+  font-size: 0.9rem;
+}
+
+.technician-labor-instruction-head span,
+.technician-labor-assignment {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.technician-labor-source-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.technician-labor-source-line {
+  display: grid;
+  gap: 3px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+}
+
+.technician-labor-source-line strong {
+  color: var(--ink);
+  line-height: 1.35;
+}
+
+.technician-labor-source-line small,
+.technician-labor-raw {
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.technician-labor-raw {
+  font-size: 0.8rem;
+}
+
+.technician-labor-assignment {
+  padding-top: 8px;
+  border-top: 1px dashed var(--line);
+}
+
+.technician-labor-assignment b {
+  color: var(--ink);
+}
+
+@media (max-width: 768px) {
+  .technician-labor-instruction {
+    padding: 11px 12px;
+  }
+
+  .technician-labor-assignment {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+}

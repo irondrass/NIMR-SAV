@@ -99,10 +99,10 @@ await check("I responsive hardening covers tablet and small mobile layouts", () 
   assert.match(ux, /@media \(prefers-reduced-motion:\s*reduce\)/u);
 });
 
-await check("J service worker is source-refreshed without changing the v23.3.28 cache contract", () => {
+await check("J service worker is source-refreshed without changing the v23.3.29 cache contract", () => {
   assert.match(sw, /UX-010 source refresh/u);
-  assert.match(sw, /const CACHE_NAME = "nimr-sav-v23\.3\.28"/u);
-  assert.match(read("js/version.js"), /^window\.APP_VERSION = "v23\.3\.28";$/mu);
+  assert.match(sw, /const CACHE_NAME = "nimr-sav-v23\.3\.29"/u);
+  assert.match(read("js/version.js"), /^window\.APP_VERSION = "v23\.3\.29";$/mu);
 });
 
 await check("K UX-010 does not introduce auth, SQL, service-role, or permission authority changes", () => {
@@ -142,27 +142,27 @@ await check("N planning hour tick labels are protected from character-level wrap
 
 await check("O mobile menu button uses absolute header positioning and removes fixed viewport overlay", () => {
   const marker = css.lastIndexOf("UX-010");
-  const ux = css.slice(marker);
-  const mobileBlock = ux.slice(ux.lastIndexOf("@media (max-width: 768px)"));
+  const nextTicket = css.indexOf("/* WORKSHOP-001F exact labor instructions */", marker);
+  const ux = css.slice(marker, nextTicket === -1 ? undefined : nextTicket);
 
   assert.match(
-    mobileBlock,
+    ux,
     /\.mobile-menu-btn\s*\{[\s\S]*?position:\s*absolute;/u,
   );
   assert.doesNotMatch(
-    mobileBlock,
+    ux,
     /\.mobile-menu-btn\s*\{[\s\S]*?position:\s*fixed;/u,
   );
   assert.match(
-    mobileBlock,
+    ux,
     /\.mobile-menu-btn\s*\{[\s\S]*?right:\s*max\(/u,
   );
   assert.match(
-    mobileBlock,
+    ux,
     /\.mobile-menu-btn\s*\{[\s\S]*?left:\s*auto/u,
   );
   assert.match(
-    mobileBlock,
+    ux,
     /\.sidebar\s+\.brand\s*\{[\s\S]*?padding:\s*0\s+calc\(88px/u,
   );
 });
@@ -208,6 +208,7 @@ await check("L changed paths are limited to the approved UX-010 surfaces", () =>
     "tests/workshop_operation_centric_domain_workshop001a.test.mjs",
     "tests/workshop_001d_operation_centric_cockpit.test.mjs",
     "tests/workshop_001e_operation_centric_technician.test.mjs",
+    "tests/workshop_001f_exact_labor_instructions.test.mjs",
     "tests/identity_database_authority_hardening_identity001d1.test.mjs",
     "tests/identity_invited_user_password_onboarding_identity001d2e.test.mjs",
     "tests/identity_password_recovery_otp_identity001d2f.test.mjs",

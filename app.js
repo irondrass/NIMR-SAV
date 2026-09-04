@@ -130,7 +130,7 @@ function bindSyncConflictUsability() {
 
 function configurePdfWorker() {
   if (window.pdfjsLib?.GlobalWorkerOptions) {
-    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.28";
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.29";
   }
 }
 
@@ -1419,7 +1419,7 @@ function registerServiceWorker() {
   });
   const registerCurrentServiceWorker = async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=23.3.28", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=23.3.29", { updateViaCache: "none" });
       const refreshRegistration = async () => {
         try {
           await registration.update?.();

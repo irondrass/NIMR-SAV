@@ -898,6 +898,36 @@ console.log('--- STARTING WORKSHOP-001B DEPENDENCY DAG TESTS ---');
   for (let i = 0; i < derived.length; i++) {
     assert.deepEqual(toPlain(normalizedTasks[i].dependencies), toPlain(derived[i].dependencies));
   }
+
+  // Verify paintGroups normalization and sourceClaimIds preservation
+  const globalPaintTask = {
+    id: 'task-batch-paint-global|case-norm-1',
+    taskId: 'task-batch-paint-global|case-norm-1',
+    kind: 'paint_batch',
+    phase: 'paint',
+    title: 'PEINTURE + VERNIS — LOT GLOBAL',
+    laborHours: 2.0,
+    durationMinutes: 120,
+    taskModelVersion: 1,
+    bodyZones: ['front', 'rear'],
+    dependencies: [],
+    paintGroups: [
+      {
+        zone: 'front',
+        rawContributionHours: 1.0,
+        elements: ['capot'],
+        sourceLineIds: ['L1'],
+        sourceClaimIds: ['claim-2', 'claim-1', 'claim-1', '  claim-2  '],
+      },
+    ],
+  };
+  const testCase2 = { id: 'case-norm-2', planningTasks: [globalPaintTask] };
+  const normalized2 = normalizeState({ cases: [testCase2] });
+  const normGlobalPaint = normalized2.cases[0].planningTasks[0];
+  assert.ok(Array.isArray(normGlobalPaint.paintGroups));
+  assert.equal(normGlobalPaint.paintGroups[0].zone, 'front');
+  // Duplicate removal, trimming, and deterministic string list
+  assert.deepEqual(toPlain(normGlobalPaint.paintGroups[0].sourceClaimIds), ['claim-2', 'claim-1']);
 }
 
 // 25. Planner safety (getCasePlanningTasks remains lazy and does NOT mutate case.planningTasks)
@@ -1333,6 +1363,260 @@ console.log('--- STARTING WORKSHOP-001B DEPENDENCY DAG TESTS ---');
   for (let i = 0; i < derived.length; i++) {
     assert.equal(derived[i].laborHours, reprocessed31[i].laborHours);
     assert.equal(derived[i].durationMinutes, reprocessed31[i].durationMinutes);
+  }
+}
+
+// 32. Same raw sourceLineId in different claims remains independent
+{
+  console.log('Test 32: Same raw sourceLineId in different claims remains independent');
+  const testCase = {
+    id: 'case-claim-scoped-rule-a',
+    claims: [
+      {
+        id: 'claim-A',
+        estimate: {
+          originalLines: [
+            {
+              id: 'estimate-source-line-1',
+              operation: 'REPARATION BAS DE CAISSE GAUCHE',
+              laborHours: 2.0,
+              paintGroup: 'left',
+              selectedPhases: ['body'],
+              allocations: [
+                { phase: 'body', laborHours: 2.0 },
+              ],
+            },
+          ],
+        },
+      },
+      {
+        id: 'claim-B',
+        estimate: {
+          originalLines: [
+            {
+              id: 'estimate-source-line-1',
+              operation: 'REPOSE POIGNEE PORTE DROITE',
+              laborHours: 0.5,
+              paintGroup: 'right',
+              selectedPhases: ['reassembly'],
+              allocations: [
+                { phase: 'reassembly', laborHours: 0.5 },
+              ],
+            },
+          ],
+        },
+      },
+    ],
+    durations: {},
+  };
+  win.recomputeCaseDurationsFromClaims(testCase);
+
+  const derived = win.deriveCanonicalPlanningTasks(testCase);
+  validateGraphInvariants(derived);
+
+  const bodyA = derived.find((t) => t.phase === 'body' && t.sourceClaimIds.includes('claim-A'));
+  const reassemblyB = derived.find((t) => t.phase === 'reassembly' && t.sourceClaimIds.includes('claim-B'));
+
+  assert.ok(bodyA, 'Body task in Claim A must exist');
+  assert.ok(reassemblyB, 'Reassembly task in Claim B must exist');
+
+  // Reassembly B must NOT depend on Body A despite sharing raw sourceLineId
+  assert.ok(!reassemblyB.dependencies.includes(bodyA.id), 'Reassembly B must NOT depend on Body A');
+  assert.ok(!isReachable(reassemblyB.id, bodyA.id, derived), 'Body A must NOT be reachable from Reassembly B');
+  assert.deepEqual(toPlain(reassemblyB.dependencies), [], 'Reassembly B should be independent');
+  assert.deepEqual(toPlain(bodyA.dependencies), [], 'Body A should be independent');
+
+  // Positive control: same line ID within SAME claim creates body -> reassembly dependency
+  const positiveControlCase = {
+    id: 'case-claim-scoped-positive-control',
+    claims: [
+      {
+        id: 'claim-A',
+        estimate: {
+          originalLines: [
+            {
+              id: 'estimate-source-line-1',
+              operation: 'REPOSE CAPOT APRES REDRESSAGE',
+              laborHours: 2.5,
+              paintGroup: 'center',
+              selectedPhases: ['body', 'reassembly'],
+              allocations: [
+                { phase: 'body', laborHours: 1.5 },
+                { phase: 'reassembly', laborHours: 1.0 },
+              ],
+            },
+          ],
+        },
+      },
+    ],
+    durations: {},
+  };
+  win.recomputeCaseDurationsFromClaims(positiveControlCase);
+  const derivedPositive = win.deriveCanonicalPlanningTasks(positiveControlCase);
+  validateGraphInvariants(derivedPositive);
+
+  const bodyCtrl = derivedPositive.find((t) => t.phase === 'body');
+  const reassemblyCtrl = derivedPositive.find((t) => t.phase === 'reassembly');
+  assert.ok(bodyCtrl && reassemblyCtrl);
+  assert.ok(reassemblyCtrl.dependencies.includes(bodyCtrl.id), 'Body -> reassembly must still work within same claim');
+  assert.ok(isReachable(reassemblyCtrl.id, bodyCtrl.id, derivedPositive));
+}
+
+// 33. Duplicate line IDs across claims do not cross-wire prep and paint
+{
+  console.log('Test 33: Duplicate line IDs across claims do not cross-wire prep and paint');
+  const testCase = {
+    id: 'case-claim-scoped-prep-paint',
+    claims: [
+      {
+        id: 'claim-A',
+        estimate: {
+          originalLines: [
+            {
+              id: 'estimate-source-line-1',
+              operation: 'PREPARATION PARE-CHOC AVANT',
+              laborHours: 1.5,
+              paintGroup: 'front',
+              selectedPhases: ['prep'],
+              allocations: [
+                { phase: 'prep', laborHours: 1.5 },
+              ],
+            },
+          ],
+        },
+      },
+      {
+        id: 'claim-B',
+        estimate: {
+          originalLines: [
+            {
+              id: 'estimate-source-line-1',
+              operation: 'REPARATION ET PEINTURE AILE ARRIERE',
+              laborHours: 3.5,
+              paintGroup: 'rear',
+              selectedPhases: ['body', 'paint'],
+              allocations: [
+                { phase: 'body', laborHours: 2.0 },
+                { phase: 'paint', laborHours: 1.5 },
+              ],
+            },
+          ],
+        },
+      },
+    ],
+    durations: {},
+  };
+  win.recomputeCaseDurationsFromClaims(testCase);
+
+  const derived = win.deriveCanonicalPlanningTasks(testCase);
+  validateGraphInvariants(derived);
+
+  const prepFront = derived.find((t) => t.phase === 'prep' && t.bodyZone === 'front');
+  const paintRear = derived.find((t) => t.phase === 'paint' && t.bodyZone === 'rear');
+  const bodyRear = derived.find((t) => t.phase === 'body' && t.sourceClaimIds.includes('claim-B'));
+
+  assert.ok(prepFront, 'Front prep batch must exist');
+  assert.ok(paintRear, 'Rear paint batch must exist');
+  assert.ok(bodyRear, 'Rear body task must exist');
+
+  // Rear paint must NOT depend on front prep from Claim A despite sharing estimate-source-line-1
+  assert.ok(!paintRear.dependencies.includes(prepFront.id), 'Rear paint must NOT depend on front prep');
+  assert.ok(!isReachable(paintRear.id, prepFront.id, derived), 'Front prep must NOT be reachable from rear paint');
+
+  // Rear paint must correctly fall back to relevant rear body in Claim B
+  assert.ok(paintRear.dependencies.includes(bodyRear.id), 'Rear paint must depend on rear body in Claim B');
+  assert.ok(isReachable(paintRear.id, bodyRear.id, derived), 'Rear body must be reachable from rear paint');
+
+  const rawTasks33 = derived.map((t) => ({ ...t, dependencies: [] }));
+  const reprocessed33 = win.applyCanonicalTaskDependencies(rawTasks33);
+  for (let i = 0; i < derived.length; i++) {
+    assert.equal(derived[i].laborHours, reprocessed33[i].laborHours);
+    assert.equal(derived[i].durationMinutes, reprocessed33[i].durationMinutes);
+  }
+}
+
+// 34. Global paint duplicate line IDs remain claim-scoped
+{
+  console.log('Test 34: Global paint duplicate line IDs remain claim-scoped');
+  const testCase = {
+    id: 'case-global-paint-claim-scoped',
+    claims: [
+      {
+        id: 'claim-A',
+        estimate: {
+          originalLines: [
+            {
+              id: 'estimate-source-line-1',
+              operation: 'REPARATION ET PREPARATION PARE-CHOC AVANT',
+              laborHours: 3.5,
+              paintGroup: 'front',
+              selectedPhases: ['body', 'prep', 'paint'],
+              allocations: [
+                { phase: 'body', laborHours: 1.0 },
+                { phase: 'prep', laborHours: 1.5 },
+                { phase: 'paint', laborHours: 1.0 },
+              ],
+            },
+          ],
+        },
+      },
+      {
+        id: 'claim-B',
+        estimate: {
+          originalLines: [
+            {
+              id: 'estimate-source-line-1',
+              operation: 'REPARATION ET PEINTURE AILE ARRIERE SANS PREP',
+              laborHours: 3.0,
+              paintGroup: 'rear',
+              selectedPhases: ['body', 'paint'],
+              allocations: [
+                { phase: 'body', laborHours: 2.0 },
+                { phase: 'paint', laborHours: 1.0 },
+              ],
+            },
+          ],
+        },
+      },
+    ],
+    durations: {},
+  };
+  win.recomputeCaseDurationsFromClaims(testCase);
+
+  const derived = win.deriveCanonicalPlanningTasks(testCase);
+  validateGraphInvariants(derived);
+
+  // Multi-zone (front + rear) creates global paint batch
+  const paintBatches = derived.filter((t) => t.phase === 'paint');
+  assert.equal(paintBatches.length, 1);
+  const globalPaint = paintBatches[0];
+  assert.ok(globalPaint.id.includes('batch-paint-global'));
+
+  // Groups in global paint must have claim-scoped metadata
+  assert.ok(Array.isArray(globalPaint.paintGroups));
+  const frontGroup = globalPaint.paintGroups.find((g) => g.zone === 'front');
+  const rearGroup = globalPaint.paintGroups.find((g) => g.zone === 'rear');
+  assert.ok(frontGroup && rearGroup);
+  assert.deepEqual(toPlain(frontGroup.sourceClaimIds), ['claim-A']);
+  assert.deepEqual(toPlain(rearGroup.sourceClaimIds), ['claim-B']);
+
+  const prepFront = derived.find((t) => t.phase === 'prep' && t.bodyZone === 'front');
+  const bodyRear = derived.find((t) => t.phase === 'body' && t.sourceClaimIds.includes('claim-B'));
+  assert.ok(prepFront && bodyRear);
+
+  // Global paint must depend on prepFront (for front group) and bodyRear (fallback for rear group without prep)
+  assert.ok(globalPaint.dependencies.includes(prepFront.id), 'Global paint must depend on prepFront');
+  assert.ok(globalPaint.dependencies.includes(bodyRear.id), 'Global paint must depend on bodyRear');
+
+  // Verify that rear group did NOT falsely match prepFront despite sharing estimate-source-line-1
+  assert.ok(isReachable(globalPaint.id, prepFront.id, derived));
+  assert.ok(isReachable(globalPaint.id, bodyRear.id, derived));
+
+  const rawTasks34 = derived.map((t) => ({ ...t, dependencies: [] }));
+  const reprocessed34 = win.applyCanonicalTaskDependencies(rawTasks34);
+  for (let i = 0; i < derived.length; i++) {
+    assert.equal(derived[i].laborHours, reprocessed34[i].laborHours);
+    assert.equal(derived[i].durationMinutes, reprocessed34[i].durationMinutes);
   }
 }
 

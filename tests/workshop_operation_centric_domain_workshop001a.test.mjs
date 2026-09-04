@@ -283,12 +283,14 @@ assert.deepEqual(toPlain(globalPaintBatch.paintGroups), [
     rawContributionHours: 3.0,
     elements: ['Pare-chocs AV'],
     sourceLineIds: ['line-f'],
+    sourceClaimIds: ['claim-mz-1'],
   },
   {
     zone: 'rear',
     rawContributionHours: 6.0,
     elements: ['Malle AR'],
     sourceLineIds: ['line-r'],
+    sourceClaimIds: ['claim-mz-1'],
   },
 ], 'paintGroups nested metadata must be sorted deterministically by zone');
 

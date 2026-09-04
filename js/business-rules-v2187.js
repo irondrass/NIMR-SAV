@@ -686,6 +686,20 @@
       return arrA.some((item) => Boolean(item) && setB.has(item));
     }
 
+    function hasClaimScopedLineIntersection(a, b) {
+      if (!a || !b) return false;
+      const linesA = Array.isArray(a.sourceLineIds) ? a.sourceLineIds : [];
+      const linesB = Array.isArray(b.sourceLineIds) ? b.sourceLineIds : [];
+      if (!hasIntersection(linesA, linesB)) return false;
+
+      const claimsA = Array.isArray(a.sourceClaimIds) ? a.sourceClaimIds.filter(Boolean) : [];
+      const claimsB = Array.isArray(b.sourceClaimIds) ? b.sourceClaimIds.filter(Boolean) : [];
+      if (claimsA.length > 0 && claimsB.length > 0) {
+        return hasIntersection(claimsA, claimsB);
+      }
+      return true;
+    }
+
     function isZoneCompatible(zoneA, zoneB) {
       const a = String(zoneA || '').trim();
       const b = String(zoneB || '').trim();
@@ -720,7 +734,13 @@
       const matched = new Set();
       (target.sourceLineIds || []).forEach((lid) => {
         const list = bodyByLineId.get(lid);
-        if (list) list.forEach((b) => matched.add(b));
+        if (list) {
+          list.forEach((b) => {
+            if (hasClaimScopedLineIntersection(target, b)) {
+              matched.add(b);
+            }
+          });
+        }
       });
       (target.elements || []).forEach((el) => {
         const list = bodyByElement.get(el);
@@ -735,20 +755,28 @@
     const rawDeps = new Map();
     tasks.forEach((t) => rawDeps.set(t.id, new Set()));
 
-    // Rule A: Group tasks by sourceLineId to avoid O(N^2) search
+    // Rule A: Same source estimate line for canonical operation tasks (claim-scoped)
     const tasksBySourceLineId = new Map();
     tasks.forEach((t) => {
-      if (Array.isArray(t.sourceLineIds)) {
-        t.sourceLineIds.forEach((lid) => {
-          if (lid) {
-            if (!tasksBySourceLineId.has(lid)) tasksBySourceLineId.set(lid, []);
-            tasksBySourceLineId.get(lid).push(t);
-          }
+      const isOpTask = t.kind === 'operation' || (!t.kind && t.phase !== 'prep' && t.phase !== 'paint' && t.phase !== 'finish' && t.phase !== 'quality');
+      if (isOpTask && Array.isArray(t.sourceLineIds)) {
+        const claimIds = Array.isArray(t.sourceClaimIds) && t.sourceClaimIds.filter(Boolean).length > 0
+          ? [...new Set(t.sourceClaimIds.filter(Boolean))]
+          : [''];
+        claimIds.forEach((cid) => {
+          t.sourceLineIds.forEach((lid) => {
+            if (lid) {
+              const key = cid ? `${cid}:::${lid}` : `*:::${lid}`;
+              if (!tasksBySourceLineId.has(key)) tasksBySourceLineId.set(key, []);
+              tasksBySourceLineId.get(key).push(t);
+            }
+          });
         });
       }
     });
 
-    tasksBySourceLineId.forEach((lineTasks) => {
+    tasksBySourceLineId.forEach((rawLineTasks) => {
+      const lineTasks = [...new Set(rawLineTasks)];
       if (lineTasks.length < 2) return;
       for (let i = 0; i < lineTasks.length; i++) {
         const taskA = lineTasks[i];
@@ -784,8 +812,8 @@
         const groups = (Array.isArray(paint.paintGroups) && paint.paintGroups.length > 0)
           ? paint.paintGroups
           : (Array.isArray(paint.bodyZones) && paint.bodyZones.length > 0
-              ? paint.bodyZones.map((z) => ({ zone: z, elements: [], sourceLineIds: [] }))
-              : [{ zone: 'general', elements: paint.elements || [], sourceLineIds: paint.sourceLineIds || [] }]);
+              ? paint.bodyZones.map((z) => ({ zone: z, elements: [], sourceLineIds: [], sourceClaimIds: paint.sourceClaimIds || [] }))
+              : [{ zone: 'general', elements: paint.elements || [], sourceLineIds: paint.sourceLineIds || [], sourceClaimIds: paint.sourceClaimIds || [] }]);
 
         groups.forEach((group) => {
           const groupZone = group.zone || 'general';
@@ -793,7 +821,7 @@
           // 1. If an applicable preparation batch exists for this paint group:
           let matchedPreps = [];
           if (prepBatches.length > 0) {
-            const lineMatches = prepBatches.filter((p) => hasIntersection(p.sourceLineIds, group.sourceLineIds));
+            const lineMatches = prepBatches.filter((p) => hasClaimScopedLineIntersection(p, group));
             const elementMatches = prepBatches.filter((p) => hasIntersection(p.elements, group.elements));
             matchedPreps = (lineMatches.length > 0 || elementMatches.length > 0)
               ? [...new Set([...lineMatches, ...elementMatches])]
@@ -813,6 +841,7 @@
           } else {
             // 2. Otherwise: use the strongest relevant upstream body provenance for that paint group
             const relevantBody = findRelevantBodyTasks({
+              sourceClaimIds: group.sourceClaimIds,
               sourceLineIds: group.sourceLineIds,
               elements: group.elements,
               bodyZone: groupZone,
@@ -828,7 +857,7 @@
         // Single-zone paint batch
         let matchedPreps = [];
         if (prepBatches.length > 0) {
-          const lineMatches = prepBatches.filter((p) => hasIntersection(p.sourceLineIds, paint.sourceLineIds));
+          const lineMatches = prepBatches.filter((p) => hasClaimScopedLineIntersection(p, paint));
           const elementMatches = prepBatches.filter((p) => hasIntersection(p.elements, paint.elements));
           matchedPreps = (lineMatches.length > 0 || elementMatches.length > 0)
             ? [...new Set([...lineMatches, ...elementMatches])]
@@ -862,13 +891,13 @@
       let matchedPaint = null;
       if (paintBatches.length > 0) {
         if (globalPaintBatch && (
-          hasIntersection(reassembly.sourceLineIds, globalPaintBatch.sourceLineIds) ||
+          hasClaimScopedLineIntersection(reassembly, globalPaintBatch) ||
           hasIntersection(reassembly.elements, globalPaintBatch.elements)
         )) {
           matchedPaint = globalPaintBatch;
         } else {
           matchedPaint = paintBatches.find((p) =>
-            hasIntersection(reassembly.sourceLineIds, p.sourceLineIds) ||
+            hasClaimScopedLineIntersection(reassembly, p) ||
             hasIntersection(reassembly.elements, p.elements)
           );
         }
@@ -880,7 +909,13 @@
         const matched = new Set();
         (reassembly.sourceLineIds || []).forEach((lid) => {
           const list = bodyByLineId.get(lid);
-          if (list) list.forEach((b) => matched.add(b));
+          if (list) {
+            list.forEach((b) => {
+              if (hasClaimScopedLineIntersection(reassembly, b)) {
+                matched.add(b);
+              }
+            });
+          }
         });
         (reassembly.elements || []).forEach((el) => {
           const list = bodyByElement.get(el);
@@ -1310,6 +1345,7 @@
         rawContributionHours: g.rawContribution,
         elements: g.elements.slice().sort(compareStableText),
         sourceLineIds: g.sourceLineIds.slice().sort(compareStableText),
+        sourceClaimIds: (g.sourceClaimIds || []).slice().sort(compareStableText),
       })).sort((a, b) => compareStableText(a.zone, b.zone));
       const rawContributionTotal = roundHours(groupContributions.reduce((sum, g) => sum + g.rawContribution, 0));
       const sourceLaborHoursTotal = roundHours(groupContributions.reduce((sum, g) => sum + g.sourceLaborHours, 0));

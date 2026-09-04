@@ -1414,6 +1414,7 @@ function normalizeCasePlanningTask(task, index = 0) {
       rawContributionHours: Number(g?.rawContributionHours || 0) || 0,
       elements: normalizeStringList(g?.elements),
       sourceLineIds: normalizeStringList(g?.sourceLineIds),
+      sourceClaimIds: normalizeStringList(g?.sourceClaimIds),
     }));
   }
   if (task.sourceKinds !== undefined) {

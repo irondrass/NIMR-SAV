@@ -115,13 +115,10 @@ test("17 operation and phase text remain escaped", () => {
   assert.match(uiCases, /escapeHtml\(nextPhaseLabel\)/u);
 });
 
-test("18 protected planner/state/business/version/SW/UI-planning baselines are unchanged", () => {
+test("18 protected planner/business/UI-planning baselines are unchanged during packaging", () => {
   for (const rel of [
     "js/planning.js",
-    "js/state.js",
     "js/business-rules-v2187.js",
-    "js/version.js",
-    "sw.js",
     "js/ui-planning.js",
   ]) {
     assert.equal(unchanged(rel), true, rel);
@@ -134,11 +131,11 @@ test("19 canonical state schema and task model are untouched", () => {
   assert.ok(businessRules.length > 0);
 });
 
-test("20 functional phase keeps release identity at v23.3.27", () => {
-  assert.match(version, /^window\.APP_VERSION = "v23\.3\.27";$/mu);
-  assert.match(version, /^window\.NIMR_BUILD = "v23\.3\.27";$/mu);
-  assert.match(version, /^window\.NIMR_CACHE_NAME = "nimr-sav-v23\.3\.27";$/mu);
-  assert.match(sw, /const CACHE_NAME = "nimr-sav-v23\.3\.27";/u);
+test("20 packaged release identity is v23.3.28", () => {
+  assert.match(version, /^window\.APP_VERSION = "v23\.3\.28";$/mu);
+  assert.match(version, /^window\.NIMR_BUILD = "v23\.3\.28";$/mu);
+  assert.match(version, /^window\.NIMR_CACHE_NAME = "nimr-sav-v23\.3\.28";$/mu);
+  assert.match(sw, /const CACHE_NAME = "nimr-sav-v23\.3\.28";/u);
 });
 
 test("21 mobile technician fixture cannot roll the next task into tomorrow", () => {

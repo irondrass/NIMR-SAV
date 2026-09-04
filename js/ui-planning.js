@@ -138,6 +138,29 @@ function buildIndexedDailyVehicleColorMap(dateKey) {
   return map;
 }
 
+// WORKSHOP-001D: operation-centric display helpers. Read-only; no planner mutation.
+function isOperationCentricPlanningDisplayBooking(booking) {
+  if (!booking || typeof booking !== "object") return false;
+  return Boolean(
+    Number(booking.taskModelVersion || 0) > 0
+    || booking.sourceKind
+    || (Array.isArray(booking.sourceClaimIds) && booking.sourceClaimIds.length)
+    || (Array.isArray(booking.sourceLineIds) && booking.sourceLineIds.length)
+    || (Array.isArray(booking.sourceOperations) && booking.sourceOperations.length)
+  );
+}
+function getPlanningBookingDisplayIdentity(booking) {
+  const phase = getDurationLabel(booking?.key) || String(booking?.key || "").trim() || "Étape atelier";
+  const rawTitle = String(booking?.title || "").trim();
+  const canonical = isOperationCentricPlanningDisplayBooking(booking);
+  const normalizedTitle = canonical && rawTitle ? rawTitle.replace(/^Reprise\s*-\s*/u, "").trim() : rawTitle;
+  return { canonical, operation: canonical && normalizedTitle ? normalizedTitle : (phase || rawTitle || "Étape planning"), phase };
+}
+function getPlanningBusinessDisplayKey(booking) {
+  if (typeof getBookingBusinessTaskId === "function") return getBookingBusinessTaskId(booking) || booking?.id || "";
+  return String(booking?.businessTaskId || booking?.parentBookingId || booking?.id || "");
+}
+
 function getBookingLaborOperations(caseItem, key) {
   const lines = [];
   (caseItem?.claims || []).forEach((claim) => {
@@ -159,6 +182,7 @@ function renderDailyLaborSummary(date, taskNumberMap, filters = null) {
   if (!target) return;
   const day = todayKey(date);
   const rows = [];
+  const seenBusinessTasks = new Set();
   const dayBookings = typeof getIndexedDayBookings === "function" ? getIndexedDayBookings(day) : state.bookings;
   dayBookings.forEach((booking) => {
     if (booking.type === 'leave') return;
@@ -167,8 +191,12 @@ function renderDailyLaborSummary(date, taskNumberMap, filters = null) {
     if (filters && !planningBookingMatchesDisplayFilters(booking, caseItem, filters)) return;
     const hasSegmentOnDay = (booking.segments || []).some((segment) => todayKey(new Date(segment.start)) === day || todayKey(new Date(segment.end)) === day);
     if (!caseItem || !hasSegmentOnDay) return;
+    const businessKey = `${booking.caseId || ""}::${getPlanningBusinessDisplayKey(booking) || booking.id || ""}`;
+    if (seenBusinessTasks.has(businessKey)) return;
+    seenBusinessTasks.add(businessKey);
     const ops = getBookingLaborOperations(caseItem, booking.key);
-    rows.push({ booking, caseItem, ops });
+    const identity = getPlanningBookingDisplayIdentity(booking);
+    rows.push({ booking, caseItem, ops, identity });
   });
   if (!rows.length) {
     const isFiltered = filters && (filters.search || filters.resourceId !== "all");
@@ -180,11 +208,11 @@ function renderDailyLaborSummary(date, taskNumberMap, filters = null) {
   target.innerHTML = `
     <div class="daily-labor-head"><strong>Détail main-d’œuvre du jour</strong><span>Chaque étape affiche les lignes devis incluses, plus rappel pièces/finition/contrôle.</span></div>
     <div class="daily-labor-list">
-      ${rows.map(({ booking, caseItem, ops }, index) => `
+      ${rows.map(({ booking, caseItem, ops, identity }, index) => `
         <article class="daily-labor-card">
-          <strong>${index + 1}. ${escapeHtml(caseItem.clientName || 'Client')} · ${escapeHtml(getDurationLabel(booking.key) || booking.title || 'Étape')}</strong>
-          <small>${escapeHtml(caseItem.vehicle || '')}${caseItem.plate ? ` · ${escapeHtml(caseItem.plate)}` : ''}</small>
-          ${ops.length ? `<ul>${ops.map((op) => `<li>${escapeHtml(op)}</li>`).join('')}</ul>` : '<p class="muted">Aucune ligne MO détaillée rattachée à cette étape.</p>'}
+          <strong>${index + 1}. ${escapeHtml(identity.operation)}</strong>
+          <small>${escapeHtml(caseItem.clientName || 'Client')} · ${escapeHtml(caseItem.vehicle || '')}${caseItem.plate ? ` · ${escapeHtml(caseItem.plate)}` : ''}${identity.canonical && identity.phase !== identity.operation ? ` · Phase: ${escapeHtml(identity.phase)}` : ''}</small>
+          ${ops.length ? `<ul>${ops.map((op) => `<li>${escapeHtml(op)}</li>`).join('')}</ul>` : '<p class="muted">Aucune ligne MO détaillée rattachée à cette opération.</p>'}
         </article>
       `).join('')}
     </div>
@@ -238,7 +266,9 @@ function renderMobilePlanningList(date, resources, taskNumberMap, filters = null
     ${rows
       .map(({ booking, segment, caseItem, resource, start, end, status }) => {
         const taskNumber = taskNumberMap?.get(getPlanningTaskNumberKey(booking, segment)) || "";
-        const stage = getDurationLabel(booking.key) || booking.title || "Étape planning";
+        const identity = getPlanningBookingDisplayIdentity(booking);
+        const stage = identity.operation;
+        const phase = identity.phase;
         const model = shortVehicleModel(caseItem?.vehicle || caseItem?.model || "Véhicule");
         const plate = caseItem?.plate || caseItem?.registration || caseItem?.vin || "";
         const statusLabel = getBookingStatusLabel(booking);
@@ -252,12 +282,12 @@ function renderMobilePlanningList(date, resources, taskNumberMap, filters = null
             </div>
             <div class="mobile-planning-body">
               <div class="mobile-planning-title">
-                <strong>${taskNumber ? `#${escapeHtml(String(taskNumber))} · ` : ""}${escapeHtml(model)}</strong>
-                <span>${escapeHtml(plate || "Sans immatriculation/VIN")}</span>
+                <strong>${taskNumber ? `#${escapeHtml(String(taskNumber))} · ` : ""}${escapeHtml(stage)}</strong>
+                <span>${escapeHtml(model)} · ${escapeHtml(plate || "Sans immatriculation/VIN")}</span>
               </div>
               <div class="mobile-planning-meta">
                 <span>${escapeHtml(resource.name || "Ressource")}</span>
-                <span>${escapeHtml(stage)}</span>
+                ${identity.canonical && phase !== stage ? `<span>${escapeHtml(phase)}</span>` : ""}
                 <span>${escapeHtml(statusLabel || "Planifié")}</span>
               </div>
               ${caseItem?.clientName ? `<p>${escapeHtml(caseItem.clientName)}</p>` : ""}
@@ -327,17 +357,21 @@ function renderResourceBookings(resource, date, dayStart, dayEnd, total, dailyCo
       const model = isLeave ? "Indisponible" : shortVehicleModel(caseItem?.vehicle || caseItem?.model || "Véhicule");
       const plate = isLeave ? "" : (caseItem?.plate || caseItem?.registration || "");
       const vehicleLine = isLeave ? (booking.title || "Congé / absence") : `${model}${plate ? ` · ${plate}` : ""}`;
-      const stage = isLeave ? "Congé / absence" : (getDurationLabel(booking.key) || booking.title || "Étape planning");
+      const identity = isLeave ? { canonical: false, operation: "Congé / absence", phase: "Congé / absence" } : getPlanningBookingDisplayIdentity(booking);
+      const stage = identity.operation;
+      const phase = identity.phase;
       const timeLine = `${formatTime(clippedStart)}-${formatTime(clippedEnd)}`;
       const equipmentPrefix = isEquipmentResource(resource) ? `${ROLE_LABELS[resource.role] || "Équipement"} · ` : "";
       const taskNumber = taskNumberMap?.get(getPlanningTaskNumberKey(booking, segment)) || "";
-      const shortStage = stage.replace("Tôlerie + démontage", "Tôlerie").replace("Peinture + vernis", "Peinture").replace("Contrôle qualité", "Contrôle");
+      const shortPhase = phase.replace("Tôlerie + démontage", "Tôlerie").replace("Peinture + vernis", "Peinture").replace("Contrôle qualité", "Contrôle");
+      const secondaryLine = isLeave ? stage : `${vehicleLine}${identity.canonical && phase !== stage ? ` · ${phase}` : ""}`;
+      const compactSecondaryLine = isLeave ? stage : `${vehicleLine}${identity.canonical && shortPhase !== stage ? ` · ${shortPhase}` : ""}`;
       const laborOps = isLeave ? [] : getBookingLaborOperations(caseItem, booking.key);
       const taskStatus = isLeave ? "" : getBookingStatusLabel(booking);
       const blocked = !isLeave && typeof isCaseBlocked === "function" && isCaseBlocked(caseItem);
       const blockedLabel = blocked && typeof getCaseBlockerLabel === "function" ? getCaseBlockerLabel(caseItem) : "";
-      const bookingTitle = `${taskNumber ? `Tâche n°${taskNumber} - ` : ""}${vehicleLine} - ${stage} - ${timeLine}${taskStatus ? ` - ${taskStatus}` : ""}${blocked ? ` - Dossier bloqué${blockedLabel ? `: ${blockedLabel}` : ""}` : ""}${laborOps.length ? `\nMO: ${laborOps.join(' · ')}` : ''}`;
-      const maxTextLength = Math.max(vehicleLine.length, `${equipmentPrefix}${shortStage}`.length);
+      const bookingTitle = `${taskNumber ? `Tâche n°${taskNumber} - ` : ""}${stage} - ${vehicleLine}${identity.canonical && phase !== stage ? ` - Phase: ${phase}` : ""} - ${timeLine}${taskStatus ? ` - ${taskStatus}` : ""}${blocked ? ` - Dossier bloqué${blockedLabel ? `: ${blockedLabel}` : ""}` : ""}${laborOps.length ? `\nMO: ${laborOps.join(' · ')}` : ''}`;
+      const maxTextLength = Math.max(stage.length, `${equipmentPrefix}${secondaryLine}`.length);
       const availableChars = Math.max(6, Math.floor(width * 1.35));
       const numberOnly = Boolean(taskNumber) && !isLeave && (width < 14 || maxTextLength > availableChars);
       const compactClass = `${blocked ? " blocked-booking" : ""}${!isLeave ? ` task-status-${escapeAttr(getBookingOperationalStatus(booking))}` : ""}${numberOnly ? " number-only-booking" : width < 8 ? " compact-booking" : ""}`;
@@ -345,7 +379,7 @@ function renderResourceBookings(resource, date, dayStart, dayEnd, total, dailyCo
       items.push(`
         <div class="booking ${isLeave ? 'leave-booking' : ''}${compactClass}" style="left:${left}%;width:${width}%;background:${color}" title="${escapeAttr(bookingTitle)}" aria-label="${escapeAttr(bookingTitle)}">
           ${taskNumber ? `<span class="booking-number">${escapeHtml(String(taskNumber))}</span>` : ""}
-          ${numberOnly ? "" : `<span class="booking-time">${escapeHtml(timeLine)}</span><strong>${escapeHtml(vehicleLine)}</strong><span class="booking-stage">${escapeHtml(equipmentPrefix)}${escapeHtml(width < 8 ? shortStage : stage)}</span>`}
+          ${numberOnly ? "" : `<span class="booking-time">${escapeHtml(timeLine)}</span><strong>${escapeHtml(stage)}</strong><span class="booking-stage">${escapeHtml(equipmentPrefix)}${escapeHtml(width < 8 ? compactSecondaryLine : secondaryLine)}</span>`}
         </div>
       `);
     });

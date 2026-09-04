@@ -5352,40 +5352,169 @@ function buildImportedLaborAllocationSummary(row) {
 }
 
 
+// WORKSHOP-001D: operation-centric cockpit read model.
+function isOperationCentricBooking(booking) {
+  if (!booking || typeof booking !== "object") return false;
+  return Boolean(
+    Number(booking.taskModelVersion || 0) > 0
+    || booking.sourceKind
+    || (Array.isArray(booking.sourceClaimIds) && booking.sourceClaimIds.length)
+    || (Array.isArray(booking.sourceLineIds) && booking.sourceLineIds.length)
+    || (Array.isArray(booking.sourceOperations) && booking.sourceOperations.length)
+  );
+}
+
+function getPlanningOperationTitle(booking) {
+  const phase = getDurationLabel(booking?.key) || "";
+  const rawTitle = String(booking?.title || "").trim();
+  if (isOperationCentricBooking(booking) && rawTitle) {
+    const normalized = rawTitle.replace(/^Reprise\s*-\s*/u, "").trim();
+    return normalized || rawTitle;
+  }
+  return phase || rawTitle || "Étape planning";
+}
+
+function getPlanningPhaseLabel(booking) {
+  return getDurationLabel(booking?.key) || String(booking?.key || "").trim() || "Étape atelier";
+}
+
+function getBusinessTaskPrimaryBooking(family = [], fallback = null) {
+  const bookings = Array.isArray(family) ? family.filter(Boolean) : [];
+  return bookings.find((booking) => isOperationCentricBooking(booking) && !booking.remainingFromPaused)
+    || bookings.find((booking) => !booking.remainingFromPaused)
+    || fallback
+    || bookings[0]
+    || null;
+}
+
+function collectPlanningTaskProvenance(family = [], item = null) {
+  const bookings = Array.isArray(family) ? family.filter(Boolean) : [];
+  const unique = (key) => [...new Set(bookings.flatMap((booking) => Array.isArray(booking?.[key]) ? booking[key] : []).filter(Boolean).map(String))];
+  const sourceClaimIds = unique("sourceClaimIds");
+  const sourceLineIds = unique("sourceLineIds");
+  const sourceOperations = unique("sourceOperations");
+  const claimMap = new Map((item?.claims || []).filter((claim) => claim?.id).map((claim) => [String(claim.id), claim]));
+  const claimLabels = sourceClaimIds
+    .map((id) => claimMap.get(id))
+    .filter(Boolean)
+    .map((claim) => [claim.number, claim.title].filter(Boolean).join(" · ").trim())
+    .filter(Boolean);
+  return {
+    sourceClaimIds,
+    sourceLineIds,
+    sourceOperations,
+    claimLabels: [...new Set(claimLabels)],
+    sourceKind: String(bookings.find((booking) => booking?.sourceKind)?.sourceKind || ""),
+    taskModelVersion: Math.max(0, ...bookings.map((booking) => Number(booking?.taskModelVersion || 0) || 0)),
+    sourceLaborHours: Math.max(0, ...bookings.map((booking) => Number(booking?.sourceLaborHours || 0) || 0)),
+  };
+}
+
+function renderPlanningTaskProvenance(provenance = {}) {
+  const chunks = [];
+  if (provenance.claimLabels?.length) chunks.push(`OR: ${provenance.claimLabels.join(", ")}`);
+  if (provenance.sourceOperations?.length) chunks.push(`Source: ${provenance.sourceOperations.join(" · ")}`);
+  if (Number(provenance.sourceLaborHours || 0) > 0) chunks.push(`MO source: ${formatLocalizedDecimal(provenance.sourceLaborHours)} h`);
+  return chunks.length
+    ? `<small class="operation-provenance">${chunks.map((chunk) => escapeHtml(chunk)).join(" · ")}</small>`
+    : "";
+}
+
+function buildBusinessTaskDependencyIndex(rows = []) {
+  const refMap = new Map();
+  rows.forEach((row) => {
+    (row.family || row.bookings || []).forEach((booking) => {
+      [booking?.id, booking?.taskId, booking?.businessTaskId]
+        .filter(Boolean)
+        .map(String)
+        .forEach((ref) => { if (!refMap.has(ref)) refMap.set(ref, row); });
+    });
+  });
+  return refMap;
+}
+
+function getBusinessTaskDependencyLabel(row, refMap) {
+  const dependencies = [...new Set((row.family || row.bookings || [])
+    .flatMap((booking) => Array.isArray(booking?.dependencies) ? booking.dependencies : [])
+    .filter(Boolean)
+    .map((dependency) => typeof dependency === "object" ? (dependency.id || dependency.taskId || dependency.key || "") : dependency)
+    .filter(Boolean)
+    .map(String))];
+  if (!dependencies.length) return "Sans dépendance";
+  const relatedRows = [...new Set(dependencies.map((dependency) => refMap.get(dependency)).filter(Boolean))];
+  const unresolvedCount = dependencies.filter((dependency) => !refMap.has(dependency)).length;
+  const pendingCount = relatedRows.filter((dependencyRow) => {
+    const family = dependencyRow.family || dependencyRow.bookings || [];
+    return typeof isBusinessTaskFamilyCompleted === "function"
+      ? !isBusinessTaskFamilyCompleted(family)
+      : !family.every((booking) => getBookingOperationalStatus(booking) === "completed");
+  }).length + unresolvedCount;
+  return pendingCount > 0
+    ? `Attend ${pendingCount} opération${pendingCount > 1 ? "s" : ""}`
+    : "Dépendances terminées · Prête";
+}
+
 function getValidatedAppointmentRows(item) {
-  return state.bookings
-    .filter((booking) => booking.caseId === item.id && booking.temporary !== true)
+  const bookings = state.bookings
+    .filter((booking) => booking.caseId === item.id && booking.temporary !== true && booking.type !== "leave")
     .slice()
-    .sort((a, b) => new Date(a.start) - new Date(b.start))
-    .map((booking) => {
-      const humanResources = booking.resourceIds
-        .map((id) => getResource(id))
-        .filter((resource) => resource && !isEquipmentResource(resource));
-      const equipmentResources = booking.resourceIds
-        .map((id) => getResource(id))
-        .filter((resource) => resource && isEquipmentResource(resource));
-      return {
+    .sort((a, b) => new Date(a.start) - new Date(b.start));
+  const businessRows = typeof getCaseBusinessTaskRows === "function"
+    ? getCaseBusinessTaskRows(item, { bookings })
+    : bookings.map((booking) => ({
         id: booking.id,
-        key: booking.key,
-        title: getDurationLabel(booking.key) || booking.title || "Étape planning",
-        planningMode: booking.planningMode || "standard",
-        details: booking.details || "",
-        start: booking.start,
-        end: booking.end,
-        status: getBookingOperationalStatus(booking),
-        statusLabel: getBookingStatusLabel(booking),
-        pauseReason: booking.pauseReason || "",
-        remainingFromPaused: Boolean(booking.remainingFromPaused),
-        actualStart: booking.actualStart || booking.startedAt || "",
-        actualEnd: booking.actualEnd || booking.completedAt || "",
-        human: humanResources.map((resource) => resource.name).filter(Boolean).join(", ") || "Non affecté",
-        equipment: equipmentResources.map((resource) => resource.name).filter(Boolean).join(", "),
-        minutes: typeof getBookingPlannedMinutes === "function"
+        family: [booking],
+        bookings: [booking],
+        displayBooking: booking,
+        actionBooking: booking,
+        actionBookingId: booking.id,
+        pauseRemainder: Boolean(booking.remainingFromPaused),
+        plannedMinutes: typeof getBookingPlannedMinutes === "function"
           ? getBookingPlannedMinutes(booking, item)
           : Math.max(0, diffMinutes(new Date(booking.start), new Date(booking.end))),
-        archived: isCaseOperationallyClosed(item),
-      };
-    });
+        start: booking.start,
+        end: booking.end,
+        resourceIds: booking.resourceIds || [],
+      }));
+  const dependencyIndex = buildBusinessTaskDependencyIndex(businessRows);
+  return businessRows.map((businessRow) => {
+    const family = businessRow.family || businessRow.bookings || [];
+    const displayBooking = businessRow.displayBooking || family[0];
+    const actionBooking = businessRow.actionBooking || displayBooking;
+    const primaryBooking = getBusinessTaskPrimaryBooking(family, displayBooking);
+    const resourceIds = [...new Set(businessRow.resourceIds || family.flatMap((booking) => booking.resourceIds || []))];
+    const humanResources = resourceIds.map((id) => getResource(id)).filter((resource) => resource && !isEquipmentResource(resource));
+    const equipmentResources = resourceIds.map((id) => getResource(id)).filter((resource) => resource && isEquipmentResource(resource));
+    const completed = typeof isBusinessTaskFamilyCompleted === "function"
+      ? isBusinessTaskFamilyCompleted(family)
+      : family.length > 0 && family.every((booking) => getBookingOperationalStatus(booking) === "completed");
+    const actionStatus = completed ? "completed" : getBookingOperationalStatus(actionBooking);
+    return {
+      id: actionBooking?.id || displayBooking?.id || businessRow.id,
+      businessTaskId: businessRow.id || displayBooking?.businessTaskId || displayBooking?.id || "",
+      key: primaryBooking?.key || displayBooking?.key || "",
+      title: getPlanningOperationTitle(primaryBooking || displayBooking),
+      phase: getPlanningPhaseLabel(primaryBooking || displayBooking),
+      canonical: isOperationCentricBooking(primaryBooking || displayBooking),
+      provenance: collectPlanningTaskProvenance(family, item),
+      dependencyLabel: getBusinessTaskDependencyLabel(businessRow, dependencyIndex),
+      planningMode: displayBooking?.planningMode || "standard",
+      details: displayBooking?.details || "",
+      start: businessRow.start || displayBooking?.start,
+      end: businessRow.end || displayBooking?.end,
+      status: actionStatus,
+      statusLabel: businessRow.pauseRemainder ? "En pause · Reprise planifiée" : (completed ? "Terminée" : (businessRow.statusLabel || getBookingStatusLabel(actionBooking || displayBooking))),
+      pauseReason: family.map((booking) => booking.pauseReason).filter(Boolean).at(-1) || "",
+      remainingFromPaused: Boolean(businessRow.pauseRemainder),
+      actualStart: family.map((booking) => booking.actualStart || booking.startedAt).filter(Boolean).sort()[0] || "",
+      actualEnd: family.map((booking) => booking.actualEnd || booking.completedAt).filter(Boolean).sort().at(-1) || "",
+      human: humanResources.map((resource) => resource.name).filter(Boolean).join(", ") || "Non affecté",
+      equipment: equipmentResources.map((resource) => resource.name).filter(Boolean).join(", "),
+      minutes: Math.max(0, Number(businessRow.plannedMinutes || 0) || 0),
+      resourceIds,
+      archived: isCaseOperationallyClosed(item),
+    };
+  });
 }
 
 function formatBookingDateRange(start, end) {
@@ -5447,10 +5576,13 @@ function renderValidatedAppointmentPlan(root, item) {
           const end = new Date(row.end);
           return `
           <div class="validated-plan-row task-status-${escapeAttr(row.status)}">
-            <strong>
-              ${escapeHtml(row.title)}
-              ${row.remainingFromPaused ? '<small class="task-remainder-badge">Reliquat</small>' : ''}
+            <strong class="operation-title-cell">
+              <span class="operation-primary">${escapeHtml(row.title)}</span>
+              ${row.canonical && row.phase && row.phase !== row.title ? `<small class="operation-phase">${escapeHtml(row.phase)}</small>` : ''}
+              ${row.remainingFromPaused ? '<small class="task-remainder-badge">Reprise planifiée</small>' : ''}
               <small class="task-status-pill">${escapeHtml(row.statusLabel)}</small>
+              ${row.dependencyLabel ? `<small class="operation-dependency">${escapeHtml(row.dependencyLabel)}</small>` : ''}
+              ${renderPlanningTaskProvenance(row.provenance)}
               ${row.details ? `<em>${escapeHtml(row.details)}</em>` : ''}
               ${row.pauseReason ? `<em>Cause pause: ${escapeHtml(row.pauseReason)}</em>` : ''}
             </strong>

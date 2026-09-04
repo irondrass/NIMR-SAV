@@ -8095,3 +8095,17 @@ select:focus {
     transition: none !important;
   }
 }
+
+
+/* WORKSHOP-001D — operation-centric cockpit */
+.operation-title-cell { align-content: start; }
+.operation-primary { color: #08253a; font-size: 0.9rem; line-height: 1.25; overflow-wrap: anywhere; }
+.operation-phase, .operation-provenance, .operation-dependency { display: block; font-size: 0.72rem; line-height: 1.35; font-weight: 700; }
+.operation-phase { color: #53697a; }
+.operation-provenance { color: #476173; }
+.operation-dependency { color: #0f5d42; }
+.validated-plan-row.task-status-paused .operation-dependency { color: #9a6700; }
+.daily-labor-card > strong { display: block; color: #08253a; line-height: 1.3; }
+.booking > strong { overflow: hidden; text-overflow: ellipsis; }
+.mobile-planning-title strong { color: #08253a; line-height: 1.25; }
+@media (max-width: 980px) { .operation-title-cell { grid-column: 1 / -1; } }

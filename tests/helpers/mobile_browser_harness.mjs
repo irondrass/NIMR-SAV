@@ -253,12 +253,35 @@ export function technicianFixtureExpression({ role = "technicien", started = tru
   return `(async () => {
     const now = new Date();
     const today = typeof todayKey === "function" ? todayKey(now) : now.toISOString().slice(0, 10);
-    const currentStart = new Date(now.getTime() - 4 * 60000);
-    const currentEnd = new Date(now.getTime() + 56 * 60000);
-    const nextStart = new Date(now.getTime() + 70 * 60000);
-    const nextEnd = new Date(now.getTime() + 130 * 60000);
+    const dayStart = new Date(now);
+    dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date(now);
+    dayEnd.setHours(23, 59, 0, 0);
+    const preferredCurrentStart = now.getTime() - 4 * 60000;
+    const latestCurrentStart = dayEnd.getTime() - 140 * 60000;
+    const currentStart = new Date(Math.max(dayStart.getTime(), Math.min(preferredCurrentStart, latestCurrentStart)));
+    const currentEnd = new Date(currentStart.getTime() + 60 * 60000);
+    const nextStart = new Date(currentStart.getTime() + 74 * 60000);
+    const nextEnd = new Date(currentStart.getTime() + 134 * 60000);
     const userRole = ${JSON.stringify(role)};
-    const user = { id: "user-mobile-tech", name: "Technicien Mobile", role: userRole, active: true, resourceId: "tech-mobile", pinHash: "", pinSalt: "", createdAt: now.toISOString(), updatedAt: now.toISOString() };
+    const workshopId = typeof getSupabaseWorkshopId === "function"
+      ? String(getSupabaseWorkshopId() || "").trim()
+      : "00000000-0000-0000-0000-000000000001";
+    const user = {
+      id: "user-mobile-tech",
+      name: "Technicien Mobile",
+      role: userRole,
+      active: true,
+      resourceId: "tech-mobile",
+      pinHash: "",
+      pinSalt: "",
+      authUserId: "auth-mobile-tech",
+      authSource: "supabase_membership",
+      membershipValidatedAt: now.toISOString(),
+      membershipWorkshopId: workshopId,
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    };
     const resources = [
       { id: "tech-mobile", name: "Technicien Mobile", role: "mecanicien", active: true, capacity: 1 },
       { id: "pont-mobile", name: "Pont mécanique mobile", role: "pont_mecanique", resourceType: "equipment", active: true, capacity: 1 },

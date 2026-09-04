@@ -2386,10 +2386,16 @@ function renderTechnicianFieldFocus(currentRow, nextRow) {
     : `Hors ligne · ${pendingCount} action${pendingCount > 1 ? "s" : ""} en attente locale`;
   const nextBooking = nextRow?.actionBooking || nextRow?.displayBooking || nextRow?.booking;
   const nextItem = nextRow?.item;
+  const operationTitle = getPlanningOperationTitle(booking);
+  const phaseLabel = getPlanningPhaseLabel(booking);
+  const canonicalOperation = isOperationCentricBooking(booking);
+  const nextOperationTitle = nextBooking ? getPlanningOperationTitle(nextBooking) : "";
+  const nextPhaseLabel = nextBooking ? getPlanningPhaseLabel(nextBooking) : "";
+  const nextCanonicalOperation = nextBooking ? isOperationCentricBooking(nextBooking) : false;
   return `
     <article class="technician-current-task" data-technician-current-task data-current-booking-id="${escapeAttr(booking.id)}">
       <div class="technician-field-head">
-        <div><span class="eyebrow">${currentRow.status === "in_progress" ? "Tâche actuelle" : "Tâche prioritaire"}</span><h2>${escapeHtml(getDurationLabel(booking.key) || booking.title || "Opération atelier")}</h2></div>
+        <div><span class="eyebrow">${currentRow.status === "in_progress" ? "Opération actuelle" : "Opération prioritaire"}</span><h2>${escapeHtml(operationTitle)}</h2>${canonicalOperation && phaseLabel !== operationTitle ? `<small class="muted">Phase · ${escapeHtml(phaseLabel)}</small>` : ""}</div>
         <span class="status-pill">${escapeHtml(currentRow.statusLabel || currentRow.status)}</span>
       </div>
       <div class="technician-field-identity">
@@ -2410,7 +2416,7 @@ function renderTechnicianFieldFocus(currentRow, nextRow) {
     </article>
     ${nextRow ? `
       <article class="technician-next-task" data-technician-next-task>
-        <div><span class="eyebrow">Tâche suivante</span><h3>${escapeHtml(getDurationLabel(nextBooking.key) || nextBooking.title || "Opération atelier")}</h3></div>
+        <div><span class="eyebrow">Opération suivante</span><h3>${escapeHtml(nextOperationTitle)}</h3>${nextCanonicalOperation && nextPhaseLabel !== nextOperationTitle ? `<small class="muted">Phase · ${escapeHtml(nextPhaseLabel)}</small>` : ""}</div>
         <p><strong>${escapeHtml(nextItem.vehicle || "Véhicule à compléter")}</strong> · ${escapeHtml(nextItem.plate || nextItem.vin || "Sans immatriculation")} · ${formatTime(new Date(nextBooking.start))}</p>
       </article>
     ` : ""}
@@ -2535,13 +2541,16 @@ function renderTechnicianTaskCard(row, options = {}) {
     .map((resource) => resource.name)
     .join(", ");
   const orderRef = getPrintOrderReference(item);
+  const operationTitle = getPlanningOperationTitle(booking);
+  const phaseLabel = getPlanningPhaseLabel(booking);
+  const canonicalOperation = isOperationCentricBooking(booking);
   const note = row.latestNote ? `<p class="technician-note">Note : ${escapeHtml(row.latestNote)}</p>` : "";
   return `
     <article class="technician-task-card task-status-${escapeAttr(row.status)} ${row.late ? "is-late" : ""} ${options.isCurrent ? "is-current-field-task" : ""}">
       <div class="technician-task-main">
         <button type="button" class="technician-task-title" data-tech-open-case="${escapeAttr(item.id)}">
-          <strong>${escapeHtml(item.vehicle || "Véhicule non renseigné")}</strong>
-          <span>${escapeHtml(item.plate || item.vin || "Sans immatriculation")} · ${escapeHtml(item.clientName || "Client")}</span>
+          <strong>${escapeHtml(operationTitle)}</strong>
+          <span>${escapeHtml(item.vehicle || "Véhicule non renseigné")} · ${escapeHtml(item.plate || item.vin || "Sans immatriculation")} · ${escapeHtml(item.clientName || "Client")}</span>
         </button>
         <div class="technician-task-tags">
           <span class="tag">${escapeHtml(row.statusLabel)}</span>
@@ -2551,7 +2560,7 @@ function renderTechnicianTaskCard(row, options = {}) {
       </div>
       <dl class="technician-task-meta">
         <div><dt>Dossier</dt><dd>${escapeHtml(orderRef)}</dd></div>
-        <div><dt>Étape</dt><dd>${escapeHtml(getDurationLabel(booking.key) || booking.title || "-")}</dd></div>
+        <div><dt>${canonicalOperation ? "Phase" : "Étape"}</dt><dd>${escapeHtml(canonicalOperation ? phaseLabel : operationTitle)}</dd></div>
         <div><dt>Prévu</dt><dd>${formatTime(start)} → ${formatTime(end)}</dd></div>
         <div><dt>Durée</dt><dd>${formatLocalizedDecimal(row.plannedMinutes / 60)} h</dd></div>
         <div><dt>Technicien</dt><dd>${escapeHtml(techName)}</dd></div>
@@ -2711,7 +2720,7 @@ function renderWorkshopChiefSummary(dateKey) {
         <article class="chief-summary-card">
           <strong>${items.length}</strong>
           <span>${escapeHtml(label)}</span>
-          <small>${items.slice(0, 3).map((row) => escapeHtml(`${row.item.clientName || "-"} · ${row.booking.title || getDurationLabel(row.booking.key) || "Tâche"}`)).join("<br>") || "Aucun"}</small>
+          <small>${items.slice(0, 3).map((row) => escapeHtml(`${getPlanningOperationTitle(row.displayBooking || row.booking)} · ${row.item.clientName || "-"}`)).join("<br>") || "Aucun"}</small>
         </article>
       `).join("")}
       <article class="chief-summary-card">
@@ -2722,7 +2731,7 @@ function renderWorkshopChiefSummary(dateKey) {
       <article class="chief-summary-card">
         <strong>${unassigned.length}</strong>
         <span>Tâches sans technicien</span>
-        <small>${unassigned.slice(0, 5).map((booking) => escapeHtml(booking.title || getDurationLabel(booking.key) || "Tâche")).join("<br>") || "Aucune"}</small>
+        <small>${unassigned.slice(0, 5).map((booking) => escapeHtml(getPlanningOperationTitle(booking))).join("<br>") || "Aucune"}</small>
       </article>
     </div>
   `;

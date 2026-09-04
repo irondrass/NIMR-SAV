@@ -79,6 +79,7 @@ export const FINGERPRINT_SCHEMES = Object.freeze({
   "v23.3.25": "canonical-lf-v2",
   "v23.3.26": "canonical-lf-v2",
   "v23.3.27": "canonical-lf-v2",
+  "v23.3.28": "canonical-lf-v2",
 });
 
 export const CURRENT_FINGERPRINT_SCHEME = "canonical-lf-v2";
@@ -103,6 +104,7 @@ export const SEALED_RELEASE_FINGERPRINTS = Object.freeze({
   "v23.3.25": "c0084d697aa781797f8100b488fb3ab8c638354bee3b5d27add9c18e685038d8",
   "v23.3.26": "a9c7a3421f6940061d59be23659bd4105b79261a90db76429b7e2ec9e7ca6fe2",
   "v23.3.27": "b28c414446ed3486c0b6261241b76096999efcec81509f2e378173dbe8acadac",
+  "v23.3.28": "3c3de28a415b05a27d7efd3704a12d29cc549d00d220d9c363883878350d3e6f",
 });
 
 /**
@@ -173,7 +175,7 @@ export function validateReleaseFingerprintContract({
       `Release ${appVersion} is SEALED and must NEVER be rewritten in place.\n` +
       `DO NOT update the sealed fingerprint for ${appVersion}.\n` +
       `To ship this runtime change, you MUST create a NEW release:\n` +
-      `1. Bump release identity (e.g. ${appVersion} -> next version, e.g. v23.3.27) across the authorized production files\n` +
+      `1. Bump release identity (e.g. ${appVersion} -> next version, e.g. v23.3.28) across the authorized production files\n` +
       `2. Add a NEW sealed entry for the next version in SEALED_RELEASE_FINGERPRINTS while keeping ${appVersion} intact.`
     );
   }

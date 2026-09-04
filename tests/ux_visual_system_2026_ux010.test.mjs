@@ -99,10 +99,10 @@ await check("I responsive hardening covers tablet and small mobile layouts", () 
   assert.match(ux, /@media \(prefers-reduced-motion:\s*reduce\)/u);
 });
 
-await check("J service worker is source-refreshed without changing the v23.3.24 cache contract", () => {
+await check("J service worker is source-refreshed without changing the v23.3.25 cache contract", () => {
   assert.match(sw, /UX-010 source refresh/u);
-  assert.match(sw, /const CACHE_NAME = "nimr-sav-v23\.3\.24"/u);
-  assert.match(read("js/version.js"), /^window\.APP_VERSION = "v23\.3\.24";$/mu);
+  assert.match(sw, /const CACHE_NAME = "nimr-sav-v23\.3\.25"/u);
+  assert.match(read("js/version.js"), /^window\.APP_VERSION = "v23\.3\.25";$/mu);
 });
 
 await check("K UX-010 does not introduce auth, SQL, service-role, or permission authority changes", () => {
@@ -220,6 +220,9 @@ await check("L changed paths are limited to the approved UX-010 surfaces", () =>
     "tests/pwa_cache_version_contract.test.mjs",
     "tests/offline_concurrency_chaos_p010.test.mjs",
     "tests/helpers/granular_supabase_adapter.mjs",
+    ".gitattributes",
+    "tests/helpers/release-fingerprint.mjs",
+    "tests/release_fingerprint_portability.test.mjs",
   ]);
   for (const changedPath of paths) {
     assert.ok(allowed.has(changedPath), `unexpected UX-010 changed path: ${changedPath}`);

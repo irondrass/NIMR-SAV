@@ -156,6 +156,7 @@ test("H. Scheme versioning: legacy releases are worktree-raw-v1 and current is c
   assert.equal(FINGERPRINT_SCHEMES["v23.3.24"], "worktree-raw-v1");
   assert.equal(FINGERPRINT_SCHEMES["v23.3.25"], "canonical-lf-v2");
   assert.equal(FINGERPRINT_SCHEMES["v23.3.26"], "canonical-lf-v2");
+  assert.equal(FINGERPRINT_SCHEMES["v23.3.27"], "canonical-lf-v2");
   assert.equal(CURRENT_FINGERPRINT_SCHEME, "canonical-lf-v2");
 });
 

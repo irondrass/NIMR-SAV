@@ -6619,6 +6619,10 @@ body[data-active-tab]:not([data-active-tab="pilotage"]) .dashboard-strip {
   display: none;
 }
 
+body:not([data-active-tab="pilotage"]) .dashboard-strip {
+  display: none !important;
+}
+
 body[data-active-tab="pilotage"] .dashboard-strip {
   display: grid;
 }
@@ -6650,16 +6654,44 @@ body.is-offline .sync-status-strip .sync-item:nth-of-type(3) {
   background: #fff5df;
 }
 
-.sidebar-nav .nav-button[data-tab="today"] { order: 1; }
-.sidebar-nav .nav-button[data-tab="dossiers"] { order: 2; }
-.sidebar-nav .nav-button[data-tab="planning"] { order: 3; }
-.sidebar-nav .nav-button[data-tab="pilotage"] { order: 4; }
-.sidebar-nav .nav-button[data-tab="technician"] { order: 5; }
-.sidebar-nav .nav-button[data-tab="reception-workspace"] { order: 6; }
-.sidebar-nav .nav-button[data-tab="atelier"] { order: 7; }
+.sidebar-nav .nav-button[data-tab="reception-workspace"] { order: 1; }
+.sidebar-nav .nav-button[data-tab="today"] { order: 2; }
+.sidebar-nav .nav-button[data-tab="dossiers"] { order: 3; }
+.sidebar-nav .nav-button[data-tab="planning"] { order: 4; }
+.sidebar-nav .nav-button[data-tab="pilotage"] { order: 5; }
+.sidebar-nav .nav-button[data-tab="technician"] { order: 6; }
+.sidebar-nav .sidebar-nav-divider { order: 7; }
+.sidebar-nav .nav-button[data-tab="atelier"] { order: 8; }
+
+.sidebar-nav .nav-button-action {
+  margin-top: 0;
+  margin-bottom: 8px;
+  font-weight: 600;
+  border-radius: var(--radius-md, 8px);
+}
+
+.sidebar-nav-divider {
+  height: 1px;
+  margin: 10px 4px;
+  background: var(--line, rgba(255, 255, 255, 0.15));
+  border: 0;
+}
+
+.sidebar-nav:has(.nav-button[data-tab="atelier"][hidden]) .sidebar-nav-divider,
+.sidebar-nav:has(.nav-button[data-tab="atelier"][style*="display: none"]) .sidebar-nav-divider {
+  display: none !important;
+}
+
+.sidebar-nav .nav-button-utility {
+  opacity: 0.85;
+}
+
+.sidebar-nav .nav-button-utility:hover,
+.sidebar-nav .nav-button-utility.active {
+  opacity: 1;
+}
 
 .sidebar-nav .nav-button[data-tab="reception-workspace"] {
-  margin-top: 10px;
   color: #fff;
   background: var(--brand);
   box-shadow: 0 4px 12px rgba(15, 59, 87, 0.18);

@@ -655,7 +655,7 @@ const pendingCaseRevisionIds = new Set();
 
 let state = loadState();
 initializeLastKnownCasesComparable();
-let activeTab = "reception-workspace";
+let activeTab = "today";
 let activeCaseId = state.cases[0]?.id ?? null;
 let activeCaseDetailTab = "resume";
 
@@ -5086,10 +5086,10 @@ const ROLE_TABS = {
 
 // Tab par défaut à afficher lors de la connexion selon le rôle
 const ROLE_DEFAULT_TABS = {
-  admin:         "reception-workspace",
-  directeur_sav: "reception-workspace",
-  chef_atelier:  "reception-workspace",
-  reception:     "reception-workspace",
+  admin:         "today",
+  directeur_sav: "pilotage",
+  chef_atelier:  "today",
+  reception:     "today",
   technicien:    "technician",
   controle_qualite: "dossiers",
   qualite:       "dossiers",
@@ -5117,8 +5117,8 @@ function canAccessTab(tabId) {
   return getAllowedTabsForCurrentUser().includes(tabId);
 }
 
-function ensureCurrentTabAllowed() {
-  if (!canAccessTab(activeTab)) {
+function ensureCurrentTabAllowed(forceDefault = false) {
+  if (forceDefault || !canAccessTab(activeTab)) {
     const user = getCurrentUser();
     const defaultTab = user ? getDefaultTabForRole(user.role) : null;
     const allowed = getAllowedTabsForCurrentUser();

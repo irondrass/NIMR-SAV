@@ -1300,6 +1300,7 @@ function bindWorkshopForms() {
     }
     if (setCurrentUser(newUserId)) {
       resetSensitiveUiStateForUserSwitch("sélecteur paramètres");
+      ensureCurrentTabAllowed(true);
       addAuditLog("users.current_changed", `Changement d'utilisateur actif : ${user.name}`);
       saveState();
       render();
@@ -2141,7 +2142,7 @@ async function checkUserSessionStartup() {
       }
 
       window.__nimrValidatedAuthUserId = authUser.id;
-      ensureCurrentTabAllowed();
+      ensureCurrentTabAllowed(true);
       render();
       hideFirstAccessRecovery();
       hideUserLoginScreen();
@@ -2182,7 +2183,7 @@ async function checkUserSessionStartup() {
       hideUserLoginScreen();
       hideUserPinChangeOverlay();
       hideFirstAccessRecovery();
-      ensureCurrentTabAllowed();
+      ensureCurrentTabAllowed(true);
       render();
     }
     return { ok: true, code: "OFFLINE_CURRENT_IDENTITY", user: currentUser };
@@ -2539,7 +2540,7 @@ function bindUserSessionActions() {
       }
       window.__nimrValidatedAuthUserId = setupResult.user.id;
       sessionStorage.setItem("nimr-user-pin-unlocked", convergedIdentity.user.id);
-      ensureCurrentTabAllowed();
+      ensureCurrentTabAllowed(true);
       render();
       hideSupabasePasswordSetupGate();
       hideFirstAccessRecovery();
@@ -2682,7 +2683,7 @@ function bindUserSessionActions() {
       }
       window.__nimrValidatedAuthUserId = authResult.user.id;
       sessionStorage.setItem("nimr-user-pin-unlocked", convergedIdentity.user.id);
-      ensureCurrentTabAllowed();
+      ensureCurrentTabAllowed(true);
       render();
       hideFirstAccessRecovery();
       if (typeof refreshSupabasePermissionState === "function") refreshSupabasePermissionState("cloud-login");
@@ -2901,7 +2902,7 @@ function completeUserLogin(targetUser) {
     hideUserLoginScreen();
 
     // Forcer la redirection et vider le DOM selon les règles d'accessibilité (Contrainte 11 hotfix test)
-    ensureCurrentTabAllowed();
+    ensureCurrentTabAllowed(true);
     if (getCanonicalUserRole(targetUser) === "technicien") {
       const caseDetail = document.getElementById("case-detail");
       const gantt = document.getElementById("gantt");

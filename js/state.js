@@ -21,7 +21,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v23.3.30";
+const APP_VERSION = "v23.3.33";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const CURRENT_DATA_SCHEMA_VERSION = 2;
@@ -139,8 +139,8 @@ const CLAIM_STATUS_LABELS = {
 const ACTION_LABELS = {
   claim: "Créer le premier ordre de travail",
   labor: "Saisir la main-d’œuvre",
-  expertApproved: "Action héritée",
-  clientApproved: "Action héritée",
+  expertApproved: "Accord expert",
+  clientApproved: "Accord client / interne",
   appointment: "Fixer le RDV de dépôt",
   received: "Confirmer la réception véhicule",
   workStarted: "Démarrer les travaux",
@@ -343,6 +343,8 @@ const USER_ROLE_ALIASES = Object.freeze({
 });
 
 const DIRECTOR_PERMISSIONS = [
+  "workshop.sync.read",
+  "workshop.sync.write",
   "audit.view",
   "dashboard.view",
   "case.view",
@@ -376,9 +378,10 @@ const DIRECTOR_PERMISSIONS = [
   "notes.direction",
 ];
 
-const READ_ONLY_PERMISSIONS = ["dashboard.view", "case.view", "planning.view", "resource.view", "print.*"];
+const READ_ONLY_PERMISSIONS = ["workshop.sync.read", "dashboard.view", "case.view", "planning.view", "resource.view", "print.*"];
 const QUALITY_CONTROLLER_PERMISSIONS = [
   ...READ_ONLY_PERMISSIONS,
+  "workshop.sync.write",
   "quality.validate",
   "quality.reject",
   "quality.revalidate",
@@ -388,6 +391,8 @@ const ROLE_PERMISSIONS = {
   admin_technique: ["*"],
   directeur: DIRECTOR_PERMISSIONS,
   chef_atelier: [
+    "workshop.sync.read",
+    "workshop.sync.write",
     "audit.view",
     "dashboard.view",
     "case.view",
@@ -417,6 +422,8 @@ const ROLE_PERMISSIONS = {
     "customer_claim.manage",
   ],
   reception: [
+    "workshop.sync.read",
+    "workshop.sync.write",
     "case.view",
     "case.create",
     "case.edit",
@@ -429,7 +436,7 @@ const ROLE_PERMISSIONS = {
     "print.*",
     "customer_claim.manage",
   ],
-  technicien: ["task.start", "task.pause", "task.resume", "task.complete", "task.block", "task.unblock", "task.note", "task.actual_time", "print.task"],
+  technicien: ["workshop.sync.read", "workshop.sync.write", "task.start", "task.pause", "task.resume", "task.complete", "task.block", "task.unblock", "task.note", "task.actual_time", "print.task"],
   controle_qualite: QUALITY_CONTROLLER_PERMISSIONS,
   lecture_seule: READ_ONLY_PERMISSIONS,
   // Alias de lecture transitoires pour les anciens tests/modules. hasPermission
@@ -638,8 +645,80 @@ function getCaseStatus(item) {
     ? getIndexedCaseBookings(item.id)
     : (Array.isArray(state?.bookings) ? state.bookings : []);
   const hasAssignments = bookings.some((booking) => booking.caseId === item.id && booking.type !== "leave");
-  if (flags.received || hasAssignments) return "in_progress";
+  if (flags.received || hasAssignments) return "planning";
   return pdfReadyForPlanning || hasRepairClaims(item) || item.appointment ? "planning" : "chief_validation";
+}
+
+// Operational display is derived from facts, independently of legacy filing statuses.
+function isCasePhysicallyPresent(item) {
+  return Boolean(item && !item.deletedAt && item.flags?.received && !item.flags?.delivered);
+}
+
+function isCaseQualityValidated(item) {
+  const status = normalizeQualityStatus(item?.receptionWorkflow?.qualityStatus);
+  if (["rejected", "rework", "in_progress"].includes(status)) return false;
+  return status === "validated" || item?.flags?.qualityApproved === true;
+}
+
+function getCaseOperationalPhase(item) {
+  if (item?.flags?.delivered) return { key: "delivered", label: "Livré" };
+  if (!item?.flags?.received) return { key: "expected", label: "Attendu" };
+  if (item.flags.workCompleted) return isCaseQualityValidated(item)
+    ? { key: "ready", label: "Prêt" }
+    : { key: "finalizing", label: "À finaliser" };
+  if (item.flags.workStarted) return { key: "in_progress", label: "En intervention" };
+  return { key: "preparing", label: "À préparer" };
+}
+
+function getWorkAuthorizationIssues(item, booking = null) {
+  const claims = (item?.claims || []).filter((claim) => claim.includeInPlanning !== false);
+  const task = booking && (item.planningTasks || []).find((entry) =>
+    [entry.id, entry.taskId].includes(booking.businessTaskId || booking.taskId));
+  const sourceIds = new Set([
+    booking?.sourceClaimId, task?.sourceClaimId,
+    ...(booking?.sourceClaimIds || []), ...(task?.sourceClaimIds || []),
+    ...(booking?.sourceOperations || []).map((entry) => entry?.sourceClaimId || entry?.claimId),
+    ...(task?.sourceOperations || []).map((entry) => entry?.sourceClaimId || entry?.claimId),
+  ].filter(Boolean));
+  const scoped = sourceIds.size ? claims.filter((claim) => sourceIds.has(claim.id)) : claims;
+  if (sourceIds.size && scoped.length !== sourceIds.size) return ["Le périmètre autorisé de cette opération doit être vérifié."];
+  return scoped.filter((claim) => claim.status === "refused" || claim.clientApproved !== true)
+    .map((claim) => `Accord client / interne à confirmer : ${getClaimLabel(claim)}.`);
+}
+
+function getCaseFinalizationIssues(item, delivery = false) {
+  if (!item) return ["Dossier introuvable."];
+  const issues = [];
+  if (!item?.flags?.received) issues.push("Confirmer la réception physique du véhicule.");
+  if (!item?.flags?.workCompleted) issues.push("Terminer les travaux avant la finalisation.");
+  if (typeof getCaseIncompleteTechnicianBookings === "function" && getCaseIncompleteTechnicianBookings(item).length) {
+    issues.push("Des opérations ou reliquats restent à terminer.");
+  }
+  if (isCaseBlocked(item)) issues.push(`Résoudre le blocage : ${getCaseBlockerLabel(item)}.`);
+  if ((item?.customerClaims || []).some((claim) => ["open", "in_progress", "unresolved"].includes(claim.status))) {
+    issues.push("Traiter les réclamations client encore ouvertes.");
+  }
+  if (delivery && !isCaseQualityValidated(item)) issues.push("Valider le contrôle qualité avant la remise du véhicule.");
+  return issues;
+}
+
+function recordWorkAuthorization(item, claimId, reference) {
+  const permission = guardAction("case.edit", { item }, { notify: false });
+  if (!permission.ok) return { ok: false, message: permission.message };
+  const claim = item?.claims?.find((entry) => entry.id === claimId);
+  const proof = String(reference || "").trim();
+  if (!claim || claim.status === "refused") return { ok: false, message: "Ordre absent ou refusé : vérifier le périmètre des travaux." };
+  if (!proof) return { ok: false, message: "Indiquer la référence de l'accord ou le contact ayant autorisé les travaux." };
+  noteCaseRevisionCandidate(item);
+  const actor = getCurrentActor();
+  claim.clientApproved = true;
+  claim.authorizationReference = proof;
+  claim.authorizationAt = new Date().toISOString();
+  claim.authorizationBy = actor.userId;
+  claim.updatedAt = claim.authorizationAt;
+  refreshCaseApprovalFlagsFromClaims(item);
+  addHistory(item, "claim.authorization.recorded", "Accord travaux enregistré", `${getClaimLabel(claim)} · ${proof}`);
+  return { ok: true, message: "Accord enregistré pour cet ordre." };
 }
 
 const DAY_LABELS = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"];
@@ -3510,6 +3589,9 @@ function normalizeRepairClaim(claim, index = 0) {
     includeInPlanning: claim.includeInPlanning !== false,
     expertApproved: Boolean(claim.expertApproved),
     clientApproved: Boolean(claim.clientApproved),
+    authorizationReference: String(claim.authorizationReference || ""),
+    authorizationAt: claim.authorizationAt || "",
+    authorizationBy: claim.authorizationBy || "",
     estimateNumber: claim.estimateNumber || claim.estimate?.reference || "",
     orNumber: claim.orNumber || "",
     amount: Math.max(0, parseLocalizedDecimal(claim.amount || 0) || 0),
@@ -4965,6 +5047,8 @@ function showInputPromptModal({
   title = "Saisie",
   message = "",
   defaultValue = "",
+  inputType = "text",
+  detailsLabel = "",
   options = null,
   confirmLabel = "Confirmer",
   cancelLabel = "Annuler",
@@ -4977,12 +5061,14 @@ function showInputPromptModal({
     const confirmBtn = document.getElementById("custom-modal-confirm");
 
     if (!overlay || !body || !cancelBtn || !confirmBtn) {
+      let fallback;
       if (options && Array.isArray(options)) {
         const text = options.map(([val, lbl]) => `${val}: ${lbl}`).join("\n");
-        resolve(prompt(`${message}\n\n${text}`, defaultValue));
+        fallback = prompt(`${message}\n\n${text}`, defaultValue);
       } else {
-        resolve(prompt(message, defaultValue));
+        fallback = prompt(message, defaultValue);
       }
+      resolve(fallback === null || !detailsLabel ? fallback : { value: fallback, details: "" });
       return;
     }
 
@@ -5011,11 +5097,12 @@ function showInputPromptModal({
       });
     } else {
       input = document.createElement("input");
-      input.type = "text";
+      input.type = ["text", "datetime-local", "date", "time"].includes(inputType) ? inputType : "text";
       input.value = String(defaultValue || "");
       input.autocomplete = "off";
     }
     input.id = "prompt-modal-input";
+    input.setAttribute("aria-label", title);
     input.className = options && Array.isArray(options) ? "custom-modal-select" : "custom-modal-input";
     input.style.width = "100%";
     input.style.padding = "10px";
@@ -5023,6 +5110,13 @@ function showInputPromptModal({
     input.style.borderRadius = "8px";
     input.style.fontSize = "16px";
     input.style.minHeight = "48px";
+    const detailsInput = detailsLabel ? document.createElement("textarea") : null;
+    if (detailsInput) {
+      detailsInput.placeholder = detailsLabel;
+      detailsInput.setAttribute("aria-label", detailsLabel);
+      detailsInput.className = "custom-modal-input";
+      detailsInput.rows = 2;
+    }
 
     if (typeof body.replaceChildren === "function") {
       body.replaceChildren(messageWrap, input);
@@ -5032,6 +5126,7 @@ function showInputPromptModal({
       body.appendChild(messageWrap);
       body.appendChild(input);
     }
+    if (detailsInput) body.appendChild(detailsInput);
 
     const cleanup = () => {
       if (titleEl) titleEl.textContent = previousTitle;
@@ -5049,9 +5144,10 @@ function showInputPromptModal({
     };
 
     const onConfirm = () => {
+      if (input?.checkValidity && !input.checkValidity()) { input.reportValidity(); return; }
       const val = input ? input.value : "";
       cleanup();
-      resolve(val);
+      resolve(detailsInput ? { value: val, details: detailsInput.value } : val);
     };
 
     const onKeyDown = (e) => {
@@ -5444,6 +5540,10 @@ function advanceReceptionWorkflow(caseId, action, payload = {}) {
         "quality.validate";
       const qualityGuard = guardAction(requiredPermission, { item });
       if (!qualityGuard.ok) return { ok: false, message: qualityGuard.message };
+      if (status === "validated") {
+        const issues = getCaseFinalizationIssues(item);
+        if (issues.length) return { ok: false, message: issues.join("\n") };
+      }
       rw.qualityStatus = status;
       rw.qualityReviewedAt = now;
       rw.qualityReviewHistory = Array.isArray(rw.qualityReviewHistory) ? rw.qualityReviewHistory : [];
@@ -5486,6 +5586,10 @@ function advanceReceptionWorkflow(caseId, action, payload = {}) {
       return { ok: true, message: "" };
     }
     case "deliver_vehicle": {
+      const deliveryGuard = guardAction("delivery.complete", { item });
+      if (!deliveryGuard.ok) return { ok: false, message: deliveryGuard.message };
+      const issues = getCaseFinalizationIssues(item, true);
+      if (issues.length) return { ok: false, message: issues.join("\n") };
       if (isCaseBlocked(item)) return { ok: false, message: `Résoudre le blocage avant livraison : ${getCaseBlockerLabel(item) || "dossier bloqué"}.` };
       const qcOk = item.flags.qualityApproved || normalizeQualityStatus(rw.qualityStatus) === "validated";
       if (!qcOk) return { ok: false, message: "Le contrôle qualité doit être validé avant livraison." };

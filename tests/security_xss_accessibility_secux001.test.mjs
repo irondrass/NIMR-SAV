@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { currentBuild, escapeRegExp } from "./helpers/build_version.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (p) => fs.readFileSync(path.join(root, p), "utf8");
@@ -26,7 +27,7 @@ import {
   SEALED_RELEASE_FINGERPRINTS,
 } from "./helpers/release-fingerprint.mjs";
 
-console.log("Starting SECUX-001 Phase 2.1 Behavioral & Static Test Suite (v23.3.30)...\n");
+console.log("Starting SECUX-001 Phase 2.1 Behavioral & Static Test Suite (v23.3.31)...\n");
 
 const passed = [];
 const failed = [];
@@ -951,24 +952,16 @@ await check("GUARD-8", "UI text never falsely claims PIN encrypts local data", (
   assert.equal(/PIN\s+(?:qui\s+)?chiffre\s+les\s+donn[eé]es\s+locales/i.test(stateSource), false);
 });
 
-await check("GUARD-9", "Release v23.3.30 is synchronized across 7 files, sealed fingerprint validates, styles.css unchanged", () => {
-  assert.match(versionSource, /^window\.APP_VERSION = "v23\.3\.30";$/m);
-  assert.match(versionSource, /^window\.NIMR_BUILD = "v23\.3\.30";$/m);
-  assert.match(versionSource, /^window\.NIMR_CACHE_NAME = "nimr-sav-v23\.3\.30";$/m);
-  assert.match(stateSource, /const APP_VERSION = "v23\.3\.30";/);
-  assert.match(swSource, /const CACHE_NAME = "nimr-sav-v23\.3\.30";/);
-  assert.match(appSource, /vendor\/pdf\.worker\.min\.js\?v=23\.3\.30/);
-  assert.match(appSource, /sw\.js\?v=23\.3\.30/);
-  assert.match(estimateSource, /vendor\/pdf\.worker\.min\.js\?v=23\.3\.30/);
-  assert.match(offlineSource, /styles\.css\?v=23\.3\.30/);
-  assert.match(indexSource, /styles\.css\?v=23\.3\.30/);
-
-  const actualFingerprint = computeReleaseFingerprint(root);
-  const EXPECTED_FINGERPRINT = SEALED_RELEASE_FINGERPRINTS["v23.3.30"];
-  assert.equal(actualFingerprint, EXPECTED_FINGERPRINT, "v23.3.30 fingerprint must match sealed release registry");
-
-  const baselineDiff = execFileSync("git", ["diff", "b08f8c7542d083a033a5bc666417630614367439", "--", "styles.css"], { cwd: root, encoding: "utf8" });
-  assert.equal(baselineDiff.trim(), "", "styles.css must remain byte-identical to the WORKSHOP-001G functional head during packaging");
+await check("GUARD-9", "Current release assets and immutable fingerprint agree", () => {
+  assert.equal(currentBuild.appVersion, currentBuild.buildVersion);
+  assert.equal(currentBuild.cacheName, `nimr-sav-${currentBuild.appVersion}`);
+  assert.ok(stateSource.includes(`const APP_VERSION = "${currentBuild.appVersion}";`));
+  assert.ok(swSource.includes(`const CACHE_NAME = "${currentBuild.cacheName}";`));
+  for (const [source, asset] of [[appSource,"vendor/pdf.worker.min.js"],[appSource,"sw.js"],[estimateSource,"vendor/pdf.worker.min.js"],[offlineSource,"styles.css"],[indexSource,"styles.css"]]) {
+    assert.match(source, new RegExp(escapeRegExp(`${asset}?v=${currentBuild.queryVersion}`)));
+  }
+  assert.equal(computeReleaseFingerprint(root), SEALED_RELEASE_FINGERPRINTS[currentBuild.appVersion]);
+  assert.match(stylesSource, /\[hidden\]\s*\{\s*display:\s*none\s*!important/u, "hidden controls remain hidden despite component CSS");
 });
 
 // ============================================================

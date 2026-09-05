@@ -5441,7 +5441,8 @@ a:focus-visible,
 }
 
 .technician-field-action-dock {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   margin-top: 12px;
   padding: 10px;
@@ -5449,7 +5450,7 @@ a:focus-visible,
   border-radius: var(--radius);
   background: rgba(255, 255, 255, 0.98);
   box-shadow: var(--shadow);
-  overflow-x: auto;
+  overflow: visible;
   overscroll-behavior-inline: contain;
   -webkit-overflow-scrolling: touch;
 }
@@ -5467,6 +5468,15 @@ a:focus-visible,
 .technician-task-card.is-current-field-task {
   border-color: color-mix(in srgb, var(--brand) 55%, var(--line));
 }
+
+.technician-secondary-actions { grid-column: 1 / -1; position: relative; }
+.technician-secondary-actions > summary { padding: 10px; min-height: 44px; cursor: pointer; text-align: center; }
+.technician-secondary-actions[open] > div { display: grid; gap: 8px; position: absolute; bottom: 100%; left: 0; right: 0; padding: 12px; background: var(--panel, white); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); max-height: 45vh; overflow-y: auto; z-index: 5; }
+.technician-secondary-actions button { min-height: 48px; width: 100%; }
+.technician-operation-details { margin-top: 12px; }
+.operational-decisions { margin-bottom: 16px; border-left: 4px solid var(--brand); }
+.operational-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.operational-decisions button { min-height: 48px; margin: 6px 0; }
 
 .custom-modal-overlay,
 .local-lock-overlay,
@@ -5533,7 +5543,7 @@ a:focus-visible,
   }
 
   #view-technician .technician-panel {
-    padding-bottom: calc(92px + var(--safe-bottom));
+    padding-bottom: calc(180px + var(--safe-bottom));
   }
 }
 
@@ -8395,4 +8405,20 @@ select:focus {
     display: grid;
     grid-template-columns: 1fr;
   }
+}
+
+/* Preserve native hidden semantics against component display declarations. */
+[hidden] { display: none !important; }
+.technician-day-options { margin-bottom: 14px; }
+.technician-day-options > summary { min-height: 44px; padding: 10px 0; cursor: pointer; }
+.technician-day-options .technician-toolbar { margin-bottom: 10px; }
+.today-secondary-queues { margin-top: 20px; }
+.today-secondary-queues > summary { min-height: 44px; padding: 12px 0; cursor: pointer; }
+@media (max-width: 768px) {
+  .app-shell { display: block; }
+  body { padding-bottom: 0; }
+  .sidebar { position: fixed; }
+  main { margin-top: 0; padding-top: calc(66px + env(safe-area-inset-top)); }
+  .technician-field-action-dock { bottom: calc(8px + var(--safe-bottom)); }
+  #view-technician .technician-panel { padding-bottom: calc(156px + var(--safe-bottom)); }
 }

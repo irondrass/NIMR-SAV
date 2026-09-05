@@ -1822,7 +1822,9 @@ function getTechnicianTaskStatus(item, booking) {
   }
   if (status === "started") return "in_progress";
   if (status === "paused") return "paused";
-  if (status === "planned" && item?.flags?.received && !hasUnfinishedPreviousRequiredBooking(item, booking)) return "ready";
+  if (status === "planned" && item?.flags?.received && !isCaseBlocked(item)
+    && !getWorkAuthorizationIssues(item, booking).length
+    && !hasUnfinishedPreviousRequiredBooking(item, booking)) return "ready";
   return "planned";
 }
 
@@ -2007,7 +2009,7 @@ function getTechnicianTaskStartIssues(item, booking, technicianId, options = {})
   if (isBookingTaskBlocked(booking) && !options.overrideBlock) issues.push("Résoudre le blocage de la tâche avant de démarrer.");
   if (!item.flags?.received) issues.push("Le véhicule doit être réceptionné avant démarrage.");
   if (typeof getBusinessRuleIssues === "function") {
-    getBusinessRuleIssues(item, "workStarted")
+    getBusinessRuleIssues(item, "workStarted", { booking, resolvedBlockId: options.resolvedBlockId })
       .filter((issue) => !/Aucune affectation/i.test(issue))
       .forEach((issue) => issues.push(issue));
   }
@@ -2456,7 +2458,12 @@ function resumeTechnicianTask(item, bookingId, technicianId, options = {}) {
   }
   const permission = guardAction("task.resume", { booking: target, technicianId }, { notify: false });
   if (!permission.ok) return { ok: false, message: permission.message };
-  if (isBookingTaskBlocked(target)) clearTechnicianTaskBlock(item, target.id, technicianId, { silent: true });
+  if (isBookingTaskBlocked(target)) {
+    if (!options.blockResolved) return { ok: false, message: "Confirmer la résolution du blocage avant de reprendre." };
+    const startCheck = canStartTechnicianTask(item, target, technicianId, { ...options, overrideBlock: true, resolvedBlockId: target.id });
+    if (!startCheck.ok) return { ok: false, message: startCheck.message };
+    clearTechnicianTaskBlock(item, target.id, technicianId);
+  }
   target.resumedAt = new Date().toISOString();
   target.resumedBy = technicianId || target.resumedBy || "";
   return startTechnicianTask(item, target.id, technicianId, {

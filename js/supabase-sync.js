@@ -1115,7 +1115,7 @@ function shouldAutoBackupToSupabase() {
   return Boolean(
     !applyingRemoteSupabaseState
     && typeof hasPermission === "function"
-    && hasPermission("supabase.sync.use")
+    && hasPermission("workshop.sync.write")
     && getSupabaseClient
     && getSupabaseClient()
     && navigator.onLine !== false,
@@ -1149,7 +1149,7 @@ async function legacyAutoBackupToSupabase(reason = "legacy-outbox", options = {}
     pendingAutoSupabaseBackupReason = reason;
     return autoSupabaseBackupPromise;
   }
-  if (!shouldAutoBackupToSupabase()) {
+  if (!shouldAutoBackupToSupabase() || !hasPermission("supabase.sync.use")) {
     if (options.requireAck) throw new Error("Synchronisation serveur indisponible ; l'opération reste dans l'outbox.");
     return { acknowledged: false, reason: "unavailable" };
   }
@@ -2518,7 +2518,7 @@ async function legacyPullLatestSupabaseBackup(reason = "legacy-bootstrap") {
 
 async function startSupabaseLiveSync() {
   const permissionGuard = typeof guardSensitiveAction === "function"
-    ? guardSensitiveAction("supabase.sync.use", {}, { notify: false })
+    ? guardSensitiveAction("workshop.sync.read", {}, { notify: false })
     : { ok: false };
   if (!permissionGuard.ok) {
     stopSupabaseLiveSync({ status: "stopped" });
@@ -2586,7 +2586,7 @@ async function startSupabaseLiveSync() {
 
       const currentUser = await getSupabaseUser();
       const currentPermission = typeof guardSensitiveAction === "function"
-        ? guardSensitiveAction("supabase.sync.use", {}, { notify: false })
+        ? guardSensitiveAction("workshop.sync.read", {}, { notify: false })
         : { ok: false };
       if (
         generation !== supabaseLiveSyncGeneration
@@ -2625,7 +2625,7 @@ async function startSupabaseLiveSync() {
         window.setTimeout(async () => {
           if (supabaseLiveSyncIdentity !== identity) return;
           const currentPermission = typeof guardSensitiveAction === "function"
-            ? guardSensitiveAction("supabase.sync.use", {}, { notify: false })
+            ? guardSensitiveAction("workshop.sync.read", {}, { notify: false })
             : { ok: false };
           if (!currentPermission.ok) return;
           let applied = false;
@@ -3672,7 +3672,7 @@ async function pullLatestSupabaseBackup(reason = "poll") {
   if (supabaseLivePullPromise) return supabaseLivePullPromise;
   const run = (async () => {
     const permissionGuard = typeof guardSensitiveAction === "function"
-      ? guardSensitiveAction("supabase.sync.use", {}, { notify: false })
+      ? guardSensitiveAction("workshop.sync.read", {}, { notify: false })
       : { ok: false };
     if (!permissionGuard.ok || navigator.onLine === false) return false;
     const client = getSupabaseClient();
@@ -4905,8 +4905,33 @@ async function sendGranularOutboxOperation(client, user, operation) {
     });
   }
   if (["case", "booking"].includes(operation.entityType)) {
-    const outcome = normalizeCanonicalCasOutcome(await applyCanonicalSyncEntity(client, operation));
-    if (operation.entityType === "case" && outcome.canonical) {
+    const syncRole = getCanonicalUserRole(getCurrentUser());
+    const qualityOnly = syncRole === "controle_qualite";
+    let response;
+    if (qualityOnly) {
+      const workflow = operation.payload?.entity?.receptionWorkflow;
+      const review = workflow?.qualityReviewHistory?.at(-1);
+      if (operation.entityType !== "case" || operation.action !== "upsert" || !review || review.status !== workflow.qualityStatus) {
+        throw new Error("Le contrôle qualité peut synchroniser uniquement une décision qualité explicite.");
+      }
+      const { data, error } = await client.rpc("nimr_apply_quality_review_v2", {
+        p_workshop_id: operation.workshopId,
+        p_case_id: operation.entityId,
+        p_quality_status: review.status,
+        p_reason: review.reason || "",
+        p_operation_id: operation.operationId,
+        p_base_version: operation.baseVersion,
+      });
+      if (error) throw error;
+      response = Array.isArray(data) ? data[0] : data;
+      if (response?.conflict) response = { ...response, local_payload: operation.payload?.entity };
+    } else {
+      response = await applyCanonicalSyncEntity(client, operation);
+    }
+    const outcome = normalizeCanonicalCasOutcome(response);
+    // Operators synchronize canonical work facts. Only office/workshop managers
+    // may rewrite the broader clients/vehicles/repair_orders projections.
+    if (!["controle_qualite", "technicien"].includes(syncRole) && operation.entityType === "case" && outcome.canonical) {
       await reconcileCaseProjectionFromCanonical(client, operation, outcome.canonical);
     }
     return {
@@ -5154,7 +5179,7 @@ function refreshSupabasePermissionState(reason = "session-change") {
   if (typeof renderAdminTechnicalVisibility === "function") {
     renderAdminTechnicalVisibility();
   }
-  if (syncGuard.ok) {
+  if (getGuard("workshop.sync.read", "Lecture atelier non autorisée.").ok) {
     bindSupabaseAuthLifecycle();
     Promise.resolve(startSupabaseLiveSync()).then((started) => {
       if (!started || typeof processOfflineQueue !== "function") return;
@@ -5697,7 +5722,7 @@ async function processOfflineQueue() {
   if (offlineQueueProcessingPromise) return offlineQueueProcessingPromise;
   const run = (async () => {
     const permissionGuard = typeof guardSensitiveAction === "function"
-      ? guardSensitiveAction("supabase.sync.use", {}, { notify: false })
+      ? guardSensitiveAction("workshop.sync.write", {}, { notify: false })
       : { ok: false };
     if (!permissionGuard.ok) return { processed: 0, reason: "permission-denied" };
     if (typeof navigator !== "undefined" && navigator.onLine === false) {

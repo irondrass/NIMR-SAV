@@ -6,7 +6,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createNimrVmContext } from "./helpers/nimr_vm_context.mjs";
 
-const BASE_SHA = "f25c596ee8ef65a91234779ebb791c95dfef6227";
+const BASE_SHA = "bfaff47b13fca3cac0159ceea88dfe01f3e5acfa";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), "utf8");
 const base = (rel) => execFileSync("git", ["show", BASE_SHA + ":" + rel], { cwd: ROOT, encoding: "utf8", maxBuffer: 40 * 1024 * 1024 });
@@ -78,10 +78,10 @@ test("7 001G is read-only and refreshes only on Today", () => {
   assert.doesNotMatch(live + caseSummary, /\bapplyDependentBookingReschedule\s*\(/u);
 });
 
-test("8 packaged release identity is v23.3.30", () => {
-  assert.match(version, /^window\.APP_VERSION = "v23\.3\.30";$/mu);
-  assert.match(version, /^window\.NIMR_BUILD = "v23\.3\.30";$/mu);
-  assert.match(version, /^window\.NIMR_CACHE_NAME = "nimr-sav-v23\.3\.30";$/mu);
+test("8 packaged release identity is v23.3.31", () => {
+  assert.match(version, /^window\.APP_VERSION = "v23\.3\.31";$/mu);
+  assert.match(version, /^window\.NIMR_BUILD = "v23\.3\.31";$/mu);
+  assert.match(version, /^window\.NIMR_CACHE_NAME = "nimr-sav-v23\.3\.31";$/mu);
 });
 
 test("9 protected planner/state/business/Supabase/version surfaces equal sealed baseline", () => {
@@ -96,33 +96,33 @@ test("9 protected planner/state/business/Supabase/version surfaces equal sealed 
   }
 
   const baseState = normalize(base("js/state.js"));
-  assert.equal(baseState.split('const APP_VERSION = "v23.3.29";').length - 1, 1, "baseline js/state.js must contain exactly one APP_VERSION");
-  const expectedState = baseState.replace('const APP_VERSION = "v23.3.29";', 'const APP_VERSION = "v23.3.30";');
+  assert.equal(baseState.split('const APP_VERSION = "v23.3.30";').length - 1, 1, "baseline js/state.js must contain exactly one APP_VERSION");
+  const expectedState = baseState.replace('const APP_VERSION = "v23.3.30";', 'const APP_VERSION = "v23.3.31";');
   assert.equal(normalize(read("js/state.js")), expectedState, "js/state.js must match expected packaged content");
 
   const baseVersion = normalize(base("js/version.js"));
-  assert.equal(baseVersion.split('window.APP_VERSION = "v23.3.29";').length - 1, 1, "baseline js/version.js must contain exactly one APP_VERSION");
-  assert.equal(baseVersion.split('window.NIMR_BUILD = "v23.3.29";').length - 1, 1, "baseline js/version.js must contain exactly one NIMR_BUILD");
-  assert.equal(baseVersion.split('window.NIMR_CACHE_NAME = "nimr-sav-v23.3.29";').length - 1, 1, "baseline js/version.js must contain exactly one NIMR_CACHE_NAME");
+  assert.equal(baseVersion.split('window.APP_VERSION = "v23.3.30";').length - 1, 1, "baseline js/version.js must contain exactly one APP_VERSION");
+  assert.equal(baseVersion.split('window.NIMR_BUILD = "v23.3.30";').length - 1, 1, "baseline js/version.js must contain exactly one NIMR_BUILD");
+  assert.equal(baseVersion.split('window.NIMR_CACHE_NAME = "nimr-sav-v23.3.30";').length - 1, 1, "baseline js/version.js must contain exactly one NIMR_CACHE_NAME");
   const expectedVersion = baseVersion
-    .replace('window.APP_VERSION = "v23.3.29";', 'window.APP_VERSION = "v23.3.30";')
-    .replace('window.NIMR_BUILD = "v23.3.29";', 'window.NIMR_BUILD = "v23.3.30";')
-    .replace('window.NIMR_CACHE_NAME = "nimr-sav-v23.3.29";', 'window.NIMR_CACHE_NAME = "nimr-sav-v23.3.30";');
+    .replace('window.APP_VERSION = "v23.3.30";', 'window.APP_VERSION = "v23.3.31";')
+    .replace('window.NIMR_BUILD = "v23.3.30";', 'window.NIMR_BUILD = "v23.3.31";')
+    .replace('window.NIMR_CACHE_NAME = "nimr-sav-v23.3.30";', 'window.NIMR_CACHE_NAME = "nimr-sav-v23.3.31";');
   assert.equal(normalize(read("js/version.js")), expectedVersion, "js/version.js must match expected packaged content");
 
   const baseSw = normalize(base("sw.js"));
-  assert.equal(baseSw.split("// WORKSHOP-001F source refresh: atomic worker-aligned release v23.3.29 with exact technician labor instructions.\n").length - 1, 1, "baseline sw.js must contain exactly one 001F refresh comment");
-  assert.equal(baseSw.split('const CACHE_NAME = "nimr-sav-v23.3.29";').length - 1, 1, "baseline sw.js must contain exactly one CACHE_NAME");
-  assert.equal(baseSw.split("?v=23.3.29").length - 1, 19, "baseline sw.js must contain exactly 19 asset version references");
-  assert.equal(baseSw.split('return parsed.searchParams.get("v") === "23.3.29";').length - 1, 1, "baseline sw.js must contain exactly one classifier statement");
+  assert.equal(baseSw.split("// WORKSHOP-001G source refresh: atomic worker-aligned release v23.3.30 with live workshop control tower.\n").length - 1, 1, "baseline sw.js must contain exactly one 001G refresh comment");
+  assert.equal(baseSw.split('const CACHE_NAME = "nimr-sav-v23.3.30";').length - 1, 1, "baseline sw.js must contain exactly one CACHE_NAME");
+  assert.equal(baseSw.split("?v=23.3.30").length - 1, 19, "baseline sw.js must contain exactly 19 asset version references");
+  assert.equal(baseSw.split('return parsed.searchParams.get("v") === "23.3.30";').length - 1, 1, "baseline sw.js must contain exactly one classifier statement");
   const expectedSw = baseSw
     .replace(
-      "// WORKSHOP-001F source refresh: atomic worker-aligned release v23.3.29 with exact technician labor instructions.\n",
-      "// WORKSHOP-001F source refresh: atomic worker-aligned release v23.3.29 with exact technician labor instructions.\n// WORKSHOP-001G source refresh: atomic worker-aligned release v23.3.30 with live workshop control tower.\n"
+      "// WORKSHOP-001G source refresh: atomic worker-aligned release v23.3.30 with live workshop control tower.\n",
+      "// WORKSHOP-001G source refresh: atomic worker-aligned release v23.3.30 with live workshop control tower.\n// SIMPLIFY-001B source refresh: atomic worker-aligned release v23.3.31 with role-home and navigation-shell simplification.\n"
     )
-    .replace('const CACHE_NAME = "nimr-sav-v23.3.29";', 'const CACHE_NAME = "nimr-sav-v23.3.30";')
-    .replaceAll("?v=23.3.29", "?v=23.3.30")
-    .replace('return parsed.searchParams.get("v") === "23.3.29";', 'return parsed.searchParams.get("v") === "23.3.30";');
+    .replace('const CACHE_NAME = "nimr-sav-v23.3.30";', 'const CACHE_NAME = "nimr-sav-v23.3.31";')
+    .replaceAll("?v=23.3.30", "?v=23.3.31")
+    .replace('return parsed.searchParams.get("v") === "23.3.30";', 'return parsed.searchParams.get("v") === "23.3.31";');
   assert.equal(normalize(read("sw.js")), expectedSw, "sw.js must match expected packaged content");
 });
 

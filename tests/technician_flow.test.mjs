@@ -203,7 +203,7 @@ assert.match(wrongTechnicianHandleResult.message, /affectée/i);
 setupTechnicianState();
 app(`state.cases[0].claims[0].clientApproved = false`);
 const missingApprovalHandleResult = await app(`handleBookingTaskAction(state.cases[0], 'start', 'booking-main', { allowOverride: false, silent: true, persist: false, skipRender: true })`);
-assert.equal(missingApprovalHandleResult.ok, true, 'le démarrage atelier ne doit pas dépendre de l’ancien accord client supprimé');
+assert.equal(missingApprovalHandleResult.ok, false, 'le démarrage atelier exige un accord explicite pour les travaux concernés');
 
 setupTechnicianState();
 const guardedStartResult = await app(`handleBookingTaskAction(state.cases[0], 'start', 'booking-main', { allowOverride: false, silent: true, persist: false, skipRender: true })`);

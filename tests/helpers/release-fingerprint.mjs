@@ -82,6 +82,9 @@ export const FINGERPRINT_SCHEMES = Object.freeze({
   "v23.3.28": "canonical-lf-v2",
   "v23.3.29": "canonical-lf-v2",
   "v23.3.30": "canonical-lf-v2",
+  "v23.3.31": "canonical-lf-v2",
+  "v23.3.32": "canonical-lf-v2",
+  "v23.3.33": "canonical-lf-v2",
 });
 
 export const CURRENT_FINGERPRINT_SCHEME = "canonical-lf-v2";
@@ -109,6 +112,9 @@ export const SEALED_RELEASE_FINGERPRINTS = Object.freeze({
   "v23.3.28": "3c3de28a415b05a27d7efd3704a12d29cc549d00d220d9c363883878350d3e6f",
   "v23.3.29": "824f9bb6f6c49fbbdd3ef29a27835e6686340ec5bab7ffa73805aa1b398db072",
   "v23.3.30": "e40ddb894efa0cde4db658ed02c4ece6609af324d74f56c86a475bd26a0b54ba",
+  "v23.3.31": "b3e8d1ea2075cf463c01b4f982a642374fc5154210309e9819b7e760c90e6496",
+  "v23.3.32": "c4a98d8477ad72fc8571b3c201dc7f8a5439a55fe562e3c7defb1baffca7fbb1",
+  "v23.3.33": "87a4d70443427932709a7c5feec23c1170f0f7f728d2f3b4745c0caf7ee2ba8a",
 });
 
 /**

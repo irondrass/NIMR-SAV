@@ -868,9 +868,9 @@ function buildDirectorDashboardSnapshot(currentState = state, nowInput = new Dat
   // Strict rule: only an existing canonical revised/current deadline, then initial fallback, can establish delivery lateness.
   // OR active booking in the past without workCompleted
   const isCaseOverdue = (c) => {
-    if (!c || isCaseOperationallyClosed(c)) return false;
+    if (!isSavDashboardActiveCase(c)) return false;
     const deliveryDue = getDirectorDeliveryDeadline(c);
-    if (deliveryDue && !c.flags?.delivered && !c.flags?.invoiced) {
+    if (deliveryDue && !c.flags?.delivered) {
       if (deliveryDue < now) return true;
     }
     return isCaseLate(c, now);
@@ -959,12 +959,12 @@ function buildDirectorDashboardSnapshot(currentState = state, nowInput = new Dat
   const rawAlerts = [];
   for (let i = 0; i < activeCases.length; i += 1) {
     const item = activeCases[i];
-    if (isCaseOperationallyClosed(item)) continue;
+    if (!isSavDashboardActiveCase(item)) continue;
     const flags = item.flags || {};
     const ref = getDashboardCaseReference(item);
     const client = item.clientName || "Client non renseigné";
     const vehicle = [item.plate, item.vehicleModel || item.carModel].filter(Boolean).join(" · ") || "Véhicule non précisé";
-    const statusLabel = statusLabels[getCaseStatus(item)] || "En cours";
+    const statusLabel = getCaseOperationalPhase(item).label;
     const caseBookings = bookingsByCaseId.get(item.id) || [];
     const planningMilestone = getDirectorPlanningMilestone(caseBookings, now);
 
@@ -1383,7 +1383,7 @@ function dateInRange(value, range) {
 }
 
 function isSavDashboardActiveCase(item) {
-  return Boolean(item && !isCaseOperationallyClosed(item));
+  return Boolean(item && !item.deletedAt && (!isCaseOperationallyClosed(item) || isCasePhysicallyPresent(item)));
 }
 
 function isDeliveryOverdue(item, now = new Date()) {
@@ -1561,6 +1561,12 @@ function getCaseNextAction(item) {
   if (isCaseReadonlyArchive(item)) {
     return { code: "done", label: "Dossier archivé", priority: "normal", reason: getArchivedCaseMessage(item) };
   }
+  if (item.flags?.delivered) return { code: "done", label: "Véhicule livré", priority: "normal", reason: "Remise physique confirmée." };
+  if (item.flags?.workCompleted && !isCaseBlocked(item)) {
+    return isCaseQualityValidated(item)
+      ? { code: "deliver_vehicle", label: "Confirmer la remise", priority: "normal", reason: "Véhicule prêt, encore présent à l'atelier." }
+      : { code: "quality_check", label: "Effectuer le contrôle final", priority: "attention", reason: "Travaux terminés ; qualité et préparation à valider." };
+  }
   if (isCaseBlocked(item)) {
     return {
       code: "resolve_blocker",
@@ -1578,6 +1584,9 @@ function getCaseNextAction(item) {
     };
   }
   const workflowClaims = getWorkflowClaims(item);
+  if (item.flags?.received && getWorkAuthorizationIssues(item).length) {
+    return { code: "authorize_work", label: "Confirmer l'accord travaux", priority: "attention", reason: "L'import ou la validation technique ne vaut pas accord client / interne." };
+  }
   if (!hasVehicleIdentity(item)) {
     return {
       code: "complete_vehicle_identity",
@@ -1672,6 +1681,9 @@ function getCaseNextAction(item) {
 
 function getCaseNextActionTab(actionCode) {
   const mapping = {
+    authorize_work: "atelier",
+    quality_check: "atelier",
+    deliver_vehicle: "atelier",
     validate_pdf_work: "planning",
     complete_vehicle_identity: "claims",
     add_labor: "claims",
@@ -2057,10 +2069,7 @@ function getWorkshopProgressValidDate(value) {
 }
 
 function isWorkshopProgressActiveCase(item) {
-  if (!item || item.deletedAt || item.archivedAt) return false;
-  const flags = item.flags || {};
-  if (flags.received !== true || flags.delivered === true || flags.invoiced === true) return false;
-  return !(typeof isCaseOperationallyClosed === "function" && isCaseOperationallyClosed(item));
+  return isCasePhysicallyPresent(item);
 }
 
 function isWorkshopProgressUsableBooking(booking) {
@@ -2080,6 +2089,7 @@ function getWorkshopProgressBookings(item) {
 }
 
 function getWorkshopProgressEta(item) {
+  if (isCaseBlocked(item) || item?.deliveryEstimate?.status === "to_confirm") return null;
   const candidates = [
     item?.revisedEstimatedDelivery,
     item?.deliveryEstimate?.current,
@@ -2311,7 +2321,7 @@ function buildWorkshopProgressRow(item, now = new Date()) {
     stale: lastActivityHours >= WORKSHOP_PROGRESS_STALE_HOURS,
     inProgress: flags.workStarted === true && flags.workCompleted !== true,
     workCompleted: flags.workCompleted === true && flags.delivered !== true,
-    readyForDelivery: flags.qualityApproved === true && flags.delivered !== true && flags.invoiced !== true,
+    readyForDelivery: flags.workCompleted === true && isCaseQualityValidated(item) && flags.delivered !== true,
     nextAction: getCaseNextAction(item),
     controlTower: buildWorkshopLiveCaseTaskSummary(item, now, currentStep),
   };
@@ -2402,7 +2412,7 @@ function renderWorkshopProgressRow(row) {
       ${renderWorkshopProgressCell("Véhicule / client", `<strong>${escapeHtml(item.vehicle || "Véhicule non renseigné")}</strong><span>${escapeHtml(identity)}</span><span>${escapeHtml(item.clientName || "Client non renseigné")}</span>`, "identity-cell")}
       ${renderWorkshopProgressCell("OR / intervention", `<strong>${escapeHtml(safeOrderReference)}</strong><span>${escapeHtml(intervention)}</span>`)}
       ${renderWorkshopProgressCell("Entrée", `<span>${row.receivedAt ? formatDateTime(row.receivedAt) : "Date non renseignée"}</span>`)}
-      ${renderWorkshopProgressCell("Étape actuelle", `<strong>${escapeHtml(row.currentStep.label)}</strong><span>${escapeHtml(row.progress.label)}</span>`)}
+      ${renderWorkshopProgressCell("Phase", `<strong>${escapeHtml(getCaseOperationalPhase(item).label)}</strong><span>${escapeHtml(row.progress.label)}</span>`)}
       ${renderWorkshopProgressCell("Responsable", `<strong>${escapeHtml(row.responsible)}</strong>`)}
       ${renderWorkshopProgressCell("Opération active", tower.current ? `<strong>${escapeHtml(tower.currentOperation || row.currentStep.label)}</strong><span>${escapeHtml(tower.current?.statusLabel || "")} · ${escapeHtml(tower.currentTechnician || "Non affecté")}</span><span>${escapeHtml(currentTimingLabel)}</span>` : `<span>Aucune opération active</span>`, "workshop-live-operation-cell")}
       ${renderWorkshopProgressCell("Opération suivante", tower.next ? `<strong>${escapeHtml(tower.nextOperation || "Opération suivante")}</strong><span>${escapeHtml(nextTimingLabel)}</span>` : `<span>Aucune opération suivante</span>`, "workshop-live-operation-cell")}
@@ -2594,10 +2604,11 @@ function getTechnicianFieldEstimatedEnd(row, now = new Date()) {
     const actualEnd = booking.actualEnd || booking.completedAt;
     return actualEnd ? new Date(actualEnd) : null;
   }
-  if (["in_progress", "paused", "blocked"].includes(row.status)) {
+  if (["paused", "blocked"].includes(row.status)) return null;
+  if (row.status === "in_progress") {
     const elapsedMinutes = getTechnicianFamilyElapsedMilliseconds(booking.id, now) / 60000;
     const remainingMinutes = Math.max(0, Number(row.plannedMinutes || 0) - elapsedMinutes);
-    return new Date(now.getTime() + remainingMinutes * 60000);
+    return remainingMinutes > 0 ? addWorkingMinutes(now, remainingMinutes) : null;
   }
   const plannedEnd = booking.plannedEnd || booking.end;
   return plannedEnd ? new Date(plannedEnd) : null;
@@ -2661,13 +2672,15 @@ function renderTechnicianFieldFocus(currentRow, nextRow) {
       <dl class="technician-field-grid">
         <div><dt>Durée prévue</dt><dd>${formatLocalizedDecimal(Number(currentRow.plannedMinutes || 0) / 60)} h</dd></div>
         <div><dt>Temps écoulé</dt><dd class="technician-live-timer" data-technician-elapsed-booking="${escapeAttr(booking.id)}">${formatTechnicianElapsedTime(getTechnicianFamilyElapsedMilliseconds(booking.id))}</dd></div>
+      </dl>
+      <details class="technician-operation-details"><summary>Ressources et horaires</summary><dl class="technician-field-grid">
         <div><dt>Début réel</dt><dd>${actualStart ? formatTime(actualStart) : "Pas encore démarrée"}</dd></div>
         <div><dt>Fin estimée</dt><dd>${estimatedEnd && !Number.isNaN(estimatedEnd.getTime()) ? formatTime(estimatedEnd) : "À recalculer"}</dd></div>
         <div><dt>Technicien</dt><dd>${escapeHtml(resourceSummary.technician)}</dd></div>
         <div><dt>Ressource</dt><dd>${escapeHtml(resourceSummary.equipment)}</dd></div>
         <div><dt>Zone</dt><dd>${escapeHtml(resourceSummary.zone)}</dd></div>
         <div><dt>Prochaine action</dt><dd>${escapeHtml(getTechnicianFieldNextAction(currentRow))}</dd></div>
-      </dl>
+      </dl></details>
       <p class="technician-field-sync ${online ? "status-ok" : "status-error"}" data-technician-sync-state>${escapeHtml(syncLabel)}</p>
     </article>
     ${nextRow ? `
@@ -2693,6 +2706,12 @@ function renderTechnicianDashboard() {
 
   const currentUser = typeof getCurrentUser === "function" ? getCurrentUser() : null;
   const allTechnicians = getTechnicianDashboardResources();
+  const dayOptions = view.querySelector(".technician-day-options");
+  const role = getCanonicalUserRole(currentUser);
+  if (dayOptions && dayOptions.dataset.role !== role) {
+    dayOptions.dataset.role = role;
+    dayOptions.open = role !== "technicien";
+  }
   const technicians = getCanonicalUserRole(currentUser) === "technicien"
     ? allTechnicians.filter((resource) => resource.id === currentUser.resourceId)
     : allTechnicians;
@@ -2841,43 +2860,42 @@ function renderTechnicianTaskActions(row) {
   const displayBase = `data-booking-id="${escapeAttr(displayBooking.id)}" data-technician-id="${escapeAttr(row.technicianId || "")}"`;
   const print = renderPermissionAwareButton("print.task", "Imprimer fiche", "print", actionBase, "ghost-button tiny-button", actionBooking);
   if (row.status === "done") return print;
+  const secondary = `<details class="technician-secondary-actions"><summary>Problème / note / photo</summary><div>
+    ${renderPermissionAwareButton("task.block", "Signaler un problème", "block", actionBase, "ghost-button", actionBooking)}
+    ${renderPermissionAwareButton("task.note", "Ajouter une note", "note", actionBase, "ghost-button", actionBooking)}
+    ${renderPermissionAwareButton("task.note", "Ajouter une photo", "photo", actionBase, "ghost-button", actionBooking)}
+    ${print}</div></details>`;
   if (row.status === "blocked") {
     return `
       ${renderPermissionAwareButton("task.resume", "Reprendre", "resume", actionBase, "primary-button tiny-button", actionBooking)}
-      ${renderPermissionAwareButton("task.start", "Ajouter note", "note", actionBase, "ghost-button tiny-button", actionBooking)}
-      <button class="ghost-button tiny-button" type="button" data-tech-action="print-block" ${displayBase}>Fiche blocage</button>
-      ${print}
+      ${secondary}
     `;
   }
   if (row.status === "in_progress") {
     return `
       ${renderPermissionAwareButton("task.pause", "Pause", "pause", actionBase, "ghost-button tiny-button", actionBooking)}
       ${renderPermissionAwareButton("task.complete", "Terminer", "complete", actionBase, "primary-button tiny-button", actionBooking)}
-      ${renderPermissionAwareButton("task.block", "Signaler blocage", "block", actionBase, "ghost-button tiny-button", actionBooking)}
-      ${renderPermissionAwareButton("task.start", "Ajouter note", "note", actionBase, "ghost-button tiny-button", actionBooking)}
-      ${renderPermissionAwareButton("task.start", "Ajouter photo", "photo", actionBase, "ghost-button tiny-button", actionBooking)}
-      ${print}
+      ${secondary}
     `;
   }
   if (row.status === "paused") {
     return `
       ${renderPermissionAwareButton("task.resume", "Reprendre", "resume", actionBase, "primary-button tiny-button", actionBooking)}
-      ${renderPermissionAwareButton("task.block", "Signaler blocage", "block", actionBase, "ghost-button tiny-button", actionBooking)}
-      <button class="ghost-button tiny-button" type="button" data-tech-action="print-block" ${displayBase}>Fiche pause</button>
-      ${print}
+      ${secondary}
     `;
   }
   return `
     ${renderPermissionAwareButton("task.start", "Démarrer", "start", actionBase, "primary-button tiny-button", actionBooking)}
-    ${renderPermissionAwareButton("task.block", "Signaler blocage", "block", actionBase, "ghost-button tiny-button", actionBooking)}
-    ${renderPermissionAwareButton("task.start", "Ajouter note", "note", actionBase, "ghost-button tiny-button", actionBooking)}
-    ${print}
+    ${secondary}
   `;
 }
 
 function renderPermissionAwareButton(permission, label, action, dataset, className, booking) {
-  const allowed = canRenderAction(permission, { booking });
-  const title = allowed ? "" : getPermissionDeniedMessage(permission, { booking });
+  const permissionAllowed = canRenderAction(permission, { booking });
+  const technicianId = getCurrentUser()?.resourceId || getBookingHumanResourceIds(booking || {})[0];
+  const startIssues = action === "start" && booking ? getTechnicianTaskStartIssues(getIndexedCaseById(booking.caseId), booking, technicianId) : [];
+  const allowed = permissionAllowed && !startIssues.length;
+  const title = !permissionAllowed ? getPermissionDeniedMessage(permission, { booking }) : startIssues[0] || "";
   return `<button class="${className}" type="button" data-tech-action="${escapeAttr(action)}" ${dataset} ${allowed ? "" : `disabled title="${escapeAttr(title)}" aria-label="${escapeAttr(`${label} indisponible : ${title}`)}"`}>${escapeHtml(label)}</button>`;
 }
 
@@ -3030,19 +3048,23 @@ async function handleTechnicianTaskAction(action, bookingId, technicianId) {
       const reason = await showInputPromptModal({
         title: "Pause de la tâche",
         message: "Motif de pause obligatoire :",
-        defaultValue: booking.pauseReason || "attente pièce",
-        options: TECHNICIAN_PAUSE_REASONS.map((r) => [r, r]),
+        defaultValue: booking.pauseReason || "",
+        options: [["", "Choisir un motif"], ...TECHNICIAN_PAUSE_REASONS.map((r) => [r, r])],
       });
       if (reason === null) return;
       result = pauseTechnicianTask(item, bookingId, technicianId, reason);
     } else if (action === "resume") {
-      result = resumeTechnicianTask(item, bookingId, technicianId, { allowConcurrent: false });
+      const blocked = isBookingTaskBlocked(booking);
+      if (blocked && !await showConfirmModal("Confirmer que la cause du blocage est levée ? La reprise reste soumise aux accords et prérequis.")) return;
+      result = resumeTechnicianTask(item, bookingId, technicianId, { allowConcurrent: false, blockResolved: blocked });
     } else if (action === "block") {
       const reason = await showInputPromptModal({
         title: "Bloquer la tâche",
         message: "Sélectionnez le motif de blocage :",
-        defaultValue: booking.blockReason || "attente pièce",
+        detailsLabel: "Détail du blocage (facultatif)",
+        defaultValue: booking.blockReason || "",
         options: [
+          ["", "Choisir un motif"],
           ["attente pièce", "Attente pièce"],
           ["attente validation", "Attente validation"],
           ["panne outillage", "Panne outillage"],
@@ -3053,39 +3075,23 @@ async function handleTechnicianTaskAction(action, bookingId, technicianId) {
         ]
       });
       if (reason === null) return;
-      const details = await showInputPromptModal({
-        title: "Détails du blocage",
-        message: "Commentaire blocage (optionnel) :",
-        defaultValue: booking.blockDetails || ""
-      });
-      if (details === null) return;
-      result = blockTechnicianTask(item, bookingId, technicianId, reason, details);
+      result = blockTechnicianTask(item, bookingId, technicianId, reason.value, reason.details || "");
     } else if (action === "note") {
-      const template = await showInputPromptModal({
+      const note = await showInputPromptModal({
         title: "Ajouter une observation",
-        message: "Choisissez un modèle ou une observation libre :",
-        defaultValue: "__custom__",
-        options: TECHNICIAN_NOTE_TEMPLATES,
+        message: "Observation technicien courte :",
+        defaultValue: "",
       });
-      if (template === null) return;
-      const note = template === "__custom__"
-        ? await showInputPromptModal({
-            title: "Observation libre",
-            message: "Observation technicien courte :",
-            defaultValue: "",
-          })
-        : template;
       if (note === null) return;
       result = addTechnicianTaskNote(item, bookingId, technicianId, note);
     } else if (action === "photo") {
       await addTechnicianTaskPhotoFromInput(item, bookingId, technicianId);
       return;
     } else if (action === "complete") {
-      const confirmed = await showConfirmModal("Terminer cette tâche maintenant ? Le temps restant sera libéré dans le planning si la tâche finit en avance.");
-      if (!confirmed) return;
       const note = await showInputPromptModal({
         title: "Terminer la tâche",
-        message: "Note de fin de tâche (optionnel) :",
+        message: "Confirmer la fin de cette opération. Note facultative :",
+        confirmLabel: "Terminer",
         defaultValue: ""
       });
       if (note === null) return;
@@ -3236,7 +3242,7 @@ function renderTodayGroup(group, entries) {
 }
 
 function renderTodayCard({ item, action, risk, timeLabel }) {
-  const status = statusLabels[getCaseStatus(item)] || "Statut";
+  const status = getCaseOperationalPhase(item).label;
   const identity = item.plate || item.vin || "Sans immatriculation";
   return `
     <button class="today-card risk-${escapeAttr(risk)}" type="button" data-today-case="${escapeAttr(item.id)}" data-today-action="${escapeAttr(action.code)}">
@@ -3266,7 +3272,7 @@ function isCaseLate(item, now = new Date()) {
   return getCaseBookings(item).some((booking) => {
     if (["completed"].includes(getBookingOperationalStatus(booking))) return false;
     const end = booking.end ? new Date(booking.end) : null;
-    return end && !Number.isNaN(end.getTime()) && end < now && !item.flags.workCompleted;
+    return end && !Number.isNaN(end.getTime()) && end < now && !item.flags?.workCompleted;
   });
 }
 
@@ -3352,7 +3358,7 @@ function renderCases() {
           <button class="case-card${active}${isCaseBlocked(item) ? " blocked-case" : ""}" type="button" data-case="${escapeAttr(item.id)}">
             <span class="case-card-head">
               <strong class="case-card-client">${escapeHtml(item.clientName || "Client sans nom")}</strong>
-              <span class="tag case-status-tag">${escapeHtml(statusLabels[status] || status)}</span>
+              <span class="tag case-status-tag">${escapeHtml(getCaseOperationalPhase(item).label)}</span>
             </span>
             <span class="case-card-vehicle">${escapeHtml(item.vehicle || "Véhicule non renseigné")}</span>
             <span class="case-card-identifiers">
@@ -3523,7 +3529,7 @@ function caseOperationalAlerts(item, now = new Date()) {
   const flags = item.flags || {};
   const appointment = item.appointment || {};
   const label = getDashboardCaseReference(item);
-  const statusLabel = statusLabels[getCaseStatus(item)] || "Statut à vérifier";
+  const statusLabel = getCaseOperationalPhase(item).label;
   if (isCaseBlocked(item)) {
     alerts.push({
       caseId: item.id,
@@ -4305,7 +4311,7 @@ function renderKanban() {
                         return `
                         <button class="kanban-card ${isCaseBlocked(item) ? "blocked-case" : ""}" type="button" data-kanban-case="${escapeAttr(item.id)}">
                           <strong>${escapeHtml(getDashboardCaseReference(item))}</strong>
-                          <span>${escapeHtml(statusLabels[getCaseStatus(item)] || "Statut")}${escapeHtml(deliveryLine)}</span>
+                          <span>${escapeHtml(getCaseOperationalPhase(item).label)}${escapeHtml(deliveryLine)}</span>
                           <span>Prochaine action : ${escapeHtml(nextAction.label)}</span>
                         </button>
                       `;
@@ -4341,7 +4347,7 @@ function renderCaseDetail() {
   updateVehicleImportStatus(vehicleRecords.length ? `${vehicleRecords.length} véhicules chargés` : "Importez la base véhicules pour chercher par VIN");
   setupCaseDetailTabs(detail, item);
   updateCaseHeader(detail, item);
-  $("[data-field='status']", detail).textContent = statusLabels[getCaseStatus(item)];
+  $("[data-field='status']", detail).textContent = getCaseOperationalPhase(item).label;
   $("[data-field='created']", detail).textContent = `Créé le ${formatDate(item.createdAt)}`;
   const canEditCase = canRenderAction("case.edit", { item }) && !isCaseReadonlyArchive(item);
 
@@ -4545,6 +4551,57 @@ function renderCaseDetail() {
   refreshCaseActionAvailability(detail, item);
   applyProductionLock(detail, item);
   applyArchiveReadOnly(detail, item);
+  renderOperationalDecisions(detail, item);
+}
+
+function renderOperationalDecisions(root, item) {
+  let panel = root.querySelector("[data-operational-decisions]");
+  if (!panel) {
+    panel = document.createElement("section");
+    panel.className = "detail-section operational-decisions";
+    panel.dataset.operationalDecisions = "";
+    root.prepend(panel);
+  }
+  const phase = getCaseOperationalPhase(item);
+  const editable = !isCaseReadonlyArchive(item) && !item.flags.delivered;
+  const pending = (item.claims || []).filter((claim) => claim.includeInPlanning !== false && !claim.clientApproved && claim.status !== "refused");
+  const button = (action, label, permission, extra = "") => editable && canRenderAction(permission, { item })
+    ? `<button type="button" class="primary-button" data-operational-action="${action}" ${extra}>${label}</button>` : "";
+  const quality = item.flags.workCompleted && !isCaseQualityValidated(item);
+  panel.innerHTML = `
+    <div class="section-heading"><h2>${escapeHtml(phase.label)}</h2><span>${isCasePhysicallyPresent(item) ? "Véhicule présent" : item.flags.delivered ? "Remise confirmée" : "Réception à confirmer"}</span></div>
+    ${isCasePhysicallyPresent(item) && isCaseReadonlyArchive(item) ? '<p role="alert">Ce dossier est archivé mais aucune remise physique n’est enregistrée. Faire vérifier le dossier par le responsable.</p>' : ""}
+    ${pending.map((claim) => `<p>${escapeHtml(getClaimLabel(claim))} — accord à confirmer ${button("authorize", "Enregistrer l'accord", "case.edit", `data-claim-id="${escapeAttr(claim.id)}"`)}</p>`).join("")}
+    ${quality ? '<p>Travaux terminés. Contrôler le véhicule et sa préparation avant de le déclarer prêt.</p>' : ""}
+    <div class="operational-actions">
+      ${quality ? button("quality", "Valider le contrôle final", "quality.validate") : ""}
+      ${item.flags.workCompleted ? button("rework", "Signaler une anomalie", "quality.reject") : ""}
+      ${item.flags.workCompleted && isCaseQualityValidated(item) ? button("deliver", "Confirmer la remise du véhicule", "delivery.complete") : ""}
+    </div>`;
+  panel.querySelectorAll("[data-operational-action]").forEach((control) => control.addEventListener("click", async () => {
+    control.disabled = true;
+    try {
+      let result;
+      if (control.dataset.operationalAction === "authorize") {
+        const reference = await showInputPromptModal({ title: "Accord travaux", message: "Référence du document ou contact ayant autorisé cet ordre :", defaultValue: "" });
+        if (reference === null) return;
+        result = recordWorkAuthorization(item, control.dataset.claimId, reference);
+      } else if (control.dataset.operationalAction === "rework") {
+        const reason = await showInputPromptModal({ title: "Retour atelier", message: "Anomalie constatée et correction nécessaire :", defaultValue: "" });
+        if (reason === null) return;
+        if (!String(reason).trim()) { notifyUser("Indiquer l'anomalie constatée.", "error"); return; }
+        result = advanceReceptionWorkflow(item.id, "update_quality_status", { status: "rejected", reason });
+      } else {
+        const deliver = control.dataset.operationalAction === "deliver";
+        if (!await showConfirmModal(deliver ? "Confirmer la remise physique de ce véhicule ?" : "Confirmer que les contrôles applicables et la préparation sont terminés ?")) return;
+        result = advanceReceptionWorkflow(item.id, deliver ? "deliver_vehicle" : "update_quality_status", { status: "validated" });
+      }
+      if (!result?.ok) { notifyUser(result?.message || "Action impossible.", "error"); return; }
+      saveState({ changedCase: item, flushCloud: true, cloudReason: "operational-decision" });
+      notifyUser(result.message || "Décision enregistrée.", "success");
+      render();
+    } finally { control.disabled = false; }
+  }));
 }
 
 
@@ -4655,6 +4712,8 @@ function applyWorkflowAction(item, action) {
     return { ok: false, message: issues.join("\n") };
   }
   if (typeof noteCaseRevisionCandidate === "function") noteCaseRevisionCandidate(item);
+  if (action === "qualityApproved") return advanceReceptionWorkflow(item.id, "update_quality_status", { status: "validated" });
+  if (action === "delivered") return advanceReceptionWorkflow(item.id, "deliver_vehicle");
 
   const workflowClaimIds = new Set(getWorkflowClaims(item).map((claim) => claim.id));
   const claims = Array.isArray(item.claims) ? item.claims : [];
@@ -4937,7 +4996,7 @@ const CASE_STAGE_FLOW = [
   ["labor", "Main-d'œuvre"],
   ["planned", "Planifié"],
   ["work", "En travaux"],
-  ["closed", "Clôturé"],
+  ["closed", "Finalisation / remise"],
 ];
 
 function getCaseStageFlow(item) {
@@ -4952,7 +5011,7 @@ function getCaseStageFlow(item) {
     labor: hasLabor,
     planned: hasPlanning,
     work: Boolean(item.flags.workCompleted),
-    closed: Boolean(item.flags.invoiced || item.flags.delivered),
+    closed: Boolean(item.flags.delivered),
   };
   const currentByAction = {
     complete_vehicle_identity: "opened",
@@ -4963,6 +5022,9 @@ function getCaseStageFlow(item) {
     start_work: "work",
     resume_or_replan_work: "work",
     finish_work: "work",
+    authorize_work: "labor",
+    quality_check: "closed",
+    deliver_vehicle: "closed",
     close_workshop: "closed",
     resolve_blocker: hasPlanning || values.workStarted ? "work" : "labor",
     done: "closed",
@@ -5268,12 +5330,15 @@ function renderHistory(root, item) {
 
 function getNextWorkflowAction(item) {
   if (isCaseReadonlyArchive(item)) return null;
+  if (item.flags.delivered) return null;
+  if (item.flags.workCompleted) return isCaseQualityValidated(item) ? "delivered" : "qualityApproved";
   if (!hasRepairClaims(item)) return "claim";
   const claimsToCheck = getWorkflowClaims(item);
   if (!claimsToCheck.length) return "claim";
   if (claimsToCheck.some((claim) => !claimHasLaborEstimate(claim))) return "labor";
   if (!item.appointment || appointmentNeedsReschedule(item)) return "appointment";
   if (!item.flags.received) return "received";
+  if (getWorkAuthorizationIssues(item).length) return "clientApproved";
   if (!item.flags.workStarted) return "workStarted";
   if (!item.flags.workCompleted) return "workCompleted";
   if (!item.closedAt && !item.flags.invoiced && item.status !== "closed") return "close";
@@ -5285,7 +5350,7 @@ function appointmentNeedsReschedule(item) {
   return ["no_show", "reschedule_pending"].includes(item?.appointmentStatus);
 }
 
-function getBusinessRuleIssues(item, action) {
+function getBusinessRuleIssues(item, action, options = {}) {
   if (!item) return ["Aucun dossier sélectionné."];
   const issues = [];
   const hasAssignments = getIndexedCaseBookings(item.id).length > 0;
@@ -5296,7 +5361,10 @@ function getBusinessRuleIssues(item, action) {
     return issues;
   }
 
-  if (isCaseBlocked(item) && !["claim", "labor"].includes(action)) {
+  const resolvingTaskBlock = options.resolvedBlockId && options.booking?.id === options.resolvedBlockId
+    && item.blockerSource === "task" && item.blockerSourceBookingIds?.length
+    && item.blockerSourceBookingIds.every((id) => id === options.resolvedBlockId);
+  if (isCaseBlocked(item) && !resolvingTaskBlock && !["claim", "labor", "clientApproved", "expertApproved"].includes(action)) {
     issues.push(`Résoudre le blocage avant de continuer : ${getCaseBlockerLabel(item) || "dossier bloqué"}.`);
     return issues;
   }
@@ -5334,6 +5402,7 @@ function getBusinessRuleIssues(item, action) {
   }
 
   if (action === "workStarted") {
+    issues.push(...getWorkAuthorizationIssues(item, options.booking));
     if (!item.flags.received) issues.push("Confirmer la réception physique du véhicule avant de démarrer les travaux.");
     if (!hasAssignments) issues.push("Aucune affectation atelier n'est planifiée pour ce dossier.");
   }
@@ -5344,6 +5413,7 @@ function getBusinessRuleIssues(item, action) {
   }
 
   if (["close", "invoiced"].includes(action)) {
+    if (!item.flags.delivered) issues.push("Confirmer la remise physique avant de clôturer le dossier.");
     if (!item.flags.workStarted) issues.push("Démarrer les travaux avant de clôturer le dossier atelier.");
     if (!item.flags.workCompleted) issues.push("Terminer les travaux avant de clôturer le dossier atelier.");
     if (isCaseBlocked(item)) {
@@ -5356,11 +5426,13 @@ function getBusinessRuleIssues(item, action) {
   }
 
   if (action === "archive") {
+    if (!item.flags.delivered) issues.push("Le véhicule est encore présent : confirmer sa remise avant archivage.");
     if (!item.closedAt && !item.flags.invoiced && item.status !== "closed") {
       issues.push("Clôturer l’atelier avant d’archiver le dossier.");
     }
   }
 
+  if (["qualityApproved", "delivered"].includes(action)) issues.push(...getCaseFinalizationIssues(item, action === "delivered"));
   return issues;
 }
 
@@ -6219,7 +6291,7 @@ async function handleBookingTaskAction(item, action, bookingId, options = {}) {
     } else if (action === "reschedule") {
       const booking = state.bookings.find((candidate) => candidate.id === bookingId && candidate.caseId === item.id);
       const defaultValue = formatDateTimeLocalInputValue(booking?.start || new Date());
-      const requested = window.prompt("Nouvelle date et heure souhaitées (format AAAA-MM-JJTHH:MM). L'application prendra le premier créneau disponible à partir de cette date.", defaultValue);
+      const requested = await showInputPromptModal({ title: "Replanifier l’opération", message: "Premier créneau disponible à partir de :", inputType: "datetime-local", defaultValue });
       if (requested === null) return;
       result = rescheduleCaseBooking(item, bookingId, requested);
     }

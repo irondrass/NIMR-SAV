@@ -482,14 +482,14 @@ const qualityGateCase = context.normalizeCase({
 });
 vm.runInContext(`state.bookings = [{ id: 'b-quality', caseId: 'case-quality-gate', resourceIds: ['tolier-1'], segments: [{ start: '2026-05-12T08:00:00.000Z', end: '2026-05-12T09:00:00.000Z' }] }];`, context);
 assert.equal(context.getNextWorkflowAction(qualityGateCase), 'workCompleted', 'le flux doit distinguer démarrage travaux et travaux terminés');
-assert.equal(context.getBusinessRuleIssues(qualityGateCase, 'qualityApproved').length, 0, 'une ancienne action qualité ne doit plus constituer une porte métier active');
+assert.ok(context.getBusinessRuleIssues(qualityGateCase, 'qualityApproved').length > 0, 'le contrôle qualité exige la fin des travaux');
 const qualityGateOverride = await context.completeCaseWorkWithChiefOverride(qualityGateCase, {
   overrideConfirmed: true,
   overrideReason: 'Smoke test clôture contrôlée',
 });
 assert.equal(qualityGateOverride.ok, true, 'la fin globale contrôlée doit accepter un override motivé dans ce scénario');
-assert.equal(context.getNextWorkflowAction(qualityGateCase), 'close', 'après fin travaux, le flux simplifié doit passer à la clôture atelier');
-assert.equal(context.getBusinessRuleIssues(qualityGateCase, 'close').length, 0, 'la clôture atelier doit être possible après fin travaux sans étape qualité/livraison');
+assert.equal(context.getNextWorkflowAction(qualityGateCase), 'qualityApproved', 'après fin travaux, vérifier la qualité');
+assert.ok(context.getBusinessRuleIssues(qualityGateCase, 'close').length > 0, 'la clôture attend la remise physique');
 
 const insuranceClosureCase = context.normalizeCase({
   id: 'case-workshop-close-photo',
@@ -501,7 +501,7 @@ const insuranceClosureCase = context.normalizeCase({
   claims: [{ type: 'assurance', includeInPlanning: true, expertApproved: true, clientApproved: true, estimate: { lines: [{ phase: 'body', operation: 'Réparation', laborHours: 1 }] } }],
 });
 vm.runInContext(`state.bookings = [{ id: 'b-close', caseId: 'case-workshop-close-photo', resourceIds: ['tolier-1'], status: 'completed', completedAt: '2026-05-12T09:00:00.000Z', segments: [{ start: '2026-05-12T08:00:00.000Z', end: '2026-05-12T09:00:00.000Z' }] }];`, context);
-assert.equal(context.getBusinessRuleIssues(insuranceClosureCase, 'close').length, 0, 'la clôture atelier simplifiée ne doit plus exiger photo après ni livraison');
+assert.ok(context.getBusinessRuleIssues(insuranceClosureCase, 'close').length > 0, 'le véhicule assuré reste présent avant sa remise physique');
 
 const zeroLaborApprovalCase = context.normalizeCase({
   id: 'case-zero-labor-approval',
@@ -712,7 +712,7 @@ const fastStartCase = context.normalizeCase({
   }],
 });
 vm.runInContext(`state.bookings = [{ id: 'fast-booking', caseId: 'case-fast-start', key: 'oilService', resourceIds: ['pont-1'], segments: [{ start: '2026-05-12T08:00:00.000Z', end: '2026-05-12T09:00:00.000Z' }] }];`, context);
-assert.equal(context.getBusinessRuleIssues(fastStartCase, 'workStarted').length, 0, 'le démarrage réel ne doit plus être bloqué par une validation masquée');
+assert.ok(context.getBusinessRuleIssues(fastStartCase, 'workStarted').length > 0, 'le démarrage réel exige un accord désormais visible');
 console.log('Client workflow summary regression OK');
 
 const noShowAppointmentCase = context.normalizeCase({

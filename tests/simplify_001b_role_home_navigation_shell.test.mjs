@@ -158,11 +158,11 @@ test("15 existing business rules, planning engine, and data models remain untouc
   }
 });
 
-test("16 version identity remains strictly v23.3.30", () => {
-  assert.match(version, /^window\.APP_VERSION = "v23\.3\.30";$/mu);
-  assert.match(version, /^window\.NIMR_BUILD = "v23\.3\.30";$/mu);
-  assert.match(version, /^window\.NIMR_CACHE_NAME = "nimr-sav-v23\.3\.30";$/mu);
-  assert.match(stateSource, /const APP_VERSION = "v23\.3\.30";/u);
+test("16 version identity is synchronized to v23.3.31", () => {
+  assert.match(version, /^window\.APP_VERSION = "v23\.3\.31";$/mu);
+  assert.match(version, /^window\.NIMR_BUILD = "v23\.3\.31";$/mu);
+  assert.match(version, /^window\.NIMR_CACHE_NAME = "nimr-sav-v23\.3\.31";$/mu);
+  assert.match(stateSource, /const APP_VERSION = "v23\.3\.31";/u);
 });
 
 console.log("SIMPLIFY-001B ROLE HOME & NAVIGATION SHELL SUITE: 16 CHECKS DECLARED");

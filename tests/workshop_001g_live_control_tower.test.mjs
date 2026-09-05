@@ -78,23 +78,52 @@ test("7 001G is read-only and refreshes only on Today", () => {
   assert.doesNotMatch(live + caseSummary, /\bapplyDependentBookingReschedule\s*\(/u);
 });
 
-test("8 release remains v23.3.29 during functional phase", () => {
-  assert.match(version, /^window\.APP_VERSION = "v23\.3\.29";$/mu);
-  assert.match(version, /^window\.NIMR_BUILD = "v23\.3\.29";$/mu);
-  assert.match(version, /^window\.NIMR_CACHE_NAME = "nimr-sav-v23\.3\.29";$/mu);
+test("8 packaged release identity is v23.3.30", () => {
+  assert.match(version, /^window\.APP_VERSION = "v23\.3\.30";$/mu);
+  assert.match(version, /^window\.NIMR_BUILD = "v23\.3\.30";$/mu);
+  assert.match(version, /^window\.NIMR_CACHE_NAME = "nimr-sav-v23\.3\.30";$/mu);
 });
 
 test("9 protected planner/state/business/Supabase/version surfaces equal sealed baseline", () => {
   for (const rel of [
     "js/planning.js",
-    "js/state.js",
     "js/business-rules-v2187.js",
     "js/supabase-client.js",
     "js/supabase-config.js",
     "js/supabase-sync.js",
-    "sw.js",
-    "js/version.js",
-  ]) assert.equal(normalize(read(rel)), normalize(base(rel)), rel);
+  ]) {
+    assert.equal(normalize(read(rel)), normalize(base(rel)), rel);
+  }
+
+  const baseState = normalize(base("js/state.js"));
+  assert.equal(baseState.split('const APP_VERSION = "v23.3.29";').length - 1, 1, "baseline js/state.js must contain exactly one APP_VERSION");
+  const expectedState = baseState.replace('const APP_VERSION = "v23.3.29";', 'const APP_VERSION = "v23.3.30";');
+  assert.equal(normalize(read("js/state.js")), expectedState, "js/state.js must match expected packaged content");
+
+  const baseVersion = normalize(base("js/version.js"));
+  assert.equal(baseVersion.split('window.APP_VERSION = "v23.3.29";').length - 1, 1, "baseline js/version.js must contain exactly one APP_VERSION");
+  assert.equal(baseVersion.split('window.NIMR_BUILD = "v23.3.29";').length - 1, 1, "baseline js/version.js must contain exactly one NIMR_BUILD");
+  assert.equal(baseVersion.split('window.NIMR_CACHE_NAME = "nimr-sav-v23.3.29";').length - 1, 1, "baseline js/version.js must contain exactly one NIMR_CACHE_NAME");
+  const expectedVersion = baseVersion
+    .replace('window.APP_VERSION = "v23.3.29";', 'window.APP_VERSION = "v23.3.30";')
+    .replace('window.NIMR_BUILD = "v23.3.29";', 'window.NIMR_BUILD = "v23.3.30";')
+    .replace('window.NIMR_CACHE_NAME = "nimr-sav-v23.3.29";', 'window.NIMR_CACHE_NAME = "nimr-sav-v23.3.30";');
+  assert.equal(normalize(read("js/version.js")), expectedVersion, "js/version.js must match expected packaged content");
+
+  const baseSw = normalize(base("sw.js"));
+  assert.equal(baseSw.split("// WORKSHOP-001F source refresh: atomic worker-aligned release v23.3.29 with exact technician labor instructions.\n").length - 1, 1, "baseline sw.js must contain exactly one 001F refresh comment");
+  assert.equal(baseSw.split('const CACHE_NAME = "nimr-sav-v23.3.29";').length - 1, 1, "baseline sw.js must contain exactly one CACHE_NAME");
+  assert.equal(baseSw.split("?v=23.3.29").length - 1, 19, "baseline sw.js must contain exactly 19 asset version references");
+  assert.equal(baseSw.split('return parsed.searchParams.get("v") === "23.3.29";').length - 1, 1, "baseline sw.js must contain exactly one classifier statement");
+  const expectedSw = baseSw
+    .replace(
+      "// WORKSHOP-001F source refresh: atomic worker-aligned release v23.3.29 with exact technician labor instructions.\n",
+      "// WORKSHOP-001F source refresh: atomic worker-aligned release v23.3.29 with exact technician labor instructions.\n// WORKSHOP-001G source refresh: atomic worker-aligned release v23.3.30 with live workshop control tower.\n"
+    )
+    .replace('const CACHE_NAME = "nimr-sav-v23.3.29";', 'const CACHE_NAME = "nimr-sav-v23.3.30";')
+    .replaceAll("?v=23.3.29", "?v=23.3.30")
+    .replace('return parsed.searchParams.get("v") === "23.3.29";', 'return parsed.searchParams.get("v") === "23.3.30";');
+  assert.equal(normalize(read("sw.js")), expectedSw, "sw.js must match expected packaged content");
 });
 
 test("10 responsive control-tower styles are dedicated", () => {

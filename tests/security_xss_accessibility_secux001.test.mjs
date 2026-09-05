@@ -26,7 +26,7 @@ import {
   SEALED_RELEASE_FINGERPRINTS,
 } from "./helpers/release-fingerprint.mjs";
 
-console.log("Starting SECUX-001 Phase 2.1 Behavioral & Static Test Suite (v23.3.29)...\n");
+console.log("Starting SECUX-001 Phase 2.1 Behavioral & Static Test Suite (v23.3.30)...\n");
 
 const passed = [];
 const failed = [];
@@ -951,24 +951,24 @@ await check("GUARD-8", "UI text never falsely claims PIN encrypts local data", (
   assert.equal(/PIN\s+(?:qui\s+)?chiffre\s+les\s+donn[eé]es\s+locales/i.test(stateSource), false);
 });
 
-await check("GUARD-9", "Release v23.3.29 is synchronized across 7 files, sealed fingerprint validates, styles.css unchanged", () => {
-  assert.match(versionSource, /^window\.APP_VERSION = "v23\.3\.29";$/m);
-  assert.match(versionSource, /^window\.NIMR_BUILD = "v23\.3\.29";$/m);
-  assert.match(versionSource, /^window\.NIMR_CACHE_NAME = "nimr-sav-v23\.3\.29";$/m);
-  assert.match(stateSource, /const APP_VERSION = "v23\.3\.29";/);
-  assert.match(swSource, /const CACHE_NAME = "nimr-sav-v23\.3\.29";/);
-  assert.match(appSource, /vendor\/pdf\.worker\.min\.js\?v=23\.3\.29/);
-  assert.match(appSource, /sw\.js\?v=23\.3\.29/);
-  assert.match(estimateSource, /vendor\/pdf\.worker\.min\.js\?v=23\.3\.29/);
-  assert.match(offlineSource, /styles\.css\?v=23\.3\.29/);
-  assert.match(indexSource, /styles\.css\?v=23\.3\.29/);
+await check("GUARD-9", "Release v23.3.30 is synchronized across 7 files, sealed fingerprint validates, styles.css unchanged", () => {
+  assert.match(versionSource, /^window\.APP_VERSION = "v23\.3\.30";$/m);
+  assert.match(versionSource, /^window\.NIMR_BUILD = "v23\.3\.30";$/m);
+  assert.match(versionSource, /^window\.NIMR_CACHE_NAME = "nimr-sav-v23\.3\.30";$/m);
+  assert.match(stateSource, /const APP_VERSION = "v23\.3\.30";/);
+  assert.match(swSource, /const CACHE_NAME = "nimr-sav-v23\.3\.30";/);
+  assert.match(appSource, /vendor\/pdf\.worker\.min\.js\?v=23\.3\.30/);
+  assert.match(appSource, /sw\.js\?v=23\.3\.30/);
+  assert.match(estimateSource, /vendor\/pdf\.worker\.min\.js\?v=23\.3\.30/);
+  assert.match(offlineSource, /styles\.css\?v=23\.3\.30/);
+  assert.match(indexSource, /styles\.css\?v=23\.3\.30/);
 
   const actualFingerprint = computeReleaseFingerprint(root);
-  const EXPECTED_FINGERPRINT = SEALED_RELEASE_FINGERPRINTS["v23.3.29"];
-  assert.equal(actualFingerprint, EXPECTED_FINGERPRINT, "v23.3.29 fingerprint must match sealed release registry");
+  const EXPECTED_FINGERPRINT = SEALED_RELEASE_FINGERPRINTS["v23.3.30"];
+  assert.equal(actualFingerprint, EXPECTED_FINGERPRINT, "v23.3.30 fingerprint must match sealed release registry");
 
-  const baselineDiff = execFileSync("git", ["diff", "f1599099fa68d83e90165708671e3d802b29aced", "--", "styles.css"], { cwd: root, encoding: "utf8" });
-  assert.equal(baselineDiff.trim(), "", "styles.css must remain byte-identical to the WORKSHOP-001F functional head during packaging");
+  const baselineDiff = execFileSync("git", ["diff", "b08f8c7542d083a033a5bc666417630614367439", "--", "styles.css"], { cwd: root, encoding: "utf8" });
+  assert.equal(baselineDiff.trim(), "", "styles.css must remain byte-identical to the WORKSHOP-001G functional head during packaging");
 });
 
 // ============================================================

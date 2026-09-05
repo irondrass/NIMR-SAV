@@ -20,8 +20,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <script src="js/version.js?v=23.3.29"></script>
-    <link rel="stylesheet" href="styles.css?v=23.3.29" />
+    <script src="js/version.js?v=23.3.30"></script>
+    <link rel="stylesheet" href="styles.css?v=23.3.30" />
   </head>
   <body>
     <button id="mobile-menu-toggle" class="mobile-menu-btn" type="button" aria-label="Ouvrir la navigation principale" aria-expanded="false" aria-controls="primary-sidebar" hidden>
@@ -202,6 +202,19 @@
               <span class="status-pill" id="today-count-pill">0 dossier</span>
             </div>
             <div class="today-board" id="today-workshop-board"></div>
+
+            <section class="workshop-live-control-section" aria-labelledby="workshop-live-control-title">
+              <div class="workshop-live-control-heading">
+                <div>
+                  <h2 id="workshop-live-control-title">Tour de contrôle atelier</h2>
+                  <p>Qui fait quoi maintenant, prochaine affectation et fin estimée de l’opération active.</p>
+                </div>
+                <p class="workshop-live-control-count" id="workshop-live-control-status" role="status" aria-live="polite" aria-atomic="true">0 technicien</p>
+              </div>
+              <div class="workshop-live-control-summary" id="workshop-live-control-summary" aria-label="Synthèse techniciens atelier"></div>
+              <div class="workshop-live-technician-grid" id="workshop-live-technician-board" aria-labelledby="workshop-live-control-title"></div>
+            </section>
+
             <section class="workshop-progress-section" aria-labelledby="workshop-progress-title">
               <div class="workshop-progress-heading">
                 <div>
@@ -1437,22 +1450,22 @@
       </div>
     </div>
 
-    <script src="vendor/pdf.min.js?v=23.3.29" defer></script>
-    <script src="js/utils.js?v=23.3.29" defer></script>
-    <script src="js/state.js?v=23.3.29" defer></script>
-    <script src="js/ui-cases.js?v=23.3.29" defer></script>
-    <script src="js/estimate-import.js?v=23.3.29" defer></script>
-    <script src="js/ui-planning.js?v=23.3.29" defer></script>
-    <script src="js/photos.js?v=23.3.29" defer></script>
-    <script src="js/storage.js?v=23.3.29" defer></script>
-    <script src="js/work-hours-sync.js?v=23.3.29" defer></script>
-    <script src="js/planning.js?v=23.3.29" defer></script>
-    <script src="js/exports.js?v=23.3.29" defer></script>
-    <script src="js/business-rules-v2187.js?v=23.3.29" defer></script>
+    <script src="vendor/pdf.min.js?v=23.3.30" defer></script>
+    <script src="js/utils.js?v=23.3.30" defer></script>
+    <script src="js/state.js?v=23.3.30" defer></script>
+    <script src="js/ui-cases.js?v=23.3.30" defer></script>
+    <script src="js/estimate-import.js?v=23.3.30" defer></script>
+    <script src="js/ui-planning.js?v=23.3.30" defer></script>
+    <script src="js/photos.js?v=23.3.30" defer></script>
+    <script src="js/storage.js?v=23.3.30" defer></script>
+    <script src="js/work-hours-sync.js?v=23.3.30" defer></script>
+    <script src="js/planning.js?v=23.3.30" defer></script>
+    <script src="js/exports.js?v=23.3.30" defer></script>
+    <script src="js/business-rules-v2187.js?v=23.3.30" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.111.0" defer></script>
-    <script src="js/supabase-config.js?v=23.3.29" defer></script>
-    <script src="js/supabase-client.js?v=23.3.29" defer></script>
-    <script src="js/supabase-sync.js?v=23.3.29" defer></script>
-    <script src="app.js?v=23.3.29" defer></script>
+    <script src="js/supabase-config.js?v=23.3.30" defer></script>
+    <script src="js/supabase-client.js?v=23.3.30" defer></script>
+    <script src="js/supabase-sync.js?v=23.3.30" defer></script>
+    <script src="app.js?v=23.3.30" defer></script>
   </body>
 </html>

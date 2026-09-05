@@ -1850,7 +1850,204 @@ function renderTodayWorkshop(now = new Date()) {
       renderCaseDetail();
     });
   });
+  renderWorkshopLiveControlTower(now);
   renderWorkshopProgressBoard(now);
+  ensureWorkshopControlTowerTicker();
+}
+
+const WORKSHOP_LIVE_ACTIVE_STATUSES = new Set(["in_progress", "paused", "blocked"]);
+const WORKSHOP_LIVE_TASK_ORDER = Object.freeze({
+  in_progress: 0,
+  paused: 1,
+  blocked: 2,
+  ready: 3,
+  planned: 4,
+  done: 5,
+});
+
+let workshopControlTowerTicker = null;
+
+function getWorkshopLiveTaskStart(row) {
+  const booking = row?.displayBooking || row?.booking || row?.actionBooking;
+  const value = row?.start || booking?.start || booking?.plannedStart || "";
+  const date = value ? new Date(value) : null;
+  return date && !Number.isNaN(date.getTime()) ? date : null;
+}
+
+function compareWorkshopLiveTaskRows(left, right) {
+  const leftPriority = WORKSHOP_LIVE_TASK_ORDER[left?.status] ?? 99;
+  const rightPriority = WORKSHOP_LIVE_TASK_ORDER[right?.status] ?? 99;
+  const leftStart = getWorkshopLiveTaskStart(left)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+  const rightStart = getWorkshopLiveTaskStart(right)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+  return leftPriority - rightPriority
+    || leftStart - rightStart
+    || String(left?.id || "").localeCompare(String(right?.id || ""));
+}
+
+function getWorkshopLiveExactOperationLabel(row) {
+  if (!row) return "";
+  const exactLines = typeof collectTechnicianExactLaborLines === "function"
+    ? collectTechnicianExactLaborLines(row)
+    : [];
+  const exact = exactLines
+    .map((line) => [line?.code, line?.operation || line?.rawText].filter(Boolean).join(" · ").trim())
+    .filter(Boolean);
+  if (exact.length) return exact.join(" / ");
+  const booking = row.displayBooking || row.booking || row.actionBooking;
+  return booking && typeof getPlanningOperationTitle === "function"
+    ? getPlanningOperationTitle(booking)
+    : String(booking?.title || "Opération atelier");
+}
+
+function getWorkshopLiveTaskTechnicianLabel(row) {
+  const booking = row?.actionBooking || row?.displayBooking || row?.booking;
+  return booking ? getWorkshopProgressResponsibleNames(booking) : "Non affecté";
+}
+
+function getWorkshopLiveTaskTiming(row, now = new Date()) {
+  const booking = row?.actionBooking || row?.displayBooking || row?.booking;
+  if (!row || !booking) return { actualStart: null, elapsedMilliseconds: 0, estimatedEnd: null };
+  const actualStart = typeof getTechnicianFieldActualStart === "function"
+    ? getTechnicianFieldActualStart(row)
+    : getWorkshopProgressValidDate(booking.actualStart || booking.startedAt);
+  const elapsedMilliseconds = typeof getTechnicianFamilyElapsedMilliseconds === "function"
+    ? getTechnicianFamilyElapsedMilliseconds(booking.id, now)
+    : 0;
+  const estimatedEnd = typeof getTechnicianFieldEstimatedEnd === "function"
+    ? getTechnicianFieldEstimatedEnd(row, now)
+    : getWorkshopProgressValidDate(booking.plannedEnd || booking.end);
+  return { actualStart, elapsedMilliseconds, estimatedEnd };
+}
+
+function buildWorkshopLiveTechnicianRow(technician, now = new Date()) {
+  const rows = typeof getTechnicianBusinessTaskRows === "function"
+    ? getTechnicianBusinessTaskRows(technician?.id || "", todayKey(now))
+    : [];
+  const ordered = [...rows].sort(compareWorkshopLiveTaskRows);
+  const current = ordered.find((row) => WORKSHOP_LIVE_ACTIVE_STATUSES.has(row.status)) || null;
+  const next = ordered
+    .filter((row) => row !== current && row.status !== "done")
+    .sort((a, b) => {
+      const aStart = getWorkshopLiveTaskStart(a)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+      const bStart = getWorkshopLiveTaskStart(b)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+      return aStart - bStart || compareWorkshopLiveTaskRows(a, b);
+    })[0] || null;
+  return {
+    technician,
+    rows,
+    current,
+    next,
+    status: current?.status || "available",
+    statusLabel: current?.statusLabel || "Sans tâche active",
+    currentOperation: getWorkshopLiveExactOperationLabel(current),
+    nextOperation: getWorkshopLiveExactOperationLabel(next),
+    timing: getWorkshopLiveTaskTiming(current, now),
+  };
+}
+
+function buildWorkshopLiveControlTowerModel(now = new Date()) {
+  const technicians = getTechnicianDashboardResources()
+    .map((resource) => buildWorkshopLiveTechnicianRow(resource, now));
+  return {
+    technicians,
+    totalTechnicians: technicians.length,
+    working: technicians.filter((row) => row.status === "in_progress").length,
+    paused: technicians.filter((row) => row.status === "paused").length,
+    blocked: technicians.filter((row) => row.status === "blocked").length,
+    withoutActiveTask: technicians.filter((row) => !row.current).length,
+  };
+}
+
+function renderWorkshopLiveTaskSummary(row, label, options = {}) {
+  if (!row) {
+    return `<div class="workshop-live-task is-empty"><small>${escapeHtml(label)}</small><strong>${escapeHtml(options.emptyLabel || "Aucune")}</strong></div>`;
+  }
+  const booking = row.actionBooking || row.displayBooking || row.booking;
+  const item = row.item;
+  const operation = getWorkshopLiveExactOperationLabel(row);
+  const identity = item?.plate || item?.vin || "Sans immatriculation";
+  const technician = getWorkshopLiveTaskTechnicianLabel(row);
+  const start = getWorkshopLiveTaskStart(row);
+  const timing = options.showLiveTiming ? getWorkshopLiveTaskTiming(row, options.now || new Date()) : null;
+  const timingParts = options.showLiveTiming
+    ? [
+        timing?.actualStart ? `Début réel ${formatTime(timing.actualStart)}` : (start ? `Prévu ${formatTime(start)}` : ""),
+        timing ? `Écoulé ${formatTechnicianElapsedTime(timing.elapsedMilliseconds)}` : "",
+        timing?.estimatedEnd && !Number.isNaN(timing.estimatedEnd.getTime()) ? `Fin estimée ${formatTime(timing.estimatedEnd)}` : "",
+      ].filter(Boolean)
+    : [
+        start ? `Début prévu ${formatTime(start)}` : "",
+        technician ? `Technicien · ${technician}` : "",
+      ].filter(Boolean);
+  return `
+    <button class="workshop-live-task" type="button" data-workshop-control-case="${escapeAttr(item?.id || booking?.caseId || "")}">
+      <small>${escapeHtml(label)}</small>
+      <strong>${escapeHtml(operation || "Opération atelier")}</strong>
+      <span>${escapeHtml(item?.vehicle || "Véhicule")} · ${escapeHtml(identity)}</span>
+      ${options.showLiveTiming ? `<span>Technicien · ${escapeHtml(technician)}</span>` : ""}
+      <span>${escapeHtml(timingParts.join(" · "))}</span>
+    </button>
+  `;
+}
+
+function renderWorkshopLiveTechnicianCard(row, now = new Date()) {
+  const currentTask = row.current
+    ? renderWorkshopLiveTaskSummary(row.current, "Maintenant", { showLiveTiming: true, now })
+    : `<div class="workshop-live-task is-empty"><small>Maintenant</small><strong>Sans tâche active</strong><span>Aucune opération démarrée, en pause ou bloquée.</span></div>`;
+  const nextTask = renderWorkshopLiveTaskSummary(row.next, "Prochaine affectation", { emptyLabel: "Aucune tâche suivante" });
+  return `
+    <article class="workshop-live-technician-card status-${escapeAttr(row.status)}">
+      <header>
+        <div>
+          <strong>${escapeHtml(row.technician?.name || "Technicien")}</strong>
+          <span>${escapeHtml(ROLE_LABELS[row.technician?.role] || row.technician?.role || "Atelier")}</span>
+        </div>
+        <span class="workshop-live-tech-status">${escapeHtml(row.statusLabel)}</span>
+      </header>
+      ${currentTask}
+      ${nextTask}
+    </article>
+  `;
+}
+
+function renderWorkshopLiveControlTower(now = new Date()) {
+  const board = $("#workshop-live-technician-board");
+  if (!board) return null;
+  const model = buildWorkshopLiveControlTowerModel(now);
+  const status = $("#workshop-live-control-status");
+  if (status) status.textContent = `${model.totalTechnicians} technicien${model.totalTechnicians > 1 ? "s" : ""}`;
+  const summary = $("#workshop-live-control-summary");
+  if (summary) {
+    const counters = [
+      ["En cours", model.working],
+      ["En pause", model.paused],
+      ["Bloqués", model.blocked],
+      ["Sans tâche active", model.withoutActiveTask],
+    ];
+    summary.innerHTML = counters.map(([label, value]) => `
+      <span class="workshop-live-counter"><strong>${value}</strong><small>${escapeHtml(label)}</small></span>
+    `).join("");
+  }
+  board.innerHTML = model.technicians.length
+    ? model.technicians.map((row) => renderWorkshopLiveTechnicianCard(row, now)).join("")
+    : `<div class="empty-inline workshop-live-empty">Aucun technicien actif déclaré.</div>`;
+  board.onclick = (event) => {
+    const button = event.target.closest?.("[data-workshop-control-case]");
+    if (button && board.contains(button)) openWorkshopProgressCase(button.dataset.workshopControlCase);
+  };
+  return model;
+}
+
+function ensureWorkshopControlTowerTicker() {
+  if (workshopControlTowerTicker !== null) return;
+  workshopControlTowerTicker = window.setInterval(() => {
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+    if (typeof activeTab !== "undefined" && activeTab !== "today") return;
+    const now = new Date();
+    renderWorkshopLiveControlTower(now);
+    renderWorkshopProgressBoard(now);
+  }, 30000);
+  workshopControlTowerTicker?.unref?.();
 }
 
 function getWorkshopProgressValidDate(value) {
@@ -2047,6 +2244,44 @@ function getWorkshopProgressPriority(row) {
   return 6;
 }
 
+function buildWorkshopLiveCaseTaskSummary(item, now = new Date(), currentStep = null) {
+  const rows = typeof getCaseBusinessTaskRows === "function" ? getCaseBusinessTaskRows(item) : [];
+  const stepBooking = currentStep?.booking || null;
+  const stepRow = stepBooking
+    ? rows.find((row) => (row.family || row.bookings || []).some((booking) => booking.id === stepBooking.id))
+    : null;
+  const current = stepRow && WORKSHOP_LIVE_ACTIVE_STATUSES.has(stepRow.status)
+    ? stepRow
+    : [...rows]
+        .filter((row) => WORKSHOP_LIVE_ACTIVE_STATUSES.has(row.status))
+        .sort(compareWorkshopLiveTaskRows)[0] || null;
+  const next = rows
+    .filter((row) => row !== current && row.status !== "done")
+    .sort((a, b) => {
+      const aStart = getWorkshopLiveTaskStart(a)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+      const bStart = getWorkshopLiveTaskStart(b)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+      return aStart - bStart || compareWorkshopLiveTaskRows(a, b);
+    })[0] || null;
+  const done = rows.filter((row) => row.status === "done").length;
+  const active = rows.filter((row) => WORKSHOP_LIVE_ACTIVE_STATUSES.has(row.status)).length;
+  const currentBooking = current?.actionBooking || current?.displayBooking || current?.booking || null;
+  const nextBooking = next?.actionBooking || next?.displayBooking || next?.booking || null;
+  return {
+    total: rows.length,
+    done,
+    active,
+    remaining: Math.max(0, rows.length - done),
+    current,
+    next,
+    currentOperation: getWorkshopLiveExactOperationLabel(current),
+    nextOperation: getWorkshopLiveExactOperationLabel(next),
+    currentTechnician: currentBooking ? getWorkshopProgressResponsibleNames(currentBooking) : "Non affecté",
+    nextTechnician: nextBooking ? getWorkshopProgressResponsibleNames(nextBooking) : "Non affecté",
+    currentTiming: getWorkshopLiveTaskTiming(current, now),
+    nextStart: getWorkshopLiveTaskStart(next),
+  };
+}
+
 function buildWorkshopProgressRow(item, now = new Date()) {
   const bookings = getWorkshopProgressBookings(item);
   const currentStep = getWorkshopProgressCurrentStep(item, now);
@@ -2078,6 +2313,7 @@ function buildWorkshopProgressRow(item, now = new Date()) {
     workCompleted: flags.workCompleted === true && flags.delivered !== true,
     readyForDelivery: flags.qualityApproved === true && flags.delivered !== true && flags.invoiced !== true,
     nextAction: getCaseNextAction(item),
+    controlTower: buildWorkshopLiveCaseTaskSummary(item, now, currentStep),
   };
   row.late = row.etaOverdue || row.existingLate;
   row.priority = getWorkshopProgressPriority(row);
@@ -2143,8 +2379,23 @@ function renderWorkshopProgressRow(row) {
     : "Évolution non renseignée";
   const staleNotice = row.stale ? `<strong>Sans évolution depuis ${escapeHtml(formatWorkshopProgressAge(row.lastActivityHours))}</strong>` : "";
   const eta = row.eta
-    ? `ETA : ${formatDateTime(row.eta)}${row.etaOverdue ? " · EN RETARD" : ""}`
-    : "ETA non définie";
+    ? `ETA dossier : ${formatDateTime(row.eta)}${row.etaOverdue ? " · EN RETARD" : ""}`
+    : "ETA dossier non définie";
+  const tower = row.controlTower || {};
+  const currentTiming = tower.currentTiming || {};
+  const currentTimingLabel = tower.current
+    ? [
+        currentTiming.actualStart ? `Début réel ${formatTime(currentTiming.actualStart)}` : "",
+        `Écoulé ${formatTechnicianElapsedTime(currentTiming.elapsedMilliseconds || 0)}`,
+        currentTiming.estimatedEnd && !Number.isNaN(currentTiming.estimatedEnd.getTime())
+          ? `Fin estimée ${formatTime(currentTiming.estimatedEnd)}`
+          : "",
+        `${tower.remaining || 0} tâche${tower.remaining > 1 ? "s" : ""} restante${tower.remaining > 1 ? "s" : ""}`,
+      ].filter(Boolean).join(" · ")
+    : "Aucune opération active";
+  const nextTimingLabel = tower.next
+    ? [tower.nextTechnician, tower.nextStart ? `Début prévu ${formatTime(tower.nextStart)}` : ""].filter(Boolean).join(" · ")
+    : "Aucune opération suivante";
   return `
     <button class="workshop-progress-row priority-level-${row.priority}" type="button" data-workshop-progress-case="${escapeAttr(item.id)}" aria-label="Ouvrir le dossier de ${escapeAttr(item.clientName || identity)}">
       ${renderWorkshopProgressCell("Priorité", `<strong class="workshop-progress-priority">${escapeHtml(row.priorityLabel)}</strong>`, "priority-cell")}
@@ -2153,6 +2404,8 @@ function renderWorkshopProgressRow(row) {
       ${renderWorkshopProgressCell("Entrée", `<span>${row.receivedAt ? formatDateTime(row.receivedAt) : "Date non renseignée"}</span>`)}
       ${renderWorkshopProgressCell("Étape actuelle", `<strong>${escapeHtml(row.currentStep.label)}</strong><span>${escapeHtml(row.progress.label)}</span>`)}
       ${renderWorkshopProgressCell("Responsable", `<strong>${escapeHtml(row.responsible)}</strong>`)}
+      ${renderWorkshopProgressCell("Opération active", tower.current ? `<strong>${escapeHtml(tower.currentOperation || row.currentStep.label)}</strong><span>${escapeHtml(tower.current?.statusLabel || "")} · ${escapeHtml(tower.currentTechnician || "Non affecté")}</span><span>${escapeHtml(currentTimingLabel)}</span>` : `<span>Aucune opération active</span>`, "workshop-live-operation-cell")}
+      ${renderWorkshopProgressCell("Opération suivante", tower.next ? `<strong>${escapeHtml(tower.nextOperation || "Opération suivante")}</strong><span>${escapeHtml(nextTimingLabel)}</span>` : `<span>Aucune opération suivante</span>`, "workshop-live-operation-cell")}
       ${renderWorkshopProgressCell("Pièces / blocage", `<span>${escapeHtml(blockerDetails)}</span>`)}
       ${renderWorkshopProgressCell("Dernière évolution", `<span>${escapeHtml(lastActivity)}</span>${staleNotice}`, row.stale ? "is-stale" : "")}
       ${renderWorkshopProgressCell("Livraison estimée", `<span>${escapeHtml(eta)}</span>`, row.etaOverdue ? "is-late" : "")}

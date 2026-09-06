@@ -36,15 +36,14 @@ function renderPlanning() {
 
   const dailyColorMap = buildIndexedDailyVehicleColorMap(todayKey(date));
   const gantt = $("#gantt");
-  const dayStart = atTime(date, "08:00");
-  const dayEnd = atTime(date, "17:00");
+  const { dayStart, dayEnd } = getGanttDayBounds(date);
   const total = diffMinutes(dayStart, dayEnd);
   gantt.innerHTML = `
     <div class="gantt-grid">
       <div class="gantt-header">
         <div class="gantt-corner">Ressource</div>
         <div class="time-scale">
-          ${renderTicks(total)}
+          ${renderTicks(total, true, dayStart)}
           ${renderPauseBands(date, total)}
         </div>
       </div>
@@ -57,7 +56,7 @@ function renderPlanning() {
                 <span>${ROLE_LABELS[resource.role]} · ${escapeHtml(resource.location || "Atelier")}${resource.fastLane ? " · Fast Lane" : ""}</span>
               </div>
               <div class="timeline">
-                ${renderTicks(total, false)}
+                ${renderTicks(total, false, dayStart)}
                 ${renderPauseBands(date, total)}
                 ${renderResourceBookings(resource, date, dayStart, dayEnd, total, dailyColorMap, taskNumberMap, filters)}
               </div>
@@ -301,22 +300,27 @@ function renderMobilePlanningList(date, resources, taskNumberMap, filters = null
   `;
 }
 
-function renderTicks(total, withLabels = true) {
+function getGanttDayBounds(date) {
+  const intervals = getDayIntervals(date);
+  return intervals.length ? { dayStart: new Date(Math.min(...intervals.map(i => +i.start))), dayEnd: new Date(Math.max(...intervals.map(i => +i.end))) }
+    : { dayStart: atTime(date, "08:00"), dayEnd: atTime(date, "17:00") };
+}
+
+function renderTicks(total, withLabels = true, dayStart = atTime(parseDateKey(state.planningDate), "08:00")) {
   const ticks = [];
-  for (let hour = 8; hour <= 17; hour += 1) {
-    const left = ((hour - 8) * 60 * 100) / total;
-    ticks.push(`<div class="tick" style="left:${left}%">${withLabels ? `<span>${String(hour).padStart(2, "0")}:00</span>` : ""}</div>`);
+  for (let minute = 0; minute <= total; minute += 60) {
+    const left = minute * 100 / total;
+    ticks.push(`<div class="tick" style="left:${left}%">${withLabels ? `<span>${formatTime(addMinutes(dayStart, minute))}</span>` : ""}</div>`);
   }
   return ticks.join("");
 }
 
 function renderPauseBands(date, total) {
-  const dayStart = atTime(date, "08:00");
+  const { dayStart, dayEnd } = getGanttDayBounds(date);
   const intervals = getDayIntervals(date);
   if (!intervals.length) return `<div class="pause-band" style="left:0;width:100%"></div>`;
   const bands = [];
   let cursor = dayStart;
-  const dayEnd = atTime(date, "17:00");
   intervals.forEach((interval) => {
     if (cursor < interval.start) {
       bands.push(renderBand(cursor, interval.start, dayStart, total));

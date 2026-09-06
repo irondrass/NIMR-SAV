@@ -369,7 +369,7 @@ check("M PDF import boundary stamps canonical source metadata once", () => {
   };
   const tasks = toPlain(run("getPdfEstimateTaskRows(__p1003ParsedPdf)"));
   assert.deepEqual(tasks.map((task) => task.phase), ["body", "paint"]);
-  assert.deepEqual(tasks.map((task) => task.dependencies), [[], ["pdf-task-body"]]);
+  assert.deepEqual(tasks.map((task) => task.dependencies), [[], [tasks[0].taskId]]);
   assert.ok(tasks.every((task) => task.taskModelVersion === 1));
   assert.ok(tasks.every((task) => task.sourceKind === "pdf_estimate" && task.source === "pdf_estimate"));
   assert.deepEqual(tasks.map((task) => task.sourceLaborHours), [1, 2]);

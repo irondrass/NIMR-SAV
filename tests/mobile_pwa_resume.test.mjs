@@ -12,7 +12,7 @@ const android = SIMULATED_DEVICE_PROFILES.find((profile) => profile.name.include
 const { result, errors } = await runMobileCdpTest({
   name: "mobile-pwa-resume",
   cdpPort: Number(process.env.NIMR_MOBILE_PWA_RESUME_CDP_PORT || 9345),
-  run: async ({ applyProfile, navigate, evaluate, waitFor, send, sessionId, wait }) => {
+  run: async ({ applyProfile, navigate, evaluate, waitFor, send, sessionId, wait, setOffline }) => {
     await applyProfile(android);
     await navigate("?mobile-pwa-resume=1");
     await evaluate(technicianFixtureExpression({ role: "technicien", started: true }));
@@ -24,6 +24,8 @@ const { result, errors } = await runMobileCdpTest({
       return persistLargeStateSnapshot(state, { appVersion: APP_VERSION, reason: "mobile-pwa-before-background" });
     })()`);
     await evaluate(`navigator.serviceWorker.ready.then(() => true)`);
+    // This fixture has a validated cached identity, not a real online Auth session.
+    await setOffline(true);
     await evaluate(`window.__nimrAppReady = false`);
     await send("Page.reload", { ignoreCache: false }, sessionId);
     await waitFor("window.__nimrAppReady === true", "PWA prête après contrôle service worker", 120);

@@ -52,7 +52,12 @@ async function startStaticServer(root) {
       return;
     }
     try {
-      const body = await readFile(filePath);
+      let body = await readFile(filePath);
+      // Synthetic fixtures must never inherit the embedded production endpoint.
+      if (relativePath === "js/supabase-config.js") body = Buffer.from(body.toString()
+        .replace(/const DEFAULT_SUPABASE_URL = .*?;/, 'const DEFAULT_SUPABASE_URL = "";')
+        .replace(/const DEFAULT_SUPABASE_ANON_KEY = .*?;/, 'const DEFAULT_SUPABASE_ANON_KEY = "";')
+        .replace('enabled: true', 'enabled: false'));
       response.writeHead(200, {
         "Content-Type": MIME[extname(filePath).toLowerCase()] || "application/octet-stream",
         "Cache-Control": "no-store",
@@ -204,14 +209,26 @@ export async function runMobileCdpTest({ name, cdpPort, run }) {
       await send("Emulation.setTouchEmulationEnabled", { enabled: touch, ...(touch ? { maxTouchPoints: 5 } : {}) }, sessionId);
     };
 
+    let offlineBootstrapId;
     const setOffline = async (offline) => {
-      await send("Network.emulateNetworkConditions", {
-        offline,
-        latency: offline ? 0 : 80,
+      // Current Chromium separates transport throttling from navigator.onLine.
+      // https://chromedevtools.github.io/devtools-protocol/tot/Network/#method-overrideNetworkState
+      await send("Network.overrideNetworkState", {
+        offline, latency: offline ? 0 : 80,
         downloadThroughput: offline ? 0 : 2_000_000,
         uploadThroughput: offline ? 0 : 750_000,
         connectionType: offline ? "none" : "cellular4g",
       }, sessionId);
+      await send("Network.emulateNetworkConditionsByRule", {
+        offline, matchedNetworkConditions: [{ urlPattern: "", latency: offline ? 0 : 80,
+          downloadThroughput: offline ? 0 : 2_000_000, uploadThroughput: offline ? 0 : 750_000 }],
+      }, sessionId);
+      // The headless localhost renderer can reset navigator.onLine on reload.
+      // Keep the simulated device signal consistent with the blocked transport.
+      if (offlineBootstrapId) await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: offlineBootstrapId }, sessionId);
+      const source = `Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => ${!offline} });`;
+      ({ identifier: offlineBootstrapId } = await send("Page.addScriptToEvaluateOnNewDocument", { source }, sessionId));
+      await evaluate(source + `window.dispatchEvent(new Event('${offline ? "offline" : "online"}'));`);
     };
 
     const waitFor = async (predicateExpression, label, attempts = 80) => {
@@ -374,7 +391,7 @@ export function responsiveAuditExpression() {
       dockVisible: visible(dock),
       criticalButtons,
       buttonsAccessible: criticalButtons.every((button) => button.width >= 44 && button.height >= 44),
-      fixedBarsDoNotOverlap: !dockRect || !navRect || dockRect.bottom <= navRect.top + 1 || getComputedStyle(nav).position !== "fixed",
+      fixedBarsDoNotOverlap: !dockRect || !navRect || !visible(nav) || navRect.right <= 0 || navRect.left >= viewportWidth || dockRect.bottom <= navRect.top + 1 || getComputedStyle(nav).position !== "fixed",
       dockRect: dockRect ? { top: dockRect.top, bottom: dockRect.bottom } : null,
       navRect: navRect ? { top: navRect.top, bottom: navRect.bottom } : null,
       modalFits: !modalRect || (modalRect.top >= -1 && modalRect.bottom <= viewportHeight + 1 && modalRect.left >= -1 && modalRect.right <= viewportWidth + 1),

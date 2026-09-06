@@ -1,3 +1,6 @@
+.case-detail-disclosure { margin: 12px 0; border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+.case-detail-disclosure > summary { min-height: 44px; display: list-item; align-content: center; cursor: pointer; font-weight: 650; color: var(--ink); }
+
 :root {
   color-scheme: light;
   --ink: #0f172a;
@@ -8421,4 +8424,34 @@ select:focus {
   main { margin-top: 0; padding-top: calc(66px + env(safe-area-inset-top)); }
   .technician-field-action-dock { bottom: calc(8px + var(--safe-bottom)); }
   #view-technician .technician-panel { padding-bottom: calc(156px + var(--safe-bottom)); }
+}
+[data-active-tab="pilotage"] .dashboard-strip,
+.pilotage-flow-grid { display: none !important; }
+.minimal-case-entry { margin: 1rem 0 1.5rem; padding: 1rem; border: 1px solid #b9cbd3; border-radius: 12px; }
+.minimal-case-entry summary, .operational-case-dialog summary { cursor: pointer; min-height: 44px; font-weight: 700; padding: 12px 0; }
+.operational-vehicle-card.workshop-progress-row { display: grid; grid-template-columns: minmax(160px,1.2fr) minmax(140px,1fr) minmax(170px,1.4fr) minmax(145px,1fr) minmax(150px,1fr); gap: 18px; padding: 18px; text-align: left; width: 100%; }
+.operational-vehicle-card > span { display: flex; flex-direction: column; gap: 6px; min-width: 0; overflow-wrap: anywhere; }
+.operational-vehicle-card small { color: #50626a; }
+.operational-vehicle-identity > strong { font-size: 1.2rem; }
+.operational-vehicle-decision.danger { color: #a2202d; }
+.operational-vehicle-decision.warn { color: #8a5100; }
+.operational-case-dialog { width: min(880px, calc(100vw - 24px)); max-height: calc(100dvh - 32px); padding: 24px; border: 0; border-radius: 16px; overflow-y: auto; color: #172d39; background: #fff; }
+.operational-case-dialog::backdrop { background: rgb(13 32 43 / 60%); }
+.operational-case-dialog header { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
+.operational-case-dialog button { min-height: 44px; }
+.operational-case-dialog form { margin-bottom: 20px; }
+.client-situation { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }
+.client-situation div { padding: 12px; background: #f1f6f8; border-radius: 8px; }
+.client-situation dt { font-size: .85rem; color: #52636e; }
+.client-situation dd { margin: 6px 0 0; font-weight: 600; overflow-wrap: anywhere; }
+@media(max-width: 900px) {
+  .operational-vehicle-card.workshop-progress-row { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .operational-vehicle-decision { grid-column: 1 / -1; }
+}
+@media(max-width: 600px) {
+  .operational-vehicle-card.workshop-progress-row { grid-template-columns: 1fr; gap: 12px; }
+  .operational-case-dialog { padding: 16px; }
+  .client-situation { grid-template-columns: 1fr; }
+  .operational-case-dialog .form-grid { grid-template-columns: 1fr; }
+  .operational-case-dialog input, .operational-case-dialog select, .minimal-case-entry input:not([type="checkbox"]) { min-height: 44px; width: 100%; min-width: 0; }
 }

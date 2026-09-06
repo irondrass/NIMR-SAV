@@ -97,6 +97,7 @@ function bindOfflineStatus() {
     banner.hidden = navigator.onLine !== false;
     document.body.classList.toggle("is-offline", navigator.onLine === false);
     if (typeof renderSyncStatusStrip === "function") renderSyncStatusStrip();
+    if (typeof refreshTechnicianNetworkStatus === "function") refreshTechnicianNetworkStatus();
   };
   window.addEventListener("online", () => {
     refresh();
@@ -130,7 +131,7 @@ function bindSyncConflictUsability() {
 
 function configurePdfWorker() {
   if (window.pdfjsLib?.GlobalWorkerOptions) {
-    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.33";
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.34";
   }
 }
 
@@ -186,7 +187,54 @@ function bindCaseList() {
   });
 }
 
+function createMinimalReceptionCase(values = {}) {
+  const guard = guardCaseCreate();
+  if (!guard.ok) throw new Error(guard.message);
+  const identity = normalizeIdentifierValue(values.identity);
+  const reason = normalizeTextInputValue(values.visitReason);
+  if (!identity || !reason) throw new Error("Renseigner l’identité du véhicule et le motif de la visite.");
+  const now = new Date().toISOString();
+  const item = normalizeCase({
+    id: uid("case"), source: "reception", createdAt: now,
+    plate: identity.length === 17 ? "" : identity, vin: identity.length === 17 ? identity : "",
+    clientName: normalizeTextInputValue(values.clientName), phone: normalizeTextInputValue(values.phone),
+    visitReason: reason, arrivalNotes: reason,
+    flags: { received: values.received === true },
+    receptionWorkflow: values.received ? { vehicleReceivedAt: now, vehicleReceivedBy: getCurrentActor().userId } : {},
+    claims: [{ id: uid("claim"), title: reason, type: "client", status: "draft", clientApproved: false, includeInPlanning: true }],
+  });
+  addHistory(item, "case.arrival", "Arrivée sans devis", reason);
+  state.cases.unshift(item);
+  noteCaseRevisionCandidate(item);
+  return item;
+}
+
 function bindCaseCreation() {
+  $("#minimal-case-form")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const button = form.querySelector('[type="submit"]');
+    if (button.disabled || !form.reportValidity()) return;
+    button.disabled = true;
+    try {
+      const data = new FormData(form);
+      const identity = normalizeIdentifierValue(data.get("identity"));
+      const duplicate = state.cases.find(item => !item.deletedAt && !item.flags?.delivered && [item.plate, item.vin].some(value => value && normalizeIdentifierValue(value) === identity));
+      if (duplicate) {
+        activeCaseId = duplicate.id;
+        setActiveTab("dossiers"); renderCases(); renderCaseDetail();
+        notifyUser("Ce véhicule possède déjà un dossier ouvert.", "info");
+        return;
+      }
+      const item = createMinimalReceptionCase({ identity, visitReason: data.get("visitReason"), clientName: data.get("clientName"), phone: data.get("phone"), received: data.get("received") === "on" });
+      const saved = await saveState({ changedCase: item, flushCloud: true, cloudReason: "vehicle-arrival" });
+      if (!saved) { notifyUser("L’arrivée reste ouverte sur ce poste, mais la sauvegarde n’a pas été confirmée. Vérifiez le stockage avant de fermer l’application.", "warn"); return; }
+      form.reset(); activeCaseId = item.id; activeCaseDetailTab = "claims";
+      setActiveTab("dossiers"); render();
+      notifyUser("Arrivée enregistrée. Définissez les opérations et leur autorisation avant de démarrer.", "success");
+    } catch (error) { notifyUser(error.message || "Création impossible.", "error"); }
+    finally { button.disabled = false; }
+  });
   const form = $("#case-form");
   if (!form) return;
   const fileInput = $("#quick-estimate-file-input", form);
@@ -407,13 +455,16 @@ function getPdfTaskRoleLabel(phase) {
 
 function getPdfEstimateTaskRows(parsed) {
   const aggregated = new Map();
-  (parsed?.distributedLines || []).forEach((line) => {
+  (parsed?.distributedLines || []).forEach((line, index) => {
     const phase = line.phase || "body";
     const isFallbackTask = Number(line.laborHours || 0) <= 0 && line.operation === "Travaux atelier à préciser";
-    const task = aggregated.get(phase) || {
-      id: `pdf-task-${phase}`,
+    // Only allocations of the SAME source operation and phase form one executable task.
+    const sourceKey = String(line.sourceLineId || line.id || `line-${index}`);
+    const taskKey = `${phase}:${sourceKey}`;
+    const task = aggregated.get(taskKey) || {
+      id: `pdf-task-${phase}-${index + 1}`,
       phase,
-      operation: isFallbackTask ? "Travaux atelier à préciser" : (getDurationLabel(phase) || "Travaux atelier à préciser"),
+      operation: isFallbackTask ? "Travaux atelier à préciser" : (line.operation || line.sourceOperation || getDurationLabel(phase) || "Travaux atelier à préciser"),
       laborHours: 0,
       requiredRole: getPdfTaskRequiredRole(phase),
       roleLabel: getPdfTaskRoleLabel(phase),
@@ -429,7 +480,7 @@ function getPdfEstimateTaskRows(parsed) {
     if (line.sourceLineId && !task.sourceLineIds.includes(line.sourceLineId)) task.sourceLineIds.push(line.sourceLineId);
     const sourceOperation = line.sourceOperation || line.operation || "";
     if (sourceOperation && !task.sourceOperations.includes(sourceOperation)) task.sourceOperations.push(sourceOperation);
-    aggregated.set(phase, task);
+    aggregated.set(taskKey, task);
   });
   const tasks = [...aggregated.values()];
   return typeof normalizePdfPlanningTasksForCase === "function"
@@ -550,6 +601,8 @@ async function createCaseFromPdfEstimate(draft, estimateFile = null, overrides =
   }));
   item.planningTasks = taskRows.map((task, index) => ({
     ...task,
+    sourceClaimId: firstClaim.id,
+    sourceClaimIds: [firstClaim.id],
     taskId: task.id,
     title: task.operation,
     durationMinutes: Math.round(Number(task.laborHours || 0) * 60),
@@ -1420,7 +1473,7 @@ function registerServiceWorker() {
   });
   const registerCurrentServiceWorker = async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=23.3.33", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=23.3.34", { updateViaCache: "none" });
       const refreshRegistration = async () => {
         try {
           await registration.update?.();
@@ -1444,6 +1497,10 @@ function registerServiceWorker() {
 }
 
 function navigateToConflictsAndFocus() {
+  if (!canAccessTab("atelier")) {
+    notifyUser("Des modifications sont conservées sur ce poste mais ne sont pas encore partagées. Demandez au Chef Atelier ou à l’administrateur de résoudre le conflit depuis Paramètres. Ne ressaisissez pas l’action.", "warning");
+    return;
+  }
   if (typeof setActiveTab === "function") {
     setActiveTab("atelier");
   }

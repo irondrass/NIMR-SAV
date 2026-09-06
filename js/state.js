@@ -21,7 +21,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v23.3.33";
+const APP_VERSION = "v23.3.34";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const CURRENT_DATA_SCHEMA_VERSION = 2;
@@ -596,7 +596,12 @@ function normalizeCaseStatus(value, fallback = "chief_validation") {
 function normalizeCaseStatusFilter(value) {
   const raw = String(value || "").trim();
   if (!raw || raw === "all") return "all";
+  if (["expected", "preparing", "in_progress", "finalizing", "ready", "delivered"].some(key => raw === `phase:${key}`)) return raw;
   return normalizeCaseStatus(raw, "all");
+}
+
+function caseMatchesStatusFilter(item, filter) {
+  return filter === "all" || (String(filter).startsWith("phase:") ? getCaseOperationalPhase(item).key === filter.slice(6) : getCaseStatus(item) === filter);
 }
 
 function getCaseStatusLabel(value) {
@@ -604,7 +609,7 @@ function getCaseStatusLabel(value) {
 }
 
 function getCaseStatusOptions() {
-  return CASE_STATUS_DEFINITIONS.map(([value, label]) => ({ value, label }));
+  return [["expected", "Attendu"], ["preparing", "À préparer"], ["in_progress", "En intervention"], ["finalizing", "À finaliser"], ["ready", "Prêt"], ["delivered", "Livré"]].map(([key, label]) => ({ value: `phase:${key}`, label }));
 }
 
 function getCaseStatusTransitions(value) {
@@ -666,8 +671,34 @@ function getCaseOperationalPhase(item) {
   if (item.flags.workCompleted) return isCaseQualityValidated(item)
     ? { key: "ready", label: "Prêt" }
     : { key: "finalizing", label: "À finaliser" };
-  if (item.flags.workStarted) return { key: "in_progress", label: "En intervention" };
+  const bookings = typeof getIndexedCaseBookings === "function" ? getIndexedCaseBookings(item.id) : (state?.bookings || []).filter(b => b.caseId === item.id);
+  const actualWork = bookings.some(b => !b.deletedAt && b.type !== "leave" && (b.actualStart || b.startedAt || ["started", "in_progress", "paused", "completed"].includes(b.status)));
+  if (actualWork || (item.flags.workStarted && !bookings.length)) return { key: "in_progress", label: "En intervention" };
   return { key: "preparing", label: "À préparer" };
+}
+
+function normalizeClientCommitment(value = {}) {
+  return {
+    promisedAt: normalizeNullableDate(value.promisedAt),
+    nextContactAt: normalizeNullableDate(value.nextContactAt),
+    lastContactAt: normalizeNullableDate(value.lastContactAt),
+    note: String(value.note || ""),
+    updatedAt: normalizeNullableDate(value.updatedAt),
+    updatedBy: String(value.updatedBy || ""),
+  };
+}
+
+function recordClientCommitment(item, changes) {
+  const guard = guardAction("case.edit", { item }, { notify: false });
+  if (!guard.ok) return guard;
+  if (item.flags?.delivered) return { ok: false, message: "Le véhicule est déjà remis." };
+  for (const key of ["promisedAt", "nextContactAt", "lastContactAt"]) {
+    if (changes[key] && !Number.isFinite(new Date(changes[key]).getTime())) return { ok: false, message: "Date invalide." };
+  }
+  noteCaseRevisionCandidate(item);
+  item.clientCommitment = normalizeClientCommitment({ ...item.clientCommitment, ...changes, updatedAt: new Date().toISOString(), updatedBy: getCurrentActor().userId });
+  addHistory(item, "client.commitment", "Engagement / contact client", [changes.promisedAt ? `Promesse : ${changes.promisedAt}` : "", changes.nextContactAt ? `Prochain contact : ${changes.nextContactAt}` : "", changes.lastContactAt ? "Client informé" : "", changes.note || ""].filter(Boolean).join(" · "));
+  return { ok: true, message: "Suivi client enregistré." };
 }
 
 function getWorkAuthorizationIssues(item, booking = null) {
@@ -873,7 +904,11 @@ function updateSaveStatusIndicator(message, variant = "saved") {
 }
 
 function quietNotify(message, variant = "success") {
-  notifyUser(message, variant);
+  if (variant === "error" || variant === "warn") {
+    notifyUser(message, variant);
+    return;
+  }
+  if (typeof updateSaveStatusIndicator === "function") updateSaveStatusIndicator(message, variant === "offline" ? "warning" : "saved");
 }
 
 function bytesToBase64(bytes) {
@@ -3326,6 +3361,9 @@ function normalizeCase(item, bookings, realBookingCaseIds = null) {
     ),
     clientName: item.clientName || "À compléter",
     phone: item.phone || "",
+    visitReason: String(item.visitReason || item.arrivalNotes || ""),
+    clientCommitment: normalizeClientCommitment(item.clientCommitment),
+    exceptionFollowup: { ownerId: String(item.exceptionFollowup?.ownerId || ""), dueAt: normalizeNullableDate(item.exceptionFollowup?.dueAt), note: String(item.exceptionFollowup?.note || "") },
     ownerName: item.ownerName || item.companyName || item.owner || "",
     driverName: item.driverName || item.depositorName || item.broughtBy || "",
     driverPhone: item.driverPhone || item.depositorPhone || "",
@@ -5175,8 +5213,8 @@ const ROLE_TABS = {
   chef_atelier:  ["reception-workspace", "dossiers", "today", "pilotage", "planning", "technician", "atelier"],
   reception:     ["reception-workspace", "dossiers", "today"],
   technicien:    ["technician"],
-  controle_qualite: ["dossiers", "pilotage", "planning"],
-  qualite:       ["dossiers", "pilotage", "planning"],
+  controle_qualite: ["today", "dossiers"],
+  qualite:       ["today", "dossiers"],
   readonly:      ["dossiers", "pilotage", "planning"],
 };
 
@@ -5187,8 +5225,8 @@ const ROLE_DEFAULT_TABS = {
   chef_atelier:  "today",
   reception:     "today",
   technicien:    "technician",
-  controle_qualite: "dossiers",
-  qualite:       "dossiers",
+  controle_qualite: "today",
+  qualite:       "today",
   readonly:      "dossiers",
 };
 
@@ -5402,6 +5440,11 @@ function canAdvanceReceptionStep(caseItem, stepKey, actor) {
 function advanceReceptionWorkflow(caseId, action, payload = {}) {
   const item = (typeof state !== "undefined" ? state.cases : []).find((c) => c.id === caseId);
   if (!item) return { ok: false, message: "Dossier introuvable." };
+  if (isCaseReadonlyArchive(item)) return { ok: false, message: getArchivedCaseMessage(item) };
+  if (!["update_quality_status", "return_to_workshop", "deliver_vehicle"].includes(action)) {
+    const permission = guardAction(action === "receive_vehicle" ? "vehicle.receive" : "case.edit", { item }, { notify: false });
+    if (!permission.ok) return permission;
+  }
   noteCaseRevisionCandidate(item);
   item.receptionWorkflow = normalizeReceptionWorkflow(item.receptionWorkflow);
   const rw = item.receptionWorkflow;
@@ -5503,10 +5546,8 @@ function advanceReceptionWorkflow(caseId, action, payload = {}) {
       return { ok: true, message: "" };
     }
     case "send_to_workshop": {
-      item.flags.workStarted = true;
       rw.sentToWorkshopAt = now;
       rw.sentToWorkshopBy = actor.userId;
-      if (typeof recordFlagHistory === "function") recordFlagHistory(item, "workStarted", true);
       if (typeof addAuditLog === "function") addAuditLog("reception.sent_to_workshop", "Envoyé en atelier", payload.note || "", { caseId });
       if (typeof addHistory === "function") addHistory(item, "reception.sent_to_workshop", "Envoyé en atelier", payload.note || "");
       return { ok: true, message: "" };

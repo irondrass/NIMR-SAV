@@ -1,0 +1,50 @@
+import assert from "node:assert/strict";
+import { createNimrVmContext } from "./helpers/nimr_vm_context.mjs";
+const {context:c, run} = createNimrVmContext();
+run(`state = normalizeState({users:[{id:'operator',role:'reception',active:true}],currentUserId:'operator',cases:[],bookings:[]});`);
+assert.throws(() => c.createMinimalReceptionCase({identity:'123TU456',visitReason:''}), /motif/);
+const item = c.createMinimalReceptionCase({identity:'123TU456', visitReason:'Bruit au freinage', received:true,clientName:'Client'});
+assert.equal(item.flags.received,true);
+assert.equal(item.claims[0].clientApproved,false);
+assert.equal(item.planningTasks.length,0,'arrival must not invent an executable repair');
+assert.equal(c.getCaseOperationalPhase(item).key,'preparing');
+assert.equal(c.getWorkAuthorizationIssues(item).length,1);
+const before = JSON.stringify(item.appointment);
+assert.equal(c.recordClientCommitment(item,{promisedAt:'2026-09-07T10:00:00Z',nextContactAt:'2026-09-06T10:00:00Z',note:'Appel client'}).ok,true);
+assert.equal(JSON.stringify(item.appointment),before,'recording a promise does not replan the workshop');
+const restored = c.normalizeCase(JSON.parse(JSON.stringify(item)));
+assert.equal(restored.clientCommitment.promisedAt,item.clientCommitment.promisedAt);
+assert.equal(restored.clientCommitment.note,'Appel client');
+assert.equal(c.recordClientCommitment(item,{promisedAt:'bad-date'}).ok,false);
+const exceptions = c.getOperationalExceptions(item,new Date('2026-09-07T12:00:00Z'));
+assert.ok(exceptions.some(e=>e.code==='promise_late'));
+assert.ok(exceptions.some(e=>e.code==='contact'));
+assert.ok(exceptions.every(e=>e.owner));
+item.flags.delivered=true;
+assert.equal(c.getOperationalExceptions(item).length,0,'handed-over vehicles do not remain in active exception queues');
+assert.equal(c.recordClientCommitment(item,{note:'new'}).ok,false);
+item.flags.delivered=false;
+const tasks = c.getPdfEstimateTaskRows({distributedLines:[
+  {phase:'body',operation:'Déposer aile avant',sourceLineId:'a',laborHours:1},
+  {phase:'body',operation:'Redresser porte',sourceLineId:'b',laborHours:2},
+  {phase:'paint',operation:'Peindre aile',sourceLineId:'c',laborHours:1.5},
+]});
+assert.equal(tasks.length,3,'two operations in the same phase remain individually executable');
+assert.deepEqual(Array.from(tasks,t=>t.operation),['Déposer aile avant','Redresser porte','Peindre aile']);
+assert.equal(tasks.reduce((sum,t)=>sum+t.laborHours,0),4.5);
+assert.equal(new Set(tasks.map(t=>t.id)).size,3);
+assert.equal(tasks[1].dependencies[0],tasks[0].id);
+assert.ok(tasks.every(t=>t.sourceLineIds.length===1));
+run(`state.bookings=[{id:'planned',caseId:state.cases[0].id,type:'work',status:'planned'}]; state.cases[0].flags.workStarted=true; invalidateUiRuntimeIndexes();`);
+assert.equal(c.getCaseOperationalPhase(item).key,'preparing','assignment and a legacy started flag do not imply actual execution');
+run(`state.bookings[0].status='blocked';`);
+assert.equal(c.getCaseOperationalPhase(item).key,'preparing','blocking an unstarted operation does not mean work has started');
+run(`state.bookings[0].status='started'; state.bookings[0].actualStart='2026-09-06T08:00:00Z';`);
+assert.equal(c.getCaseOperationalPhase(item).key,'in_progress');
+assert.equal(c.caseMatchesStatusFilter(item,'phase:in_progress'),true);
+assert.equal(c.getDefaultTabForRole('controle_qualite'),'today');
+assert.deepEqual(Array.from(c.getAllowedTabsForRole('controle_qualite')),['today','dossiers']);
+run(`state.currentUserId='cq'; state.users.push({id:'cq',role:'controle_qualite',active:true});`);
+assert.equal(c.recordClientCommitment(item,{note:'forbidden'}).ok,false,'QC cannot alter client commitments');
+assert.throws(()=>c.createMinimalReceptionCase({identity:'123',visitReason:'No'}));
+console.log('Audit completion: minimal arrival, consent, commitment persistence, deadline alerts, exact PDF operations, actual activity and CQ scope PASS');

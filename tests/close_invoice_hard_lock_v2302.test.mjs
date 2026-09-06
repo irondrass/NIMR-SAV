@@ -39,11 +39,14 @@ assert.equal(result.ok, false);
 assert.match(result.message, /Terminer les travaux|tâches atelier/u);
 
 context.completeCaseWorkBookingsNow(item, new Date("2026-06-02T09:00:00.000Z"), { keepEmptyBookings: true, completedByOverride: "chief-close" });
+assert.equal(context.applyWorkflowAction(item, "close").ok, false, "finishing work does not prove physical handover");
+assert.equal(context.advanceReceptionWorkflow(item.id, "update_quality_status", {status:"validated"}).ok, true);
+assert.equal(context.advanceReceptionWorkflow(item.id, "deliver_vehicle").ok, true);
 result = context.applyWorkflowAction(item, "close");
 assert.equal(result.ok, true);
 assert.equal(context.isCaseReadonlyArchive(item), false);
 assert.equal(context.getCaseStatus(item), "closed");
-assert.equal(context.getCaseNextAction(item).code, "archive_case");
+assert.equal(context.getCaseNextAction(item).code, "done", "handover completes the daily workflow without a mandatory archive step");
 
 result = context.applyWorkflowAction(item, "archive");
 assert.equal(result.ok, true);

@@ -9,7 +9,7 @@ const { context } = createNimrVmContext({ filename: "canonical-workspaces-contra
 assert.equal(context.normalizeUserRole("qualite"), "controle_qualite");
 assert.deepEqual(
   Array.from(context.getAllowedTabsForRole("qualite")),
-  ["dossiers", "pilotage", "planning"],
+  ["today", "dossiers"],
   "un ancien rôle qualité doit migrer vers le workspace d'inspection qualité",
 );
 assert.equal(context.canAccessTab("qc-workspace", { role: "admin" }), false);

@@ -1822,9 +1822,7 @@ function getTechnicianTaskStatus(item, booking) {
   }
   if (status === "started") return "in_progress";
   if (status === "paused") return "paused";
-  if (status === "planned" && item?.flags?.received && !isCaseBlocked(item)
-    && !getWorkAuthorizationIssues(item, booking).length
-    && !hasUnfinishedPreviousRequiredBooking(item, booking)) return "ready";
+  if (status === "planned" && (booking.resourceIds || []).some(id => isTechnicianResource(getResource(id)) && getTechnicianTaskStartIssues(item, booking, id).length === 0)) return "ready";
   return "planned";
 }
 
@@ -2659,7 +2657,7 @@ function attachTechnicianTaskPhoto(item, bookingId, technicianId, photoId) {
   return { ok: true, message: "Photo rattachée à la tâche.", booking };
 }
 
-function rescheduleCaseBooking(item, bookingId, startAfter) {
+function rescheduleCaseBooking(item, bookingId, startAfter, options = {}) {
   const booking = findCaseBooking(item, bookingId);
   if (!booking) return { ok: false, message: "Tâche introuvable dans le planning." };
   const permission = guardAction("planning.edit", { booking }, { notify: false });
@@ -2699,6 +2697,7 @@ function rescheduleCaseBooking(item, bookingId, startAfter) {
     },
   );
   if (!match) return { ok: false, message: "Aucun créneau disponible à partir de cette date." };
+  if (options.previewOnly) return { ok: true, start: match.slot.start, end: match.slot.end, message: "Créneau proposé après contrôle des contraintes." };
   booking.initialPlannedStart = booking.initialPlannedStart || booking.plannedStart || booking.start;
   booking.initialPlannedEnd = booking.initialPlannedEnd || booking.plannedEnd || booking.end;
   applySlotToBooking(booking, match, duration);
@@ -4623,7 +4622,8 @@ function recalculateEstimatedDelivery(item, reason = "Recalcul automatique du pl
   item.totalPlannedMinutes = bookings.reduce((sum, booking) => sum + getBookingPlannedMinutes(booking, item), 0);
   item.totalActualMinutes = bookings.reduce((sum, booking) => sum + Math.max(0, Number(booking.actualWorkedMinutes || 0) || 0), 0);
   item.estimatedDelayMinutes = estimate.delayMinutes;
-  if (item.appointment) item.appointment.delivery = current || item.appointment.delivery || "";
+  // The appointment is the accepted schedule; recalculation only updates the estimate.
+  // A date communicated to the client lives exclusively in clientCommitment.promisedAt.
 
   if (changed) {
     const actorName = actor?.userName || actor?.name || actor || "Système";

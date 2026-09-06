@@ -94,7 +94,7 @@ for (const permission of qcDenied) {
 
 const qualityCase = {
   id: "quality-case",
-  flags: { workCompleted: true, qualityApproved: false, delivered: false },
+  flags: { received: true, workCompleted: true, qualityApproved: false, delivered: false },
   customerClaims: [],
   receptionWorkflow: { qualityStatus: "not_started" },
 };

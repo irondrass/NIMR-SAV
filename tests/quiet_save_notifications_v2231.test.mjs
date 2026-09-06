@@ -62,7 +62,7 @@ assert.ok(appJs.includes('quietNotify("Mode hors ligne actif. Les données local
 assert.ok(syncJs.includes('quietNotify("Mise à jour reçue depuis un autre poste.", "info")'), "Sync entrante sans conflit non convertie");
 
 // Test 9: Utilisateur courant
-assert.ok(appJs.includes('quietNotify("Utilisateur actif mis à jour.", "success")'), "Changement utilisateur actif non converti");
+assert.ok(!appJs.includes('notifyUser("Utilisateur actif mis à jour.", "success")'), "Un changement de session ne doit pas créer un toast de routine");
 
 // Test 10: Toasts maintenus pour actions sensibles
 assert.ok(syncJs.includes('notifyUser("Données et réglages restaurés depuis Supabase.", "success")'), "Restauration cloud doit garder son toast");

@@ -161,7 +161,7 @@ assert.equal(run("normalizeQualityStatus('unknown_quality')"), "not_started");
 run(`state = normalizeState({
   users: [{ id: "qc", name: "QC", role: "controle_qualite", active: true }],
   currentUserId: "qc",
-  cases: [{ id: "quality-case", flags: {}, receptionWorkflow: { qualityStatus: "approved", qualityReviewHistory: [] } }],
+  cases: [{ id: "quality-case", flags: { received: true, workCompleted: true }, receptionWorkflow: { qualityStatus: "approved", qualityReviewHistory: [] } }],
   resources: [],
   bookings: []
 })`);

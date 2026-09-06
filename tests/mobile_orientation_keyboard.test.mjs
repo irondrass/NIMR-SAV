@@ -43,12 +43,6 @@ const { result, errors } = await runMobileCdpTest({
 
       await click('#technician-field-action-dock [data-tech-action="note"]');
       await waitFor("!document.querySelector('#custom-modal-overlay').hidden", "modal observation");
-      await evaluate(`(() => {
-        const select = document.querySelector("#prompt-modal-input");
-        select.value = "__custom__";
-        select.dispatchEvent(new Event("change", { bubbles: true }));
-        document.querySelector("#custom-modal-confirm").click();
-      })()`);
       await waitFor("document.querySelector('#prompt-modal-input')?.tagName === 'INPUT'", "champ observation libre");
       await evaluate(`document.querySelector("#prompt-modal-input").focus()`);
 

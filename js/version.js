@@ -1,3 +1,3 @@
-window.APP_VERSION = "v23.3.33";
-window.NIMR_BUILD = "v23.3.33";
-window.NIMR_CACHE_NAME = "nimr-sav-v23.3.33";
+window.APP_VERSION = "v23.3.34";
+window.NIMR_BUILD = "v23.3.34";
+window.NIMR_CACHE_NAME = "nimr-sav-v23.3.34";

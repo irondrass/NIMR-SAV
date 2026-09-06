@@ -19,16 +19,19 @@ const { result, errors } = await runMobileCdpTest({
     await evaluate(`persistLargeStateSnapshot(state, { appVersion: APP_VERSION, reason: "mobile-offline-fixture" })`);
 
     await evaluate(`navigator.serviceWorker.ready.then(() => true)`);
+    // No real Auth session is configured: exercise the validated offline identity.
+    // An online reload must require server authentication (IDENTITY-001C).
+    await setOffline(true);
     await evaluate(`window.__nimrAppReady = false`);
     await send("Page.reload", { ignoreCache: false }, sessionId);
     await waitFor("window.__nimrAppReady === true", "application contrôlée par le service worker", 120);
     await waitFor("Boolean(navigator.serviceWorker.controller)", "contrôle PWA actif", 120);
     await waitFor("Boolean(document.querySelector('[data-technician-current-task]'))", "tâche technicien restaurée", 80);
 
-    await setOffline(true);
     await waitFor("navigator.onLine === false", "passage hors ligne", 80);
     await waitFor("!document.querySelector('#offline-banner').hidden", "bannière hors ligne", 80);
 
+    await evaluate('window.NIMR_CLOUD_DURABILITY = null');
     await click('#technician-field-action-dock [data-tech-action="note"]');
     await waitFor("!document.querySelector('#custom-modal-overlay').hidden", "modèles d'observation hors ligne");
     await evaluate(`(() => {
@@ -39,6 +42,7 @@ const { result, errors } = await runMobileCdpTest({
     })()`);
     await waitFor("state.bookings.some((booking) => booking.notes?.some((note) => /Essai/.test(note.text)))", "observation locale conservée");
     await waitFor("Number(window.NIMR_OUTBOX_STATUS?.pending || 0) > 0", "opération IndexedDB en attente", 120);
+    await waitFor("window.NIMR_CLOUD_DURABILITY?.durable === true", "lot de mutations entièrement durable", 120);
     await evaluate(`persistLargeStateSnapshot(state, { appVersion: APP_VERSION, reason: "mobile-offline-action" })`);
 
     const beforeReload = await evaluate(`(async () => {

@@ -494,15 +494,26 @@ function setActiveTab(tab) {
   });
 }
 
-function renderNavigationVisibility() {
+function renderPrimaryNavigationVisibility() {
   if (typeof getAllowedTabsForCurrentUser !== "function") return;
   const allowed = getAllowedTabsForCurrentUser();
+  const role = toRuntimeUserRole(getCurrentUser()?.role);
+  const primary = {
+    admin: ["today", "dossiers", "planning", "pilotage", "atelier"],
+    chef_atelier: ["today", "dossiers", "planning", "pilotage", "atelier"],
+    directeur_sav: ["pilotage", "today", "dossiers", "planning"],
+    reception: ["today", "dossiers"],
+    controle_qualite: ["today", "dossiers"],
+    technicien: ["technician"],
+    readonly: ["pilotage", "dossiers"],
+  }[role] || allowed;
   $$(".nav-button").forEach((button) => {
     const tabId = button.dataset.tab;
-    const isAllowed = allowed.includes(tabId);
+    const isAllowed = allowed.includes(tabId) && primary.includes(tabId);
     button.hidden = !isAllowed;
     button.style.display = isAllowed ? "" : "none";
   });
+  $$(".sidebar-nav-divider, .sidebar-nav-section-label").forEach(element => { element.hidden = true; });
 }
 
 

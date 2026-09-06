@@ -18,8 +18,10 @@ const server = createServer(async (req, res) => {
         state.bookings[0].status = "completed";
         state.bookings[0].remainingMinutes = 0;
         activeCaseId = state.cases[0].id;
-        activeTab = "dossiers";
+        activeTab = "today";
       }
+      bindCaseCreation();
+      renderNavigationVisibility();
       render();
       setActiveTab(activeTab);
       document.querySelectorAll(".local-lock-overlay").forEach(e => e.hidden = true);

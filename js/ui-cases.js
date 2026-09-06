@@ -1,5 +1,6 @@
 const CASE_LIST_PAGE_SIZE = 50;
 let caseListPage = 1;
+let caseInspectionIds = null;
 let caseListFilterSignature = "";
 let savPerformanceDashboardCache = null;
 let uiRuntimeIndexRevision = 0;
@@ -373,6 +374,7 @@ function renderNavigationVisibility() {
       button.removeAttribute("aria-current");
     }
   });
+  if (typeof renderPrimaryNavigationVisibility === "function") renderPrimaryNavigationVisibility();
   renderAdminTechnicalVisibility();
 }
 
@@ -486,10 +488,16 @@ function renderSavKpis(snapshot) {
     target.innerHTML = `<div class="empty-inline">Dashboard SAV réservé aux rôles autorisés.</div>`;
     return;
   }
-  const kpis = buildSavKpis(snapshot);
+  const liveCases = getSavDashboardCases(getSavDashboardRange()).filteredCases.filter(isCasePhysicallyPresent);
+  const kpis = [
+    { label: "Véhicules présents", value: liveCases.length, detail: "Jusqu’à la remise physique", ids: liveCases.map(c => c.id) },
+    { label: "Engagements menacés", value: liveCases.filter(c => getOperationalExceptions(c).some(e => e.code.startsWith("promise"))).length, detail: "Promesse dépassée ou à sécuriser", level: "warn", ids: liveCases.filter(c => getOperationalExceptions(c).some(e => e.code.startsWith("promise"))).map(c => c.id) },
+    { label: "Décisions à traiter", value: liveCases.filter(c => getOperationalExceptions(c).length).length, detail: "Une entrée par véhicule", level: "warn", ids: liveCases.filter(c => getOperationalExceptions(c).length).map(c => c.id) },
+    { label: "Charge / capacité", value: `${snapshot?.metrics?.humanLoadPercent || 0}%`, detail: "Planning de la période sélectionnée", navTab: "planning" },
+  ];
   target.innerHTML = kpis
-    .map((kpi) => `
-      <button type="button" class="sav-kpi-card ${kpi.level || "neutral"}" data-nav-tab="${escapeAttr(kpi.navTab || "dossiers")}">
+    .map((kpi, index) => `
+      <button type="button" class="sav-kpi-card ${kpi.level || "neutral"}" data-kpi-index="${index}" data-nav-tab="${escapeAttr(kpi.navTab || "dossiers")}">
         <span>${escapeHtml(kpi.label)}</span>
         <strong>${escapeHtml(kpi.value)}</strong>
         <small>${escapeHtml(kpi.detail)}</small>
@@ -500,7 +508,15 @@ function renderSavKpis(snapshot) {
   $$(".sav-kpi-card[data-nav-tab]", target).forEach((card) => {
     card.addEventListener("click", () => {
       const tab = card.dataset.navTab || "dossiers";
+      const kpi = kpis[Number(card.dataset.kpiIndex)];
+      if (kpi?.ids) {
+        caseInspectionIds = new Set(kpi.ids);
+        state.ui.caseStatusFilter = "all"; state.ui.caseTypeFilter = "all";
+        if ($("#case-search")) $("#case-search").value = "";
+      } else if (tab === "planning") state.planningDate = todayKey(getSavDashboardRange().start);
       if (typeof setActiveTab === "function") setActiveTab(tab);
+      if (tab === "dossiers") renderCases();
+      if (tab === "planning") renderPlanning();
     });
   });
 }
@@ -1336,7 +1352,7 @@ function getSavDashboardCases(range) {
   const filters = getSavDashboardFilters();
   const filteredCases = state.cases
     .filter((item) => item && !item.deletedAt)
-    .filter((item) => filters.status === "all" || getCaseStatus(item) === filters.status)
+    .filter((item) => caseMatchesStatusFilter(item, filters.status))
     .filter((item) => caseMatchesTypeFilter(item, filters.type));
   return {
     filteredCases,
@@ -1848,6 +1864,18 @@ let workshopProgressFilter = "all";
 function renderTodayWorkshop(now = new Date()) {
   const board = $("#today-workshop-board");
   if (!board) return;
+  const role = toRuntimeUserRole(getCurrentUser()?.role);
+  const heading = $("#view-today h1");
+  if (heading) heading.textContent = role === "controle_qualite" ? "À contrôler" : role === "reception" ? "Accueil et suivi client" : "Aujourd’hui atelier";
+  const team = $("#view-today .workshop-live-control-section");
+  if (team) team.hidden = ["reception", "controle_qualite"].includes(role);
+  const secondary = $("#view-today .today-secondary-queues");
+  if (secondary) secondary.hidden = true;
+  const headingPanel = $("#view-today .panel-heading");
+  if (headingPanel && hasPermission("case.create") && !headingPanel.querySelector("[data-new-arrival]")) {
+    const create = document.createElement("button"); create.type = "button"; create.className = "primary-button"; create.dataset.newArrival = ""; create.textContent = "Nouvelle arrivée";
+    create.addEventListener("click", () => startReceptionCaseCreation()); headingPanel.append(create);
+  }
   const groups = buildTodayWorkshopGroups(now);
   const total = new Set(Object.values(groups).flat().map((entry) => entry.item.id)).size;
   const pill = $("#today-count-pill");
@@ -1942,15 +1970,20 @@ function buildWorkshopLiveTechnicianRow(technician, now = new Date()) {
     .sort((a, b) => {
       const aStart = getWorkshopLiveTaskStart(a)?.getTime() ?? Number.MAX_SAFE_INTEGER;
       const bStart = getWorkshopLiveTaskStart(b)?.getTime() ?? Number.MAX_SAFE_INTEGER;
-      return aStart - bStart || compareWorkshopLiveTaskRows(a, b);
+      const aReady = a.status === "ready" ? 0 : 1;
+      const bReady = b.status === "ready" ? 0 : 1;
+      return aReady - bReady || aStart - bStart || compareWorkshopLiveTaskRows(a, b);
     })[0] || null;
+  const withinHours = typeof getEffectiveResourceDayIntervals === "function" && getEffectiveResourceDayIntervals(technician, now).some(i => i.start <= now && now < i.end);
+  const reserved = (typeof getIndexedResourceBookings === "function" ? getIndexedResourceBookings(technician.id) : state.bookings).some(b => (b.resourceIds || [b.resourceId]).includes(technician.id) && getBookingOperationalStatus(b) !== "completed" && getRuntimeBookingSegments(b).some(s => new Date(s.start) <= now && now < new Date(s.end)));
+  const availability = !withinHours ? "Hors horaires / absent" : reserved ? "Créneau réservé" : "Disponible maintenant";
   return {
     technician,
     rows,
     current,
     next,
-    status: current?.status || "available",
-    statusLabel: current?.statusLabel || "Sans tâche active",
+    status: current?.status || (!withinHours ? "unavailable" : reserved ? "reserved" : "available"),
+    statusLabel: current?.statusLabel || availability,
     currentOperation: getWorkshopLiveExactOperationLabel(current),
     nextOperation: getWorkshopLiveExactOperationLabel(next),
     timing: getWorkshopLiveTaskTiming(current, now),
@@ -2006,7 +2039,7 @@ function renderWorkshopLiveTechnicianCard(row, now = new Date()) {
   const currentTask = row.current
     ? renderWorkshopLiveTaskSummary(row.current, "Maintenant", { showLiveTiming: true, now })
     : `<div class="workshop-live-task is-empty"><small>Maintenant</small><strong>Sans tâche active</strong><span>Aucune opération démarrée, en pause ou bloquée.</span></div>`;
-  const nextTask = renderWorkshopLiveTaskSummary(row.next, "Prochaine affectation", { emptyLabel: "Aucune tâche suivante" });
+  const nextTask = renderWorkshopLiveTaskSummary(row.next, row.next?.status === "ready" ? "Ensuite · exécutable sous réserve du contrôle de démarrage" : "Ensuite · prévue", { emptyLabel: "Aucune tâche suivante" });
   return `
     <article class="workshop-live-technician-card status-${escapeAttr(row.status)}">
       <header>
@@ -2319,21 +2352,32 @@ function buildWorkshopProgressRow(item, now = new Date()) {
     lastActivityAt,
     lastActivityHours,
     stale: lastActivityHours >= WORKSHOP_PROGRESS_STALE_HOURS,
-    inProgress: flags.workStarted === true && flags.workCompleted !== true,
+    inProgress: getCaseOperationalPhase(item).key === "in_progress",
     workCompleted: flags.workCompleted === true && flags.delivered !== true,
     readyForDelivery: flags.workCompleted === true && isCaseQualityValidated(item) && flags.delivered !== true,
     nextAction: getCaseNextAction(item),
     controlTower: buildWorkshopLiveCaseTaskSummary(item, now, currentStep),
   };
-  row.late = row.etaOverdue || row.existingLate;
+  row.exceptions = getOperationalExceptions(item, now);
+  row.late = row.etaOverdue || row.existingLate || row.exceptions.some(e => e.code === "promise_late");
   row.priority = getWorkshopProgressPriority(row);
   row.priorityLabel = getWorkshopProgressPriorityLabel(row);
+  if (row.exceptions.length) {
+    row.priority = Math.min(row.priority, row.exceptions[0].severity === "danger" ? 0 : 1);
+    row.priorityLabel = row.exceptions[0].label;
+  }
   return row;
 }
 
 function workshopProgressRowMatchesFilter(row, filter) {
   const filters = {
     all: () => true,
+    expected: () => !row.item.flags?.received,
+    exceptions: () => row.exceptions.length > 0,
+    promise: () => row.exceptions.some(e => e.code.startsWith("promise")),
+    contact: () => row.exceptions.some(e => e.code === "contact"),
+    quality: () => row.workCompleted && !row.readyForDelivery,
+    support: () => /expert|garantie|diagnos|support/i.test([row.item.blockerReason, row.item.blockerDetails, getCasePrimaryType(row.item)].join(" ")),
     late: () => row.late,
     blocked: () => row.blocked,
     stale: () => row.stale,
@@ -2359,7 +2403,12 @@ function compareWorkshopProgressRows(left, right) {
 function buildWorkshopProgressBoardModel(now = new Date(), options = {}) {
   const search = String(options.search ?? workshopProgressSearch).trim();
   const filter = String(options.filter ?? workshopProgressFilter) || "all";
-  const activeCases = (Array.isArray(state?.cases) ? state.cases : []).filter(isWorkshopProgressActiveCase);
+  const role = toRuntimeUserRole(getCurrentUser()?.role);
+  const activeCases = (Array.isArray(state?.cases) ? state.cases : []).filter(item => {
+    if (item.deletedAt || item.flags?.delivered) return false;
+    if (role === "controle_qualite") return isCasePhysicallyPresent(item) && (item.flags?.workCompleted || ["rejected", "rework"].includes(item.receptionWorkflow?.qualityStatus)) && !isCaseQualityValidated(item);
+    return isWorkshopProgressActiveCase(item) || (!item.archivedAt && (role === "reception" || filter === "expected") && !item.flags?.received);
+  });
   const rows = activeCases
     .filter((item) => caseMatchesGlobalSearch(item, search))
     .map((item) => buildWorkshopProgressRow(item, now))
@@ -2368,60 +2417,123 @@ function buildWorkshopProgressBoardModel(now = new Date(), options = {}) {
   return { total: activeCases.length, visible: rows.length, search, filter, rows };
 }
 
+function getOperationalExceptions(item, now = new Date()) {
+  if (!item || item.deletedAt || item.flags?.delivered) return [];
+  const result = [];
+  const add = (code, label, severity, owner, dueAt = "") => result.push({ code, label, severity, owner, dueAt });
+  const commitment = item.clientCommitment || {};
+  const promised = getWorkshopProgressValidDate(commitment.promisedAt);
+  const eta = getWorkshopProgressEta(item);
+  if (promised && !isCaseQualityValidated(item)) {
+    if (promised < now) add("promise_late", "Promesse dépassée", "danger", "Réception", commitment.promisedAt);
+    else if (!eta || eta > promised) add("promise_risk", "Promesse à sécuriser", "warn", "Chef Atelier", commitment.promisedAt);
+  }
+  const contact = getWorkshopProgressValidDate(commitment.nextContactAt);
+  if (contact && contact <= now) add("contact", "Client à recontacter", "danger", "Réception", commitment.nextContactAt);
+  if (isCaseBlocked(item)) add("blocked", getCaseBlockerLabel(item) || "Blocage à résoudre", "danger", "Chef Atelier");
+  if (["rejected", "rework"].includes(item.receptionWorkflow?.qualityStatus)) add("quality", "Anomalie qualité à corriger", "danger", "Chef Atelier");
+  if (isCasePhysicallyPresent(item) && !item.flags?.workCompleted && getWorkAuthorizationIssues(item).length) add("authorization", "Accord travaux à obtenir", "warn", "Réception");
+  if (isCasePhysicallyPresent(item) && !item.flags?.workCompleted) {
+    const activity = getWorkshopProgressLastActivityAt(item);
+    if (getWorkshopProgressAgeHours(activity, now) >= WORKSHOP_PROGRESS_STALE_HOURS) add("stale", "Sans évolution depuis 24 h", "warn", "Chef Atelier");
+    if (eta && eta < now) add("eta", "Fin estimée dépassée", "danger", "Chef Atelier");
+    const bookings = getWorkshopProgressBookings(item);
+    const unavailableAssignment = bookings.some(b => !["completed", "cancelled"].includes(getBookingOperationalStatus(b)) &&
+      (b.resourceIds || []).some(id => {
+        const resource = state.resources?.find(r => r.id === id);
+        return !resource || resource.active === false || (typeof isResourceAvailableForSlot === "function" && !isResourceAvailableForSlot(resource, b).ok);
+      }));
+    if (unavailableAssignment) add("assignment", "Affectation à revoir : ressource indisponible", "warn", "Chef Atelier");
+    if (bookings.some(b => ["started", "paused"].includes(getBookingOperationalStatus(b)) && new Date(b.end || b.plannedEnd) < now)) add("overrun", "Durée d’opération dépassée", "warn", "Chef Atelier");
+  }
+  const followup = item.exceptionFollowup || {};
+  const owner = state.users?.find(u => u.id === followup.ownerId && u.active !== false);
+  return result.map(e => ({ ...e, owner: owner?.name || e.owner, dueAt: followup.dueAt || e.dueAt }))
+    .sort((a, b) => (a.severity === "danger" ? 0 : 1) - (b.severity === "danger" ? 0 : 1));
+}
+
+function renderClientSituation(item) {
+  const commitment = item.clientCommitment || {};
+  const eta = getWorkshopProgressEta(item);
+  return `<dl class="client-situation">
+    <div><dt>Motif</dt><dd>${escapeHtml(item.visitReason || item.arrivalNotes || item.claims?.[0]?.title || "À préciser")}</dd></div>
+    <div><dt>Disponibilité estimée</dt><dd>${eta ? escapeHtml(formatDateTime(eta)) : "À confirmer"}</dd></div>
+    <div><dt>Promesse client</dt><dd>${commitment.promisedAt ? escapeHtml(formatDateTime(commitment.promisedAt)) : "Aucune heure promise enregistrée"}</dd></div>
+    <div><dt>Prochain contact</dt><dd>${commitment.nextContactAt ? escapeHtml(formatDateTime(commitment.nextContactAt)) : "Non fixé"}</dd></div>
+    ${commitment.note ? `<div><dt>Dernier échange</dt><dd>${escapeHtml(commitment.note)}</dd></div>` : ""}
+  </dl>`;
+}
+
+function toLocalInputDate(value) {
+  const date = value ? new Date(value) : null;
+  if (!date || !Number.isFinite(date.getTime())) return "";
+  return `${todayKey(date)}T${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
+function openOperationalCasePanel(caseId) {
+  const item = state.cases.find(c => c.id === caseId);
+  if (!item || !canAccessTab("dossiers")) return;
+  document.querySelector("#operational-case-dialog")?.close();
+  document.querySelector("#operational-case-dialog")?.remove();
+  const dialog = document.createElement("dialog"); dialog.id = "operational-case-dialog"; dialog.className = "operational-case-dialog";
+  dialog.setAttribute("aria-labelledby", "operational-case-title");
+  const editable = canRenderAction("case.edit", { item }) && !item.flags?.delivered;
+  const c = item.clientCommitment || {};
+  const f = item.exceptionFollowup || {};
+  dialog.innerHTML = `<header><h2 id="operational-case-title">${escapeHtml(item.plate || item.vin || item.vehicle)} · ${escapeHtml(item.clientName)}</h2><button type="button" data-close>Fermer</button></header>
+    <div data-context-decisions></div>${renderClientSituation(item)}
+    ${editable ? `<details><summary>Engagement, contact et décision attendue</summary><form data-client-followup class="form-grid">
+      <label>Heure promise au client<input type="datetime-local" name="promisedAt" value="${escapeAttr(toLocalInputDate(c.promisedAt))}" /></label>
+      <label>Prochain contact<input type="datetime-local" name="nextContactAt" value="${escapeAttr(toLocalInputDate(c.nextContactAt))}" /></label>
+      <label>Compte rendu de l’échange<textarea name="note">${escapeHtml(c.note || "")}</textarea></label>
+      <label><input type="checkbox" name="contacted" /> Client informé maintenant</label>
+      <label>Responsable de la décision<select name="ownerId"><option value="">Responsable métier habituel</option>${(state.users || []).filter(u => u.active !== false && ["admin", "chef_atelier", "reception", "directeur_sav"].includes(toRuntimeUserRole(u.role))).map(u => `<option value="${escapeAttr(u.id)}" ${u.id === f.ownerId ? "selected" : ""}>${escapeHtml(u.name || u.id)}</option>`).join("")}</select></label>
+      <label>Échéance de la décision<input type="datetime-local" name="dueAt" value="${escapeAttr(toLocalInputDate(f.dueAt))}" /></label>
+      <button class="primary-button" type="submit">Enregistrer le suivi</button>
+    </form></details>` : ""}
+    <button type="button" data-open-full class="secondary-button">Ouvrir le dossier et le planning</button>`;
+  document.body.append(dialog);
+  const contextRoot = dialog.querySelector("[data-context-decisions]");
+  renderOperationalDecisions(contextRoot, item);
+  const trigger = document.activeElement;
+  dialog.querySelector("[data-close]").onclick = () => dialog.close();
+  dialog.addEventListener("close", () => { dialog.remove(); trigger?.focus?.(); });
+  dialog.querySelector("[data-open-full]").onclick = () => { dialog.close(); openWorkshopProgressCase(item.id); };
+  dialog.querySelector("[data-client-followup]")?.addEventListener("submit", async event => {
+    event.preventDefault(); const form = event.currentTarget; if (!form.reportValidity()) return;
+    const data = new FormData(form);
+    const dateValue = key => data.get(key) ? new Date(data.get(key)).toISOString() : "";
+    const changes = { promisedAt: dateValue("promisedAt"), nextContactAt: dateValue("nextContactAt"), note: data.get("note") };
+    if (data.get("contacted")) { changes.lastContactAt = new Date().toISOString(); if (changes.nextContactAt && new Date(changes.nextContactAt) <= new Date()) changes.nextContactAt = ""; }
+    const result = recordClientCommitment(item, changes);
+    if (!result.ok) { notifyUser(result.message, "error"); return; }
+    item.exceptionFollowup = { ownerId: String(data.get("ownerId") || ""), dueAt: dateValue("dueAt"), note: changes.note };
+    const saved = await saveState({ changedCase: item, flushCloud: true, cloudReason: "client-followup" });
+    if (!saved) { notifyUser("Le suivi reste ouvert sur ce poste, mais la sauvegarde n’a pas été confirmée. Vérifiez le stockage avant de fermer l’application.", "warn"); return; }
+    dialog.close(); render(); openOperationalCasePanel(item.id);
+  });
+  dialog.showModal();
+}
+
 function renderWorkshopProgressCell(label, content, className = "") {
   return `<span class="workshop-progress-cell${className ? ` ${className}` : ""}"><small class="workshop-progress-cell-label">${escapeHtml(label)}</small>${content}</span>`;
 }
 
 function renderWorkshopProgressRow(row) {
   const item = row.item;
-  const identity = item.plate || item.vin || "Sans immatriculation / VIN";
-  const orderReference = typeof getPrintOrderReference === "function" ? getPrintOrderReference(item) : "";
-  const safeOrderReference = orderReference && orderReference !== item.id ? orderReference : "OR non renseigné";
-  const intervention = getClaimTypeLabel(getCasePrimaryType(item));
-  const blockerDetails = [
-    row.partsLabel,
-    row.blocked ? row.blockerLabel : "",
-    row.blockerDetails,
-    row.blocked && row.blockedHours > 0 ? `Bloqué depuis ${formatWorkshopProgressAge(row.blockedHours)}` : "",
-  ].filter(Boolean).join(" · ");
-  const lastActivity = row.lastActivityAt
-    ? `${formatDateTime(row.lastActivityAt)} · il y a ${formatWorkshopProgressAge(row.lastActivityHours)}`
-    : "Évolution non renseignée";
-  const staleNotice = row.stale ? `<strong>Sans évolution depuis ${escapeHtml(formatWorkshopProgressAge(row.lastActivityHours))}</strong>` : "";
-  const eta = row.eta
-    ? `ETA dossier : ${formatDateTime(row.eta)}${row.etaOverdue ? " · EN RETARD" : ""}`
-    : "ETA dossier non définie";
   const tower = row.controlTower || {};
-  const currentTiming = tower.currentTiming || {};
-  const currentTimingLabel = tower.current
-    ? [
-        currentTiming.actualStart ? `Début réel ${formatTime(currentTiming.actualStart)}` : "",
-        `Écoulé ${formatTechnicianElapsedTime(currentTiming.elapsedMilliseconds || 0)}`,
-        currentTiming.estimatedEnd && !Number.isNaN(currentTiming.estimatedEnd.getTime())
-          ? `Fin estimée ${formatTime(currentTiming.estimatedEnd)}`
-          : "",
-        `${tower.remaining || 0} tâche${tower.remaining > 1 ? "s" : ""} restante${tower.remaining > 1 ? "s" : ""}`,
-      ].filter(Boolean).join(" · ")
-    : "Aucune opération active";
-  const nextTimingLabel = tower.next
-    ? [tower.nextTechnician, tower.nextStart ? `Début prévu ${formatTime(tower.nextStart)}` : ""].filter(Boolean).join(" · ")
-    : "Aucune opération suivante";
-  return `
-    <button class="workshop-progress-row priority-level-${row.priority}" type="button" data-workshop-progress-case="${escapeAttr(item.id)}" aria-label="Ouvrir le dossier de ${escapeAttr(item.clientName || identity)}">
-      ${renderWorkshopProgressCell("Priorité", `<strong class="workshop-progress-priority">${escapeHtml(row.priorityLabel)}</strong>`, "priority-cell")}
-      ${renderWorkshopProgressCell("Véhicule / client", `<strong>${escapeHtml(item.vehicle || "Véhicule non renseigné")}</strong><span>${escapeHtml(identity)}</span><span>${escapeHtml(item.clientName || "Client non renseigné")}</span>`, "identity-cell")}
-      ${renderWorkshopProgressCell("OR / intervention", `<strong>${escapeHtml(safeOrderReference)}</strong><span>${escapeHtml(intervention)}</span>`)}
-      ${renderWorkshopProgressCell("Entrée", `<span>${row.receivedAt ? formatDateTime(row.receivedAt) : "Date non renseignée"}</span>`)}
-      ${renderWorkshopProgressCell("Phase", `<strong>${escapeHtml(getCaseOperationalPhase(item).label)}</strong><span>${escapeHtml(row.progress.label)}</span>`)}
-      ${renderWorkshopProgressCell("Responsable", `<strong>${escapeHtml(row.responsible)}</strong>`)}
-      ${renderWorkshopProgressCell("Opération active", tower.current ? `<strong>${escapeHtml(tower.currentOperation || row.currentStep.label)}</strong><span>${escapeHtml(tower.current?.statusLabel || "")} · ${escapeHtml(tower.currentTechnician || "Non affecté")}</span><span>${escapeHtml(currentTimingLabel)}</span>` : `<span>Aucune opération active</span>`, "workshop-live-operation-cell")}
-      ${renderWorkshopProgressCell("Opération suivante", tower.next ? `<strong>${escapeHtml(tower.nextOperation || "Opération suivante")}</strong><span>${escapeHtml(nextTimingLabel)}</span>` : `<span>Aucune opération suivante</span>`, "workshop-live-operation-cell")}
-      ${renderWorkshopProgressCell("Pièces / blocage", `<span>${escapeHtml(blockerDetails)}</span>`)}
-      ${renderWorkshopProgressCell("Dernière évolution", `<span>${escapeHtml(lastActivity)}</span>${staleNotice}`, row.stale ? "is-stale" : "")}
-      ${renderWorkshopProgressCell("Livraison estimée", `<span>${escapeHtml(eta)}</span>`, row.etaOverdue ? "is-late" : "")}
-      ${renderWorkshopProgressCell("Prochaine action", `<strong>${escapeHtml(row.nextAction?.label || "Consulter le dossier")}</strong>`)}
-    </button>
-  `;
+  const phase = getCaseOperationalPhase(item);
+  const reception = toRuntimeUserRole(getCurrentUser()?.role) === "reception";
+  const exception = row.exceptions?.[0];
+  const current = tower.currentOperation || "Aucune opération démarrée";
+  const next = tower.nextOperation || "À définir";
+  return `<button class="workshop-progress-row operational-vehicle-card priority-level-${row.priority}" type="button" data-workshop-progress-case="${escapeAttr(item.id)}" aria-label="Consulter et agir : ${escapeAttr(item.plate || item.vin || item.clientName)}">
+    <span class="operational-vehicle-identity"><strong>${escapeHtml(item.plate || item.vin || "Identité à compléter")}</strong><span>${escapeHtml(item.vehicle)} · ${escapeHtml(item.clientName)}</span><b>${escapeHtml(phase.label)}</b></span>
+    <span><small>Motif</small><strong>${escapeHtml(item.visitReason || item.arrivalNotes || item.claims?.[0]?.title || "À préciser")}</strong></span>
+    <span><small>Maintenant</small><strong>${escapeHtml(current)}</strong>${tower.currentTechnician && !reception ? `<span>${escapeHtml(tower.currentTechnician)}</span>` : ""}<small>Ensuite : ${escapeHtml(next)}</small></span>
+    <span><small>Disponibilité estimée</small><strong>${row.eta ? escapeHtml(formatDateTime(row.eta)) : "À confirmer"}</strong><small>Promesse : ${item.clientCommitment?.promisedAt ? escapeHtml(formatDateTime(item.clientCommitment.promisedAt)) : "non renseignée"}</small>${reception ? `<small>Contact : ${item.clientCommitment?.nextContactAt ? escapeHtml(formatDateTime(item.clientCommitment.nextContactAt)) : "non fixé"}</small>` : ""}</span>
+    <span class="operational-vehicle-decision ${exception ? escapeAttr(exception.severity) : ""}"><strong>${escapeHtml(exception?.label || row.nextAction?.label || "Consulter")}</strong>${exception ? `<small>${escapeHtml(exception.owner)}${exception.dueAt ? ` · ${escapeHtml(formatDateTime(exception.dueAt))}` : ""}</small>` : ""}<small>Consulter / agir</small></span>
+  </button>`;
 }
 
 function openWorkshopProgressCase(caseId) {
@@ -2472,7 +2584,7 @@ function renderWorkshopProgressBoard(now = new Date()) {
     : `<div class="empty-inline workshop-progress-empty">Aucun véhicule ne correspond à ces critères.</div>`;
   board.onclick = (event) => {
     const button = event.target.closest?.("[data-workshop-progress-case]");
-    if (button && board.contains(button)) openWorkshopProgressCase(button.dataset.workshopProgressCase);
+    if (button && board.contains(button)) openOperationalCasePanel(button.dataset.workshopProgressCase);
   };
   bindWorkshopProgressControls();
   return model;
@@ -2691,6 +2803,19 @@ function renderTechnicianFieldFocus(currentRow, nextRow) {
       </article>
     ` : ""}
   `;
+}
+
+function refreshTechnicianNetworkStatus() {
+  const online = typeof navigator === "undefined" || navigator.onLine !== false;
+  const count = getTechnicianPendingActionCount();
+  const label = online
+    ? (count ? `En ligne · ${count} action${count > 1 ? "s" : ""} en attente de confirmation` : "En ligne · aucune action locale en attente")
+    : `Hors ligne · ${count} action${count > 1 ? "s" : ""} en attente locale`;
+  document.querySelectorAll("[data-technician-sync-state]").forEach(el => {
+    el.textContent = label;
+    el.classList.toggle("status-ok", online);
+    el.classList.toggle("status-error", !online);
+  });
 }
 
 function renderTechnicianDashboard() {
@@ -3287,6 +3412,13 @@ function getNextBookingTimeLabel(bookings, now = new Date()) {
 function renderCases() {
   const list = $("#case-list");
   if (!list) return;
+  let inspection = $("#case-inspection-reset");
+  if (!inspection && list.parentElement) {
+    inspection = document.createElement("button"); inspection.id = "case-inspection-reset"; inspection.type = "button"; inspection.className = "ghost-button";
+    list.before(inspection);
+    inspection.onclick = () => { caseInspectionIds = null; renderCases(); };
+  }
+  if (inspection) { inspection.hidden = !caseInspectionIds; inspection.textContent = `Sélection Pilotage (${caseInspectionIds?.size || 0}) · Afficher tous les dossiers`; }
   const search = ($("#case-search")?.value || "").trim();
   const statusFilter = normalizeCaseStatusFilter(state.ui?.caseStatusFilter);
   const typeFilter = state.ui?.caseTypeFilter || "all";
@@ -3312,9 +3444,9 @@ function renderCases() {
   const cases = state.cases
     .filter((item) => {
       const matchesText = caseMatchesGlobalSearch(item, search);
-      const matchesStatus = statusFilter === "all" || getCaseStatus(item) === statusFilter;
+      const matchesStatus = caseMatchesStatusFilter(item, statusFilter);
       const matchesType = caseMatchesTypeFilter(item, typeFilter);
-      return matchesText && matchesStatus && matchesType;
+      return !item.deletedAt && matchesText && matchesStatus && matchesType && (!caseInspectionIds || caseInspectionIds.has(item.id));
     });
   cases.sort(compareCasesForList);
   const pageCount = Math.max(1, Math.ceil(cases.length / CASE_LIST_PAGE_SIZE));
@@ -3455,7 +3587,10 @@ function renderPilotageAlerts(snapshot) {
     target.innerHTML = "";
     return;
   }
-  const priorities = snapshot?.priorities || [];
+  const priorities = getSavDashboardCases(getSavDashboardRange()).filteredCases.filter(isCasePhysicallyPresent).flatMap(item => {
+    const exception = getOperationalExceptions(item)[0];
+    return exception ? [{ caseId: item.id, severity: exception.severity === "danger" ? "critical" : "medium", severityLabel: exception.severity === "danger" ? "À TRAITER" : "RISQUE", ref: item.plate || item.vin, stageLabel: getCaseOperationalPhase(item).label, title: exception.label, reason: `${exception.owner}${exception.dueAt ? ` · ${formatDateTime(exception.dueAt)}` : ""}`, client: item.clientName, vehicle: item.vehicle, ctaLabel: "Consulter et attribuer" }] : [];
+  }).sort((a, b) => (a.severity === "critical" ? 0 : 1) - (b.severity === "critical" ? 0 : 1));
   const status = $("#pilotage-priority-status");
   if (status) {
     const message = priorities.length
@@ -3492,7 +3627,7 @@ function renderPilotageAlerts(snapshot) {
   $$("[data-nav-case]", target).forEach((button) => {
     button.addEventListener("click", () => {
       const caseId = button.dataset.navCase;
-      if (caseId) openDirectorDashboardCase(caseId);
+      if (caseId) openOperationalCasePanel(caseId);
     });
   });
 }
@@ -4307,7 +4442,7 @@ function renderKanban() {
                     .map(
                       (item) => {
                         const nextAction = getCaseNextAction(item);
-                        const deliveryLine = item.appointment?.delivery ? ` · Fin ${formatDate(item.appointment.delivery)}` : "";
+                        const deliveryLine = getWorkshopProgressEta(item) ? ` · Fin ${formatDate(getWorkshopProgressEta(item))}` : " · Estimation à confirmer";
                         return `
                         <button class="kanban-card ${isCaseBlocked(item) ? "blocked-case" : ""}" type="button" data-kanban-case="${escapeAttr(item.id)}">
                           <strong>${escapeHtml(getDashboardCaseReference(item))}</strong>
@@ -4552,6 +4687,18 @@ function renderCaseDetail() {
   applyProductionLock(detail, item);
   applyArchiveReadOnly(detail, item);
   renderOperationalDecisions(detail, item);
+  compactCaseDetailSections(detail, item);
+}
+
+function compactCaseDetailSections(root, item) {
+  const role = toRuntimeUserRole(getCurrentUser()?.role);
+  root.querySelectorAll('.case-panel[data-case-panel="claims"] > .detail-section, .case-panel[data-case-panel="claims"] > .detail-grid').forEach(section => {
+    const title = section.querySelector("h2")?.textContent || "Détails des travaux";
+    const disclosure = document.createElement("details"); disclosure.className = "case-detail-disclosure";
+    const summary = document.createElement("summary"); summary.textContent = title;
+    disclosure.append(summary); section.before(disclosure); disclosure.append(section);
+    disclosure.open = !item.flags?.workStarted && !item.flags?.workCompleted && /Ordres de réparation/.test(title) && ["chef_atelier", "admin"].includes(role);
+  });
 }
 
 function renderOperationalDecisions(root, item) {
@@ -4564,28 +4711,41 @@ function renderOperationalDecisions(root, item) {
   }
   const phase = getCaseOperationalPhase(item);
   const editable = !isCaseReadonlyArchive(item) && !item.flags.delivered;
+  const role = toRuntimeUserRole(getCurrentUser()?.role);
+  const exceptions = getOperationalExceptions(item);
   const pending = (item.claims || []).filter((claim) => claim.includeInPlanning !== false && !claim.clientApproved && claim.status !== "refused");
   const button = (action, label, permission, extra = "") => editable && canRenderAction(permission, { item })
     ? `<button type="button" class="primary-button" data-operational-action="${action}" ${extra}>${label}</button>` : "";
   const quality = item.flags.workCompleted && !isCaseQualityValidated(item);
   panel.innerHTML = `
     <div class="section-heading"><h2>${escapeHtml(phase.label)}</h2><span>${isCasePhysicallyPresent(item) ? "Véhicule présent" : item.flags.delivered ? "Remise confirmée" : "Réception à confirmer"}</span></div>
+    ${!root.closest?.("dialog") && role !== "controle_qualite" ? `${renderClientSituation(item)}<button type="button" class="ghost-button" data-client-situation>Engagement et suivi client</button>` : ""}
+    <p class="case-sharing-status">${Number(item.localRevision || 0) > Number(item.syncRevision || 0) ? "Action enregistrée sur ce poste · partage en attente" : item.lastSyncedAt || Number(item.syncRevision || 0) > 0 ? "Dernière révision confirmée par le serveur" : "Confirmation du partage non disponible"}</p>
     ${isCasePhysicallyPresent(item) && isCaseReadonlyArchive(item) ? '<p role="alert">Ce dossier est archivé mais aucune remise physique n’est enregistrée. Faire vérifier le dossier par le responsable.</p>' : ""}
-    ${pending.map((claim) => `<p>${escapeHtml(getClaimLabel(claim))} — accord à confirmer ${button("authorize", "Enregistrer l'accord", "case.edit", `data-claim-id="${escapeAttr(claim.id)}"`)}</p>`).join("")}
+    ${role !== "controle_qualite" ? pending.map((claim) => `<p>${escapeHtml(getClaimLabel(claim))} — accord à confirmer ${button("authorize", "Enregistrer l'accord", "case.edit", `data-claim-id="${escapeAttr(claim.id)}"`)}</p>`).join("") : ""}
+    ${exceptions.length ? `<details class="operational-exceptions" open><summary>${escapeHtml(exceptions[0].label)}</summary>${exceptions.map(e => `<p>${escapeHtml(e.label)} · ${escapeHtml(e.owner)}${e.dueAt ? ` · ${escapeHtml(formatDateTime(e.dueAt))}` : ""}</p>`).join("")}</details>` : ""}
+    ${isCaseBlocked(item) ? '<p>Portée du blocage : véhicule et chaîne atelier. La reprise exige la résolution de la cause ; les dépendances restent contrôlées.</p>' : ""}
     ${quality ? '<p>Travaux terminés. Contrôler le véhicule et sa préparation avant de le déclarer prêt.</p>' : ""}
     <div class="operational-actions">
+      ${!item.flags.received ? button("receive", "Confirmer l’arrivée", "vehicle.receive") : ""}
       ${quality ? button("quality", "Valider le contrôle final", "quality.validate") : ""}
       ${item.flags.workCompleted ? button("rework", "Signaler une anomalie", "quality.reject") : ""}
       ${item.flags.workCompleted && isCaseQualityValidated(item) ? button("deliver", "Confirmer la remise du véhicule", "delivery.complete") : ""}
     </div>`;
   panel.querySelectorAll("[data-operational-action]").forEach((control) => control.addEventListener("click", async () => {
     control.disabled = true;
+    const overlay = document.getElementById("custom-modal-overlay");
+    const overlayParent = overlay?.parentElement;
+    const parentDialog = root.closest?.("dialog");
+    if (parentDialog && overlay) parentDialog.append(overlay);
     try {
       let result;
       if (control.dataset.operationalAction === "authorize") {
         const reference = await showInputPromptModal({ title: "Accord travaux", message: "Référence du document ou contact ayant autorisé cet ordre :", defaultValue: "" });
         if (reference === null) return;
         result = recordWorkAuthorization(item, control.dataset.claimId, reference);
+      } else if (control.dataset.operationalAction === "receive") {
+        result = advanceReceptionWorkflow(item.id, "receive_vehicle");
       } else if (control.dataset.operationalAction === "rework") {
         const reason = await showInputPromptModal({ title: "Retour atelier", message: "Anomalie constatée et correction nécessaire :", defaultValue: "" });
         if (reason === null) return;
@@ -4600,8 +4760,10 @@ function renderOperationalDecisions(root, item) {
       saveState({ changedCase: item, flushCloud: true, cloudReason: "operational-decision" });
       notifyUser(result.message || "Décision enregistrée.", "success");
       render();
-    } finally { control.disabled = false; }
+      if (root.closest?.("dialog")?.open) renderOperationalDecisions(root, item);
+    } finally { if (parentDialog && overlay && overlayParent) overlayParent.append(overlay); control.disabled = false; }
   }));
+  panel.querySelector("[data-client-situation]")?.addEventListener("click", () => openOperationalCasePanel(item.id));
 }
 
 
@@ -4815,7 +4977,7 @@ function renderCaseSummary(root, item) {
   setText(root, "summary-vehicle", item.vehicle || "Véhicule non renseigné");
   setText(root, "summary-vehicle-extra", `${item.plate || "Sans immatriculation"} · ${item.vin || "VIN non renseigné"}`);
   setText(root, "summary-planning", item.appointment ? formatDateTime(item.appointment.start) : "RDV non planifié");
-  setText(root, "summary-delivery", item.appointment ? `Fin estimée : ${formatDateTime(item.appointment.delivery)}` : "Calculez un RDV pour obtenir une fin estimée.");
+  setText(root, "summary-delivery", getWorkshopProgressEta(item) ? `Fin estimée : ${formatDateTime(getWorkshopProgressEta(item))}` : "Estimation à confirmer.");
 
   const workflowClaims = getWorkflowClaims(item);
   const primaryClaim = workflowClaims[0] || item.claims?.[0] || null;
@@ -6014,7 +6176,7 @@ function renderValidatedAppointmentPlan(root, item) {
       </div>
       <div class="validated-plan-summary">
         <strong>RDV ${formatDateTime(item.appointment.start)}</strong>
-        <span>Fin estimée ${formatDateTime(item.appointment.delivery)}</span>
+        <span>${getWorkshopProgressEta(item) ? `Fin estimée ${formatDateTime(getWorkshopProgressEta(item))}` : "Estimation à confirmer"}</span>
       </div>
     </div>
       <div class="validated-plan-table">
@@ -6293,6 +6455,9 @@ async function handleBookingTaskAction(item, action, bookingId, options = {}) {
       const defaultValue = formatDateTimeLocalInputValue(booking?.start || new Date());
       const requested = await showInputPromptModal({ title: "Replanifier l’opération", message: "Premier créneau disponible à partir de :", inputType: "datetime-local", defaultValue });
       if (requested === null) return;
+      const preview = rescheduleCaseBooking(item, bookingId, requested, { previewOnly: true });
+      if (!preview.ok) { notifyUser(preview.message, "error"); return preview; }
+      if (!await showConfirmModal(`Créneau proposé : ${escapeHtml(formatDateTime(preview.start))} → ${escapeHtml(formatDateTime(preview.end))}. Les opérations dépendantes seront recalées si nécessaire. Confirmer ?`)) return;
       result = rescheduleCaseBooking(item, bookingId, requested);
     }
     if (!result) return;
@@ -7029,7 +7194,7 @@ function renderAssignments(root, item) {
   if (appointmentNeedsReschedule(item)) {
     if (delivery) delivery.textContent = item.appointmentStatus === "no_show" ? "RDV manqué : report nécessaire" : "Report RDV en attente";
   } else {
-    if (delivery) delivery.textContent = item.appointment ? `Fin estimée: ${formatDateTime(item.appointment.delivery)}` : "Fin non planifiée";
+    if (delivery) delivery.textContent = getWorkshopProgressEta(item) ? `Fin estimée: ${formatDateTime(getWorkshopProgressEta(item))}` : "Estimation à confirmer";
   }
   const assignmentRows = typeof getCaseBusinessTaskRows === "function"
     ? getCaseBusinessTaskRows(item)

@@ -20,8 +20,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <script src="js/version.js?v=23.3.33"></script>
-    <link rel="stylesheet" href="styles.css?v=23.3.33" />
+    <script src="js/version.js?v=23.3.34"></script>
+    <link rel="stylesheet" href="styles.css?v=23.3.34" />
   </head>
   <body data-active-tab="today">
     <button id="mobile-menu-toggle" class="mobile-menu-btn" type="button" aria-label="Ouvrir la navigation principale" aria-expanded="false" aria-controls="primary-sidebar" hidden>
@@ -128,8 +128,20 @@
             <div class="pdf-import-hero">
               <span class="eyebrow">Import devis PDF</span>
               <h1 id="pdf-import-title">Nouveau dossier</h1>
-              <p>Déposez le devis PDF, vérifiez les informations détectées puis créez le dossier.</p>
+              <p>Importez un devis ou enregistrez directement une arrivée sans document.</p>
             </div>
+
+            <details class="minimal-case-entry">
+              <summary>Arrivée sans devis / diagnostic</summary>
+              <form id="minimal-case-form" class="form-grid">
+                <label>Immatriculation ou VIN<input name="identity" required autocomplete="off" /></label>
+                <label>Motif de la visite<input name="visitReason" required placeholder="Ex. bruit au freinage" /></label>
+                <label>Client<input name="clientName" autocomplete="name" /></label>
+                <label>Téléphone<input name="phone" type="tel" autocomplete="tel" /></label>
+                <label><input type="checkbox" name="received" checked /> Véhicule physiquement présent</label>
+                <button type="submit" class="primary-button">Enregistrer l’arrivée</button>
+              </form>
+            </details>
 
             <form id="case-form" class="pdf-import-form">
               <p class="form-error-summary" id="case-form-errors" data-form-errors role="alert" hidden></p>
@@ -219,6 +231,12 @@
                   <span>Filtrer l’avancement</span>
                   <select id="workshop-progress-filter">
                     <option value="all">Tous</option>
+                    <option value="expected">À recevoir</option>
+                    <option value="exceptions">Décisions et risques</option>
+                    <option value="promise">Engagements menacés</option>
+                    <option value="contact">Clients à recontacter</option>
+                    <option value="quality">À contrôler</option>
+                    <option value="support">Expertise / garantie</option>
                     <option value="late">En retard</option>
                     <option value="blocked">Bloqués</option>
                     <option value="stale">Sans évolution &gt; 24 h</option>
@@ -383,7 +401,8 @@
                 <div class="pilotage-case-funnel-card" id="pilotage-case-funnel" aria-label="Répartition du flux des dossiers"></div>
               </div>
             </section>
-            <section class="pilotage-level-block pilotage-kanban-block" aria-label="Tableau opérationnel Kanban">
+            <details class="pilotage-level-block pilotage-kanban-block" aria-label="Tableau opérationnel Kanban">
+              <summary>Répartition détaillée des dossiers</summary>
               <div class="section-heading compact-heading">
                 <div>
                   <h2>Suivi Kanban des dossiers</h2>
@@ -391,7 +410,7 @@
                 </div>
               </div>
               <div class="kanban-board" id="kanban-board"></div>
-            </section>
+            </details>
           </section>
         </section>
 
@@ -1455,22 +1474,22 @@
       </div>
     </div>
 
-    <script src="vendor/pdf.min.js?v=23.3.33" defer></script>
-    <script src="js/utils.js?v=23.3.33" defer></script>
-    <script src="js/state.js?v=23.3.33" defer></script>
-    <script src="js/ui-cases.js?v=23.3.33" defer></script>
-    <script src="js/estimate-import.js?v=23.3.33" defer></script>
-    <script src="js/ui-planning.js?v=23.3.33" defer></script>
-    <script src="js/photos.js?v=23.3.33" defer></script>
-    <script src="js/storage.js?v=23.3.33" defer></script>
-    <script src="js/work-hours-sync.js?v=23.3.33" defer></script>
-    <script src="js/planning.js?v=23.3.33" defer></script>
-    <script src="js/exports.js?v=23.3.33" defer></script>
-    <script src="js/business-rules-v2187.js?v=23.3.33" defer></script>
+    <script src="vendor/pdf.min.js?v=23.3.34" defer></script>
+    <script src="js/utils.js?v=23.3.34" defer></script>
+    <script src="js/state.js?v=23.3.34" defer></script>
+    <script src="js/ui-cases.js?v=23.3.34" defer></script>
+    <script src="js/estimate-import.js?v=23.3.34" defer></script>
+    <script src="js/ui-planning.js?v=23.3.34" defer></script>
+    <script src="js/photos.js?v=23.3.34" defer></script>
+    <script src="js/storage.js?v=23.3.34" defer></script>
+    <script src="js/work-hours-sync.js?v=23.3.34" defer></script>
+    <script src="js/planning.js?v=23.3.34" defer></script>
+    <script src="js/exports.js?v=23.3.34" defer></script>
+    <script src="js/business-rules-v2187.js?v=23.3.34" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.111.0" defer></script>
-    <script src="js/supabase-config.js?v=23.3.33" defer></script>
-    <script src="js/supabase-client.js?v=23.3.33" defer></script>
-    <script src="js/supabase-sync.js?v=23.3.33" defer></script>
-    <script src="app.js?v=23.3.33" defer></script>
+    <script src="js/supabase-config.js?v=23.3.34" defer></script>
+    <script src="js/supabase-client.js?v=23.3.34" defer></script>
+    <script src="js/supabase-sync.js?v=23.3.34" defer></script>
+    <script src="app.js?v=23.3.34" defer></script>
   </body>
 </html>

@@ -193,7 +193,9 @@ app('state.cases[0].receptionWorkflow.readyForDeliveryAt = new Date().toISOStrin
 app('state.currentUserId = "u-admin"');
 
 const r10 = app('advanceReceptionWorkflow("case-block-1", "deliver_vehicle")');
-assert.ok(r10.ok, 'La livraison doit réussir');
+assert.equal(r10.ok, false, 'Une signature ou un override ne remplace pas la réception, la fin des travaux et la résolution des réclamations');
+app('state.cases[0].flags.received = true; state.cases[0].flags.workCompleted = true; state.cases[0].customerClaims.forEach(c => c.status = "resolved")');
+assert.equal(app('advanceReceptionWorkflow("case-block-1", "deliver_vehicle").ok'), true, 'La remise est permise lorsque les prérequis sont établis');
 
 const caseDelivered = app('state.cases.find(c => c.id === "case-block-1")');
 assert.ok(caseDelivered.flags.delivered, 'flags.delivered doit être true');

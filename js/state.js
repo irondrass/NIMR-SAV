@@ -21,7 +21,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v23.3.34";
+const APP_VERSION = "v23.3.35";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const CURRENT_DATA_SCHEMA_VERSION = 2;
@@ -665,10 +665,15 @@ function isCaseQualityValidated(item) {
   return status === "validated" || item?.flags?.qualityApproved === true;
 }
 
+function isCaseReadyForDelivery(item) {
+  return isCasePhysicallyPresent(item) && isCaseQualityValidated(item)
+    && getCaseFinalizationIssues(item, true).length === 0;
+}
+
 function getCaseOperationalPhase(item) {
   if (item?.flags?.delivered) return { key: "delivered", label: "Livré" };
   if (!item?.flags?.received) return { key: "expected", label: "Attendu" };
-  if (item.flags.workCompleted) return isCaseQualityValidated(item)
+  if (item.flags.workCompleted) return isCaseReadyForDelivery(item)
     ? { key: "ready", label: "Prêt" }
     : { key: "finalizing", label: "À finaliser" };
   const bookings = typeof getIndexedCaseBookings === "function" ? getIndexedCaseBookings(item.id) : (state?.bookings || []).filter(b => b.caseId === item.id);

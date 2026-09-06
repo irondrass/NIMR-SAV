@@ -171,7 +171,9 @@ export async function runMobileCdpTest({ name, cdpPort, run }) {
         awaitPromise: options.awaitPromise !== false,
         returnByValue: options.returnByValue !== false,
         userGesture: options.userGesture !== false,
-      }, sessionId);
+      }, sessionId).catch(error => {
+        throw new Error(`${error.message} — evaluation: ${String(expression).slice(0, 120)}`);
+      });
       if (result.exceptionDetails) {
         throw new Error(result.exceptionDetails.exception?.description || result.exceptionDetails.text || "Évaluation navigateur impossible");
       }

@@ -36,13 +36,16 @@ const {result,errors} = await runMobileCdpTest({name:'audit-completion',cdpPort:
   assert.equal(await evaluate(`document.querySelector('#operational-case-dialog').contains(document.querySelector('#custom-modal-overlay'))`),true,'confirmation remains above the native dialog');
   await click('#custom-modal-confirm');
   await waitFor(`state.cases[0].flags.qualityApproved===true`,'QC decision');
+  await waitFor(`document.querySelector('#operational-case-dialog [data-operational-action="quality"]')===null`,'durable quality decision rendered before the next user takes over');
   assert.equal(await evaluate(`document.querySelector('#operational-case-dialog [data-operational-action="deliver"]')===null`),true);
   await click('#operational-case-dialog [data-close]');
+  assert.equal(await evaluate(`document.querySelector('#custom-modal-overlay') !== null`),true,'closing a panel must preserve the shared confirmation dialog');
   await evaluate(`state.users[0].role='reception'; setActiveTab('today'); render();`);
   await click('#workshop-progress-board [data-workshop-progress-case="case-mobile-current"]');
   await click('[data-operational-action="deliver"]'); await click('#custom-modal-confirm');
   await waitFor(`state.cases[0].flags.delivered===true`,'physical handover');
   await click('#operational-case-dialog [data-close]');
+  await waitFor(`document.querySelectorAll('#workshop-progress-board [data-workshop-progress-case="case-mobile-current"]').length===0`,'confirmed handover reflected in the board after durable save');
   assert.equal(await evaluate(`document.querySelectorAll('#workshop-progress-board [data-workshop-progress-case="case-mobile-current"]').length`),0);
   await evaluate(`setActiveTab('reception-workspace'); document.querySelector('.minimal-case-entry').open=true;`);
   await evaluate(`(() => {const f=document.querySelector('#minimal-case-form'); f.elements.identity.value='999TU999';f.elements.visitReason.value='Diagnostic freinage'; f.requestSubmit();})()`);

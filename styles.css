@@ -8435,6 +8435,12 @@ select:focus {
 .operational-vehicle-identity > strong { font-size: 1.2rem; }
 .operational-vehicle-decision.danger { color: #a2202d; }
 .operational-vehicle-decision.warn { color: #8a5100; }
+.workshop-quick-filters { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.workshop-quick-filters button { min-height: 44px; }
+.workshop-quick-filters [aria-pressed="true"] { background: #123f55; color: #fff; }
+.workshop-quick-filters strong { margin-left: 6px; }
+.workshop-next-condition, .technician-start-condition { padding: 12px; border-left: 3px solid #9b6000; background: #fff5e4; color: #684300; overflow-wrap: anywhere; }
+.finalization-issues { color: #922333; padding-left: 24px; }
 .operational-case-dialog { width: min(880px, calc(100vw - 24px)); max-height: calc(100dvh - 32px); padding: 24px; border: 0; border-radius: 16px; overflow-y: auto; color: #172d39; background: #fff; }
 .operational-case-dialog::backdrop { background: rgb(13 32 43 / 60%); }
 .operational-case-dialog header { display: flex; align-items: start; justify-content: space-between; gap: 12px; }

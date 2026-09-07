@@ -545,7 +545,7 @@ async function resolveSupabaseWorkshopMembership(authUser) {
 }
 window.resolveSupabaseWorkshopMembership = resolveSupabaseWorkshopMembership;
 
-const WORKSHOP_USER_ADMIN_ACTIONS = new Set(["capabilities", "invite_member", "offboard_member"]);
+const WORKSHOP_USER_ADMIN_ACTIONS = new Set(["capabilities", "invite_member", "offboard_member", "link_technician_resource"]);
 
 async function readWorkshopUserAdminInvokeError(error) {
   const context = error?.context;

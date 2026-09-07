@@ -8,7 +8,7 @@ declare const Deno: {
 type JsonRecord = Record<string, unknown>;
 type SupabaseClientLike = ReturnType<typeof createClient>;
 
-const FUNCTION_ACTIONS = new Set(["capabilities", "invite_member", "offboard_member"]);
+const FUNCTION_ACTIONS = new Set(["capabilities", "invite_member", "offboard_member", "link_technician_resource"]);
 const CANONICAL_WORKSHOP_ROLES = new Set([
   "admin_technique",
   "directeur",
@@ -228,10 +228,12 @@ async function validateTechnicianResource(
 
 async function handleCapabilities(adminClient: SupabaseClientLike, authority: { role: string; workshopId: string }): Promise<Response> {
   try {
-    const [humanResources, activeAdminTechnicalCount] = await Promise.all([
+    const [humanResources, activeAdminTechnicalCount, membersResult] = await Promise.all([
       listHumanResources(adminClient, authority.workshopId),
       countActiveTechnicalAdmins(adminClient, authority.workshopId),
+      adminClient.from("workshop_members").select("user_id, role, resource_id").eq("workshop_id", authority.workshopId).is("deleted_at", null),
     ]);
+    if (membersResult.error) throw membersResult.error;
     return response({
       ok: true,
       can_manage_accounts: true,
@@ -240,10 +242,46 @@ async function handleCapabilities(adminClient: SupabaseClientLike, authority: { 
       provisioning_available: true,
       active_admin_technique_count: activeAdminTechnicalCount,
       human_resources: humanResources,
+      members: membersResult.data || [],
+      can_link_technician_resource: true,
     });
   } catch {
     return failure("RESOURCE_LIST_FAILED", "Impossible de charger les ressources technicien.", 500);
   }
+}
+
+async function handleLinkTechnicianResource(
+  adminClient: SupabaseClientLike,
+  authority: { role: string; workshopId: string },
+  callerId: string,
+  payload: JsonRecord,
+): Promise<Response> {
+  const targetUserId = String(payload.user_id || "").trim();
+  if (!targetUserId) return failure("TARGET_REQUIRED", "Sélectionnez le compte technicien.");
+  const { data: target, error } = await adminClient.from("workshop_members")
+    .select("user_id, workshop_id, role, resource_id")
+    .eq("user_id", targetUserId).eq("workshop_id", authority.workshopId).is("deleted_at", null).maybeSingle();
+  if (error) return failure("MEMBER_READ_FAILED", "Impossible de vérifier le compte technicien.", 500);
+  if (!target || canonicalizeCallerRole(target.role) !== "technicien") {
+    return failure("TECHNICIAN_MEMBER_REQUIRED", "Ce compte n'est pas un technicien actif de cet atelier.", 403);
+  }
+  if (!Object.hasOwn(payload, "expected_resource_id") || String(payload.expected_resource_id || "") !== String(target.resource_id || "")) {
+    return failure("MEMBER_CHANGED", "La liaison a changé. Actualisez les comptes avant de recommencer.", 409);
+  }
+  const requestedResourceId = String(payload.resource_id || "").trim();
+  if (!requestedResourceId) return failure("TECHNICIAN_RESOURCE_REQUIRED", "Sélectionnez une ressource humaine active.");
+  if (requestedResourceId === String(target.resource_id || "")) return response({ok: true, action: "link_technician_resource", member: target});
+  const validation = await validateTechnicianResource(adminClient, authority.workshopId, "technicien", requestedResourceId);
+  if (!validation.ok) return validation.response;
+  // The existing composite FK and unique active-resource index protect workshop
+  // scope and concurrent assignments. Compare the old link again at the write.
+  let update = adminClient.from("workshop_members").update({resource_id: validation.resourceId, updated_by: callerId, updated_at: new Date().toISOString()})
+    .eq("user_id", targetUserId).eq("workshop_id", authority.workshopId).eq("role", target.role).is("deleted_at", null);
+  update = target.resource_id ? update.eq("resource_id", target.resource_id) : update.is("resource_id", null);
+  const { data: member, error: updateError } = await update.select("user_id, workshop_id, role, resource_id").maybeSingle();
+  if (updateError) return failure("RESOURCE_LINK_FAILED", "Liaison refusée : vérifiez que la ressource est active et libre de tout autre compte.", 409);
+  if (!member) return failure("MEMBER_CHANGED", "Le compte a changé pendant l'enregistrement. Actualisez les comptes.", 409);
+  return response({ok: true, action: "link_technician_resource", member});
 }
 
 async function handleInviteMember(
@@ -448,6 +486,7 @@ export function createWorkshopUserAdminHandler(overrides: {
 
     if (action === "capabilities") return handleCapabilities(adminClient, authority);
     if (action === "invite_member") return handleInviteMember(adminClient, authority, String(caller.id), payload);
+    if (action === "link_technician_resource") return handleLinkTechnicianResource(adminClient, authority, String(caller.id), payload);
     return handleOffboardMember(adminClient, authority, String(caller.id), payload);
   };
 }

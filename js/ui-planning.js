@@ -682,6 +682,8 @@ let workshopUserAdminCapabilityState = Object.freeze({
   workshopId: "",
   activeAdminTechnicalCount: 0,
   humanResources: [],
+  members: [],
+  canLinkTechnicianResource: false,
   reason: "Vérification de la capacité serveur requise.",
 });
 
@@ -705,6 +707,8 @@ function setWorkshopUserAdminCapabilityState(next = {}) {
     workshopId: String(next.workshopId || ""),
     activeAdminTechnicalCount: Math.max(0, Number.parseInt(next.activeAdminTechnicalCount, 10) || 0),
     humanResources: Object.freeze((Array.isArray(next.humanResources) ? next.humanResources : []).map((resource) => Object.freeze({ ...resource }))),
+    members: Object.freeze((Array.isArray(next.members) ? next.members : []).map(member => Object.freeze({...member}))),
+    canLinkTechnicianResource: next.canLinkTechnicianResource === true,
     reason: String(next.reason || ""),
   });
   return workshopUserAdminCapabilityState;
@@ -801,6 +805,8 @@ async function refreshWorkshopUserAdminCapabilities(options = {}) {
     workshopId: expectedWorkshopId,
     activeAdminTechnicalCount: result.active_admin_technique_count,
     humanResources,
+    members: Array.isArray(result.members) ? result.members : [],
+    canLinkTechnicianResource: result.can_link_technician_resource === true,
     reason: "Gestion sécurisée disponible via Supabase.",
   });
 }
@@ -983,7 +989,7 @@ function renderUsersAndRoles() {
   Array.from(form.elements || []).forEach((control) => {
     if (control.id === "current-user-selector" || control.name === "userId") return;
     control.disabled = !canManageUsers;
-    if (!canManageUsers) control.title = deniedTitle;
+    control.title = canManageUsers ? "" : deniedTitle;
   });
 
   const resourceSelect = form.elements.resourceId;
@@ -1044,6 +1050,7 @@ function renderUsersAndRoles() {
     const isLastActiveTechnicalAdmin = canonicalRole === "admin_technique"
       && workshopUserAdminCapabilityState.activeAdminTechnicalCount <= 1;
     const canRenderOffboardAction = Boolean(serverManagedProfile && targetAuthUserId && serverManagementDecision.allowed);
+    const canLinkResource = canRenderOffboardAction && canonicalRole === "technicien" && workshopUserAdminCapabilityState.canLinkTechnicianResource;
     const offboardTitle = isCurrentServerIdentity
       ? "Vous ne pouvez pas retirer votre propre accès atelier."
       : (isLastActiveTechnicalAdmin
@@ -1080,6 +1087,7 @@ function renderUsersAndRoles() {
           ${warnNoResource}
         </div>
         <div class="resource-actions">
+          ${canLinkResource ? `<button class="primary-button" type="button" data-link-technician-resource="${escapeAttr(user.id)}">${isTechWithoutRes ? "Rattacher la ressource" : "Changer la ressource"}</button>` : ""}
           <button class="ghost-button" type="button" data-edit-user="${escapeAttr(user.id)}" ${mutationDisabled ? `disabled title="${escapeAttr(mutationTitle)}"` : ""}>
             Modifier
           </button>
@@ -1198,6 +1206,42 @@ function renderUsersAndRoles() {
         ? "Accès atelier révoqué. Nettoyage du compte Auth encore en attente."
         : "Accès atelier retiré et compte Auth supprimé côté serveur.";
       notifyUser(message, result.code === "AUTH_CLEANUP_PENDING" ? "warn" : "success");
+    });
+  });
+  $$("[data-link-technician-resource]", list).forEach(button => {
+    button.addEventListener("click", async () => {
+      const user = getUserById(button.dataset.linkTechnicianResource);
+      if (!user || !isServerManagedLocalProfile(user) || getCanonicalUserRole(user) !== "technicien") return;
+      await refreshWorkshopUserAdminCapabilities({force: true});
+      const decision = getWorkshopUserAdminUiDecision();
+      const capability = workshopUserAdminCapabilityState;
+      if (!decision.allowed || !capability.canLinkTechnicianResource) return notifyUser(decision.reason || "Gestion de liaison indisponible.", "error");
+      const member = capability.members.find(candidate => String(candidate.user_id) === String(user.authUserId));
+      if (!member || member.role !== "technicien") return notifyUser("Compte technicien actif introuvable dans cet atelier.", "error");
+      const resources = capability.humanResources.filter(resource => !capability.members.some(candidate => String(candidate.user_id) !== String(user.authUserId) && String(candidate.resource_id) === resource.id));
+      const resourceId = await showInputPromptModal({title:"Ressource du compte technicien",
+        message:`${escapeHtml(user.name || user.email)} : choisissez la personne dont ce compte doit afficher les travaux.`,
+        options:[["", "Choisir une ressource"], ...resources.map(resource => [resource.id, `${resource.name} · ${ROLE_LABELS[resource.type] || resource.type}`])],
+        defaultValue:member.resource_id || "", confirmLabel:"Enregistrer la liaison"});
+      if (resourceId === null) return;
+      const resource = resources.find(candidate => candidate.id === resourceId);
+      if (!resource) return notifyUser("Sélectionnez une ressource humaine active.", "error");
+      button.disabled = true;
+      try {
+        const result = await invokeWorkshopUserAdmin("link_technician_resource", {user_id:user.authUserId, resource_id:resource.id, expected_resource_id:member.resource_id || null});
+        if (!result?.ok || String(result.member?.user_id) !== String(user.authUserId) || String(result.member?.resource_id) !== resource.id || result.member?.role !== "technicien" || result.member?.workshop_id !== capability.workshopId) {
+          return notifyUser(result?.message || "La liaison n'a pas été confirmée par le serveur.", "error");
+        }
+        const localResource = state.resources.find(candidate => candidate.id === resource.localId || candidate.id === resource.id);
+        if (localResource) {
+          // Reflect only the server-confirmed link in this local display mirror.
+          user.resourceId = localResource.id;
+          await saveState();
+        }
+        await refreshWorkshopUserAdminCapabilities({force:true});
+        renderUsersAndRoles();
+        notifyUser(`Compte rattaché à ${resource.name}. Reconnectez le technicien pour charger ses travaux.`, "success");
+      } finally { button.disabled = false; }
     });
   });
 }

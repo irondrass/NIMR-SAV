@@ -144,7 +144,7 @@ N° Immat. VIN Prem. Immat. Conseiller de vente
 6286TU243 LMXA14AF6RZ352028 15/05/24 INES LENGLIZ`, {fileName:'Report3.pdf', claimType:'client'});
 if (report3.info.clientName !== 'STE M.H.I') throw new Error(`Report3 client expected STE M.H.I got ${report3.info.clientName}`);
 if (report3.info.phone !== '98321415') throw new Error(`Report3 phone expected 98321415 got ${report3.info.phone}`);
-if (report3.info.vehicle !== 'T5 EVO 1.5L TURBO') throw new Error(`Report3 vehicle expected T5 EVO 1.5L TURBO got ${report3.info.vehicle}`);
+if (report3.info.vehicle !== 'DFM T5 EVO 1.5L TURBO') throw new Error(`Report3 vehicle must preserve the make: ${report3.info.vehicle}`);
 if (report3.info.plate !== '6286TU243') throw new Error(`Report3 plate expected 6286TU243 got ${report3.info.plate}`);
 if (report3.info.mileage !== '52000') throw new Error(`Report3 mileage expected 52000 got ${report3.info.mileage}`);
 if (report3.info.vin !== 'LMXA14AF6RZ352028') throw new Error(`Report3 VIN expected LMXA14AF6RZ352028 got ${report3.info.vin}`);

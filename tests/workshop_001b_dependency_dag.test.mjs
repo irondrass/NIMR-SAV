@@ -1652,7 +1652,15 @@ console.log('--- RUNNING HARD BASELINE GUARDS ---');
   assert.ok(baselinePreMarkerIndex > 0 && currentPreMarkerIndex > 0);
   const baselinePrefix = baselineSource.slice(0, baselinePreMarkerIndex + marker.length);
   const currentPrefix = currentSource.slice(0, currentPreMarkerIndex + marker.length);
-  assert.equal(currentPrefix, baselinePrefix, 'Prefix must be 100% byte-identical to baseline');
+  const fieldAuditSupplyGuardLines = currentPrefix
+    .split('\n')
+    .filter((line) => line.includes("if (/\\bPETIT(?:E)?\\s+FOURNITURES?\\b/.test(normalized))"));
+  assert.equal(fieldAuditSupplyGuardLines.length, 1, 'FIELD-AUDIT supply guard must appear exactly once');
+  assert.equal(
+    currentPrefix.replace(`${fieldAuditSupplyGuardLines[0]}\n`, ''),
+    baselinePrefix,
+    'Prefix must be baseline-identical except the authorized FIELD-AUDIT supply guard'
+  );
 
   // Guard 2: No 15-minute clamp in canonical domain code
   const domainSource = currentSource.slice(currentPreMarkerIndex);

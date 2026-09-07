@@ -189,6 +189,7 @@ function parseEstimateText(text, options = {}) {
   return {
     fileName: options.fileName || "devis",
     sourceType: options.sourceType || "texte",
+    documentType: /EDITION\s+FIN\s+DES\s+TRAVAUX/i.test(normalizeEstimateOperationText(text)) ? "work_completed" : "estimate",
     info,
     laborLines,
     partsLines: dedupeEstimatePartLines(partsLines),
@@ -253,7 +254,8 @@ function classifyLaborLine(line, options = {}) {
   // Bypass hardIgnored for FILTRE/HUILE if they are confirmed labor (have 33/35 PU).
   // Also include REMP (without L) as a common labor abbreviation.
   const isFiltreOrHuileLabor = isConfirmedLabor && /\b(FILTRE|HUILE)\b/.test(normalized);
-  const laborException = isFiltreOrHuileLabor || /\b(REMP|REMPL|REMPLACEMENT)\s+FEU\b/.test(normalized) || /\b(CHANG(?:EMENT)?|REMP|REMPL)\b/.test(normalized);
+  const laborException = isFiltreOrHuileLabor || /\b(REMP|REMPL|REMPLACEMENT)\s+FEU\b/.test(normalized)
+    || (isConfirmedLabor && /\b(D\s*\/\s*P|CHANG(?:EMENT)?|DEPOSE|DEMONTAGE|REPOSE|REMONTAGE|PREPARATION|DRESSAGE|REPARATION|REMP|REMPL)\b/.test(normalized));
 
   const hardIgnored = [
     "FOURNITURE",
@@ -316,22 +318,17 @@ function classifyEstimatePartLine(line) {
   if (!text || text.length < 3) return null;
   const normalized = normalizeEstimateOperationText(text);
   if (isEstimateLegalOrFooterLine(normalized)) return null;
-  if (/\b(TOTAL|TVA|TIMBRE|DEVIS|RECEPTIONNAIRE|PAGE|CODE\s+MOTEUR|TYPE\s+MAIN|N\s*OR|N\s*DEVIS)\b/.test(normalized)) return null;
+  if (/\b(TOTAL|TVA|TIMBRE|DEVIS|RECEPTIONNAIRE|PAGE|DESIGNATION|QUANTITE|DATE|TUNIS LE|KILOMETRAGE|CODE\s+MOTEUR|TYPE\s+MAIN|N\s*OR|N\s*DEVIS)\b/.test(normalized)) return null;
+  if (/\b[A-HJ-NPR-Z0-9]{17}\b/i.test(text) || /^\d+\s*TU\s*\d+\b/i.test(text)) return null;
   if (classifyLaborLine(text)?.type === "labor") return null;
-
-  const pricingInfo = extractEstimatePricingInfo(text);
-  if (!pricingInfo.matches.length) return null;
-  if (pricingInfo.hasLaborHourlyRate) return null;
-  const matches = pricingInfo.matches;
-  const qtyMatch = matches[0];
-  const unitMatch = matches.length >= 2 ? matches[matches.length - 2] : null;
-  const amountMatch = matches.length >= 2 ? matches[matches.length - 1] : null;
-  const quantity = qtyMatch?.hours || 0;
-  const unitPrice = unitMatch?.hours || 0;
-  const amount = amountMatch?.hours || 0;
+  const fields = parseEstimatePricedRow(text);
+  if (!fields) return null;
+  const { quantity, unitPrice, amount } = fields;
   if (!quantity || quantity <= 0 || quantity > 999) return null;
   if (!unitPrice || !amount) return null;
-  const designation = sanitizeEstimateOperation(text.slice(0, qtyMatch.index) || text);
+  const expectedAmount = quantity * unitPrice * (1 - fields.discount / 100);
+  if (Math.abs(expectedAmount - amount) > Math.max(0.02, Math.abs(amount) * 0.001)) return null;
+  const designation = sanitizeEstimateOperation(fields.designation);
   if (!designation || designation.length < 2) return null;
   return {
     id: uid("estimate-part"),
@@ -341,6 +338,26 @@ function classifyEstimatePartLine(line) {
     amount: roundPlanningHours(amount),
     rawText: text,
   };
+}
+
+// A price row must end with its numeric columns. Numbers in a VIN, a model,
+// an article reference or a sentence are never quantities by themselves.
+function parseEstimatePricedRow(value) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  const number = "\\d+(?: \\d{3})*(?:[,.]\\d+)?";
+  for (const withDiscount of [false, true]) {
+    const discountPattern = withDiscount ? "(\\d+(?:[,.]\\d+)?)\\s+" : "()";
+    const pattern = new RegExp(`^(.+?)\\s+(\\d+(?:[,.]\\d+)?)\\s+(?:(PCS|PIECE[S]?|HEUR[E]?|H|UNITE[S]?)\\s+)?(${number})\\s+${discountPattern}(${number})$`, "i");
+    const match = text.match(pattern);
+    if (!match) continue;
+    const quantityIndex = match[1].length + 1;
+    const fields = { designation: match[1], quantity: parseEstimateNumber(match[2]), unit: match[3] || "",
+      unitPrice: parseEstimateNumber(match[4]), discount: parseEstimateNumber(match[5] || 0),
+      amount: parseEstimateNumber(match[6]), quantityIndex, numericTail: text.slice(quantityIndex) };
+    const expected = fields.quantity * fields.unitPrice * (1 - fields.discount / 100);
+    if (fields.discount <= 100 && Math.abs(expected - fields.amount) <= Math.max(0.02, Math.abs(fields.amount) * 0.001)) return fields;
+  }
+  return null;
 }
 
 function dedupeEstimatePartLines(parts) {
@@ -635,13 +652,14 @@ function splitEstimateSourceLines(text) {
   const pdfTableRows = extractPdfContentTableRows(source);
   const columnarRows = extractColumnarEstimateRows(source);
   const dressageMarker = "DRESSAGE__ET__PEINTURE";
-  const protectedSource = source.replace(/\bDRESSAGE\s+ET\s+PEINTURE\b/gi, dressageMarker);
+  const protectedSource = source.replace(/\bDRESSAGE\s+ET\s+PEINTURE\b/gi, dressageMarker)
+    .replace(/(D[ée]signation\s+Qt[ée]\s+Prix(?:\s+unitaire)?(?:\s+%\s*Rem)?\s+Montant)[ \t]+(?=\S)/gi, "$1\n");
   const expanded = protectedSource
     // Split before each real operation.  The protected dressage marker must also
     // be a split point; otherwise a consumable row like "PEINTURE 5 180,000
     // 900,000" can stay glued to the following "DRESSAGE ET PEINTURE ...
     // 8 33,000 ..." row and appear as a fake MO operation.
-    .replace(/\s+(?=(?:D\/P|DRESSAGE__ET__PEINTURE|DRESSAGE|PEINTURE|PRODUITS?\s+(?:DE\s+)?PEINTURE|REMP|REMPL|REMPLACEMENT|DEPOSE|DÉPOSE|DEMONTAGE|DÉMONTAGE|REMONTAGE|REPOSE|PETIT(?:E)? FOURNITURE|ENTRETIEN|VIDANGE|FILTRE|RONDELLE|HUILE|BOUCHON|JOINT|COLLIER)\b)/gi, "\n")
+    .replace(/(\d[,.]\d{2,5})\s+(?=(?:(?:MO[-/][A-Z0-9]+\s+)?(?:D\/P|CHANG(?:EMENT)?|DRESSAGE__ET__PEINTURE|DRESSAGE|PEINTURE|PRODUITS?\s+(?:DE\s+)?PEINTURE|REMP|REMPL|REMPLACEMENT|DEPOSE|DÉPOSE|DEMONTAGE|DÉMONTAGE|REMONTAGE|REPOSE|PETIT(?:E)? FOURNITURE|ENTRETIEN|VIDANGE|FILTRE|RONDELLE|HUILE|BOUCHON|JOINT|COLLIER))\b)/gi, "$1\n")
     .split(/\r?\n/)
     .map((line) => line.replace(new RegExp(dressageMarker, "g"), "DRESSAGE ET PEINTURE"))
     .map((line) => line.replace(/\s+/g, " ").trim())
@@ -751,23 +769,20 @@ function splitRawEstimateMetadataLines(text) {
 function cleanupEstimateVehicleDescription(value) {
   const text = String(value || "").replace(/\s+/g, " ").trim();
   if (!text) return "";
-  return text
-    .replace(/^(DFM|DONGFENG|CHERY|HYUNDAI|KIA|TOYOTA|PEUGEOT|RENAULT|NISSAN|VOLKSWAGEN|MG|HAVAL|FIAT|CITROEN|MITSUBISHI|ISUZU)\s+/i, "")
-    .replace(/\s+\d{1,3}(?:\s?\d{3})?\s*$/i, "")
-    .trim();
+  return text;
 }
 
 function inferEstimateHeaderInfo(text) {
   const lines = splitRawEstimateMetadataLines(text);
   const oneLine = String(text || "").replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
   const info = {};
-  const cltIndex = lines.findIndex((line) => /^CLT[-\s]?\d+/i.test(line));
+  const cltIndex = lines.findIndex((line) => /\bCLT\d*[-\s]\d+/i.test(line));
   if (cltIndex >= 0) {
-    info.clientNumber = lines[cltIndex];
-    const clientLine = lines.slice(cltIndex + 1, cltIndex + 4).find((line) => !/^(Fax|Tel|N°|No|Devis|Date|Page)\b/i.test(line));
+    info.clientNumber = lines[cltIndex].match(/\bCLT\d*[-\s]\d+/i)?.[0] || "";
+    const clientLine = lines.slice(cltIndex + 1, cltIndex + 4).find((line) => !/^(MF\/CNI|Fax|Tel|N°|No|Devis|Date|Page)\b/i.test(line));
     if (clientLine) info.clientName = clientLine;
   }
-  const telLine = lines.find((line) => /^Tel\b/i.test(line));
+  const telLine = lines.slice(0, 20).find((line) => /^Tel\b/i.test(line));
   if (telLine) {
     const phone = telLine.replace(/^Tel\s*[:\-]?\s*/i, "").trim();
     if (phone) info.phone = phone;
@@ -776,7 +791,7 @@ function inferEstimateHeaderInfo(text) {
   const orMatch = oneLine.match(/\b(OR-[A-Z0-9-]+)\b/i);
   if (estimateMatch) info.estimateNumber = estimateMatch[1].toUpperCase();
   if (orMatch) info.orNumber = orMatch[1].toUpperCase();
-  const plateVinMatch = oneLine.match(/\b(\d{1,6}\s*TU\s*\d{1,6})\s+([A-HJ-NPR-Z0-9]{17})\b/i);
+  const plateVinMatch = oneLine.match(/\b(\d{1,6}\s*TU\s*\d{1,6}|\d{2}-\d{6})\s+([A-HJ-NPR-Z0-9]{17})\b/i);
   if (plateVinMatch) {
     info.plate = plateVinMatch[1].replace(/\s+/g, "").toUpperCase();
     info.vin = plateVinMatch[2].toUpperCase();
@@ -784,9 +799,10 @@ function inferEstimateHeaderInfo(text) {
   const brandLineIndex = lines.findIndex((line) => /^(DFM|DONGFENG|CHERY|HYUNDAI|KIA|TOYOTA|PEUGEOT|RENAULT|NISSAN|VOLKSWAGEN|MG|HAVAL|FIAT|CITROEN|MITSUBISHI|ISUZU)\b/i.test(line));
   if (brandLineIndex >= 0) {
     const vehicleRaw = lines[brandLineIndex];
-    const mileageMatch = vehicleRaw.match(/\b(\d{1,3}(?:\s?\d{3})+)\b\s*$/);
+    const mileageMatch = vehicleRaw.match(/\s+(\d{1,3}(?:\s\d{3})+|\d{4,7})(?:\s+[A-Z][A-Z._\\]+)?\s*$/i);
     const withoutMileage = mileageMatch ? vehicleRaw.slice(0, mileageMatch.index).trim() : vehicleRaw;
-    const vehicle = cleanupEstimateVehicleDescription(withoutMileage);
+    const continuation = lines[brandLineIndex + 1] || "";
+    const vehicle = cleanupEstimateVehicleDescription(`${withoutMileage}${/^(SKD|CKD)$/i.test(continuation) ? ` ${continuation}` : ""}`);
     if (vehicle) info.vehicle = vehicle;
     if (mileageMatch) info.mileage = mileageMatch[1].replace(/\s+/g, "");
   }
@@ -797,11 +813,11 @@ function extractEstimateInfo(text, lines = splitEstimateSourceLines(text)) {
   const value = (aliases) => findEstimateLabelValue(lines, aliases);
   const headerInfo = inferEstimateHeaderInfo(text);
   return {
-    clientName: value(["client"]) || headerInfo.clientName || "",
-    clientNumber: value(["n client", "no client", "numero client", "numéro client"]) || headerInfo.clientNumber || "",
+    clientName: headerInfo.clientName || value(["client"]) || "",
+    clientNumber: headerInfo.clientNumber || value(["n client", "no client", "numero client", "numéro client"]) || "",
     phone: value(["telephone", "téléphone", "tel"]) || headerInfo.phone || "",
-    estimateNumber: value(["n devis", "no devis", "numero devis", "numéro devis", "devis"]) || headerInfo.estimateNumber || "",
-    orNumber: value(["n or", "no or", "numero or", "numéro or"]) || headerInfo.orNumber || "",
+    estimateNumber: headerInfo.estimateNumber || value(["n devis", "no devis", "numero devis", "numéro devis"]) || "",
+    orNumber: headerInfo.orNumber || value(["n or", "no or", "numero or", "numéro or"]) || "",
     estimateDate: value(["date devis", "date"]),
     receptionist: value(["receptionnaire", "réceptionnaire"]),
     vehicle: value(["vehicule", "véhicule"]) || headerInfo.vehicle || "",
@@ -855,6 +871,8 @@ function isEstimateLegalOrFooterLine(normalized) {
     /\bRECUPERER\s+LE\s+VEHICULE\b/,
     /\b48\s*H\b/,
     /\bSTATIONNEMENT\b/,
+    /\bPARKING\s+SERA\s+FACTURE\b/,
+    /\bAPRES\s+30\s+JOURS\b/,
     /\b30\s*DT\b/,
     /\bSAUF\s+VENTE\s+ENTRE\s+TEMPS\b/,
     /\bVALABLE\s+SEPT\s+7\s+JOURS\b/,
@@ -1012,7 +1030,7 @@ async function extractPdfTextWithPdfJs(buffer) {
   if (!window.pdfjsLib?.getDocument) return "";
   try {
     window.pdfjsLib.GlobalWorkerOptions = window.pdfjsLib.GlobalWorkerOptions || {};
-    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.35";
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.36";
     const pdf = await window.pdfjsLib.getDocument({ data: buffer }).promise;
     const pages = [];
     for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
@@ -1026,7 +1044,6 @@ async function extractPdfTextWithPdfJs(buffer) {
         }))
         .filter((item) => item.text.trim());
       pages.push(buildPdfTextLines(positioned));
-      pages.push(positioned.map((item) => item.text).join(" "));
     }
     return pages.join("\n");
   } catch (error) {
@@ -1049,18 +1066,31 @@ function buildPdfTextLines(items) {
         rows.push({ y: item.y, items: [item] });
       }
     });
-  return rows
-    .sort((a, b) => b.y - a.y)
-    .map((row) =>
-      row.items
-        .sort((a, b) => a.x - b.x)
-        .map((item) => item.text)
-        .join(" ")
-        .replace(/\s+/g, " ")
-        .trim(),
-    )
-    .filter(Boolean)
-    .join("\n");
+  const ordered = rows.sort((a, b) => b.y - a.y).map(row => {
+    const items = row.items.sort((a, b) => a.x - b.x);
+    return { ...row, items, text: items.map(item => item.text).join(" ").replace(/\s+/g, " ").trim() };
+  });
+  const result = [];
+  for (let index = 0; index < ordered.length; index += 1) {
+    const row = ordered[index];
+    const fields = parseEstimatePricedRow(row.text);
+    let text = row.text;
+    if (fields) {
+      const quantityItem = row.items.find(item => isEstimateNumberToken(item.text));
+      const continuation = ordered[index + 1];
+      // Wrapped designation cells stay to the left of the quantity column.
+      // A wrapped unit (HEUR / E) in the right-hand column is not an instruction.
+      if (quantityItem && continuation && row.y - continuation.y <= 18 && !parseEstimatePricedRow(continuation.text)) {
+        const extra = continuation.items.filter(item => item.x < quantityItem.x - 8).map(item => item.text).join(" ").trim();
+        if (extra && !/\d/.test(extra) && !/^(TOTAL|MO[-/]|ART\d|PRODUIT|DATE|PAGE|CONDITION|NOTE|TIMBRE|FRAIS|CACHET)\b/i.test(extra)) {
+          text = `${fields.designation} ${extra} ${fields.numericTail}`;
+          index += 1;
+        } else if (!extra && /^E$/i.test(continuation.text)) index += 1;
+      }
+    }
+    if (text) result.push(text);
+  }
+  return result.join("\n");
 }
 
 async function extractPdfTextFallback(buffer) {

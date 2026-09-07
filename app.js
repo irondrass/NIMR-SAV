@@ -131,7 +131,7 @@ function bindSyncConflictUsability() {
 
 function configurePdfWorker() {
   if (window.pdfjsLib?.GlobalWorkerOptions) {
-    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.35";
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.36";
   }
 }
 
@@ -505,15 +505,20 @@ function renderPdfEstimateCreationPreview(form, draft, file) {
 
   const warning = $("#pdf-estimate-import-warning");
   if (warning) {
-    warning.hidden = draft.hasDetailedLabor;
-    warning.textContent = draft.hasDetailedLabor ? "" : "Aucune main-d’œuvre détaillée détectée dans le devis.";
+    const messages = [];
+    if (!draft.hasDetailedLabor) messages.push("Aucune main-d’œuvre détaillée détectée dans le document.");
+    if (draft.parsed.documentType === "work_completed") messages.push("Document de fin des travaux : vérifiez les travaux à reprendre avant de créer une nouvelle intervention.");
+    const existing = findExistingCaseForEstimate(info.orNumber);
+    if (existing) messages.push(`Cet OR existe déjà pour ${existing.plate || existing.vehicle || existing.clientName}. Ouvrez son dossier pour ajouter un document ou un complément.`);
+    warning.hidden = messages.length === 0;
+    warning.textContent = messages.join(" ");
   }
 
   const list = $("#pdf-estimate-labor-preview");
   if (list) {
     list.innerHTML = `<div class="pdf-import-task-list">${taskRows.map((task) => `
       <article class="pdf-import-task-row">
-        <div><strong>${escapeHtml(task.operation)}</strong><small>Source PDF · Prêt pour validation</small></div>
+        <div><strong>${escapeHtml(task.operation)}</strong><small>Travail extrait du PDF · Répartition proposée à confirmer</small></div>
         <div><span>${escapeHtml(getDurationLabel(task.phase) || task.phase)}</span><strong>${escapeHtml(task.roleLabel)}</strong></div>
         <b>${formatLocalizedDecimal(task.laborHours)} h</b>
       </article>
@@ -527,6 +532,13 @@ function renderPdfEstimateCreationPreview(form, draft, file) {
   if (button) button.disabled = false;
 }
 
+function findExistingCaseForEstimate(orNumber) {
+  const key = String(orNumber || "").replace(/\s+/g, "").toUpperCase();
+  if (!key) return null;
+  return (state.cases || []).find(item => !item.deletedAt && [item.orNavNumber, ...(item.claims || []).map(claim => claim.orNumber)]
+    .some(value => String(value || "").replace(/\s+/g, "").toUpperCase() === key)) || null;
+}
+
 async function createCaseFromPdfEstimate(draft, estimateFile = null, overrides = {}) {
   if (!draft?.parsed) throw new Error("Aucun aperçu PDF valide n’est disponible.");
   const createGuard = guardCaseCreate();
@@ -537,6 +549,8 @@ async function createCaseFromPdfEstimate(draft, estimateFile = null, overrides =
   const overrideOrDetected = (field, detectedField = field) => Object.prototype.hasOwnProperty.call(overrides, field)
     ? overrides[field]
     : (info[detectedField] || "");
+  const existing = findExistingCaseForEstimate(overrideOrDetected("orNavNumber", "orNumber"));
+  if (existing) throw new Error("Cet OR existe déjà. Ouvrez le dossier existant pour ajouter un document ou un complément.");
   const importedAt = new Date().toISOString();
   const orderType = inferOrderTypeFromEstimate(parsed) || "client";
   const estimateNumber = cleanParsedEstimateNumber(overrideOrDetected("estimateNumber", "estimateNumber"));
@@ -743,14 +757,6 @@ function splitRawEstimateMetadataLines(text) {
     .filter(Boolean);
 }
 
-function cleanupEstimateVehicleDescription(value) {
-  const text = String(value || "").replace(/\s+/g, " ").trim();
-  if (!text) return "";
-  return text
-    .replace(/\s+\d{1,3}(?:\s?\d{3})?\s*$/i, "")
-    .trim();
-}
-
 function enrichParsedEstimateInfo(parsed, metadata = {}) {
   const info = { ...(parsed?.info || {}) };
   Object.entries(metadata || {}).forEach(([key, value]) => {
@@ -792,6 +798,7 @@ function inferOrderTypeFromEstimate(parsed) {
   if (!operations) return "client";
   if (/\bVIDANGE\b|\bENTRETIEN\b|\bSERVICE\s+RAPIDE\b/.test(operations)) return "vidange";
   if (/\bDIAGNOSTIC\b|\bCONTROLE\b|\bRECHERCHE\s+PANNE\b/.test(operations)) return "diagnostic";
+  if (/\b(DRESSAGE|CARROSSERIE|PEINTURE|PARE CHOCS?)\b/.test(operations)) return "client";
   if (/\bELECTRIQUE\b|\bELECTRICITE\b|\bDIAGNOSTIC\b|\bBATTERIE\b|\bAIRBAG\b|\bFAISCEAU\b|\bCAPTEUR\b|\bALTERNATEUR\b|\bDEMARREUR\b/.test(operations)) return "electrical_client";
   if (/\bMECANIQUE\b|\bMECAN\b|\bFREIN\b|\bSUSPENSION\b|\bEMBRAYAGE\b|\bMOTEUR\b|\bDISTRIBUTION\b|\bBOITE\b/.test(operations)) return "mechanical_client";
   return "client";
@@ -1473,7 +1480,7 @@ function registerServiceWorker() {
   });
   const registerCurrentServiceWorker = async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=23.3.35", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=23.3.36", { updateViaCache: "none" });
       const refreshRegistration = async () => {
         try {
           await registration.update?.();

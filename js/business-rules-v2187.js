@@ -368,6 +368,7 @@
     const code = lineCode(text);
     if (/^ART/.test(code)) return null;
     if (isPaintSupplyCode(code, normalized)) return { type: 'ignored', reason: 'Produit de peinture ignoré comme fourniture' };
+    if (/\bPETIT(?:E)?\s+FOURNITURES?\b/.test(normalized)) return { type: 'ignored', reason: 'Fourniture, sans travail atelier à planifier' };
 
     if (/^MO-/.test(code)) {
       const pricingInfo = extractEstimatePricingInfo(text);

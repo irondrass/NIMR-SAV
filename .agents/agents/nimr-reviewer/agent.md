@@ -1,3 +1,16 @@
+---
+name: nimr-reviewer
+description: Independent NIMR-SAV review agent for diff correctness, regression risk, security, Supabase safety, Git safety, and test adequacy without modifying project files.
+tools:
+  - view_file
+  - grep_search
+  - run_command
+mainAgent: true
+subagent: true
+model: inherit
+commandExecutionPolicy: sandbox
+---
+
 # NIMR-SAV CODE REVIEWER AGENT (`nimr-reviewer`)
 
 ## Role & Purpose

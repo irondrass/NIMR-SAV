@@ -16,13 +16,14 @@ All commands run from the repository root:
    ```
 2. **Targeted Domain Tests**:
    - Identity: `node tests/sec_secure_identity_onboarding_sec001.test.mjs`
-   - Identity Mapping: `node tests/identity_001e_technician_resource_mapping.test.mjs`
    - Planning Assignment: `node tests/planning_resource_assignment.test.mjs`
    - Planning Conflicts: `node tests/planning_resources_conflicts.test.mjs`
    - Workshop DAG: `node tests/workshop_001b_dependency_dag.test.mjs`
    - Supabase Sync: `node tests/supabase_sync_integrity.test.mjs`
    - Technician Flow: `node tests/technician_flow.test.mjs`
    - Estimate Import: `node tests/estimate_regression.mjs`
+
+   *Branch-Specific Tests*: Ticket-specific regression tests must be run when present in the current branch, but must not be added to this canonical matrix until they exist on `main`. Before invoking a named canonical test, verify that the path exists at the current HEAD.
 3. **Audit & Release Suite**:
    ```bash
    node tests/run-audit-release.mjs

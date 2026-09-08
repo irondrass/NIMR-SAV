@@ -9,18 +9,18 @@ Cette version délivre le renforcement de sécurité WORK-AUTHORIZATION-001 (F03
 - Découplage strict entre l'accord commercial (`claim.clientApproved` / aggregate `item.flags.clientApproved`) et l'autorisation formelle d'intervention (`claim.authorizationReference`, `hasWorkAuthorizationEvidence`).
 - Vérification formelle d'autorisation par prestation via `hasWorkAuthorizationEvidence(claim)` : exige que la prestation existe, ne soit pas refusée (`claim.status !== "refused"`), porte l'accord client (`claim.clientApproved === true`), et contienne une référence d'autorisation non vide (`claim.authorizationReference.trim().length > 0`).
 - Blocage strict de la mise en travaux (`getWorkAuthorizationIssues`) tant qu'au moins une prestation requise ne dispose pas d'une preuve formelle d'autorisation.
-- Neutralisation de l'accès au cockpit opérationnel et aux décisions d'atelier en cas d'absence d'autorisation formelle.
+- Blocage fail-closed du démarrage des travaux tant que la prestation requise ne dispose pas d'une preuve explicite d'autorisation ; le cockpit opérationnel conserve l'action permettant d'enregistrer l'accord manquant.
 
 ## 2. Cycle de vie et intégrité de révocation
 
-- Fonction atomique `clearWorkAuthorization(claim)` pour révoquer l'autorisation formelle dès la désactivation d'un accord client ou le refus/désaccord d'une prestation.
-- Révocation automatique et synchrone de `authorizationReference`, `authorizationAt` et `authorizationBy` lors du décochement de prestation (`toggleCaseClaimClientApproved`), du refus/désaccord expert, et du décochement workflow (`flags.clientApproved`).
+- Fonction centralisée `clearWorkAuthorization(claim)` pour révoquer l'autorisation formelle dès la désactivation d'un accord client ou le refus/désaccord d'une prestation.
+- Révocation automatique et synchrone de `authorizationReference`, `authorizationAt` et `authorizationBy` lors de la modification des champs de prestation (décochement de `clientApproved` ou `expertApproved`, ou passage en statut `refused`) et lors du décochement workflow (`flags.clientApproved`).
 - Protection contre toute réactivation intempestive d'une référence d'ordre de réparation périmée : un re-cochage d'accord commercial impose une nouvelle saisie explicite de référence d'autorisation avant mise en travaux.
 - Préservation de la fluidité opérationnelle en cours de travaux : `getNextWorkflowAction()` n'impose pas le re-contrôle de l'accord commercial si les travaux sont déjà engagés (`item.flags.workStarted`).
 
 ## 3. Robustesse de la suite de tests et conformité TDD
 
-- Ajout du fichier de régression `tests/work_authorization_001.test.mjs` (4 tests unitaires couvrant l'interdiction de démarrage sans preuve formelle, la non-assimilation de l'accord commercial à l'autorisation d'exécution, la révocation synchrone, et la conformité multi-prestations).
+- Ajout du fichier de régression `tests/work_authorization_001.test.mjs` (4 tests unitaires couvrant l'accord importé non équivalent à l'accord d'intervention, le blocage de l'accord commercial sans référence d'autorisation, le blocage fail-closed du démarrage travaux, et la révocation avec immunité contre la réactivation intempestive).
 - Enregistrement du test dans `tests/run-audit-release.mjs`.
 - Ajustement réaliste des fixtures dans `tests/technician_flow.test.mjs` (intégration des références d'autorisation d'intervention `OR-TECH-001` / `OR-TECH-002` conformes au standard de production).
 
@@ -40,7 +40,7 @@ Cette version délivre le renforcement de sécurité WORK-AUTHORIZATION-001 (F03
 - `tests/pwa_deploy_asset_version_consistency_cache001.test.mjs` : 49/49 PASS
 - `tests/release_fingerprint_portability.test.mjs` : 10/10 PASS
 - Suite F03 ciblée (7 suites) : PASS
-- `run-audit-release` : 27/27 fichiers de tests PASS, 0 FAIL
+- `run-audit-release` : 41 tests PASS, 0 FAIL, exécutés via 26 fichiers de tests canoniques.
 
 ## 6. Supabase et déploiement
 

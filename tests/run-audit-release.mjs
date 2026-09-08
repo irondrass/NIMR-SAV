@@ -13,6 +13,7 @@ const files = [
   'mobile_offline_recovery', 'mobile_orientation_keyboard', 'mobile_pwa_resume',
   'pwa_deploy_asset_version_consistency_cache001', 'pwa_cache_version_contract',
   'release_fingerprint_portability',
+  'sync_role_transport_001',
 ];
 const result = spawnSync(process.execPath, ['--test', '--test-concurrency=1', ...files.map(name => `tests/${name}.test.mjs`)], { stdio: 'inherit' });
 if (result.error) console.error(result.error.message);

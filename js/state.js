@@ -21,7 +21,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v23.3.36";
+const APP_VERSION = "v23.3.37";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const CURRENT_DATA_SCHEMA_VERSION = 2;
@@ -706,6 +706,23 @@ function recordClientCommitment(item, changes) {
   return { ok: true, message: "Suivi client enregistré." };
 }
 
+function hasWorkAuthorizationEvidence(claim) {
+  return Boolean(
+    claim &&
+    claim.status !== "refused" &&
+    claim.clientApproved === true &&
+    String(claim.authorizationReference || "").trim()
+  );
+}
+
+function clearWorkAuthorization(claim) {
+  if (!claim) return;
+  claim.clientApproved = false;
+  claim.authorizationReference = "";
+  claim.authorizationAt = "";
+  claim.authorizationBy = "";
+}
+
 function getWorkAuthorizationIssues(item, booking = null) {
   const claims = (item?.claims || []).filter((claim) => claim.includeInPlanning !== false);
   const task = booking && (item.planningTasks || []).find((entry) =>
@@ -718,7 +735,7 @@ function getWorkAuthorizationIssues(item, booking = null) {
   ].filter(Boolean));
   const scoped = sourceIds.size ? claims.filter((claim) => sourceIds.has(claim.id)) : claims;
   if (sourceIds.size && scoped.length !== sourceIds.size) return ["Le périmètre autorisé de cette opération doit être vérifié."];
-  return scoped.filter((claim) => claim.status === "refused" || claim.clientApproved !== true)
+  return scoped.filter((claim) => !hasWorkAuthorizationEvidence(claim))
     .map((claim) => `Accord client / interne à confirmer : ${getClaimLabel(claim)}.`);
 }
 

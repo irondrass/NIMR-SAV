@@ -10,6 +10,7 @@ function fixture() {
     cases:[{id:'car',plate:'111TU222',vehicle:'Véhicule test',createdAt:'2026-09-01T08:00:00Z',
       flags:{received:true}, receptionWorkflow:{vehicleReceivedAt:'2026-09-01T08:00:00Z'},
       claims:[{id:'order',type:'mechanical_client',title:'Alternateur',includeInPlanning:true,clientApproved:true,
+        authorizationReference:'OR-2026-001',
         estimate:{lines:[{phase:'mechanical',operation:'Remplacer alternateur',laborHours:1}]}}]}],
     bookings:[{id:'job',caseId:'car',type:'work',key:'mechanical',title:'Remplacer alternateur',status:'planned',
       start:'2026-09-07T08:00:00Z',end:'2026-09-07T09:00:00Z',plannedMinutes:60,remainingMinutes:60,

@@ -119,7 +119,7 @@ function setupTechnicianState() {
           orNavNumber: 'OR-TECH',
           flags: { received: true },
           appointment: { start: '${start}', end: '${end}', delivery: '${end}', marginMinutes: 15 },
-          claims: [{ type: 'client', includeInPlanning: true, expertApproved: true, clientApproved: true, estimate: { lines: [{ phase: 'mechanical', operation: 'MO', laborHours: 2 }] } }]
+          claims: [{ type: 'client', includeInPlanning: true, expertApproved: true, clientApproved: true, authorizationReference: 'OR-TECH-001', authorizationAt: '${start}', authorizationBy: 'front', estimate: { lines: [{ phase: 'mechanical', operation: 'MO', laborHours: 2 }] } }]
         },
         {
           id: 'case-tech-2',
@@ -128,7 +128,7 @@ function setupTechnicianState() {
           plate: '456 TU 789',
           flags: { received: true },
           appointment: { start: '${start}', end: '${end}', delivery: '${end}', marginMinutes: 15 },
-          claims: [{ type: 'client', includeInPlanning: true, expertApproved: true, clientApproved: true, estimate: { lines: [{ phase: 'mechanical', operation: 'MO', laborHours: 1 }] } }]
+          claims: [{ type: 'client', includeInPlanning: true, expertApproved: true, clientApproved: true, authorizationReference: 'OR-TECH-002', authorizationAt: '${start}', authorizationBy: 'front', estimate: { lines: [{ phase: 'mechanical', operation: 'MO', laborHours: 1 }] } }]
         }
       ],
       bookings: [

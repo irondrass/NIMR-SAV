@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 const files = [
   'operational_coherence',
   'audit_completion', 'audit_completion_browser', 'smoke', 'technician_flow',
-  'workshop_operational_simplification', 'canonical_task_model_p1003',
+  'workshop_operational_simplification', 'work_authorization_001', 'canonical_task_model_p1003',
   'canonical_roles_statuses_v236', 'quality_controller_role_v235',
   'close_invoice_hard_lock_v2302', 'reception_delivery_sheet_v231c',
   'role_based_workspaces_qc_view_v2325', 'quiet_save_notifications_v2231',

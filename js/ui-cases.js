@@ -3898,7 +3898,33 @@ function renderClaims(root, item) {
       }
 
       claim[field] = nextValue;
-      if (field === 'expertApproved' && !nextValue) claim.clientApproved = false;
+      if (field === 'clientApproved' && !nextValue) {
+        if (typeof clearWorkAuthorization === 'function') clearWorkAuthorization(claim);
+        else {
+          claim.clientApproved = false;
+          claim.authorizationReference = '';
+          claim.authorizationAt = '';
+          claim.authorizationBy = '';
+        }
+      }
+      if (field === 'expertApproved' && !nextValue) {
+        if (typeof clearWorkAuthorization === 'function') clearWorkAuthorization(claim);
+        else {
+          claim.clientApproved = false;
+          claim.authorizationReference = '';
+          claim.authorizationAt = '';
+          claim.authorizationBy = '';
+        }
+      }
+      if (field === 'status' && nextValue === 'refused') {
+        if (typeof clearWorkAuthorization === 'function') clearWorkAuthorization(claim);
+        else {
+          claim.clientApproved = false;
+          claim.authorizationReference = '';
+          claim.authorizationAt = '';
+          claim.authorizationBy = '';
+        }
+      }
       synchronizeClaimStatus(claim, field);
       claim.updatedAt = new Date().toISOString();
 
@@ -4674,7 +4700,14 @@ function renderCaseDetail() {
           const workflowClaimIds = new Set(getWorkflowClaims(item).map((claim) => claim.id));
           (item.claims || []).forEach((claim) => {
             if (!workflowClaimIds.has(claim.id)) return;
-            claim.clientApproved = false;
+            if (typeof clearWorkAuthorization === "function") {
+              clearWorkAuthorization(claim);
+            } else {
+              claim.clientApproved = false;
+              claim.authorizationReference = "";
+              claim.authorizationAt = "";
+              claim.authorizationBy = "";
+            }
             claim.updatedAt = new Date().toISOString();
             synchronizeClaimStatus(claim, "clientApproved");
           });
@@ -4822,7 +4855,7 @@ function renderOperationalDecisions(root, item) {
   const editable = !isCaseReadonlyArchive(item) && !item.flags.delivered;
   const role = toRuntimeUserRole(getCurrentUser()?.role);
   const exceptions = getOperationalExceptions(item);
-  const pending = (item.claims || []).filter((claim) => claim.includeInPlanning !== false && !claim.clientApproved && claim.status !== "refused");
+  const pending = (item.claims || []).filter((claim) => claim.includeInPlanning !== false && !hasWorkAuthorizationEvidence(claim) && claim.status !== "refused");
   const button = (action, label, permission, extra = "") => editable && canRenderAction(permission, { item })
     ? `<button type="button" class="primary-button" data-operational-action="${action}" ${extra}>${label}</button>` : "";
   const quality = item.flags.workCompleted && !isCaseQualityValidated(item);
@@ -5634,7 +5667,7 @@ function getNextWorkflowAction(item) {
   if (claimsToCheck.some((claim) => !claimHasLaborEstimate(claim))) return "labor";
   if (!item.appointment || appointmentNeedsReschedule(item)) return "appointment";
   if (!item.flags.received) return "received";
-  if (getWorkAuthorizationIssues(item).length) return "clientApproved";
+  if (!item.flags.workStarted && getWorkAuthorizationIssues(item).length) return "clientApproved";
   if (!item.flags.workStarted) return "workStarted";
   if (!item.flags.workCompleted) return "workCompleted";
   if (!item.closedAt && !item.flags.invoiced && item.status !== "closed") return "close";

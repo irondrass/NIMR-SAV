@@ -40,7 +40,7 @@ function createStorage() {
   };
 }
 
-function createAppHarness({ online = true, getSupabaseUser, resolveMembership } = {}) {
+function createAppHarness({ online = true, getSupabaseUser, getSupabaseSessionState, resolveMembership } = {}) {
   const local = createStorage();
   const session = createStorage();
   const elements = {};
@@ -94,6 +94,14 @@ function createAppHarness({ online = true, getSupabaseUser, resolveMembership } 
     sessionStorage: session.api,
     getSupabaseWorkshopId: () => "00000000-0000-0000-0000-000000000001",
     getSupabaseUser: getSupabaseUser || (async () => null),
+    getSupabaseSessionState: getSupabaseSessionState !== undefined
+      ? getSupabaseSessionState
+      : (async () => {
+          const fn = getSupabaseUser || (async () => null);
+          const user = await fn();
+          if (user?.id) return { state: "AUTHORIZED", user, error: null };
+          return { state: "NO_SESSION", user: null, error: null };
+        }),
     resolveSupabaseWorkshopMembership: resolveMembership || (async () => ({ ok: false, code: "NOT_A_MEMBER" })),
     ensureCurrentTabAllowed() {},
     render: () => { renderCount += 1; },
@@ -569,6 +577,11 @@ await checkAsync("G Persisted session startup seamlessly authenticates and autho
     sessionStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
     getSupabaseWorkshopId: () => "00000000-0000-0000-0000-000000000001",
     getSupabaseUser: async () => ({ id: "auth-user-persisted", email: "persisted@nimr.com.tn" }),
+    getSupabaseSessionState: async () => ({
+      state: "AUTHORIZED",
+      user: { id: "auth-user-persisted", email: "persisted@nimr.com.tn" },
+      error: null,
+    }),
     resolveSupabaseWorkshopMembership: async () => ({
       ok: true,
       membership: {
@@ -637,6 +650,31 @@ await checkAsync("G Persisted session startup seamlessly authenticates and autho
   assert.equal(denied.code, "NO_CLOUD_SESSION");
   assert.equal(cachedOnlineHarness.renderCount, 0, "Le cache local ne remplace jamais une session cloud en ligne");
   assert.equal(cachedOnlineHarness.getElement("first-access-overlay").hidden, false);
+
+  let legacyGetSupabaseUserCalled = false;
+  const missingSessionStateHarness = createAppHarness({
+    online: true,
+    getSupabaseUser: async () => {
+      legacyGetSupabaseUserCalled = true;
+      return { id: "auth-legacy", email: "legacy@nimr.test" };
+    },
+  });
+  delete missingSessionStateHarness.context.getSupabaseSessionState;
+  delete missingSessionStateHarness.context.window.getSupabaseSessionState;
+  vm.runInContext(`
+    state.users = [{
+      id: "cached-online-director", name: "Cached Director", role: "directeur", active: true,
+      authUserId: "auth-cached-director", authSource: "supabase_membership",
+      membershipValidatedAt: "2026-08-29T08:00:00.000Z",
+      membershipWorkshopId: "00000000-0000-0000-0000-000000000001"
+    }];
+    state.currentUserId = "cached-online-director";
+  `, missingSessionStateHarness.context);
+  const missingDenied = await missingSessionStateHarness.context.checkUserSessionStartup();
+  assert.equal(missingDenied.code, "AUTH_PROVIDER_UNAVAILABLE");
+  assert.equal(legacyGetSupabaseUserCalled, false, "getSupabaseUser ne doit jamais être appelé si getSupabaseSessionState est absent");
+  assert.equal(missingSessionStateHarness.renderCount, 0, "Aucun rendu si le provider de session est manquant");
+  assert.equal(missingSessionStateHarness.getElement("first-access-overlay").hidden, false);
 
   let postConvergenceMembershipCall = 0;
   const revokedDuringConvergenceHarness = createAppHarness({

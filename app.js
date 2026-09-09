@@ -131,7 +131,7 @@ function bindSyncConflictUsability() {
 
 function configurePdfWorker() {
   if (window.pdfjsLib?.GlobalWorkerOptions) {
-    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.37";
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.38";
   }
 }
 
@@ -1480,7 +1480,7 @@ function registerServiceWorker() {
   });
   const registerCurrentServiceWorker = async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=23.3.37", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=23.3.38", { updateViaCache: "none" });
       const refreshRegistration = async () => {
         try {
           await registration.update?.();
@@ -2113,6 +2113,40 @@ function hideSupabasePasswordSetupGate() {
 }
 window.hideSupabasePasswordSetupGate = hideSupabasePasswordSetupGate;
 
+function isValidatedCachedWorkshopIdentity(user, configuredWorkshopId) {
+  const workshopId = configuredWorkshopId !== undefined
+    ? configuredWorkshopId
+    : (typeof getSupabaseWorkshopId === "function" ? String(getSupabaseWorkshopId() || "").trim() : "");
+  return Boolean(
+    user &&
+    user.active !== false &&
+    user.authSource === "supabase_membership" &&
+    user.membershipValidatedAt &&
+    user.authUserId &&
+    (!workshopId || user.membershipWorkshopId === workshopId)
+  );
+}
+
+function resumeValidatedLocalIdentity(currentUser, returnCode) {
+  if (typeof clearAccountAccessRuntimeContext === "function") clearAccountAccessRuntimeContext();
+  if (typeof stopSupabaseLiveSync === "function") stopSupabaseLiveSync();
+  window.__nimrTransportFallback = (returnCode === "OFFLINE_FALLBACK_TRANSPORT_UNAVAILABLE");
+
+  const hasPin = Boolean(currentUser?.pinHash);
+  const pinRequired = SENSITIVE_ROLES.includes(getCanonicalUserRole(currentUser)) || currentUser?.pinRequired || hasPin;
+  if (pinRequired && sessionStorage.getItem("nimr-user-pin-unlocked") !== currentUser?.id) {
+    hideFirstAccessRecovery();
+    showUserLoginScreen();
+  } else {
+    hideUserLoginScreen();
+    hideUserPinChangeOverlay();
+    hideFirstAccessRecovery();
+    ensureCurrentTabAllowed(true);
+    render();
+  }
+  return { ok: true, code: returnCode, user: currentUser };
+}
+
 async function checkUserSessionStartup() {
   if (typeof isLocalSessionUnlocked === "function" && !isLocalSessionUnlocked()) {
     // PIN local activé et verrouillé -> priorité au PIN, on attend le déverrouillage
@@ -2148,6 +2182,7 @@ async function checkUserSessionStartup() {
 
   const denyStartup = (message, code) => {
     window.__nimrValidatedAuthUserId = "";
+    window.__nimrTransportFallback = false;
     if (typeof clearAccountAccessRuntimeContext === "function") clearAccountAccessRuntimeContext();
     if (typeof stopSupabaseLiveSync === "function") stopSupabaseLiveSync();
     showFirstAccessRecovery();
@@ -2156,18 +2191,34 @@ async function checkUserSessionStartup() {
     return { ok: false, code };
   };
 
+  const currentUser = getCurrentUser();
+  const configuredWorkshopId = typeof getSupabaseWorkshopId === "function"
+    ? String(getSupabaseWorkshopId() || "").trim()
+    : "";
+
   // En ligne, la session Supabase, l'appartenance et la persistance du miroir
-  // sont toutes obligatoires. Aucun cache local ne peut remplacer l'une d'elles.
+  // sont toutes obligatoires. Aucun cache local ne peut remplacer l'une d'elles,
+  // sauf en cas d'indisponibilité transport avec identité locale préalablement validée.
   if (navigator.onLine !== false) {
     window.__nimrValidatedAuthUserId = "";
-    if (typeof getSupabaseUser !== "function") {
+    if (typeof getSupabaseSessionState !== "function") {
       return denyStartup("Connexion cloud indisponible. Rechargez la page avec une connexion internet.", "AUTH_PROVIDER_UNAVAILABLE");
     }
     try {
-      const authUser = await getSupabaseUser();
-      if (!authUser?.id) {
+      const sessionState = await getSupabaseSessionState();
+      if (sessionState?.state === "TRANSPORT_UNAVAILABLE") {
+        if (!isValidatedCachedWorkshopIdentity(currentUser, configuredWorkshopId)) {
+          return denyStartup(
+            "Première connexion internet requise pour enregistrer cet appareil et cette identité.",
+            "OFFLINE_IDENTITY_REQUIRED"
+          );
+        }
+        return resumeValidatedLocalIdentity(currentUser, "OFFLINE_FALLBACK_TRANSPORT_UNAVAILABLE");
+      }
+      if (sessionState?.state === "NO_SESSION" || !sessionState?.user?.id) {
         return denyStartup("Connexion NIMR SAV requise pour accéder à cet atelier.", "NO_CLOUD_SESSION");
       }
+      const authUser = sessionState.user;
 
       const passwordSetupMode = typeof getSupabasePasswordSetupMode === "function"
         ? getSupabasePasswordSetupMode(authUser)
@@ -2206,6 +2257,7 @@ async function checkUserSessionStartup() {
       }
 
       window.__nimrValidatedAuthUserId = authUser.id;
+      window.__nimrTransportFallback = false;
       ensureCurrentTabAllowed(true);
       render();
       hideFirstAccessRecovery();
@@ -2213,44 +2265,26 @@ async function checkUserSessionStartup() {
       hideUserPinChangeOverlay();
       return { ok: true, code: "ONLINE_AUTHORIZED", user: convergedIdentity.user };
     } catch (err) {
+      if (typeof isSupabaseTransportError === "function" && isSupabaseTransportError(err)) {
+        if (!isValidatedCachedWorkshopIdentity(currentUser, configuredWorkshopId)) {
+          return denyStartup(
+            "Première connexion internet requise pour enregistrer cet appareil et cette identité.",
+            "OFFLINE_IDENTITY_REQUIRED"
+          );
+        }
+        return resumeValidatedLocalIdentity(currentUser, "OFFLINE_FALLBACK_TRANSPORT_UNAVAILABLE");
+      }
       console.warn("Vérification session Supabase au démarrage impossible", err);
       return denyStartup(err?.message || "Validation cloud impossible. Reconnectez-vous pour continuer.", "ONLINE_AUTH_CHECK_FAILED");
     }
   }
 
   // Mode hors ligne : seule l'identité courante précédemment validée peut continuer.
-  if (typeof clearAccountAccessRuntimeContext === "function") clearAccountAccessRuntimeContext();
-  const configuredWorkshopId = typeof getSupabaseWorkshopId === "function"
-    ? String(getSupabaseWorkshopId() || "").trim()
-    : "";
-  const isValidatedCachedIdentity = (user) => Boolean(
-    user &&
-    user.active !== false &&
-    user.authSource === "supabase_membership" &&
-    user.membershipValidatedAt &&
-    user.authUserId &&
-    (!configuredWorkshopId || user.membershipWorkshopId === configuredWorkshopId)
-  );
-  const currentUser = getCurrentUser();
-  const isValidatedOfflineUser = isValidatedCachedIdentity(currentUser);
-
   if (navigator.onLine === false) {
-    if (!isValidatedOfflineUser) {
+    if (!isValidatedCachedWorkshopIdentity(currentUser, configuredWorkshopId)) {
       return denyStartup("Première connexion internet requise pour enregistrer cet appareil et cette identité.", "OFFLINE_IDENTITY_REQUIRED");
     }
-
-    const hasPin = Boolean(currentUser.pinHash);
-    const pinRequired = SENSITIVE_ROLES.includes(getCanonicalUserRole(currentUser)) || currentUser.pinRequired || hasPin;
-    if (pinRequired && sessionStorage.getItem("nimr-user-pin-unlocked") !== currentUser.id) {
-      showUserLoginScreen();
-    } else {
-      hideUserLoginScreen();
-      hideUserPinChangeOverlay();
-      hideFirstAccessRecovery();
-      ensureCurrentTabAllowed(true);
-      render();
-    }
-    return { ok: true, code: "OFFLINE_CURRENT_IDENTITY", user: currentUser };
+    return resumeValidatedLocalIdentity(currentUser, "OFFLINE_CURRENT_IDENTITY");
   }
 }
 
@@ -2368,14 +2402,7 @@ function renderUserLoginScreen() {
   const configuredWorkshopId = typeof getSupabaseWorkshopId === "function"
     ? String(getSupabaseWorkshopId() || "").trim()
     : "";
-  const currentIdentityIsValidated = Boolean(
-    currentUser &&
-    currentUser.active !== false &&
-    currentUser.authSource === "supabase_membership" &&
-    currentUser.membershipValidatedAt &&
-    currentUser.authUserId &&
-    (!configuredWorkshopId || currentUser.membershipWorkshopId === configuredWorkshopId)
-  );
+  const currentIdentityIsValidated = isValidatedCachedWorkshopIdentity(currentUser, configuredWorkshopId);
   const activeUsers = currentIdentityIsValidated ? [currentUser] : [];
 
   selectEl.innerHTML = activeUsers.map(user => {
@@ -2830,19 +2857,13 @@ function bindUserSessionActions() {
     const configuredWorkshopId = typeof getSupabaseWorkshopId === "function"
       ? String(getSupabaseWorkshopId() || "").trim()
       : "";
-    const currentIdentityIsValidated = Boolean(
-      validatedCurrentIdentity &&
-      validatedCurrentIdentity.active !== false &&
-      validatedCurrentIdentity.authSource === "supabase_membership" &&
-      validatedCurrentIdentity.membershipValidatedAt &&
-      validatedCurrentIdentity.authUserId &&
-      (!configuredWorkshopId || validatedCurrentIdentity.membershipWorkshopId === configuredWorkshopId)
-    );
+    const currentIdentityIsValidated = isValidatedCachedWorkshopIdentity(validatedCurrentIdentity, configuredWorkshopId);
     const selectedIdentityMismatch = !currentIdentityIsValidated ||
       userId !== validatedCurrentIdentity.id ||
       user.authUserId !== validatedCurrentIdentity.authUserId;
-    const offlineIdentityMismatch = navigator.onLine === false && selectedIdentityMismatch;
-    const cloudIdentityMismatch = navigator.onLine !== false && (
+    const isOfflineOrTransportFallback = navigator.onLine === false || window.__nimrTransportFallback === true;
+    const offlineIdentityMismatch = isOfflineOrTransportFallback && selectedIdentityMismatch;
+    const cloudIdentityMismatch = !isOfflineOrTransportFallback && (
       selectedIdentityMismatch ||
       window.__nimrValidatedAuthUserId !== validatedCurrentIdentity.authUserId
     );
@@ -3010,6 +3031,8 @@ function bindUserSessionIdleEvents() {
 }
 
 window.checkUserSessionStartup = checkUserSessionStartup;
+window.isValidatedCachedWorkshopIdentity = isValidatedCachedWorkshopIdentity;
+window.resumeValidatedLocalIdentity = resumeValidatedLocalIdentity;
 window.renderCurrentSessionIndicator = renderCurrentSessionIndicator;
 window.resetUserSessionIdleTimer = resetUserSessionIdleTimer;
 window.bindUserSessionIdleEvents = bindUserSessionIdleEvents;

@@ -15,6 +15,7 @@ const files = [
   'release_fingerprint_portability',
   'sync_role_transport_001',
   'offline_auth_001',
+  'sync_conflict_ux_p1_matrix',
 ];
 const result = spawnSync(process.execPath, ['--test', '--test-concurrency=1', ...files.map(name => `tests/${name}.test.mjs`)], { stdio: 'inherit' });
 if (result.error) console.error(result.error.message);

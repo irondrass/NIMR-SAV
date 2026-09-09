@@ -131,7 +131,7 @@ function bindSyncConflictUsability() {
 
 function configurePdfWorker() {
   if (window.pdfjsLib?.GlobalWorkerOptions) {
-    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.38";
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.39";
   }
 }
 
@@ -1480,7 +1480,7 @@ function registerServiceWorker() {
   });
   const registerCurrentServiceWorker = async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=23.3.38", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=23.3.39", { updateViaCache: "none" });
       const refreshRegistration = async () => {
         try {
           await registration.update?.();
@@ -1527,7 +1527,7 @@ function navigateToConflictsAndFocus() {
   }
   if (conflictPanel) {
     conflictPanel.scrollIntoView({ behavior: "smooth" });
-    const firstBtn = conflictPanel.querySelector("button, [data-sync-conflict-action]");
+    const firstBtn = conflictPanel.querySelector("[data-sync-conflict-action]:not([disabled])");
     if (firstBtn) {
       firstBtn.focus();
     } else {
@@ -1543,10 +1543,15 @@ function renderActivityLog() {
   if (!panel) return;
 
   const openConflictsList = typeof getOpenSyncConflicts === "function" ? getOpenSyncConflicts() : [];
-  const openConflictsCount = openConflictsList.length;
+  const outbox = typeof readDurableOutboxMirror === "function" ? readDurableOutboxMirror() : [];
+  const groupedConflicts = typeof groupConflictedEntities === "function"
+    ? groupConflictedEntities(openConflictsList, outbox)
+    : null;
+  const outboxConflictCount = outbox.filter((op) => ["conflicted", "conflict"].includes(op.syncStatus)).length;
+  const totalConflictsCount = groupedConflicts ? groupedConflicts.length : (openConflictsList.length + outboxConflictCount);
   const hasAuditView = hasPermission("audit.view");
 
-  panel.hidden = !hasAuditView && openConflictsCount === 0;
+  panel.hidden = !hasAuditView && totalConflictsCount === 0;
 
   // Toggle visibility of activity log specific elements based on hasAuditView
   const heading = panel.querySelector(".panel-heading");

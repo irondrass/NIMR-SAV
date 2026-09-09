@@ -4389,7 +4389,7 @@ async function reconcileServerResolvedConflicts(client = getSupabaseClient(), wo
 
   let reconciledCount = 0;
 
-  openConflicts.forEach((localConflict) => {
+  for (const localConflict of openConflicts) {
     // Priority 1: local.serverConflictId === server.id
     let matchingRow = null;
     if (localConflict.serverConflictId && isProvenServerConflictId(localConflict.serverConflictId)) {
@@ -4417,27 +4417,53 @@ async function reconcileServerResolvedConflicts(client = getSupabaseClient(), wo
         if (matchingRow.id) localConflict.serverConflictId = matchingRow.id;
         if (matchingRow.local_operation_id) localConflict.localOperationId = matchingRow.local_operation_id;
         reconciledCount += 1;
+
+        // Fix H: Proven exact historical outbox settlement
+        const targetOpId = matchingRow.local_operation_id || localConflict.localOperationId;
+        if (targetOpId && typeof loadDurableOutboxOperations === "function") {
+          const currentOutbox = await loadDurableOutboxOperations();
+          const targetOp = currentOutbox.find((op) => op.operationId === targetOpId);
+          if (targetOp) {
+            const isConflictedStatus = ["conflicted", "conflict"].includes(targetOp.syncStatus);
+            const workshopMatch = !matchingRow.workshop_id || !targetOp.workshopId || String(matchingRow.workshop_id) === String(targetOp.workshopId);
+            const entityTypeMatch = !matchingRow.entity_type || !targetOp.entityType || String(matchingRow.entity_type) === String(targetOp.entityType);
+            const entityIdMatch = !matchingRow.entity_id || !targetOp.entityId || String(matchingRow.entity_id) === String(targetOp.entityId);
+
+            if (isConflictedStatus && workshopMatch && entityTypeMatch && entityIdMatch) {
+              if (typeof acknowledgeDurableOutboxOperation === "function") {
+                try {
+                  await acknowledgeDurableOutboxOperation(targetOpId, {
+                    updatedAt: matchingRow.resolved_at || new Date().toISOString(),
+                  });
+                } catch (outboxErr) {
+                  console.error("Échec du règlement de l'opération conflictuelle durable:", outboxErr);
+                  return { reconciled: reconciledCount, error: outboxErr, settlementError: outboxErr };
+                }
+              }
+            }
+          }
+        }
       }
-      return;
+      continue;
     }
 
     // Safe entity-only fallback for damaged historical records:
     const entityId = localConflict.entityId || localConflict.caseId;
     const candidates = serverRows.filter((r) => r.entity_type === localConflict.entityType && r.entity_id === entityId);
-    if (!candidates.length) return;
+    if (!candidates.length) continue;
 
     // Mixed resolved/open rows for the same entity MUST NOT auto-close
     const hasOpenRows = candidates.some((r) => r.status === "open");
-    if (hasOpenRows) return;
+    if (hasOpenRows) continue;
 
     // All candidate server conflict rows must be resolved
     const allResolved = candidates.every((r) => r.status === "resolved");
-    if (!allResolved) return;
+    if (!allResolved) continue;
 
     // Resolutions must be compatible (all rows have identical resolution)
     const firstResolution = candidates[0].resolution;
     const allCompatible = candidates.every((r) => r.resolution === firstResolution);
-    if (!allCompatible) return;
+    if (!allCompatible) continue;
 
     const representative = candidates[0];
     localConflict.status = "resolved";
@@ -4449,7 +4475,7 @@ async function reconcileServerResolvedConflicts(client = getSupabaseClient(), wo
     if (representative.id) localConflict.serverConflictId = representative.id;
     if (representative.local_operation_id) localConflict.localOperationId = representative.local_operation_id;
     reconciledCount += 1;
-  });
+  }
 
   if (reconciledCount > 0) {
     state.syncConflicts = normalizeSyncConflicts(state.syncConflicts);

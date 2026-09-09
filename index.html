@@ -20,8 +20,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <script src="js/version.js?v=23.3.39"></script>
-    <link rel="stylesheet" href="styles.css?v=23.3.39" />
+    <script src="js/version.js?v=23.3.40"></script>
+    <link rel="stylesheet" href="styles.css?v=23.3.40" />
   </head>
   <body data-active-tab="today">
     <button id="mobile-menu-toggle" class="mobile-menu-btn" type="button" aria-label="Ouvrir la navigation principale" aria-expanded="false" aria-controls="primary-sidebar" hidden>
@@ -601,13 +601,13 @@
                     </button>
                   </form>
                   <div class="holiday-list" id="holiday-list"></div>
-                  <div class="section-heading compact-heading"><div><h2>Congés / absences ressources</h2><span>Bloque la personne concernée. Si une tâche existe déjà, replanifiez-la ou mettez-la en pause avant d'ajouter l'absence.</span></div></div>
+                  <div class="section-heading compact-heading"><div><h2>Congés / absences ressources</h2><span>Enregistrez l'absence, puis traitez les tâches signalées. Les pointages sont conservés. Si le retour est incertain, saisissez la période connue et réévaluez-la avant sa fin.</span></div></div>
                   <form class="holiday-form" id="resource-leave-form">
-                    <select name="resourceId" required></select>
-                    <input name="start" type="datetime-local" required />
-                    <input name="end" type="datetime-local" required />
-                    <input name="label" placeholder="Motif: congé, formation, absence" />
-                    <button class="primary-button" type="submit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>Ajouter congé</button>
+                    <select name="resourceId" aria-label="Technicien absent" required></select>
+                    <input name="start" aria-label="Début de l'absence" type="datetime-local" required />
+                    <input name="end" aria-label="Fin de la période d'absence connue" type="datetime-local" required />
+                    <input name="label" aria-label="Motif de l'absence" placeholder="Motif: congé, formation, absence" />
+                    <button class="primary-button" type="submit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>Enregistrer l'absence</button>
                   </form>
                   <div class="holiday-list" id="resource-leave-list"></div>
                 </section>
@@ -1471,22 +1471,22 @@
       </div>
     </div>
 
-    <script src="vendor/pdf.min.js?v=23.3.39" defer></script>
-    <script src="js/utils.js?v=23.3.39" defer></script>
-    <script src="js/state.js?v=23.3.39" defer></script>
-    <script src="js/ui-cases.js?v=23.3.39" defer></script>
-    <script src="js/estimate-import.js?v=23.3.39" defer></script>
-    <script src="js/ui-planning.js?v=23.3.39" defer></script>
-    <script src="js/photos.js?v=23.3.39" defer></script>
-    <script src="js/storage.js?v=23.3.39" defer></script>
-    <script src="js/work-hours-sync.js?v=23.3.39" defer></script>
-    <script src="js/planning.js?v=23.3.39" defer></script>
-    <script src="js/exports.js?v=23.3.39" defer></script>
-    <script src="js/business-rules-v2187.js?v=23.3.39" defer></script>
+    <script src="vendor/pdf.min.js?v=23.3.40" defer></script>
+    <script src="js/utils.js?v=23.3.40" defer></script>
+    <script src="js/state.js?v=23.3.40" defer></script>
+    <script src="js/ui-cases.js?v=23.3.40" defer></script>
+    <script src="js/estimate-import.js?v=23.3.40" defer></script>
+    <script src="js/ui-planning.js?v=23.3.40" defer></script>
+    <script src="js/photos.js?v=23.3.40" defer></script>
+    <script src="js/storage.js?v=23.3.40" defer></script>
+    <script src="js/work-hours-sync.js?v=23.3.40" defer></script>
+    <script src="js/planning.js?v=23.3.40" defer></script>
+    <script src="js/exports.js?v=23.3.40" defer></script>
+    <script src="js/business-rules-v2187.js?v=23.3.40" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.111.0" defer></script>
-    <script src="js/supabase-config.js?v=23.3.39" defer></script>
-    <script src="js/supabase-client.js?v=23.3.39" defer></script>
-    <script src="js/supabase-sync.js?v=23.3.39" defer></script>
-    <script src="app.js?v=23.3.39" defer></script>
+    <script src="js/supabase-config.js?v=23.3.40" defer></script>
+    <script src="js/supabase-client.js?v=23.3.40" defer></script>
+    <script src="js/supabase-sync.js?v=23.3.40" defer></script>
+    <script src="app.js?v=23.3.40" defer></script>
   </body>
 </html>

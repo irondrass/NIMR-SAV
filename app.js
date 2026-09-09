@@ -131,7 +131,7 @@ function bindSyncConflictUsability() {
 
 function configurePdfWorker() {
   if (window.pdfjsLib?.GlobalWorkerOptions) {
-    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.39";
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.40";
   }
 }
 
@@ -193,6 +193,8 @@ function createMinimalReceptionCase(values = {}) {
   const identity = normalizeIdentifierValue(values.identity);
   const reason = normalizeTextInputValue(values.visitReason);
   if (!identity || !reason) throw new Error("Renseigner l’identité du véhicule et le motif de la visite.");
+  if (!isValidPhoneValue(values.phone)) throw new Error("Le téléphone doit contenir 8 à 15 chiffres, ou rester vide s'il n'est pas connu.");
+  if (identity.length === 17 ? !isValidVinValue(identity) : !isValidPlateValue(identity)) throw new Error("Renseignez une immatriculation ou un VIN valide.");
   const now = new Date().toISOString();
   const item = normalizeCase({
     id: uid("case"), source: "reception", createdAt: now,
@@ -1130,7 +1132,7 @@ function bindWorkshopForms() {
   });
 
 
-  $("#resource-leave-form")?.addEventListener("submit", (event) => {
+  $("#resource-leave-form")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const permission = guardAction("planning.edit", {}, { notify: false });
     if (!permission.ok) return notifyUser(permission.message, "error");
@@ -1144,33 +1146,23 @@ function bindWorkshopForms() {
       notifyUser("Renseignez une ressource et une période de congé valide.", "error");
       return;
     }
-    const conflicts = getResourceLeaveConflicts(resourceId, start, end);
-    if (conflicts.length) {
-      const details = conflicts
-        .slice(0, 3)
-        .map((booking) => `${booking.title || getDurationLabel(booking.key) || "Tâche"} · ${formatDateTime(booking.start)}`)
-        .join(" / ");
-      notifyUser(`Cette absence chevauche ${conflicts.length} tâche(s) atelier. Replanifiez les tâches non démarrées ou mettez en pause la tâche en cours avant d'ajouter l'absence.${details ? ` ${details}` : ""}`, "error");
-      return;
+    if (form.dataset.saving === "true") return;
+    const result = recordResourceLeave({ resourceId, start, end, label });
+    if (!result.ok) return notifyUser(result.message, "error");
+    form.dataset.saving = "true";
+    try {
+      const saved = await saveState();
+      if (saved === false) throw new Error("La sauvegarde locale ou sa mise en file n'a pas été confirmée");
+      form.reset();
+      notifyUser(result.impacts.length ? `Absence enregistrée sur ce poste. ${result.impacts.length} tâche(s) à traiter ci-dessous.` : "Absence enregistrée sur ce poste.", result.impacts.length ? "warn" : "success");
+    } catch (error) {
+      notifyUser(`Absence en mémoire, sauvegarde non confirmée : ${error.message || error}. Réessayez la sauvegarde avant de quitter.`, "error");
+    } finally {
+      delete form.dataset.saving;
+      renderPlanning();
+      renderResourceLeaves();
+      renderMetrics();
     }
-    state.bookings.push(normalizeBooking({
-      id: uid("leave"),
-      type: "leave",
-      caseId: "__leave__",
-      title: label,
-      key: "leave",
-      start: start.toISOString(),
-      end: end.toISOString(),
-      resourceIds: [resourceId],
-      primaryResourceId: resourceId,
-      segments: [{ start: start.toISOString(), end: end.toISOString() }],
-      color: "#6b7280",
-    }, new Set(state.resources.map((resource) => resource.id))));
-    saveState();
-    form.reset();
-    renderPlanning();
-    renderResourceLeaves();
-    renderMetrics();
   });
 
   $("#user-form")?.addEventListener("submit", async (event) => {
@@ -1373,10 +1365,39 @@ function bindWorkshopForms() {
   bindWorkHoursInputs();
 }
 
-function getResourceLeaveConflicts(resourceId, start, end) {
-  return state.bookings.filter((booking) => {
-    if (!booking || booking.type === "leave") return false;
+function recordResourceLeave({ resourceId, start, end, label = "" } = {}) {
+  const permission = guardAction("planning.edit", {}, { notify: false });
+  if (!permission.ok) return permission;
+  const resource = getResource(resourceId);
+  const from = new Date(start);
+  const until = new Date(end);
+  if (!isTechnicianResource(resource) || !(from < until)) {
+    return { ok: false, message: "Choisissez un technicien actif et une période d'absence valide." };
+  }
+  if (getTechnicianLeaveConflicts(resourceId, from, until).length) {
+    return { ok: false, message: "Une absence couvre déjà tout ou partie de cette période. Vérifiez la période existante." };
+  }
+  const impacts = getResourceLeaveConflicts(resourceId, from, until);
+  const leave = normalizeBooking({
+    id: uid("leave"), type: "leave", caseId: "__leave__", key: "leave",
+    title: normalizeTextInputValue(label) || "Absence",
+    start: from.toISOString(), end: until.toISOString(),
+    resourceIds: [resourceId], primaryResourceId: resourceId,
+    segments: [{ start: from.toISOString(), end: until.toISOString() }], color: "#6b7280",
+  }, new Set(state.resources.map(entry => entry.id)));
+  state.bookings.push(leave);
+  markBookingEntityPersistenceDirty(leave);
+  addAuditLog("planning.absence.recorded", `Absence de ${resource.name}`, `${formatDateTime(from)} → ${formatDateTime(until)}. ${impacts.length} tâche(s) à examiner ; pointages conservés.`);
+  return { ok: true, leave, impacts };
+}
+
+function getResourceLeaveConflicts(resourceId, start, end, now = new Date(), bookings = state.bookings) {
+  return bookings.filter((booking) => {
+    if (!booking || booking.type === "leave" || booking.deletedAt || booking.temporary || booking.needsScheduling) return false;
+    if (["completed", "cancelled", "unplanned"].includes(getBookingOperationalStatus(booking)) || booking.status === "cancelled" || booking.status === "unplanned") return false;
+    if (getBookingOperationalStatus(booking) === "paused" && booking.supersededBy) return false;
     if (!booking.resourceIds?.includes(resourceId)) return false;
+    if (getBookingOperationalStatus(booking) === "started" && new Date(booking.startedAt || booking.actualStart || booking.start) < end && now >= start) return true;
     return (booking.segments || []).some((segment) => {
       const segmentStart = new Date(segment.start);
       const segmentEnd = new Date(segment.end);
@@ -1480,7 +1501,7 @@ function registerServiceWorker() {
   });
   const registerCurrentServiceWorker = async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=23.3.39", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=23.3.40", { updateViaCache: "none" });
       const refreshRegistration = async () => {
         try {
           await registration.update?.();

@@ -642,33 +642,51 @@ function renderResourceLeaves() {
     if (!canEditPlanning) control.title = deniedTitle;
   });
   const selected = select.value;
-  const humans = orderPlanningResources(state.resources.filter(isHumanPlanningResource));
+  const humans = orderPlanningResources(state.resources.filter(isTechnicianResource));
   select.innerHTML = humans.map((resource) => `<option value="${escapeAttr(resource.id)}">${escapeHtml(resource.name)} · ${escapeHtml(ROLE_LABELS[resource.role] || resource.role)}</option>`).join("");
   if (selected && humans.some((resource) => resource.id === selected)) select.value = selected;
   const leaves = state.bookings
     .filter((booking) => booking.type === "leave")
     .slice()
-    .sort((a, b) => new Date(a.start) - new Date(b.start));
+      .sort((a, b) => new Date(a.start) - new Date(b.start));
   list.innerHTML = leaves.length
     ? leaves.map((leave) => {
         const resource = getResource(leave.resourceIds?.[0]);
+        const impacts = getResourceLeaveConflicts(resource?.id, new Date(leave.start), new Date(leave.end));
         return `<article class="holiday-card">
-          <div><strong>${escapeHtml(resource?.name || "Ressource")}</strong><span class="muted">${escapeHtml(leave.title || "Congé")} · ${formatDateTime(leave.start)} → ${formatDateTime(leave.end)}</span></div>
+          <div><strong>${escapeHtml(resource?.name || "Ressource")}</strong><span class="muted">${escapeHtml(leave.title || "Congé")} · ${formatDateTime(leave.start)} → ${formatDateTime(leave.end)}</span>
+            ${impacts.length ? `<p class="warning-text">${impacts.length} tâche(s) à traiter. Mettez en pause le travail en cours ; réaffectez ou déplacez les travaux non commencés. Vérifiez ensuite la promesse et le rappel client.</p>
+              <ul>${impacts.map(booking => {
+                const item = state.cases.find(candidate => candidate.id === booking.caseId);
+                return `<li>${escapeHtml(item?.orNavNumber || item?.plate || "Dossier")} · ${escapeHtml(booking.title || getDurationLabel(booking.key))} · ${getBookingOperationalStatus(booking) === "started" ? "En cours — pause à confirmer" : "À replanifier"}
+                  <button type="button" class="ghost-button" data-leave-impact-case="${escapeAttr(booking.caseId)}">Ouvrir les travaux</button></li>`;
+              }).join("")}</ul>` : `<span class="muted">Aucune tâche restante à déplacer sur cette période.</span>`}
+          </div>
           <button class="ghost-button" type="button" data-remove-leave="${escapeAttr(leave.id)}" ${canEditPlanning ? "" : `disabled title="${escapeAttr(deniedTitle)}"`}>Retirer</button>
         </article>`;
       }).join("")
     : `<div class="empty-inline">Aucun congé ou absence planifié.</div>`;
   $$('[data-remove-leave]', list).forEach((button) => {
-    button.addEventListener('click', () => {
+    button.addEventListener('click', async () => {
       const permission = guardAction("planning.edit", {}, { notify: false });
       if (!permission.ok) return notifyUser(permission.message, "error");
-      state.bookings = state.bookings.filter((booking) => booking.id !== button.dataset.removeLeave);
-      saveState();
+      if (!await showConfirmModal("Retirer cette absence et rendre la personne disponible sur cette période ?")) return;
+      const leave = state.bookings.find(booking => booking.id === button.dataset.removeLeave);
+      if (!leave) return;
+      state.bookings = state.bookings.filter((booking) => booking.id !== leave.id);
+      addAuditLog("planning.absence.removed", "Absence retirée", `${leave.title} · ${formatDateTime(leave.start)} → ${formatDateTime(leave.end)}`);
+      const saved = await saveState();
+      if (saved === false) notifyUser("Retrait en mémoire, sauvegarde non confirmée. Réessayez la sauvegarde avant de quitter.", "error");
       renderPlanning();
       renderResourceLeaves();
       renderMetrics();
     });
   });
+  $$('[data-leave-impact-case]', list).forEach(button => button.addEventListener('click', () => {
+    activeCaseId = button.dataset.leaveImpactCase;
+    activeCaseDetailTab = "planning";
+    setActiveTab("dossiers"); renderCases(); renderCaseDetail();
+  }));
 }
 
 const WORKSHOP_USER_ADMIN_UI_ROLES = new Set(["admin_technique", "directeur"]);

@@ -153,6 +153,11 @@ assert.match(concurrentResult.message, /déjà une tâche en cours/i);
 const pauseWithoutReason = app(`pauseTechnicianTask(state.cases[0], 'booking-main', 'tech-1', '')`);
 assert.equal(pauseWithoutReason.ok, false, 'une pause doit exiger un motif');
 
+// Simulate thirty minutes of actual execution, not just a reservation in the past.
+app(`const working = state.bookings.find(b => b.id === 'booking-main');
+  working.startedAt = working.start; working.actualStart = working.start;
+  working.workSessions[0].startedAt = working.start;`);
+
 const pauseResult = app(`pauseTechnicianTask(state.cases[0], 'booking-main', 'tech-1', 'attente pièces')`);
 assert.equal(pauseResult.ok, true, 'une tâche démarrée doit pouvoir être mise en pause');
 const pausedOriginal = app(`state.bookings.find((booking) => booking.id === 'booking-main')`);

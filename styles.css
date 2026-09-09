@@ -8461,3 +8461,8 @@ select:focus {
   .operational-case-dialog .form-grid { grid-template-columns: 1fr; }
   .operational-case-dialog input, .operational-case-dialog select, .minimal-case-entry input:not([type="checkbox"]) { min-height: 44px; width: 100%; min-width: 0; }
 }
+:where(.customer-request-panel) [hidden] { display: none !important; }
+.customer-request-panel { margin: 16px 0; }
+.customer-request-panel .request-check { display: flex; align-items: center; gap: 8px; }
+.customer-request-panel input[type="checkbox"] { width: 18px; height: 18px; min-height: 0; margin: 0; }
+.customer-request-panel [data-request-feedback] { grid-column: 1 / -1; padding: 10px; border-left: 3px solid #a12a25; color: #8f201c; background: #fff3f1; }

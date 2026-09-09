@@ -968,6 +968,9 @@ const pausedTaskRegression = JSON.parse(vm.runInContext(`(() => {
   });
   const item = state.cases[0];
   const startResult = startCaseBookingTask(item, 'booking-live');
+  // Pointage de trente minutes : une réservation passée ne prouve pas un travail réalisé.
+  const working = state.bookings.find(booking => booking.id === 'booking-live');
+  working.startedAt = start; working.actualStart = start; working.workSessions[0].startedAt = start;
   const pauseResult = pauseCaseBookingTask(item, 'booking-live', 'Attente pièce');
   return JSON.stringify({
     startOk: startResult.ok,

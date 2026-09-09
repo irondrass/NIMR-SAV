@@ -1750,13 +1750,27 @@ function renderSyncStatusStrip() {
   const outboxConflictCount = durableOutbox.filter((action) => ["conflicted", "conflict"].includes(action.syncStatus)).length;
   const totalConflicts = groupedConflicts ? groupedConflicts.length : (rawConflicts.length + outboxConflictCount);
 
+  const conflictList = groupedConflicts || rawConflicts;
+  const actionableConflicts = conflictList.filter((c) => !c.pendingResolution && c.status !== "resolved");
+  const pendingResolutionConflicts = conflictList.filter((c) => Boolean(c.pendingResolution));
+  const actionableCount = actionableConflicts.length;
+  const pendingCount = pendingResolutionConflicts.length;
+  const canManageConflicts = typeof canAccessTab === "function" ? canAccessTab("atelier") : true;
+
   let cloudLabel = "Prêt";
   let cloudState = "ok";
   if (!configured) {
     cloudLabel = "Non configuré";
     cloudState = "muted";
-  } else if (totalConflicts > 0) {
-    cloudLabel = totalConflicts === 1 ? "— 1 conflit détecté — Résoudre" : `— ${totalConflicts} conflits détectés — Résoudre`;
+  } else if (actionableCount > 0) {
+    if (canManageConflicts) {
+      cloudLabel = actionableCount === 1 ? "— 1 conflit détecté — Résoudre" : `— ${actionableCount} conflits détectés — Résoudre`;
+    } else {
+      cloudLabel = actionableCount === 1 ? "— 1 conflit détecté — Chef Atelier requis" : `— ${actionableCount} conflits détectés — Chef Atelier requis`;
+    }
+    cloudState = "warn";
+  } else if (pendingCount > 0) {
+    cloudLabel = pendingCount === 1 ? "— 1 résolution en attente" : `— ${pendingCount} résolutions en attente`;
     cloudState = "warn";
   } else if (cloudError) {
     cloudLabel = "Échec sync";
@@ -1782,7 +1796,7 @@ function renderSyncStatusStrip() {
 
   const cloudEl = target.querySelector("[data-sync-cloud]");
   if (cloudEl) {
-    if (openConflicts + outboxConflictCount > 0) {
+    if (configured && actionableCount > 0 && canManageConflicts) {
       cloudEl.style.cursor = "pointer";
       cloudEl.style.textDecoration = "underline";
       cloudEl.removeAttribute("disabled");
@@ -1817,7 +1831,7 @@ function renderSyncStatusStrip() {
   // Handle fallback button visibility
   const fallbackBtn = document.getElementById("fallback-resolve-conflict-btn");
   if (fallbackBtn) {
-    fallbackBtn.hidden = openConflicts + outboxConflictCount === 0;
+    fallbackBtn.hidden = !canManageConflicts || actionableCount === 0;
   }
 }
 

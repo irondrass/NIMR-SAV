@@ -299,6 +299,105 @@ function setSupabaseDetails(message = "") {
   target.textContent = message;
 }
 
+function isSupabaseTransportError(error) {
+  if (!error) return false;
+  const status = Number(error.status);
+  if (Number.isFinite(status) && status > 0) {
+    return false;
+  }
+  if (error.name === "AuthRetryableFetchError") {
+    return true;
+  }
+  if (error instanceof TypeError && /failed to fetch|network|load failed/iu.test(String(error.message || ""))) {
+    return true;
+  }
+  const msg = String(error.message || "").toLowerCase();
+  if (
+    msg.includes("failed to fetch")
+    || msg.includes("networkerror")
+    || msg.includes("network error")
+    || msg.includes("timeout")
+    || msg.includes("aborted")
+    || msg.includes("econnrefused")
+  ) {
+    return true;
+  }
+  return false;
+}
+window.isSupabaseTransportError = isSupabaseTransportError;
+
+async function getSupabaseSessionState() {
+  const client = getSupabaseClient();
+  if (!client || !client.auth) {
+    return { state: "PROVIDER_UNAVAILABLE", user: null, error: null };
+  }
+
+  // 1. Appeler client.auth.getUser() - autorité principale côté serveur
+  let userData = null;
+  let userError = null;
+  if (typeof client.auth.getUser === "function") {
+    try {
+      const res = await client.auth.getUser();
+      userData = res?.data;
+      userError = res?.error;
+    } catch (userEx) {
+      userError = userEx;
+    }
+  }
+
+  // Si getUser produit une erreur réseau de transport -> TRANSPORT_UNAVAILABLE
+  if (userError && isSupabaseTransportError(userError)) {
+    return { state: "TRANSPORT_UNAVAILABLE", user: null, error: userError };
+  }
+
+  // Si un utilisateur est renvoyé avec succès -> AUTHORIZED
+  const authUser = userData?.user || null;
+  if (authUser?.id) {
+    markSupabaseAuthSessionRecovered("USER_RECOVERED", { user: authUser });
+    return { state: "AUTHORIZED", user: authUser, error: null };
+  }
+
+  // 2. Vérifier client.auth.getSession() pour détecter les erreurs de refresh transport
+  let sessionData = null;
+  let sessionError = null;
+  if (typeof client.auth.getSession === "function") {
+    try {
+      const sRes = await client.auth.getSession();
+      sessionData = sRes?.data;
+      sessionError = sRes?.error;
+    } catch (sessionEx) {
+      sessionError = sessionEx;
+    }
+  }
+
+  // Si getSession produit une erreur réseau de transport -> TRANSPORT_UNAVAILABLE
+  if (sessionError && isSupabaseTransportError(sessionError)) {
+    return { state: "TRANSPORT_UNAVAILABLE", user: null, error: sessionError };
+  }
+
+  // Si l'une des erreurs est un rejet d'authentification sémantique (400, 401, 403)
+  const userStatus = Number(userError?.status);
+  const sessionStatus = Number(sessionError?.status);
+  if (
+    userStatus === 400 || userStatus === 401 || userStatus === 403 ||
+    sessionStatus === 400 || sessionStatus === 401 || sessionStatus === 403
+  ) {
+    return { state: "AUTH_REJECTED", user: null, error: userError || sessionError };
+  }
+
+  if (sessionData?.session?.user?.id) {
+    markSupabaseAuthSessionRecovered("SESSION_RECOVERED", sessionData.session);
+    return { state: "AUTHORIZED", user: sessionData.session.user, error: null };
+  }
+
+  if (!userData?.user && !sessionData?.session) {
+    return { state: "NO_SESSION", user: null, error: userError || sessionError };
+  }
+
+  return { state: "UNKNOWN", user: null, error: userError || sessionError };
+}
+window.getSupabaseSessionState = getSupabaseSessionState;
+
 async function getSupabaseUser() {
   const client = getSupabaseClient();
   if (!client) return null;

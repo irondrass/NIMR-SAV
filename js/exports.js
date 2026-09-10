@@ -1067,7 +1067,18 @@ function printSupplementWorkOrders(item, supplementId = null) {
       .signature-grid { display: grid; gap: 24px; grid-template-columns: repeat(2, 1fr); margin-top: 48px; } .signature-box { border-top: 1px solid #14212b; min-height: 70px; padding-top: 8px; } .signature-box span { color: #687987; display: block; font-size: 12px; margin-top: 6px; }
       .page-break { page-break-before: always; } @media print { body { margin: 0; } .page-break { break-before: page; } }
       ${buildWorkshopPrintCss(getPrintOrderReference(item))}
-      .signature-grid{margin-top:8mm}.signature-box{min-height:12mm}.notes-box{min-height:15mm}
+      .supplement-page header{padding-bottom:2mm;margin-bottom:2mm}
+      .supplement-page h1{font-size:16pt;margin:0 0 1.5mm}
+      .supplement-page h2{font-size:11pt;margin:2mm 0 1mm}
+      .supplement-page p{margin:1mm 0}
+      .supplement-page .grid{gap:3mm;margin-top:2mm}
+      .supplement-page .box{padding:2mm}
+      .supplement-page table{margin:1.5mm 0 2mm}
+      .supplement-page th,.supplement-page td{padding:1.5mm 2mm}
+      .supplement-page .check-cell{width:36px;font-size:16px}
+      .supplement-page .notes-box{min-height:10mm}
+      .supplement-page .signature-grid{display:grid;gap:12mm;grid-template-columns:repeat(2,1fr);margin-top:4mm}
+      .supplement-page .signature-box{border-top:1px solid #14212b;min-height:10mm;padding-top:1.5mm}
     </style></head><body>${pages}<script>window.addEventListener('load', () => window.print());</script></body></html>
   `);
   popup.document.close();

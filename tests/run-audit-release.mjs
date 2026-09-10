@@ -1,7 +1,7 @@
 // Current audit acceptance suite. Historical release snapshots remain separate.
 // Performance-sensitive benchmarks (workshop_001b_dependency_dag) execute in an
-// isolated child process to prevent heap accumulation from the functional suite
-// from inflating wall-clock timings past strict microsecond thresholds.
+// isolated child process so unrelated suite activity cannot interfere with the
+// strict wall-clock benchmark threshold measured in milliseconds.
 import { spawnSync } from 'node:child_process';
 
 // --- Invocation A: Functional release suite (excludes DAG benchmark) ---

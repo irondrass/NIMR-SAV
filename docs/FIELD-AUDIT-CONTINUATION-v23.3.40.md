@@ -1,6 +1,6 @@
 # Reprise de l'audit terrain — candidat v23.3.40
 
-Date : 9 septembre 2026. Statut : corrections locales prêtes pour revue ; publication non effectuée.
+Date : 9 septembre 2026. Statut : branche publiée sur GitHub ; [PR #65](https://github.com/irondrass/NIMR-SAV/pull/65) en état DRAFT, revue distante disponible ; aucune fusion ni mise en production.
 
 ## Base et préservation des changements utilisateur
 
@@ -10,7 +10,7 @@ Base vérifiée sur `origin/main` : `269bcf535bc314f9fd1e9dd8c050559972ae19e8`, 
 
 Branche : `fix/field-audit-continuation-v2339`. Dossier de travail : `NIMR-SAV-FIELD-AUDIT-CONTINUATION`. Les modifications préexistantes du dossier `__github_publish_NIMR_SAV` sont conservées ; aucune copie des anciens fichiers applicatifs sur la nouvelle base. Aucune modification du code React.
 
-L'audit initial reste une observation des écrans et des documents. Cette phase utilise la lecture ciblée du code, expressément autorisée par l'utilisateur après l'audit. Ses autorisations locales et en ligne restent acquises ; la connexion GitHub invalide constitue une limite technique distincte.
+L'audit initial reste une observation des écrans et des documents. Cette phase utilise la lecture ciblée du code, expressément autorisée par l'utilisateur après l'audit. L'authentification du transport Git et du navigateur a permis la publication de la branche et la création de la PR #65 ; la revue distante est disponible malgré le problème antérieur de GitHub CLI.
 
 ## Changements intégrés
 
@@ -72,9 +72,11 @@ GATE: suite navigateur automatisée complète | STATUS: NOT RUN | REASON: les ha
 
 GATE: PDF réellement exportés | STATUS: NOT RUN | REASON: aperçu HTML disponible, export natif PDF non accessible à l'automatisation courante | RISK: nombre de pages, coupures et marges finales doivent être vérifiés dans les PDF du navigateur.
 
+PDF PAGINATION: NOT VERIFIED — les sept aperçus HTML existent ; les PDF natifs restent en attente d'export et de revue par l'utilisateur.
+
 GATE: performance DAG | STATUS: FAIL | REASON: seuil dépassé également sur la base intacte | RISK: fusion bloquée par la règle locale de qualité à 100 %. Aucun seuil n'a été assoupli.
 
-GATE: publication distante | STATUS: NOT RUN | REASON: authentification GitHub CLI invalide ; reconnexion demandée | RISK: les corrections locales ne sont pas encore en ligne.
+GATE: revue distante | STATUS: AVAILABLE | REASON: PR #65 publiée sur GitHub, état DRAFT, HEAD f5f8fb4a4764f4d2b3901ef6a377b611a87cc7aa | RISK: branche disponible pour revue, sans fusion ni mise en production ; les conditions de validation restent distinctes.
 
 GATE: liaison compte-technicien en production | STATUS: NOT VERIFIED | REASON: la fonction Edge déjà livrée dans v36 n'a pas été redéployée ni vérifiée avec un compte administrateur durant cette reprise | RISK: distinguer présence du bouton local et liaison réellement persistée côté Supabase.
 

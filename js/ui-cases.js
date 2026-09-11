@@ -4508,6 +4508,50 @@ async function deleteClaim(item, claimId) {
   renderCaseDetail();
 }
 
+const supplementDraftsByCaseId = new Map();
+
+function isSupplementDraftEmpty(draft) {
+  if (!draft) return true;
+  return !draft.title
+    && !draft.vehicleArea
+    && (draft.status === 'draft' || !draft.status)
+    && (draft.phase === 'body' || !draft.phase)
+    && !draft.reason
+    && !draft.operation
+    && !draft.laborHours
+    && !draft.parts;
+}
+
+function captureSupplementDraft(form) {
+  if (!form) return null;
+  const elements = form.elements;
+  return {
+    title: elements.title?.value ?? '',
+    vehicleArea: elements.vehicleArea?.value ?? '',
+    status: elements.status?.value ?? 'draft',
+    phase: elements.phase?.value ?? 'body',
+    reason: elements.reason?.value ?? '',
+    operation: elements.operation?.value ?? '',
+    laborHours: elements.laborHours?.value ?? '',
+    parts: elements.parts?.value ?? '',
+  };
+}
+
+function restoreSupplementDraft(form, caseId) {
+  if (!form || !caseId) return;
+  const draft = supplementDraftsByCaseId.get(String(caseId));
+  if (!draft) return;
+  const elements = form.elements;
+  if (elements.title && draft.title !== undefined) elements.title.value = draft.title;
+  if (elements.vehicleArea && draft.vehicleArea !== undefined) elements.vehicleArea.value = draft.vehicleArea;
+  if (elements.status && draft.status !== undefined) elements.status.value = draft.status;
+  if (elements.phase && draft.phase !== undefined) elements.phase.value = draft.phase;
+  if (elements.reason && draft.reason !== undefined) elements.reason.value = draft.reason;
+  if (elements.operation && draft.operation !== undefined) elements.operation.value = draft.operation;
+  if (elements.laborHours && draft.laborHours !== undefined) elements.laborHours.value = draft.laborHours;
+  if (elements.parts && draft.parts !== undefined) elements.parts.value = draft.parts;
+}
+
 function populateSupplementClaimSelect(root, item) {
   const select = $('[data-supplement-claim-select]', root);
   if (!select) return;
@@ -4650,6 +4694,7 @@ async function handleSupplementSubmit(event, item) {
   item.supplements.push(supplement);
   addHistory(item, 'supplement.created', 'Réparation complémentaire ajoutée', `${supplement.number} - ${supplement.title}`);
   saveState({ changedCase: item });
+  supplementDraftsByCaseId.delete(String(item.id));
   form.reset();
   renderCaseDetail();
 }
@@ -4920,7 +4965,24 @@ function renderCaseDetail() {
 
   $("#photo-input", detail).addEventListener("change", (event) => handlePhotos(event, item, $("#photo-category", detail)?.value));
   $("#claim-form", detail)?.addEventListener("submit", (event) => handleClaimSubmit(event, item));
-  $("#supplement-form", detail)?.addEventListener("submit", (event) => handleSupplementSubmit(event, item));
+  const supplementForm = $("#supplement-form", detail);
+  if (supplementForm) {
+    restoreSupplementDraft(supplementForm, item.id);
+    const updateDraft = () => {
+      const draft = captureSupplementDraft(supplementForm);
+      if (isSupplementDraftEmpty(draft)) {
+        supplementDraftsByCaseId.delete(String(item.id));
+      } else {
+        supplementDraftsByCaseId.set(String(item.id), draft);
+      }
+    };
+    supplementForm.addEventListener("input", updateDraft);
+    supplementForm.addEventListener("change", updateDraft);
+    supplementForm.addEventListener("reset", () => {
+      supplementDraftsByCaseId.delete(String(item.id));
+    });
+    supplementForm.addEventListener("submit", (event) => handleSupplementSubmit(event, item));
+  }
   $("#print-supplement-orders", detail)?.addEventListener("click", () => printSupplementWorkOrders(item));
   $$("[data-open-case-tab]", detail).forEach((button) => {
     button.addEventListener("click", () => {

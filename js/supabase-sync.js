@@ -4555,10 +4555,22 @@ async function resolveCanonicalConcurrencyConflict(conflict, action) {
         projectionLocalId: caseSyncLocalId(currentLocalCase),
       };
     } else if (entityType === "workshop_settings") {
+      const fullSettingsPayload = typeof buildWorkshopSettingsPayload === "function"
+        ? buildWorkshopSettingsPayload(state)
+        : (state?.settings || {});
       const currentLocalSettings = state?.settings || {};
       replacementPayload = {
         ...(oldOperation.payload || {}),
-        entity: cloneGranularSyncValue(currentLocalSettings),
+        entity: {
+          ...cloneGranularSyncValue(currentLocalSettings),
+          ...cloneGranularSyncValue(fullSettingsPayload),
+          ...cloneGranularSyncValue(currentLocalSettings),
+          settings: cloneGranularSyncValue(fullSettingsPayload?.settings || currentLocalSettings),
+          workHours: cloneGranularSyncValue(fullSettingsPayload?.workHours || state?.workHours || {}),
+          holidays: cloneGranularSyncValue(fullSettingsPayload?.holidays || state?.holidays || []),
+          resources: cloneGranularSyncValue(fullSettingsPayload?.resources || state?.resources || []),
+          planningDate: fullSettingsPayload?.planningDate || state?.planningDate,
+        },
       };
     } else {
       replacementPayload = cloneGranularSyncValue(oldOperation.payload || {});

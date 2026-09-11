@@ -186,7 +186,55 @@ const cloudCaseMutations = new Map();
 const cloudBookingMutations = new Map();
 const cloudAuditMutations = new Map();
 let cloudWorkshopSettingsMutation = null;
-let durableWorkshopSettingsFingerprint = "";
+const WORKSHOP_SETTINGS_FINGERPRINT_METADATA_KEY = "workshop_settings_acknowledged_fingerprint";
+
+function readPersistedAcknowledgedWorkshopSettingsFingerprint() {
+  try {
+    if (typeof localStorage !== "undefined" && typeof localStorage.getItem === "function") {
+      const raw = localStorage.getItem(`nimr-sav-sync-metadata:${WORKSHOP_SETTINGS_FINGERPRINT_METADATA_KEY}`);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed.fingerprint === "string" && parsed.fingerprint) {
+          return parsed.fingerprint;
+        }
+      }
+    }
+  } catch {
+    // Ignore corrupt local storage entries
+  }
+  return "";
+}
+
+let durableWorkshopSettingsFingerprint = readPersistedAcknowledgedWorkshopSettingsFingerprint();
+
+function persistAcknowledgedWorkshopSettingsFingerprint(fingerprint, workshopId = "") {
+  if (!fingerprint || typeof fingerprint !== "string") return;
+  durableWorkshopSettingsFingerprint = fingerprint;
+  const record = {
+    key: WORKSHOP_SETTINGS_FINGERPRINT_METADATA_KEY,
+    workshopId: String(workshopId || (typeof getOutboxWorkshopId === "function" ? getOutboxWorkshopId() : "") || ""),
+    entityType: "workshop_settings",
+    entityId: "workshop_settings",
+    fingerprint,
+    updatedAt: new Date().toISOString(),
+  };
+  try {
+    if (typeof localStorage !== "undefined" && typeof localStorage.setItem === "function") {
+      localStorage.setItem(`nimr-sav-sync-metadata:${WORKSHOP_SETTINGS_FINGERPRINT_METADATA_KEY}`, JSON.stringify(record));
+    }
+  } catch {
+    // Quota exceeded
+  }
+  if (typeof putSyncMetadata === "function") {
+    try {
+      const promise = putSyncMetadata(WORKSHOP_SETTINGS_FINGERPRINT_METADATA_KEY, record);
+      if (promise && typeof promise.catch === "function") promise.catch(() => {});
+    } catch {
+      // Ignore background sync metadata put failures
+    }
+  }
+}
+
 const observedGranularEntityMetadata = new Map();
 const durableOutboxEntityBaseVersions = new Map();
 const OBSERVED_GRANULAR_METADATA_PREFIX = "granular-observed:";
@@ -272,8 +320,8 @@ function markEntityAuditEntryDirty(entry, options = {}) {
   }
 }
 
-function markWorkshopSettingsCloudDirty(settingsPayload) {
-  if (!settingsPayload || typeof settingsPayload !== "object") return null;
+function getWorkshopSettingsPayloadFingerprint(settingsPayload) {
+  if (!settingsPayload || typeof settingsPayload !== "object") return "";
   const snapshot = cloneGranularSyncValue(settingsPayload);
   const fingerprintValue = cloneGranularSyncValue(snapshot);
   delete fingerprintValue.exportedAt;
@@ -281,8 +329,40 @@ function markWorkshopSettingsCloudDirty(settingsPayload) {
     delete fingerprintValue.workHoursSync.acknowledgedAt;
     delete fingerprintValue.workHoursSync.pending;
   }
-  const fingerprint = hashEntityPersistenceValue(fingerprintValue);
+  return hashEntityPersistenceValue(fingerprintValue);
+}
+
+function markWorkshopSettingsCloudDirty(settingsPayload) {
+  if (!settingsPayload || typeof settingsPayload !== "object") return null;
+  const snapshot = cloneGranularSyncValue(settingsPayload);
+  const fingerprint = getWorkshopSettingsPayloadFingerprint(snapshot);
+  if (!fingerprint) return null;
   if (fingerprint === durableWorkshopSettingsFingerprint) return null;
+
+  if (typeof readDurableOutboxMirror === "function") {
+    const mirror = readDurableOutboxMirror();
+    const settingsOps = mirror.filter((entry) => (
+      entry.entityType === "workshop_settings"
+      && isActiveDurableOutboxSyncStatus(entry.syncStatus || entry.status)
+    ));
+    if (settingsOps.length > 0) {
+      const exactMatch = settingsOps.find((entry) => {
+        const opFp = entry.snapshotFingerprint || getWorkshopSettingsPayloadFingerprint(entry.payload?.entity || entry.payload);
+        return opFp && opFp === fingerprint;
+      });
+      if (exactMatch) {
+        return null;
+      }
+      const pendingOp = settingsOps.find((entry) => isSendableDurableOutboxSyncStatus(entry.syncStatus || entry.status));
+      if (pendingOp) {
+        const pendingFp = pendingOp.snapshotFingerprint || getWorkshopSettingsPayloadFingerprint(pendingOp.payload?.entity || pendingOp.payload);
+        if (pendingFp && pendingFp === fingerprint) {
+          return null;
+        }
+      }
+    }
+  }
+
   cloudWorkshopSettingsMutation = {
     entityId: "workshop_settings",
     action: "upsert",
@@ -355,9 +435,16 @@ function isSendableDurableOutboxSyncStatus(status) {
 
 function getMutationBaseVersion(workshopId, entityType, entityId) {
   const key = [workshopId, entityType, entityId].map((value) => String(value || "")).join("|");
+  const observedVersion = getObservedGranularServerVersion(workshopId, entityType, entityId);
+  if (entityType === "workshop_settings" && observedVersion !== null && observedVersion !== undefined) {
+    return observedVersion;
+  }
   if (!durableOutboxEntityBaseVersions.size && typeof readDurableOutboxMirror === "function") {
     readDurableOutboxMirror().forEach((entry) => {
-      if (!isActiveDurableOutboxSyncStatus(entry.syncStatus || entry.status)) return;
+      const isEligible = entry.entityType === "workshop_settings"
+        ? isSendableDurableOutboxSyncStatus(entry.syncStatus || entry.status)
+        : isActiveDurableOutboxSyncStatus(entry.syncStatus || entry.status);
+      if (!isEligible) return;
       const entryKey = [entry.workshopId, entry.entityType, entry.entityId].map((value) => String(value || "")).join("|");
       if (!durableOutboxEntityBaseVersions.has(entryKey)) {
         durableOutboxEntityBaseVersions.set(entryKey, normalizeOutboxExpectedVersion(entry.baseVersion ?? entry.expectedVersion));
@@ -365,7 +452,7 @@ function getMutationBaseVersion(workshopId, entityType, entityId) {
     });
   }
   if (durableOutboxEntityBaseVersions.has(key)) return durableOutboxEntityBaseVersions.get(key);
-  return getObservedGranularServerVersion(workshopId, entityType, entityId);
+  return observedVersion;
 }
 
 function captureEntityMutationBatch(candidate = state, options = {}) {
@@ -460,13 +547,14 @@ function buildDurableOperationFromEntityMutation(mutation, options = {}) {
     baseVersion,
     expectedVersion: baseVersion,
     payload: mutation.payload,
+    snapshotFingerprint: mutation.settingsFingerprint,
     updatedAt: mutation.updatedAt,
     syncStatus: "pending",
     description: `${mutation.entityType} ${mutation.action} à synchroniser`,
   });
 }
 
-function acknowledgeEntityMutationBatch(batch = []) {
+function acknowledgeEntityMutationBatch(batch = [], options = {}) {
   const acknowledgeMap = (collection, descriptor) => {
     const current = collection.get(descriptor.entityId);
     if (current?.generation === descriptor.generation) collection.delete(descriptor.entityId);
@@ -483,6 +571,13 @@ function acknowledgeEntityMutationBatch(batch = []) {
       cloudWorkshopSettingsMutation = null;
     }
   });
+  if (options?.workshopSettings) {
+    const fp = options.workshopSettings.settingsFingerprint
+      || (options.workshopSettings.payload ? getWorkshopSettingsPayloadFingerprint(options.workshopSettings.payload) : "");
+    if (fp) {
+      persistAcknowledgedWorkshopSettingsFingerprint(fp, options.workshopId);
+    }
+  }
 }
 
 function markEntityStateFullReplacement() {
@@ -1180,7 +1275,11 @@ function normalizeDurableOutboxOperation(input = {}) {
     expectedVersion: normalizeOutboxExpectedVersion(rawBaseVersion),
     entityVersion: normalizeOutboxExpectedVersion(input.entityVersion),
     snapshotFingerprint: normalizeOutboxSnapshotFingerprint(
-      input.snapshotFingerprint || input.payload?.snapshotFingerprint,
+      input.snapshotFingerprint
+      || input.payload?.snapshotFingerprint
+      || (inputEntityType === "workshop_settings" && typeof getWorkshopSettingsPayloadFingerprint === "function"
+        ? getWorkshopSettingsPayloadFingerprint(input.payload?.entity || input.payload)
+        : null),
     ),
     retryCount: Math.min(DURABLE_OUTBOX_MAX_RETRY_COUNT, Math.max(0, Number(input.retryCount || input.attempts || 0))),
     lastError: String(input.lastError || input.error || ""),
@@ -1241,7 +1340,10 @@ function publishDurableOutboxMirror(records = []) {
   }));
   durableOutboxEntityBaseVersions.clear();
   compact.forEach((entry) => {
-    if (!isActiveDurableOutboxSyncStatus(entry.syncStatus)) return;
+    const isEligible = entry.entityType === "workshop_settings"
+      ? isSendableDurableOutboxSyncStatus(entry.syncStatus)
+      : isActiveDurableOutboxSyncStatus(entry.syncStatus);
+    if (!isEligible) return;
     const entityKey = [entry.workshopId, entry.entityType, entry.entityId].map((value) => String(value || "")).join("|");
     if (!durableOutboxEntityBaseVersions.has(entityKey)) {
       durableOutboxEntityBaseVersions.set(entityKey, entry.baseVersion);
@@ -1380,6 +1482,13 @@ async function acknowledgeDurableOutboxOperation(operationId, acknowledgement = 
     if (!matched) return { acknowledged: null, remaining: records };
     const retained = records.filter((entry) => entry.operationId !== matched.operationId);
     await replaceDurableOutboxOperations(retained);
+    if (matched.entityType === "workshop_settings") {
+      const payload = matched.payload?.entity || matched.payload;
+      const fp = getWorkshopSettingsPayloadFingerprint(payload);
+      if (fp) {
+        persistAcknowledgedWorkshopSettingsFingerprint(fp, matched.workshopId);
+      }
+    }
     return {
       acknowledged: {
         ...matched,
@@ -1461,11 +1570,18 @@ async function hydrateObservedGranularEntityMetadata(workshopId = "") {
   if (typeof indexedDB === "undefined") {
     for (let index = 0; index < localStorage.length; index += 1) {
       const storageKey = localStorage.key(index);
-      if (!storageKey?.startsWith(`nimr-sav-sync-metadata:${OBSERVED_GRANULAR_METADATA_PREFIX}`)) continue;
+      if (
+        !storageKey?.startsWith(`nimr-sav-sync-metadata:${OBSERVED_GRANULAR_METADATA_PREFIX}`)
+        && storageKey !== `nimr-sav-sync-metadata:${WORKSHOP_SETTINGS_FINGERPRINT_METADATA_KEY}`
+      ) continue;
       try { records.push(JSON.parse(localStorage.getItem(storageKey) || "null")); } catch { /* ignore corrupt metadata */ }
     }
   } else {
     records = await runIndexedDbTransaction(SYNC_METADATA_STORE, "readonly", (store) => store.getAll());
+  }
+  const fpRecord = (records || []).find((record) => String(record?.key || "") === WORKSHOP_SETTINGS_FINGERPRINT_METADATA_KEY);
+  if (fpRecord && typeof fpRecord.fingerprint === "string" && fpRecord.fingerprint) {
+    durableWorkshopSettingsFingerprint = fpRecord.fingerprint;
   }
   const normalizedWorkshopId = String(workshopId || "");
   (records || []).filter((record) => String(record?.key || "").startsWith(OBSERVED_GRANULAR_METADATA_PREFIX))
@@ -1534,6 +1650,13 @@ async function completeDurableOutboxOperationAtomically(operationId, observedVal
     localStorage.removeItem(journalKey);
     observedGranularEntityMetadata.set(settledObserved.key, settledObserved);
     publishDurableOutboxMirror(retained);
+    if (matched.entityType === "workshop_settings") {
+      const payload = matched.payload?.entity || matched.payload;
+      const fp = getWorkshopSettingsPayloadFingerprint(payload);
+      if (fp) {
+        persistAcknowledgedWorkshopSettingsFingerprint(fp, matched.workshopId);
+      }
+    }
     return { acknowledged: { ...matched, syncStatus: "acknowledged", acknowledgedAt: acknowledgement.updatedAt || new Date().toISOString() }, remaining: retained };
   }
   const result = await runDurableOutboxMutation(async () => {
@@ -1567,6 +1690,13 @@ async function completeDurableOutboxOperationAtomically(operationId, observedVal
   });
   if (result.acknowledged && result.settledObserved) {
     observedGranularEntityMetadata.set(result.settledObserved.key, result.settledObserved);
+  }
+  if (result.acknowledged && result.acknowledged.entityType === "workshop_settings") {
+    const payload = result.acknowledged.payload?.entity || result.acknowledged.payload;
+    const fp = getWorkshopSettingsPayloadFingerprint(payload);
+    if (fp) {
+      persistAcknowledgedWorkshopSettingsFingerprint(fp, result.acknowledged.workshopId);
+    }
   }
   return { acknowledged: result.acknowledged, remaining: result.remaining };
 }
@@ -1806,6 +1936,8 @@ window.markEntityBookingDeleted = markEntityBookingDeleted;
 window.markEntityAuditEntryDirty = markEntityAuditEntryDirty;
 window.markEntityStateFullReplacement = markEntityStateFullReplacement;
 window.markWorkshopSettingsCloudDirty = markWorkshopSettingsCloudDirty;
+window.getWorkshopSettingsPayloadFingerprint = getWorkshopSettingsPayloadFingerprint;
+window.persistAcknowledgedWorkshopSettingsFingerprint = persistAcknowledgedWorkshopSettingsFingerprint;
 window.captureEntityMutationBatch = captureEntityMutationBatch;
 window.acknowledgeEntityMutationBatch = acknowledgeEntityMutationBatch;
 window.buildDurableOperationFromEntityMutation = buildDurableOperationFromEntityMutation;

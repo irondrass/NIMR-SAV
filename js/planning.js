@@ -2004,6 +2004,7 @@ function getTechnicianTaskStartIssues(item, booking, technicianId, options = {})
   if (status === "completed") issues.push("Cette tâche est déjà terminée.");
   if (status === "paused") issues.push("Cette tâche est en pause. Reprenez le reliquat planifié.");
   if (status === "started") issues.push("Cette tâche est déjà en cours.");
+  if (booking.needsScheduling || booking.remainingEstimateRequired) issues.push("Le Chef Atelier doit estimer le temps restant et planifier la reprise.");
   if (isBookingTaskBlocked(booking) && !options.overrideBlock) issues.push("Résoudre le blocage de la tâche avant de démarrer.");
   if (!item.flags?.received) issues.push("Le véhicule doit être réceptionné avant démarrage.");
   if (typeof getBusinessRuleIssues === "function") {
@@ -2059,23 +2060,38 @@ function closeBookingWorkSession(booking, fields = {}) {
 }
 
 function estimateBookingWorkedMinutes(booking, fallbackEnd = new Date()) {
-  const plannedMinutes = getBookingPlannedMinutes(booking);
-  const productiveSegments = getBookingProductiveSegments(booking);
-  const sessions = ensureBookingWorkSessions(booking);
-  const fromSessions = sessions.reduce((sum, session) => {
+  if (!booking) return 0;
+  const sessions = Array.isArray(booking.workSessions) && booking.workSessions.length
+    ? booking.workSessions
+    : booking.startedAt || booking.actualStart
+      ? [{ startedAt: booking.startedAt || booking.actualStart, completedAt: booking.completedAt, pausedAt: booking.pausedAt }]
+      : [];
+  const resource = getResource(booking.primaryResourceId || booking.resourceIds?.[0]);
+  const ranges = [];
+  sessions.forEach(session => {
     const start = new Date(session.startedAt);
     const end = new Date(session.completedAt || session.pausedAt || fallbackEnd);
-    if (!(start < end)) return sum;
-    const productive = countBookingSegmentMinutesBetween(productiveSegments, start, end);
-    return sum + (productive > 0 ? productive : diffMinutes(start, end));
-  }, 0);
-  if (fromSessions > 0) return plannedMinutes > 0 ? Math.min(Math.round(fromSessions), plannedMinutes) : Math.round(fromSessions);
-  const start = new Date(booking.startedAt || booking.actualStart || booking.start);
-  const end = fallbackEnd instanceof Date ? fallbackEnd : new Date(fallbackEnd);
-  if (!(start < end)) return 0;
-  const productive = countBookingSegmentMinutesBetween(productiveSegments, start, end);
-  const minutes = productive > 0 ? productive : diffMinutes(start, end);
-  return plannedMinutes > 0 ? Math.min(Math.round(minutes), plannedMinutes) : Math.round(minutes);
+    if (!(start < end)) return;
+    // Preserve explicitly reserved work outside standard hours, and count
+    // overruns inside the working calendar rather than clipping to the plan.
+    const intervals = getBookingProductiveSegments(booking);
+    for (let day = startOfDay(start); day < end; day = addDays(day, 1)) {
+      intervals.push(...getResourceDayIntervals(resource, day));
+    }
+    intervals.forEach(interval => {
+      const from = Math.max(start.getTime(), new Date(interval.start).getTime());
+      const until = Math.min(end.getTime(), new Date(interval.end).getTime());
+      if (from < until) ranges.push([from, until]);
+    });
+  });
+  ranges.sort((a, b) => a[0] - b[0]);
+  const merged = [];
+  ranges.forEach(range => {
+    const last = merged.at(-1);
+    if (last && range[0] <= last[1]) last[1] = Math.max(last[1], range[1]);
+    else merged.push([...range]);
+  });
+  return Math.round(merged.reduce((sum, [start, end]) => sum + (end - start) / 60000, 0));
 }
 
 function truncateSegmentsAt(segments, cutoffDate) {
@@ -2172,11 +2188,13 @@ function applySlotToBooking(booking, match, durationMinutes) {
   booking.plannedEnd = booking.end;
   booking.plannedSegments = clonePlanningSegments(segments);
   booking.plannedMinutes = durationMinutes || sumBookingSegmentsMinutes(segments);
+  booking.needsScheduling = false;
+  booking.remainingEstimateRequired = false;
   markBookingEntityPersistenceDirty(booking);
 }
 
 function refreshCaseAppointmentFromBookings(item) {
-  const bookings = getCaseWorkBookings(item);
+  const bookings = getCaseWorkBookings(item).filter(booking => !booking.needsScheduling && booking.start && booking.end);
   if (!bookings.length) return;
   if (typeof noteCaseRevisionCandidate === "function") noteCaseRevisionCandidate(item);
   const start = bookings.reduce((earliest, booking) => minDate(earliest, new Date(booking.start)), new Date(bookings[0].start));
@@ -2309,11 +2327,12 @@ function pauseCaseBookingTask(item, bookingId, reason, meta = {}) {
   const now = new Date();
   const originalSegments = clonePlanningSegments(booking.segments);
   const plannedMinutes = booking.plannedMinutes || sumBookingSegmentsMinutes(originalSegments);
-  const workedMinutes = Math.min(plannedMinutes, countWorkedMinutesUntil(originalSegments, now));
+  const workedMinutes = estimateBookingWorkedMinutes(booking, now);
   const remainingMinutes = Math.max(0, plannedMinutes - workedMinutes);
   if (workedMinutes <= 0) return { ok: false, message: "Aucune portion réalisée à conserver. Utilisez Replanifier pour déplacer toute la tâche." };
   if (typeof noteCaseRevisionCandidate === "function") noteCaseRevisionCandidate(item);
 
+  if (!getBookingTemplate(booking)) return { ok: false, message: "Étape planning inconnue pour préparer la reprise." };
   const clippedSegments = truncateSegmentsAt(originalSegments, now);
   if (!applySegmentsToBooking(booking, clippedSegments)) {
     return { ok: false, message: "Impossible de découper cette tâche au moment demandé." };
@@ -2336,29 +2355,57 @@ function pauseCaseBookingTask(item, bookingId, reason, meta = {}) {
     item,
     "planning.task.paused",
     "Tâche mise en pause",
-    `${booking.title || getDurationLabel(booking.key)} suspendue${meta.actorLabel ? ` par ${meta.actorLabel}` : ""}: ${cleanReason}. Temps travaillé: ${formatLocalizedDecimal(workedMinutes / 60)} h. Reliquat replanifié le ${formatDateTime(remainder.start)}.`
+    `${booking.title || getDurationLabel(booking.key)} suspendue${meta.actorLabel ? ` par ${meta.actorLabel}` : ""}: ${cleanReason}. Temps travaillé: ${formatLocalizedDecimal(workedMinutes / 60)} h. ${remainder.needsScheduling ? "Reprise à estimer / planifier par le Chef Atelier." : `Reliquat replanifié le ${formatDateTime(remainder.start)}.`}`
   );
   refreshCaseAppointmentFromBookings(item);
   markBookingEntityPersistenceDirty(booking);
-  return { ok: true, message: "Tâche mise en pause et reliquat replanifié.", booking, remainder };
+  return { ok: true, message: remainder.needsScheduling ? "Tâche mise en pause. Chef Atelier : réévaluez le temps restant et planifiez la reprise." : "Tâche mise en pause et reliquat replanifié.", booking, remainder };
 }
 
 function createPausedBookingRemainder(item, sourceBooking, remainingMinutes, reason, startAfter) {
   const template = getBookingTemplate(sourceBooking);
   if (!template) throw new Error("Étape planning inconnue pour replanifier le reliquat.");
-  const duration = Math.max(STEP_MINUTES, Math.round(remainingMinutes));
+  const duration = Math.max(0, Math.round(remainingMinutes));
   const businessTaskId = getBookingBusinessTaskId(sourceBooking) || sourceBooking.id;
   sourceBooking.businessTaskId = businessTaskId;
+  const taskContract = {
+    taskId: sourceBooking.taskId,
+    ...normalizeBookingTaskProvenance(sourceBooking),
+    dependencies: [...(sourceBooking.dependencies || [])],
+    parallelizable: sourceBooking.parallelizable === true,
+    vehicleExclusive: sourceBooking.vehicleExclusive !== false,
+    vehicleLocation: getBookingVehicleLocation(sourceBooking),
+    requiredRole: sourceBooking.requiredRole,
+    requiredCategory: sourceBooking.requiredCategory,
+    requiredRolesByResource: { ...(sourceBooking.requiredRolesByResource || {}) },
+    requiredCategoriesByResource: { ...(sourceBooking.requiredCategoriesByResource || {}) },
+    capacityUnits: sourceBooking.capacityUnits,
+    resourceUnits: { ...(sourceBooking.resourceUnits || {}) },
+    serviceMode: sourceBooking.serviceMode,
+    subcontractId: sourceBooking.subcontractId,
+    subcontractPhase: sourceBooking.subcontractPhase,
+    planningMode: sourceBooking.planningMode || "standard",
+  };
   const tempBookings = state.bookings.filter((booking) => booking.id !== sourceBooking.id).map(cloneBooking);
-  const match = findBestResourceSlot(template, startAfter, duration, tempBookings, isFastLaneJob(item), sourceBooking.primaryResourceId);
-  if (!match) throw new Error("Aucun créneau disponible pour reporter le reliquat.");
+  const match = duration > 0 ? findBestResourceSlot(template, startAfter, duration, tempBookings, isFastLaneJob(item), sourceBooking.primaryResourceId, sourceBooking.equipmentResourceIds?.[0] || null, `${item.id}:${sourceBooking.taskId || sourceBooking.key}`, {
+    ...taskContract, caseId: item.id, bookingId: sourceBooking.id, stepKey: sourceBooking.key,
+    requiredSite: getBookingRequiredResourceSite(sourceBooking),
+  }) : null;
   const title = `Reprise - ${sourceBooking.title || getDurationLabel(sourceBooking.key) || "Tâche atelier"}`;
-  const step = makePlanningStep(item, template, match, {
+  const step = match ? makePlanningStep(item, template, match, {
+    ...taskContract,
     title,
     details: `Reliquat après pause: ${reason}`,
     planningMode: sourceBooking.planningMode || "standard",
-  });
-  const booking = stepToBooking(item, step, false);
+  }) : null;
+  const booking = step ? stepToBooking(item, step, false) : normalizeBooking({
+    id: uid("booking"), caseId: item.id, key: sourceBooking.key, title,
+    status: "planned", needsScheduling: true, remainingEstimateRequired: duration <= 0,
+    resourceIds: [...sourceBooking.resourceIds], primaryResourceId: sourceBooking.primaryResourceId,
+    segments: [], start: "", end: "", plannedMinutes: duration,
+    details: "Reprise à planifier après pause. Les pointages précédents sont conservés.",
+  }, new Set(state.resources.map(resource => resource.id)));
+  Object.assign(booking, taskContract);
   booking.parentBookingId = sourceBooking.id;
   booking.businessTaskId = businessTaskId;
   booking.remainingFromPaused = true;
@@ -2366,6 +2413,7 @@ function createPausedBookingRemainder(item, sourceBooking, remainingMinutes, rea
   booking.plannedMinutes = duration;
   sourceBooking.supersededBy = booking.id;
   state.bookings.push(booking);
+  markBookingEntityPersistenceDirty(booking);
   return booking;
 }
 
@@ -2673,7 +2721,9 @@ function rescheduleCaseBooking(item, bookingId, startAfter, options = {}) {
   }
   const template = getBookingTemplate(booking);
   if (!template) return { ok: false, message: "Étape planning inconnue." };
-  const duration = getBookingEffectivePlanningMinutes(booking, item);
+  const requestedDuration = Number(options.durationMinutes);
+  if (booking.remainingEstimateRequired && (!Number.isFinite(requestedDuration) || requestedDuration <= 0 || requestedDuration > 14400)) return { ok: false, message: "Indiquez une estimation positive du temps restant (maximum 240 h)." };
+  const duration = booking.remainingEstimateRequired ? Math.max(STEP_MINUTES, Math.round(requestedDuration)) : getBookingEffectivePlanningMinutes(booking, item);
   const previousStart = booking.start;
   const tempBookings = state.bookings.filter((candidate) => candidate.id !== booking.id).map(cloneBooking);
   const match = findBestResourceSlot(

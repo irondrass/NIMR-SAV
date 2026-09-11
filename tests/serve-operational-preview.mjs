@@ -21,6 +21,11 @@ const server = createServer(async (req, res) => {
         activeTab = "today";
       }
       bindCaseCreation();
+      bindMainNavigation();
+      bindCaseList();
+      bindPlanningToolbar();
+      bindSettingsWorkspaceNavigation();
+      bindWorkshopForms();
       renderNavigationVisibility();
       render();
       setActiveTab(activeTab);

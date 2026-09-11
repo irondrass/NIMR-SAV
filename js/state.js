@@ -21,7 +21,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v23.3.39";
+const APP_VERSION = "v23.3.42";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const CURRENT_DATA_SCHEMA_VERSION = 2;
@@ -742,6 +742,7 @@ function getWorkAuthorizationIssues(item, booking = null) {
 function getCaseFinalizationIssues(item, delivery = false) {
   if (!item) return ["Dossier introuvable."];
   const issues = [];
+  if ((item.claims || []).some(claim => claim.includeInPlanning !== false && claim.durationMode === "investigation" && !String(claim.diagnosticConclusion || "").trim())) issues.push("Consigner la conclusion du diagnostic avant la finalisation.");
   if (!item?.flags?.received) issues.push("Confirmer la réception physique du véhicule.");
   if (!item?.flags?.workCompleted) issues.push("Terminer les travaux avant la finalisation.");
   if (typeof getCaseIncompleteTechnicianBookings === "function" && getCaseIncompleteTechnicianBookings(item).length) {
@@ -3224,6 +3225,7 @@ function normalizeBooking(booking, resourceIds) {
     workSessions: normalizeBookingWorkSessions(booking.workSessions),
     actualWorkedMinutes: Number(booking.actualWorkedMinutes || 0) || 0,
     remainingMinutes: Number(booking.remainingMinutes || 0) || 0,
+    remainingEstimateRequired: booking.remainingEstimateRequired === true,
     parentBookingId,
     businessTaskId: booking.businessTaskId || parentBookingId || id,
     taskId: booking.taskId || booking.businessTaskId || parentBookingId || id,
@@ -3592,6 +3594,10 @@ function normalizeCustomerClaim(claim) {
     createdBy: claim.createdBy || "",
     responsibleRole: claim.responsibleRole || "",
     responsibleUserId: claim.responsibleUserId || "",
+    nextAction: String(claim.nextAction || "").trim(),
+    reviewAt: normalizeNullableDate(claim.reviewAt),
+    outcome: String(claim.outcome || "").trim(),
+    customerNotifiedAt: normalizeNullableDate(claim.customerNotifiedAt),
     comments: Array.isArray(claim.comments) ? claim.comments.map(normalizeClaimComment).filter(Boolean) : [],
     linkedBookingId: claim.linkedBookingId || "",
     resolvedAt: claim.resolvedAt || "",
@@ -3645,6 +3651,8 @@ function normalizeRepairClaim(claim, index = 0) {
     title: claim.title || claim.label || `Intervention ${index + 1}`,
     vehicleArea: claim.vehicleArea || claim.area || "",
     type: claim.type || "assurance",
+    durationMode: claim.durationMode === "investigation" ? "investigation" : "estimated",
+    diagnosticConclusion: String(claim.diagnosticConclusion || "").trim(),
     status: normalizeClaimStatus(claim.status),
     includeInPlanning: claim.includeInPlanning !== false,
     expertApproved: Boolean(claim.expertApproved),

@@ -2155,6 +2155,8 @@ function getWorkshopProgressBookings(item) {
 
 function getWorkshopProgressEta(item) {
   if (isCaseBlocked(item) || item?.deliveryEstimate?.status === "to_confirm") return null;
+  if (getCaseWorkBookings(item).some(booking => booking.needsScheduling || booking.remainingEstimateRequired)) return null;
+  if ((item?.claims || []).some(claim => claim.includeInPlanning !== false && claim.durationMode === "investigation" && !claim.diagnosticConclusion)) return null;
   const candidates = [
     item?.revisedEstimatedDelivery,
     item?.deliveryEstimate?.current,
@@ -2462,6 +2464,10 @@ function getOperationalExceptions(item, now = new Date()) {
   const result = [];
   const add = (code, label, severity, owner, dueAt = "") => result.push({ code, label, severity, owner, dueAt });
   const commitment = item.clientCommitment || {};
+  (item.customerClaims || []).filter(claim => ["open", "in_progress", "unresolved"].includes(claim.status)).forEach(claim => {
+    const overdue = claim.reviewAt && new Date(claim.reviewAt) <= now;
+    add("customer_request", `${overdue ? "Revue en retard" : "Demande à suivre"} : ${claim.title || claim.text}`, overdue ? "danger" : "warn", state.users.find(user => user.id === claim.responsibleUserId)?.name || "Réception", claim.reviewAt || "");
+  });
   const promised = getWorkshopProgressValidDate(commitment.promisedAt);
   const eta = getWorkshopProgressEta(item);
   if (promised && !isCaseReadyForDelivery(item)) {
@@ -2471,6 +2477,11 @@ function getOperationalExceptions(item, now = new Date()) {
   const contact = getWorkshopProgressValidDate(commitment.nextContactAt);
   if (contact && contact <= now) add("contact", "Client à recontacter", "danger", "Réception", commitment.nextContactAt);
   const bookings = getWorkshopProgressBookings(item);
+  const absenceImpacts = getIndexedCaseBookings("__leave__").filter(leave => leave.type === "leave" && !leave.deletedAt)
+    .flatMap(leave => getResourceLeaveConflicts(leave.resourceIds?.[0], new Date(leave.start), new Date(leave.end), now, bookings));
+  if (absenceImpacts.length) add("absence", "Technicien absent : travaux à réorganiser", "danger", "Chef Atelier");
+  if (getCaseWorkBookings(item).some(booking => booking.remainingEstimateRequired)) add("remaining_estimate", "Temps restant à réévaluer avant reprise", "danger", "Chef Atelier");
+  else if (getCaseWorkBookings(item).some(booking => booking.needsScheduling)) add("pending_schedule", "Travail en attente d'affectation et de créneau", "warn", "Chef Atelier");
   const blockedTask = bookings.find(isWorkshopProgressBookingBlocked);
   if (isCaseBlocked(item) || blockedTask) add("blocked", isCaseBlocked(item) ? getCaseBlockerLabel(item) || "Blocage à résoudre" : `Opération bloquée : ${getPlanningOperationTitle(blockedTask)}`, "danger", "Chef Atelier");
   if (["rejected", "rework"].includes(item.receptionWorkflow?.qualityStatus)) add("quality", "Anomalie qualité à corriger", "danger", "Chef Atelier");
@@ -2563,10 +2574,12 @@ function openOperationalCasePanel(caseId) {
       <button class="primary-button" type="submit">Enregistrer le suivi</button>
     </form></details>` : ""}
     ${canRenderAction("planning.edit", { item }) ? `<button type="button" data-open-planning class="secondary-button">Préparer / ajuster le planning</button>` : ""}
+    <div data-customer-requests></div>
     <button type="button" data-open-full class="secondary-button">Dossier complet</button>`;
   document.body.append(dialog);
   const contextRoot = dialog.querySelector("[data-context-decisions]");
   renderOperationalDecisions(contextRoot, item);
+  renderCustomerRequests(dialog.querySelector('[data-customer-requests]'), item);
   if (editable) renderCaseBlockerControls(dialog, item);
   const trigger = document.activeElement;
   dialog.querySelector("[data-close]").onclick = () => dialog.close();
@@ -3876,6 +3889,101 @@ function getCaseBlockedHours(item, now = new Date()) {
   return Math.max(0, diffMinutes(start, now) / 60);
 }
 
+const CUSTOMER_REQUEST_STATES = { open: "À examiner", in_progress: "En investigation", unresolved: "En attente", resolved: "Clôturé" };
+const CUSTOMER_REQUEST_OUTCOMES = { fixed: "Résolu", not_reproduced: "Non reproduit", declined: "Suite refusée par le client", outside_scope: "Hors périmètre / orienté", explained: "Explication apportée" };
+
+function recordCustomerRequest(item, requestId, changes = {}) {
+  const permission = guardAction("case.edit", { item }, { notify: false });
+  if (!permission.ok) return permission;
+  if (isCaseReadonlyArchive(item)) return { ok: false, message: getArchivedCaseMessage(item) };
+  const existing = requestId ? (item.customerClaims || []).find(claim => claim.id === requestId) : null;
+  if (requestId && !existing) return { ok: false, message: "Demande introuvable. Actualisez le dossier." };
+  const title = String(changes.title || "").trim();
+  const status = String(changes.status || "open");
+  const nextAction = String(changes.nextAction || "").trim();
+  const reviewAt = changes.reviewAt ? new Date(changes.reviewAt) : null;
+  const owner = state.users.find(user => user.id === changes.responsibleUserId && user.active !== false);
+  const note = String(changes.note || "").trim();
+  if (!title || title.length > 300) return { ok: false, message: "Décrivez la demande en 1 à 300 caractères." };
+  if (!Object.hasOwn(CUSTOMER_REQUEST_STATES, status)) return { ok: false, message: "État de suivi invalide." };
+  if (reviewAt && !Number.isFinite(reviewAt.getTime())) return { ok: false, message: "Date de revue invalide." };
+  if (changes.responsibleUserId && !owner) return { ok: false, message: "Choisissez un responsable actif." };
+  if (status !== "resolved" && (!owner || !nextAction || !reviewAt)) return { ok: false, message: "Indiquez le responsable, la prochaine action et la date de revue." };
+  if (status === "resolved" && (!Object.hasOwn(CUSTOMER_REQUEST_OUTCOMES, changes.outcome || "") || !note || !changes.customerNotified)) return { ok: false, message: "La clôture exige une conclusion, un compte rendu et la confirmation que le client a été informé." };
+  if (changes.linkedBookingId && !getCaseWorkBookings(item).some(booking => booking.id === changes.linkedBookingId)) return { ok: false, message: "L'opération liée doit appartenir à ce dossier." };
+  const now = new Date().toISOString();
+  const actor = getCurrentUser()?.id || "";
+  const request = normalizeCustomerClaim({ ...existing, title, type: changes.type === "request" ? "request" : "claim", status,
+    responsibleUserId: owner?.id || existing?.responsibleUserId || "", nextAction: status === "resolved" ? "" : nextAction,
+    reviewAt: status === "resolved" ? "" : reviewAt.toISOString(), linkedBookingId: changes.linkedBookingId || "",
+    outcome: status === "resolved" ? changes.outcome : "", createdAt: existing?.createdAt || now, createdBy: existing?.createdBy || actor,
+    resolvedAt: status === "resolved" ? now : "", resolvedBy: status === "resolved" ? actor : "",
+    customerNotifiedAt: changes.customerNotified ? now : existing?.customerNotifiedAt || "",
+  });
+  const trace = `${CUSTOMER_REQUEST_STATES[status]}${owner ? ` · ${owner.name}` : ""}${request.reviewAt ? ` · revue ${formatDateTime(request.reviewAt)}` : ""}${request.nextAction ? ` · ${request.nextAction}` : ""}${request.outcome ? ` · ${CUSTOMER_REQUEST_OUTCOMES[request.outcome]}` : ""}${note ? ` : ${note}` : ""}`;
+  request.comments.push(normalizeClaimComment({ text: trace, createdAt: now, createdBy: actor }));
+  item.customerClaims = (item.customerClaims || []).filter(claim => claim.id !== request.id).concat(request);
+  addHistory(item, "customer.request.updated", existing ? "Suivi de demande client" : "Demande client enregistrée", `${title} · ${trace}`);
+  return { ok: true, request, message: "Suivi enregistré." };
+}
+
+function renderCustomerRequests(target, item, feedback = "") {
+  if (!target) return;
+  const editable = canRenderAction("case.edit", { item }) && !isCaseReadonlyArchive(item);
+  const revision = getVisibleCaseRevision(item);
+  const requests = item.customerClaims || [];
+  const users = (state.users || []).filter(user => user.active !== false);
+  const bookings = getCaseWorkBookings(item);
+  const requestForm = (request = {}) => `<form data-customer-request-form data-request-id="${escapeAttr(request.id || '')}" class="form-grid">
+    <label>Type<select name="type"><option value="claim" ${request.type !== 'request' ? 'selected' : ''}>Réclamation</option><option value="request" ${request.type === 'request' ? 'selected' : ''}>Demande / diagnostic</option></select></label>
+    <label>Symptôme / demande du client<input name="title" required maxlength="300" value="${escapeAttr(request.title || request.text || '')}" /></label>
+    <label>État<select name="status">${Object.entries(CUSTOMER_REQUEST_STATES).map(([value, label]) => `<option value="${value}" ${(request.status === 'explained_to_customer' ? 'resolved' : request.status || 'open') === value ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
+    <label>Responsable<select name="responsibleUserId"><option value="">À choisir</option>${users.map(user => `<option value="${escapeAttr(user.id)}" ${user.id === (request.responsibleUserId || getCurrentUser()?.id) ? 'selected' : ''}>${escapeHtml(user.name)}</option>`).join('')}</select></label>
+    <label data-request-open-field>Prochaine action<input name="nextAction" value="${escapeAttr(request.nextAction || '')}" placeholder="Ex. Reproduire le bruit à froid" /></label>
+    <label data-request-open-field>Prochaine revue<input name="reviewAt" type="datetime-local" value="${escapeAttr(toLocalInputDate(request.reviewAt))}" /></label>
+    <label>Opération concernée<select name="linkedBookingId"><option value="">Pas encore planifiée</option>${bookings.filter(booking => !booking.deletedAt).map(booking => `<option value="${escapeAttr(booking.id)}" ${request.linkedBookingId === booking.id ? 'selected' : ''}>${escapeHtml(getPlanningOperationTitle(booking))}</option>`).join('')}</select></label>
+    <label data-request-close-field>Conclusion à la clôture<select name="outcome"><option value="">À renseigner à la clôture</option>${Object.entries(CUSTOMER_REQUEST_OUTCOMES).map(([value, label]) => `<option value="${value}" ${request.outcome === value ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
+    <label>Constat / compte rendu<textarea name="note" placeholder="Résultat, attente, décision ou explication apportée"></textarea></label>
+    <label data-request-close-field class="request-check"><input name="customerNotified" type="checkbox" /> Client informé de cette décision</label>
+    <p data-request-feedback role="alert" tabindex="-1" hidden></p>
+    <button class="primary-button" type="submit">${request.id ? 'Enregistrer le suivi' : 'Enregistrer la demande'}</button>
+  </form>`;
+  target.innerHTML = `<details class="customer-request-panel" ${feedback || requests.some(request => ['open','in_progress','unresolved'].includes(request.status)) ? 'open' : ''}><summary>Réclamations et demandes client (${requests.length})</summary>
+    ${feedback ? `<p role="status">${escapeHtml(feedback)}</p>` : ''}
+    <p class="muted">Suivez le symptôme, les constats et la prochaine revue. Le créneau de diagnostic se réserve dans les interventions ; sa fin ne signifie pas que le problème est résolu.</p>
+    ${requests.map(request => `<article class="claim-card"><strong>${escapeHtml(request.title || request.text)}</strong><p>${escapeHtml(CUSTOMER_REQUEST_STATES[request.status] || 'Clôturé')}${request.reviewAt ? ` · revue ${formatDateTime(request.reviewAt)}` : ''}${request.outcome ? ` · ${escapeHtml(CUSTOMER_REQUEST_OUTCOMES[request.outcome] || request.outcome)}` : ''}</p>
+      ${editable ? `<details><summary>Mettre à jour le suivi</summary>${requestForm(request)}</details>` : `<p>${escapeHtml(request.nextAction || '')}</p>`}
+      <details><summary>Historique (${request.comments.length})</summary><ul>${request.comments.map(comment => `<li>${formatDateTime(comment.createdAt)} · ${escapeHtml(users.find(user => user.id === comment.createdBy)?.name || comment.createdBy)} : ${escapeHtml(comment.text)}</li>`).join('')}</ul></details></article>`).join('')}
+    ${editable ? `<details><summary>Ajouter une réclamation / demande</summary>${requestForm()}</details>` : ''}</details>`;
+  target.querySelectorAll('[data-customer-request-form]').forEach(form => {
+    const showFields = () => {
+      const closed = form.elements.status.value === 'resolved';
+      form.querySelectorAll('[data-request-close-field]').forEach(field => { field.hidden = !closed; });
+      form.querySelectorAll('[data-request-open-field]').forEach(field => { field.hidden = closed; });
+    };
+    showFields(); form.elements.status.addEventListener('change', showFields);
+    form.addEventListener('submit', async event => {
+    event.preventDefault();
+    const showError = message => {
+      const error = form.querySelector('[data-request-feedback]'); error.hidden = false; error.textContent = message; error.focus();
+    };
+    if (form.dataset.saving === 'true' || !form.reportValidity()) return;
+    const current = guardVisibleCaseRevision(item, revision);
+    if (!current.ok) return showError(current.message);
+    const data = new FormData(form);
+    const changes = Object.fromEntries(data.entries());
+    changes.customerNotified = data.has('customerNotified');
+    const result = recordCustomerRequest(item, form.dataset.requestId, changes);
+    if (!result.ok) return showError(result.message);
+    form.dataset.saving = 'true';
+    let saved = false;
+    try { saved = await saveState({ changedCase: item, flushCloud: true, cloudReason: 'customer-request' }); }
+    catch { saved = false; }
+    renderCustomerRequests(target, item, saved === false ? "Suivi en mémoire, sauvegarde non confirmée. Réessayez la sauvegarde avant de quitter." : "Suivi enregistré sur ce poste.");
+    });
+  });
+}
+
 function renderClaims(root, item) {
   const target = $(`[data-field='claims']`, root);
   if (!target) return;
@@ -3884,6 +3992,7 @@ function renderClaims(root, item) {
   const includedClaims = item.claims.filter((claim) => claim.includeInPlanning !== false).length;
   const missingLaborCount = item.claims.filter((claim) => claim.includeInPlanning !== false && !claimHasLaborEstimate(claim)).length;
   target.innerHTML = `
+    <div data-customer-requests></div>
     <div class="claim-summary-card ${missingLaborCount ? 'needs-attention' : ''}">
       <strong>Planning global véhicule</strong>
       <span>${formatLocalizedDecimal(planningTotal)} h planifiées sur ${includedClaims} intervention(s) incluse(s).</span>
@@ -3891,6 +4000,8 @@ function renderClaims(root, item) {
     </div>
     ${item.claims.length ? item.claims.map((claim, index) => renderClaimCard(claim, index)).join("") : `<div class="empty-inline"><strong>Aucune intervention créée.</strong><br>Créez un ordre de travail SAV, puis importez un devis ou saisissez sa main-d’œuvre.</div>`}
   `;
+
+  renderCustomerRequests(target.querySelector('[data-customer-requests]'), item);
 
   $$('[data-claim-import]', target).forEach((input) => {
     input.addEventListener('change', (event) => handleClaimEstimateImportFile(event, item, input.dataset.claimImport, root));
@@ -3975,6 +4086,11 @@ function shouldClearPlanningAfterClaimFieldChange(field, nextValue) {
 
 function validateClaimFieldChange(item, claim, field, nextValue) {
   const issues = [];
+  if (['durationMode', 'diagnosticConclusion'].includes(field)) {
+    const permission = guardCaseEdit(item, { notify: false });
+    if (!permission.ok) issues.push(permission.message);
+    if (field === 'durationMode' && !['estimated', 'investigation'].includes(nextValue)) issues.push('Choisissez un mode de durée valide.');
+  }
   const clientOnly = isClientOnlyRepairClaim(claim);
   if (field === 'expertApproved' && nextValue && !clientOnly) {
     if (!hasBeforeRepairPhoto(item)) issues.push('Ajouter au moins une photo Avant réparation avant de valider l’accord expert de l’ordre assurance.');
@@ -4118,17 +4234,20 @@ function renderClaimCard(claim, index) {
         <label>Zone<input data-claim-id="${escapeHtml(claim.id)}" data-claim-field="vehicleArea" value="${escapeHtml(claim.vehicleArea || '')}" /></label>
         <label>N° devis<input data-claim-id="${escapeHtml(claim.id)}" data-claim-field="estimateNumber" value="${escapeHtml(claim.estimateNumber || '')}" /></label>
         <label>N° OR<input data-claim-id="${escapeHtml(claim.id)}" data-claim-field="orNumber" value="${escapeHtml(claim.orNumber || '')}" /></label>
+        <label>Durée de résolution<select data-claim-id="${escapeAttr(claim.id)}" data-claim-field="durationMode"><option value="estimated" ${claim.durationMode !== 'investigation' ? 'selected' : ''}>Travaux estimés</option><option value="investigation" ${claim.durationMode === 'investigation' ? 'selected' : ''}>Inconnue — créneaux d'investigation</option></select></label>
+        ${claim.durationMode === 'investigation' ? `<label>Conclusion du diagnostic<textarea data-claim-id="${escapeAttr(claim.id)}" data-claim-field="diagnosticConclusion" placeholder="À compléter après investigation : constat et suite à donner">${escapeHtml(claim.diagnosticConclusion || '')}</textarea></label>` : ''}
         <label>Statut<select data-claim-id="${escapeHtml(claim.id)}" data-claim-field="status">
           ${Object.entries(CLAIM_STATUS_LABELS).map(([value, label]) => `<option value="${value}" ${claim.status === value ? 'selected' : ''}>${label}</option>`).join('')}
         </select></label>
       </div>
       <div class="approval-row">
         <label class="check-card"><input type="checkbox" data-claim-id="${escapeHtml(claim.id)}" data-claim-field="includeInPlanning" ${claim.includeInPlanning !== false ? 'checked' : ''}/><span>Inclure planning</span></label>
-        <span class="tag ${total > 0 ? 'ok' : 'warn'}">${formatLocalizedDecimal(total)} h MO</span>
+        <span class="tag ${total > 0 ? 'ok' : 'warn'}">${formatLocalizedDecimal(total)} h ${claim.durationMode === 'investigation' ? "réservées d'investigation" : "MO"}</span>
         <button class="ghost-button danger-button" type="button" data-claim-delete="${escapeHtml(claim.id)}">Supprimer</button>
       </div>
       <details class="claim-lines manual-labor-entry" data-manual-labor-entry ${laborDetailsOpen ? 'open' : ''}>
-        <summary>Ajouter / modifier la main-d'œuvre de l'ordre (${totalSourceLines.length})</summary>
+        <summary>${claim.durationMode === 'investigation' ? "Réserver un créneau d'investigation" : "Ajouter / modifier la main-d'œuvre de l'ordre"} (${totalSourceLines.length})</summary>
+        ${claim.durationMode === 'investigation' ? `<p class="warning-text">Durée totale inconnue. Réservez une durée choisie pour la prochaine investigation, puis fixez une revue dans le suivi client. La fin du créneau ne vaut ni résolution du problème, ni promesse de livraison.</p>` : ''}
         <ul>${lineRows}</ul>
         ${laborDetailsOpen ? `<p class="muted">Saisissez ici les heures manuelles quand il n’y a pas de devis importé.</p>` : ''}
         <form class="claim-labor-form" data-claim-labor-form data-claim-id="${escapeAttr(claim.id)}">
@@ -4198,11 +4317,12 @@ function refreshClaimEstimateFromManualLines(claim) {
   }
 }
 
-function handleClaimLaborSubmit(event, item) {
+async function handleClaimLaborSubmit(event, item) {
   event.preventDefault();
   const permissionGuard = guardCaseEdit(item);
   if (!permissionGuard.ok) return;
   const form = event.currentTarget;
+  if (form.dataset.saving === 'true') return;
   const claim = item.claims.find((candidate) => candidate.id === form.dataset.claimId);
   if (!claim) return;
   const data = new FormData(form);
@@ -4214,14 +4334,16 @@ function handleClaimLaborSubmit(event, item) {
     form.elements.operation?.focus();
     return;
   }
-  if (!laborHours || laborHours <= 0) {
-    notifyUser("Renseignez une quantité d'heures valide.", "error");
+  if (!Number.isFinite(laborHours) || roundHours(laborHours) <= 0 || laborHours > MAX_STEP_DURATION_HOURS) {
+    notifyUser(`Renseignez une durée positive, au maximum ${MAX_STEP_DURATION_HOURS} h.`, "error");
     form.elements.laborHours?.focus();
     return;
   }
 
   claim.estimate = normalizeExpertEstimate(claim.estimate);
-  claim.estimate.originalLines.push(buildManualClaimLaborLine({ phase, operation, laborHours }));
+  const manualLine = buildManualClaimLaborLine({ phase, operation, laborHours });
+  const preservesInvestigation = claim.durationMode === 'investigation' && getIndexedCaseBookings(item.id).some(booking => !booking.deletedAt && booking.type !== 'leave');
+  claim.estimate.originalLines.push(manualLine);
   claim.estimate.confirmed = false;
   claim.estimate.confirmedAt = "";
   claim.updatedAt = new Date().toISOString();
@@ -4229,11 +4351,38 @@ function handleClaimLaborSubmit(event, item) {
   recomputeCaseDurationsFromClaims(item);
   generatedProposals[item.id] = null;
   invalidatePdfChiefValidationAfterLaborChange(item, "Une ligne de main-d’œuvre a été ajoutée après la validation Chef Atelier.");
-  clearPlanningIfNeeded(item, "Planning annulé après ajout manuel de main-d'œuvre. Recalculez un RDV.");
+  if (preservesInvestigation) {
+    const pending = normalizeBooking({
+      id: uid('booking'), caseId: item.id, key: manualLine.selectedPhases[0], taskId: manualLine.id,
+      taskModelVersion: CANONICAL_TASK_MODEL_VERSION, sourceKind: 'manual',
+      sourceClaimIds: [claim.id], sourceLineIds: [manualLine.id], sourceOperations: [operation], sourceLaborHours: manualLine.laborHours,
+      title: operation, plannedMinutes: Math.round(manualLine.laborHours * 60),
+      needsScheduling: true, resourceIds: [], segments: [],
+      details: "Investigation supplémentaire : créneau à affecter par le Chef Atelier. Durée totale de résolution inconnue.",
+    }, new Set(state.resources.map(resource => resource.id)));
+    state.bookings.push(pending);
+    markBookingEntityPersistenceDirty(pending);
+    item.flags.workCompleted = false;
+    item.flags.qualityApproved = false;
+    claim.diagnosticConclusion = '';
+    addHistory(item, 'diagnostic.slot.added', 'Investigation à planifier', `${operation} : ${formatLocalizedDecimal(manualLine.laborHours)} h. Planning et pointages précédents conservés.`);
+  } else {
+    clearPlanningIfNeeded(item, "Planning annulé après ajout manuel de main-d'œuvre. Recalculez un RDV.");
+  }
   refreshCaseApprovalFlagsFromClaims(item);
   addHistory(item, "claim.labor.added", "Main-d'œuvre ajoutée à l'ordre", `${getClaimLabel(claim)} - ${operation}: ${formatLocalizedDecimal(laborHours)} h`);
-  saveState({ changedCase: item });
-  renderCaseDetail();
+  form.dataset.saving = 'true';
+  try {
+    const saved = await saveState({ changedCase: item });
+    form.reset();
+    renderCaseDetail();
+    if (saved === false) notifyUser("La saisie reste en mémoire mais n'a pas été sauvegardée durablement. Réessayez Enregistrer avant de fermer.", 'error');
+    else if (preservesInvestigation) notifyUser("Investigation ajoutée. Le Chef Atelier doit affecter son créneau ; fixez aussi la prochaine revue client.", 'success');
+  } catch (error) {
+    notifyUser("Sauvegarde impossible. La saisie reste en mémoire : réessayez Enregistrer avant de fermer.", 'error');
+  } finally {
+    delete form.dataset.saving;
+  }
 }
 
 async function removeClaimLaborLine(item, claimId, lineId) {
@@ -4282,6 +4431,7 @@ function handleClaimSubmit(event, item) {
     title,
     vehicleArea: normalizeTextInputValue(data.get('vehicleArea')),
     type: data.get('type') || 'vidange',
+    durationMode: data.get('type') === 'diagnostic' ? 'investigation' : 'estimated',
     status: data.get('status') || 'draft',
     estimateNumber: normalizeTextInputValue(data.get('estimateNumber')),
     orNumber: normalizeTextInputValue(data.get('orNumber')),
@@ -4356,6 +4506,50 @@ async function deleteClaim(item, claimId) {
   addHistory(item, 'claim.deleted', 'Ordre de réparation supprimé', getClaimLabel(claim));
   saveState({ changedCase: item });
   renderCaseDetail();
+}
+
+const supplementDraftsByCaseId = new Map();
+
+function isSupplementDraftEmpty(draft) {
+  if (!draft) return true;
+  return !draft.title
+    && !draft.vehicleArea
+    && (draft.status === 'draft' || !draft.status)
+    && (draft.phase === 'body' || !draft.phase)
+    && !draft.reason
+    && !draft.operation
+    && !draft.laborHours
+    && !draft.parts;
+}
+
+function captureSupplementDraft(form) {
+  if (!form) return null;
+  const elements = form.elements;
+  return {
+    title: elements.title?.value ?? '',
+    vehicleArea: elements.vehicleArea?.value ?? '',
+    status: elements.status?.value ?? 'draft',
+    phase: elements.phase?.value ?? 'body',
+    reason: elements.reason?.value ?? '',
+    operation: elements.operation?.value ?? '',
+    laborHours: elements.laborHours?.value ?? '',
+    parts: elements.parts?.value ?? '',
+  };
+}
+
+function restoreSupplementDraft(form, caseId) {
+  if (!form || !caseId) return;
+  const draft = supplementDraftsByCaseId.get(String(caseId));
+  if (!draft) return;
+  const elements = form.elements;
+  if (elements.title && draft.title !== undefined) elements.title.value = draft.title;
+  if (elements.vehicleArea && draft.vehicleArea !== undefined) elements.vehicleArea.value = draft.vehicleArea;
+  if (elements.status && draft.status !== undefined) elements.status.value = draft.status;
+  if (elements.phase && draft.phase !== undefined) elements.phase.value = draft.phase;
+  if (elements.reason && draft.reason !== undefined) elements.reason.value = draft.reason;
+  if (elements.operation && draft.operation !== undefined) elements.operation.value = draft.operation;
+  if (elements.laborHours && draft.laborHours !== undefined) elements.laborHours.value = draft.laborHours;
+  if (elements.parts && draft.parts !== undefined) elements.parts.value = draft.parts;
 }
 
 function populateSupplementClaimSelect(root, item) {
@@ -4500,6 +4694,7 @@ async function handleSupplementSubmit(event, item) {
   item.supplements.push(supplement);
   addHistory(item, 'supplement.created', 'Réparation complémentaire ajoutée', `${supplement.number} - ${supplement.title}`);
   saveState({ changedCase: item });
+  supplementDraftsByCaseId.delete(String(item.id));
   form.reset();
   renderCaseDetail();
 }
@@ -4770,7 +4965,24 @@ function renderCaseDetail() {
 
   $("#photo-input", detail).addEventListener("change", (event) => handlePhotos(event, item, $("#photo-category", detail)?.value));
   $("#claim-form", detail)?.addEventListener("submit", (event) => handleClaimSubmit(event, item));
-  $("#supplement-form", detail)?.addEventListener("submit", (event) => handleSupplementSubmit(event, item));
+  const supplementForm = $("#supplement-form", detail);
+  if (supplementForm) {
+    restoreSupplementDraft(supplementForm, item.id);
+    const updateDraft = () => {
+      const draft = captureSupplementDraft(supplementForm);
+      if (isSupplementDraftEmpty(draft)) {
+        supplementDraftsByCaseId.delete(String(item.id));
+      } else {
+        supplementDraftsByCaseId.set(String(item.id), draft);
+      }
+    };
+    supplementForm.addEventListener("input", updateDraft);
+    supplementForm.addEventListener("change", updateDraft);
+    supplementForm.addEventListener("reset", () => {
+      supplementDraftsByCaseId.delete(String(item.id));
+    });
+    supplementForm.addEventListener("submit", (event) => handleSupplementSubmit(event, item));
+  }
   $("#print-supplement-orders", detail)?.addEventListener("click", () => printSupplementWorkOrders(item));
   $$("[data-open-case-tab]", detail).forEach((button) => {
     button.addEventListener("click", () => {
@@ -6302,7 +6514,8 @@ function getValidatedAppointmentRows(item) {
       start: businessRow.start || displayBooking?.start,
       end: businessRow.end || displayBooking?.end,
       status: actionStatus,
-      statusLabel: businessRow.pauseRemainder ? "En pause · Reprise planifiée" : (completed ? "Terminée" : (businessRow.statusLabel || getBookingStatusLabel(actionBooking || displayBooking))),
+      statusLabel: actionBooking?.remainingEstimateRequired ? "En pause · Temps restant à estimer" : actionBooking?.needsScheduling ? (actionBooking.remainingFromPaused ? "En pause · Reprise à planifier" : "Travail à planifier") : businessRow.pauseRemainder ? "En pause · Reprise planifiée" : (completed ? "Terminée" : (businessRow.statusLabel || getBookingStatusLabel(actionBooking || displayBooking))),
+      needsScheduling: actionBooking?.needsScheduling === true,
       pauseReason: family.map((booking) => booking.pauseReason).filter(Boolean).at(-1) || "",
       remainingFromPaused: Boolean(businessRow.pauseRemainder),
       actualStart: family.map((booking) => booking.actualStart || booking.startedAt).filter(Boolean).sort()[0] || "",
@@ -6378,7 +6591,7 @@ function renderValidatedAppointmentPlan(root, item) {
             <strong class="operation-title-cell">
               <span class="operation-primary">${escapeHtml(row.title)}</span>
               ${row.canonical && row.phase && row.phase !== row.title ? `<small class="operation-phase">${escapeHtml(row.phase)}</small>` : ''}
-              ${row.remainingFromPaused ? '<small class="task-remainder-badge">Reprise planifiée</small>' : ''}
+              ${row.remainingFromPaused ? `<small class="task-remainder-badge">${row.needsScheduling ? "Reprise à planifier" : "Reprise planifiée"}</small>` : ''}
               <small class="task-status-pill">${escapeHtml(row.statusLabel)}</small>
               ${row.dependencyLabel ? `<small class="operation-dependency">${escapeHtml(row.dependencyLabel)}</small>` : ''}
               ${renderPlanningTaskProvenance(row.provenance)}
@@ -6633,20 +6846,32 @@ async function handleBookingTaskAction(item, action, bookingId, options = {}) {
       result = await runSecuredBookingTaskAction(item, action, bookingId, { ...options, pauseReason: reason });
     } else if (action === "reschedule") {
       const booking = state.bookings.find((candidate) => candidate.id === bookingId && candidate.caseId === item.id);
+      let durationMinutes;
+      if (booking?.remainingEstimateRequired) {
+        const hours = await showInputPromptModal({ title: "Réévaluer la reprise", message: "Temps restant estimé, en heures (ex. 0,5). Le temps déjà pointé sera conservé.", defaultValue: "" });
+        if (hours === null) return;
+        durationMinutes = parseLocalizedDecimal(hours) * 60;
+      }
       const defaultValue = formatDateTimeLocalInputValue(booking?.start || new Date());
       const requested = await showInputPromptModal({ title: "Replanifier l’opération", message: "Premier créneau disponible à partir de :", inputType: "datetime-local", defaultValue });
       if (requested === null) return;
-      const preview = rescheduleCaseBooking(item, bookingId, requested, { previewOnly: true });
+      const preview = rescheduleCaseBooking(item, bookingId, requested, { previewOnly: true, durationMinutes });
       if (!preview.ok) { notifyUser(preview.message, "error"); return preview; }
       if (!await showConfirmModal(`Créneau proposé : ${escapeHtml(formatDateTime(preview.start))} → ${escapeHtml(formatDateTime(preview.end))}. Les opérations dépendantes seront recalées si nécessaire. Confirmer ?`)) return;
-      result = rescheduleCaseBooking(item, bookingId, requested);
+      result = rescheduleCaseBooking(item, bookingId, requested, { durationMinutes });
     }
     if (!result) return;
-    if (!options.silent) quietNotify(result.message, result.ok ? "success" : "info");
     if (result.ok) {
-      if (options.persist !== false) saveState({ changedCase: item, flushCloud: true, cloudReason: `booking-${action}` });
+      if (options.persist !== false) {
+        const saved = await saveState({ changedCase: item, flushCloud: true, cloudReason: `booking-${action}` });
+        if (saved === false) {
+          quietNotify("Action en mémoire, sauvegarde non confirmée. Réessayez la sauvegarde avant de quitter.", "error");
+          return { ...result, ok: false, persistenceFailed: true };
+        }
+      }
       if (!options.skipRender) render();
     }
+    if (!options.silent) quietNotify(result.message, result.ok ? "success" : "info");
     return result;
   } catch (error) {
     notifyUser(error.message || "Action planning impossible.", "error");

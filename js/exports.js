@@ -13,6 +13,8 @@ function isPrintableWorkBooking(booking) {
       && booking.caseId
       && booking.caseId !== "__leave__"
       && booking.temporary !== true
+      && !booking.deletedAt
+      && booking.status !== "cancelled"
   );
 }
 
@@ -860,701 +862,133 @@ const CRC_TABLE = (() => {
   return table;
 })();
 
-function printRepairOrder(item) {
-  const title = "Ordre de réparation";
-  const archiveMode = isCaseReadonlyArchive(item);
-  const assignments = state.bookings.filter((booking) => booking.caseId === item.id);
-  const rows = DURATIONS.map(
-    ([key, label]) => `
-      <tr>
-        <td>${escapeHtml(label)}</td>
-        <td>${formatLocalizedDecimal(item.durations[key] || 0)} h</td>
-      </tr>
-    `,
-  ).join("");
-  const expertEstimateRows = buildClaimEstimateHtmlRows(item);
-  const partRows = buildClaimEstimatePartHtmlRows(item);
-  const assignmentRows = assignments
-    .map((booking) => {
-      const resources = booking.resourceIds.map((id) => getResource(id)?.name).filter(Boolean).join(", ");
-      const statusValue = typeof getBookingOperationalStatus === "function"
-        ? getBookingOperationalStatus(booking, item)
-        : booking.status;
-      const operationalStatus = archiveMode ? "Archive / terminé" : (statusValue ? getBookingStatusLabel(booking) : null);
-      return `
-        <tr>
-          <td>${escapeHtml(booking.title)}</td>
-          <td>${escapeHtml(resources)}</td>
-          <td>${formatDateTime(booking.start)}</td>
-          <td>${formatDateTime(booking.end)}</td>
-          <td>${escapeHtml(operationalStatus || booking.status || "Planifié")}</td>
-        </tr>
-      `;
-    })
-    .join("");
+function printCssText(value) {
+  return '"' + String(value || '').replace(/["\\\n\r\f<>]/g, character => '\\' + character.codePointAt(0).toString(16) + ' ') + '"';
+}
 
-  const popup = window.open("", "_blank", "width=900,height=1100");
-  if (!popup) {
-    notifyUser("Le navigateur a bloqué l'ouverture du PDF. Autorisez les pop-ups pour imprimer.");
-    return;
+function getWorkshopPrintOperationTitle(booking) {
+  return isOperationCentricBooking(booking) ? getPlanningOperationTitle(booking) : booking.title || getPlanningOperationTitle(booking);
+}
+
+function buildWorkshopPrintCss(reference, landscape = false) {
+  return `@page { size:A4 ${landscape ? 'landscape' : 'portrait'}; margin:16mm 10mm 14mm;
+    @top-left { content:${printCssText('NIMR SAV · ' + reference)}; font:9pt Arial; color:#35434b; }
+    @bottom-left { content:"Document interne atelier · Vérifier les évolutions dans NIMR SAV"; font:8pt Arial; color:#35434b; }
+    @bottom-right { content:"Page " counter(page) " / " counter(pages); font:8pt Arial; }
   }
-  popup.document.write(`
-    <!doctype html>
-    <html lang="fr">
-      <head>
-        <meta charset="utf-8" />
-        <title>${title} - ${escapeHtml(item.clientName)}</title>
-        <style>
-          @page { size: A4; margin: 10mm; }
-          body { color: #14212b; font-family: Arial, sans-serif; font-size: 11px; line-height: 1.25; margin: 0; }
-          header { align-items: flex-start; border-bottom: 2px solid #11415f; display: flex; justify-content: space-between; padding-bottom: 8px; }
-          h1 { color: #11415f; font-size: 20px; margin: 0 0 4px; }
-          h2 { font-size: 13px; margin: 12px 0 5px; }
-          p { margin: 2px 0; }
-          table { border-collapse: collapse; margin-top: 4px; width: 100%; }
-          th, td { border: 1px solid #dce4e9; padding: 4px 5px; text-align: left; vertical-align: top; }
-          th { background: #f5f8fa; }
-          .grid { display: grid; gap: 8px; grid-template-columns: repeat(2, 1fr); margin-top: 8px; }
-          .muted { color: #687987; }
-          .box { border: 1px solid #dce4e9; padding: 7px; }
-          .num { text-align: right; white-space: nowrap; }
-          .avoid-break { break-inside: avoid; page-break-inside: avoid; }
-          .signatures { display: grid; gap: 18px; grid-template-columns: repeat(2, 1fr); margin-top: 22px; }
-          .signature { border-top: 1px solid #14212b; padding-top: 6px; }
-          @media print {
-            body { margin: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-            button, nav, .tabs, .topbar, .app-shell > main > :not(.print-document) { display: none !important; }
-          }
-        </style>
-      </head>
-      <body>
-        ${renderPrintHeaderHtml(title, item, "Document interne atelier", [
-          `<strong>Devis :</strong> ${escapeHtml(getClaimReferenceSummary(item, "devis"))}`,
-        ])}
-        ${archiveMode ? `<section class="avoid-break"><h2>Archive lecture seule</h2><p><strong>${escapeHtml(getArchivedCaseMessage(item))}</strong> Ce document est conservé pour consultation, historique et archivage.</p></section>` : ""}
-        <section class="grid">
-          <div class="box">
-            <h2>Client</h2>
-            <p><strong>Nom:</strong> ${escapeHtml(item.clientName)}</p>
-            <p><strong>Téléphone:</strong> ${escapeHtml(item.phone || "-")}</p>
-            <p><strong>Assurance:</strong> ${escapeHtml(item.insurance || "-")}</p>
-          </div>
-          <div class="box">
-            <h2>Véhicule</h2>
-            <p><strong>Modèle:</strong> ${escapeHtml(item.vehicle || "-")}</p>
-            <p><strong>Immatriculation:</strong> ${escapeHtml(item.plate || "-")}</p>
-            <p><strong>Couleur:</strong> ${escapeHtml(item.color || "-")}</p>
-            <p><strong>Kilométrage:</strong> ${escapeHtml(item.mileage ? `${item.mileage} km` : "-")}</p>
-            <p><strong>VIN:</strong> ${escapeHtml(item.vin || "-")}</p>
-          </div>
-        </section>
-        <section>
-          <h2>Travaux demandés</h2>
-          <p>${escapeHtml(item.damageNotes || "Aucune note renseignée.")}</p>
-        </section>
-        ${renderPartsBlockerHtml(item)}
-        <section class="avoid-break">
-          <h2>Main-d’œuvre importée</h2>
-          <p><strong>Référence:</strong> ${escapeHtml(item.expertEstimate?.reference || "-")}</p>
-          <p><strong>État:</strong> ${item.expertEstimate?.confirmed ? "Confirmé" : "Non confirmé"}</p>
-          <table>
-            <thead><tr><th>Ordre</th><th>Étape</th><th>Opération</th><th>Main d'œuvre</th></tr></thead>
-            <tbody>${expertEstimateRows || `<tr><td colspan="4">Aucune ligne MO importée ou saisie dans les ordres.</td></tr>`}</tbody>
-          </table>
-          <p><strong>Total MO devis importés:</strong> ${formatLocalizedDecimal(getAllClaimEstimateTotalHours(item))} h</p>
-        </section>
-        <section class="avoid-break">
-          <h2>Pièces / articles importés du devis</h2>
-          <table>
-            <thead><tr><th>Ordre</th><th>Désignation</th><th>Qté</th></tr></thead>
-            <tbody>${partRows || `<tr><td colspan="3">Aucune pièce ou article importé depuis le devis.</td></tr>`}</tbody>
-          </table>
-        </section>
-        <section class="avoid-break">
-          <h2>Durées estimées</h2>
-          <table>
-            <thead><tr><th>Opération</th><th>Durée</th></tr></thead>
-            <tbody>${rows}</tbody>
-          </table>
-          <p><strong>Total atelier:</strong> ${sumDurations(item)} h</p>
-        </section>
-        <section class="avoid-break">
-          <h2>Affectations atelier</h2>
-          <table>
-            <thead><tr><th>Travail</th><th>Ressource</th><th>Début</th><th>Fin</th><th>Statut</th></tr></thead>
-            <tbody>${assignmentRows || `<tr><td colspan="5">Aucune affectation planifiée.</td></tr>`}</tbody>
-          </table>
-        </section>
-        <section class="avoid-break">
-          <h2>Consignes atelier</h2>
-          <p>Type d'intervention : <strong>${escapeHtml(getInterventionTypeLabelForPrint(item))}</strong></p>
-          <p>Vérifier le statut pièces et signaler immédiatement toute anomalie, demande de complément ou impact délai.</p>
-        </section>
-        <div class="signatures">
-          <div class="signature">Signature chef atelier</div>
-          <div class="signature">Signature réception</div>
-        </div>
-        <script>window.addEventListener("load", () => window.print());</script>
-      </body>
-    </html>
-  `);
+  *{box-sizing:border-box} body{font:10pt/1.35 Arial,sans-serif;color:#192f3e;margin:0 auto;max-width:${landscape ? '277' : '190'}mm;background:white}
+  h1{font-size:19pt;margin:0 0 4mm}h2{font-size:12pt;margin:5mm 0 2mm;break-after:avoid}h3{font-size:10pt;margin:3mm 0 1mm}
+  p{margin:2mm 0}header{border-bottom:2px solid #163f57;padding-bottom:3mm;margin-bottom:4mm}
+  table{border-collapse:collapse;width:100%;table-layout:fixed;margin:2mm 0 4mm}thead{display:table-header-group}tfoot{display:table-footer-group}
+  th,td{border:1px solid #98aab5;padding:2mm;text-align:left;vertical-align:top;overflow-wrap:anywhere}th{background:#e9eef1;font-size:9pt}
+  tr{break-inside:avoid}ul{padding-left:5mm}li{margin:1mm 0}small,.muted{font-size:9pt;color:#435966}.num{text-align:right;white-space:nowrap}
+  .identity{display:flex;flex-wrap:wrap;gap:2mm 7mm}.notice{padding:2mm 3mm;border-left:3px solid #163f57;background:#f1f4f5}
+  .note-space{min-height:12mm;border-bottom:1px solid #91a3af;margin-top:2mm}.signature{margin-top:7mm;border-top:1px solid #91a3af;padding-top:2mm}
+  .print-section + .print-section{break-before:page}.avoid-break{break-inside:avoid}.toolbar{padding:3mm;background:#edf2f4;margin-bottom:4mm}
+  .timeline{position:relative;height:10mm;border:1px solid #8397a3;margin:3mm 0;background:repeating-linear-gradient(to right,#fff 0,#fff calc(100% / 12 - 1px),#d6dfe4 calc(100% / 12 - 1px),#d6dfe4 calc(100% / 12))}
+  .bar{position:absolute;height:6mm;top:2mm;background:#b7cbd6;border:1px solid #254459;overflow:hidden;font-size:8pt;text-align:center}
+  .axis{display:flex;justify-content:space-between;font-size:8pt}.equipment-annex{display:none}
+  body:has(#print-equipment:checked) .equipment-annex{display:block}
+  @media screen{body{padding:8mm;box-shadow:0 0 3mm #bbc3c8}.print-section{margin-bottom:8mm}}
+  @media print{.toolbar{display:none!important}body{max-width:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+  `;
+}
+
+function openWorkshopPrint(title, reference, body, options = {}) {
+  const popup = window.open('', '_blank', 'width=1100,height=950');
+  if (!popup) { notifyUser("Autorisez l'ouverture de la fenêtre d'impression dans le navigateur.", 'warn'); return; }
+  popup.document.write(`<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>${escapeHtml(title)} - ${escapeHtml(reference)}</title><style>${buildWorkshopPrintCss(reference, options.landscape)}</style></head><body>
+    <div class="toolbar"><button type="button" onclick="window.print()">Imprimer / Enregistrer en PDF</button> A4 · Échelle 100 % · Désactiver les en-têtes et pieds de page du navigateur.${options.equipment ? '<label><input id="print-equipment" type="checkbox"> Joindre le planning des équipements</label>' : ''}</div>
+    ${body}<script>window.addEventListener('load',()=>window.print());</script></body></html>`);
   popup.document.close();
+}
+
+function renderWorkshopPrintIdentity(item, title, subtitle = '') {
+  return `<header><h1>${escapeHtml(title)}</h1><div class="identity"><strong>Réf. OR : ${escapeHtml(getPrintOrderReference(item))}</strong><strong>${escapeHtml(item.plate || 'Immatriculation à compléter')}</strong><span>${escapeHtml(item.vehicle || '')}</span></div>
+    ${subtitle ? `<p>${escapeHtml(subtitle)}</p>` : ''}<small>Édité le ${formatDateTime(new Date())} · ${escapeHtml(getPrintStatusLabel(item))}</small></header>`;
+}
+
+function getWorkshopPrintDayRows(dateLike, equipment = false) {
+  const date = typeof dateLike === 'string' ? parseDateKey(dateLike) : new Date(dateLike);
+  const start = startOfDay(date), end = addDays(start, 1);
+  const cases = new Map(state.cases.filter(item => !item.deletedAt).map(item => [item.id, item]));
+  const rows = [];
+  state.bookings.filter(booking => isPrintableWorkBooking(booking) && !booking.deletedAt && booking.status !== 'cancelled' && !booking.needsScheduling).forEach(booking => {
+    const item = cases.get(booking.caseId);
+    if (!item || !isActivePrintableWorkBooking(booking, item)) return;
+    const resources = (booking.resourceIds || []).map(getResource).filter(resource => equipment ? isPrintEquipmentResource(resource) : isPrintHumanResource(resource));
+    resources.forEach(resource => (booking.segments || []).forEach(segment => {
+      const from = maxDate(new Date(segment.start), start), until = minDate(new Date(segment.end), end);
+      if (from < until) rows.push({ booking, item, resource, start:from, end:until, minutes:diffMinutes(from, until) });
+    }));
+  });
+  return rows.sort((a,b) => a.resource.name.localeCompare(b.resource.name, 'fr') || a.start - b.start);
+}
+
+function renderWorkshopPrintRequests(item) {
+  const requests = item.customerClaims || [];
+  return requests.length ? `<h2>Demandes et points à vérifier</h2><ul>${requests.map(request => `<li><strong>${escapeHtml(request.title || request.text)}</strong> · ${escapeHtml(CUSTOMER_REQUEST_STATES[request.status] || 'Clôturé')}${request.nextAction ? ` · ${escapeHtml(request.nextAction)}` : ''}${request.outcome ? ` · ${escapeHtml(CUSTOMER_REQUEST_OUTCOMES[request.outcome] || request.outcome)}` : ''}</li>`).join('')}</ul>` : '';
+}
+
+function getPrintableWorkshopParts(item) {
+  return getAllClaimEstimateParts(item).filter(part => part.quantity > 0 && !/^(?:(?:DFM\s+)?BOX\s*EV\s*$|Après\s*$|(?:VIN|PLAQ(?:UE)?|Châssis|Chassis)\s*[:#]\s*[A-Z0-9]{17}\b|Immat(?:riculation)?\s*[:#])/i.test(part.designation));
+}
+
+function printRepairOrder(item) {
+  if (!item) return;
+  const assignments = getCaseWorkBookings(item).filter(booking => !booking.deletedAt && booking.status !== 'cancelled');
+  const parts = getPrintableWorkshopParts(item);
+  const workRows = assignments.map(booking => `<tr><td>${escapeHtml(getWorkshopPrintOperationTitle(booking))}${booking.remainingEstimateRequired ? '<p>Temps restant à estimer</p>' : ''}</td>
+    <td>${escapeHtml(getBookingTechnicianName(booking))}</td><td>${booking.needsScheduling ? 'À planifier' : `${formatDateTime(booking.start)}<br>${formatTime(booking.end)}`}</td>
+    <td>${escapeHtml(getBookingStatusLabel(booking))}</td></tr>`).join('');
+  const labor = getAllClaimEstimateLines(item);
+  const laborRows = labor.map(line => `<tr><td>${escapeHtml(line.operation)}</td><td>${escapeHtml(getDurationLabel(line.phase) || line.phase || '')}</td><td class="num">${formatLocalizedDecimal(line.assignedHours)} h</td></tr>`).join('');
+  const body = `${renderWorkshopPrintIdentity(item, 'Ordre de réparation', item.clientName || '')}
+    <div class="identity">${item.vin ? `<span>VIN : ${escapeHtml(item.vin)}</span>` : ''}${item.mileage ? `<span>Kilométrage : ${escapeHtml(item.mileage)} km</span>` : ''}</div>
+    <h2>Demande et consignes</h2><p>${escapeHtml(item.visitReason || item.arrivalNotes || item.damageNotes || 'À préciser')}</p>
+    ${renderPartsBlockerHtml(item)}${renderWorkshopPrintRequests(item)}
+    ${laborRows ? `<h2>Opérations prévues</h2><table><thead><tr><th style="width:65%">Opération</th><th>Phase</th><th style="width:15%">Heures source</th></tr></thead><tbody>${laborRows}</tbody></table>` : ''}
+    ${parts.length ? `<h2>Pièces et fournitures</h2><table><thead><tr><th>Désignation</th><th style="width:15%">Qté</th></tr></thead><tbody>${parts.map(part => `<tr><td>${escapeHtml(part.designation)}</td><td class="num">${formatLocalizedDecimal(part.quantity)}</td></tr>`).join('')}</tbody></table>` : ''}
+    <h2>Travaux et affectations</h2><table><thead><tr><th style="width:40%">Travail</th><th>Technicien</th><th>Créneau prévu</th><th>État</th></tr></thead><tbody>${workRows || '<tr><td colspan="4">Travaux à planifier.</td></tr>'}</tbody></table>
+    ${(item.claims || []).some(claim => claim.durationMode === 'investigation' && !claim.diagnosticConclusion) ? '<p class="notice">Diagnostic en cours : durée totale et disponibilité à confirmer.</p>' : ''}
+    <div class="avoid-break"><h2>Observations atelier</h2><div class="note-space"></div><p class="signature">Visa Chef Atelier : ____________________ · Date : ______________</p></div>`;
+  openWorkshopPrint('Ordre de réparation', getPrintOrderReference(item), body);
 }
 
 
 
 
 function printDailyPlanningGantt(dateKey = state.planningDate) {
-  const date = typeof dateKey === "string" ? parseDateKey(dateKey) : new Date(dateKey);
-  const dayKey = todayKey(date);
-  const dayStart = atTime(date, "08:00");
-  const dayEnd = atTime(date, "17:00");
-  const totalDayMinutes = Math.max(1, diffMinutes(dayStart, dayEnd));
-  const intervals = getDayIntervals(date);
-  const holiday = getHoliday(date);
-  const caseById = new Map(state.cases.map((item) => [item.id, item]));
-  const dailyColorMap = buildDailyVehicleColorMap(dayKey);
-  const activeResources = orderPlanningResources(state.resources.filter(isDisplayPlanningResource));
-
-  const intervalText = intervals.length
-    ? intervals.map((interval) => `${formatTime(interval.start)}-${formatTime(interval.end)}`).join(" / ")
-    : holiday ? `Jour férié : ${holiday.label}` : "Jour fermé";
-
-  const timelineTicks = () => {
-    const ticks = [];
-    for (let hour = 8; hour <= 17; hour += 1) {
-      const left = ((hour - 8) * 60 * 100) / totalDayMinutes;
-      ticks.push(`<div class="tick" style="left:${left}%"><span>${String(hour).padStart(2, "0")}:00</span></div>`);
-    }
-    return ticks.join("");
+  const date = typeof dateKey === 'string' ? parseDateKey(dateKey) : new Date(dateKey);
+  const humans = getWorkshopPrintDayRows(date), equipment = getWorkshopPrintDayRows(date, true);
+  const all = [...humans, ...equipment];
+  const opening = getDayIntervals(date);
+  const starts = [...all.map(row => row.start), ...opening.map(row => row.start)];
+  const ends = [...all.map(row => row.end), ...opening.map(row => row.end)];
+  const from = starts.length ? Math.min(...starts.map(Number)) : atTime(date, '08:00').getTime();
+  const until = ends.length ? Math.max(...ends.map(Number)) : atTime(date, '17:00').getTime();
+  const span = Math.max(60000, until - from);
+  const renderRows = (rows, title) => {
+    const groups = new Map(); rows.forEach(row => { if (!groups.has(row.resource.id)) groups.set(row.resource.id, []); groups.get(row.resource.id).push(row); });
+    return `<h2>${escapeHtml(title)}</h2>${[...groups.values()].map(group => `<section><h3>${escapeHtml(group[0].resource.name)}</h3>
+      <div class="axis">${Array.from({length:5},(_,i) => `<span>${formatTime(new Date(from + span * i / 4))}</span>`).join('')}</div>
+      <div class="timeline">${group.map((row,i) => `<span class="bar" style="left:${(row.start-from)*100/span}%;width:${(row.end-row.start)*100/span}%">${i+1}</span>`).join('')}</div>
+      <table><thead><tr><th style="width:6%">N°</th><th style="width:16%">Horaire</th><th style="width:26%">Réf. OR / véhicule</th><th>Opération / état</th></tr></thead><tbody>${group.map((row,i) => `<tr><td>${i+1}</td><td>${formatTime(row.start)}–${formatTime(row.end)}<br>${formatLocalizedDecimal(row.minutes / 60)} h</td><td>${escapeHtml(getPrintOrderReference(row.item))} · ${escapeHtml(row.item.plate || row.item.vehicle || '')}</td><td>${escapeHtml(getWorkshopPrintOperationTitle(row.booking))} · ${escapeHtml(getBookingStatusLabel(row.booking))}</td></tr>`).join('')}</tbody></table></section>`).join('') || '<p>Aucun travail planifié.</p>'}`;
   };
-
-  const pauseBands = () => {
-    if (!intervals.length) return `<div class="pause-band" style="left:0;width:100%"></div>`;
-    const bands = [];
-    let cursor = new Date(dayStart);
-    intervals.forEach((interval) => {
-      if (cursor < interval.start) bands.push(renderPrintBand(cursor, interval.start));
-      cursor = interval.end;
-    });
-    if (cursor < dayEnd) bands.push(renderPrintBand(cursor, dayEnd));
-    return bands.join("");
-  };
-
-  function renderPrintBand(start, end) {
-    const left = Math.max(0, Math.min(100, (diffMinutes(dayStart, start) * 100) / totalDayMinutes));
-    const width = Math.max(0, Math.min(100 - left, (diffMinutes(start, end) * 100) / totalDayMinutes));
-    return `<div class="pause-band" style="left:${left}%;width:${width}%"></div>`;
-  }
-
-  const bookingsForResource = (resource) => {
-    const rows = [];
-    state.bookings.forEach((booking) => {
-      if (!isPrintableWorkBooking(booking)) return;
-      if (!isBookingVisibleForResource(booking, resource.id)) return;
-      const item = caseById.get(booking.caseId);
-      if (!item) return;
-      if (!isActivePrintableWorkBooking(booking, item)) return;
-      (booking.segments || []).forEach((segment) => {
-        const segmentStart = new Date(segment.start);
-        const segmentEnd = new Date(segment.end);
-        if (segmentEnd <= dayStart || segmentStart >= dayEnd) return;
-        const clippedStart = maxDate(segmentStart, dayStart);
-        const clippedEnd = minDate(segmentEnd, dayEnd);
-        if (clippedEnd <= clippedStart) return;
-        rows.push({ booking, item, start: clippedStart, end: clippedEnd });
-      });
-    });
-    rows.sort((a, b) => a.start - b.start || a.end - b.end || String(a.booking.title || "").localeCompare(String(b.booking.title || "")));
-    return rows;
-  };
-
-  const buildRows = (resourceFilter) => activeResources
-    .filter(resourceFilter)
-    .map((resource) => ({ resource, bookings: bookingsForResource(resource) }))
-    .filter((row) => row.bookings.length);
-
-  const humanRows = buildRows((resource) => !isEquipmentResource(resource));
-  const equipmentRows = buildRows((resource) => isEquipmentResource(resource));
-  const allRows = [...humanRows, ...equipmentRows];
-
-  const primaryHumanMinutes = humanRows.reduce((sum, row) => sum + row.bookings.reduce((bookingSum, rowBooking) => {
-    if (!isPrimaryResourceBooking(rowBooking.booking, row.resource.id)) return bookingSum;
-    return bookingSum + diffMinutes(rowBooking.start, rowBooking.end);
-  }, 0), 0);
-  const dossierCount = new Set(allRows.flatMap((row) => row.bookings.map((entry) => entry.booking.caseId))).size;
-  const allEntries = allRows.flatMap((row) => row.bookings.map((entry) => ({ ...entry, resource: row.resource })));
-  const plannedCaseIds = new Set(allEntries.map((entry) => entry.booking.caseId));
-  const plannedCases = [...plannedCaseIds].map((id) => caseById.get(id)).filter(Boolean);
-  const blockedCases = plannedCases.filter((item) => isCaseBlocked(item));
-  const deliveryCases = plannedCases.filter((item) => {
-    const delivery = item.appointment?.delivery || state.bookings.find((booking) => booking.caseId === item.id)?.delivery;
-    return delivery && todayKey(new Date(delivery)) === dayKey;
-  });
-  const now = new Date();
-  const lateEntries = allEntries.filter((entry) => new Date(entry.booking.end || entry.end) < now && entry.booking.status !== "completed" && !entry.item.flags?.workCompleted);
-  const leaveEntries = state.bookings.filter((booking) => {
-    if (booking.type !== "leave") return false;
-    return (booking.segments || []).some((segment) => {
-      const start = new Date(segment.start);
-      const end = new Date(segment.end);
-      return end > dayStart && start < dayEnd;
-    });
-  });
-  const absentResources = [...new Set(leaveEntries.flatMap((booking) => booking.resourceIds || []))]
-    .map((id) => getResource(id)?.name)
-    .filter(Boolean);
-
-  const getEntryMeta = (entry) => {
-    const model = shortVehicleModel(entry.item.vehicle || entry.item.model || "Véhicule");
-    const plate = entry.item.plate || entry.item.registration || "";
-    const vehicleLine = `${model}${plate ? ` · ${plate}` : ""}`;
-    const stage = getDurationLabel(entry.booking.key) || entry.booking.title || "Étape planning";
-    const timeLine = `${formatTime(entry.start)}-${formatTime(entry.end)}`;
-    const minutes = diffMinutes(entry.start, entry.end);
-    return { model, plate, vehicleLine, stage, timeLine, minutes };
-  };
-
-  const getEntryNumberMap = (rows) => {
-    const map = new Map();
-    let number = 1;
-    rows.forEach(({ bookings }) => bookings.forEach((entry) => {
-      map.set(entry, number);
-      number += 1;
-    }));
-    return map;
-  };
-
-  const bookingBlock = (entry, numberMap) => {
-    const left = Math.max(0, Math.min(100, (diffMinutes(dayStart, entry.start) * 100) / totalDayMinutes));
-    const rawWidth = (diffMinutes(entry.start, entry.end) * 100) / totalDayMinutes;
-    const width = Math.max(1.2, Math.min(100 - left, rawWidth));
-    const meta = getEntryMeta(entry);
-    const color = getBookingPlanningColor(entry.booking, dailyColorMap) || entry.booking.color || "#174f72";
-    const stateClass = isCaseBlocked(entry.item)
-      ? " blocked"
-      : entry.booking.status === "paused"
-        ? " paused"
-        : entry.booking.status === "completed"
-          ? " completed"
-          : (new Date(entry.booking.end || entry.end) < now && !entry.item.flags?.workCompleted)
-            ? " late"
-            : "";
-    const taskNumber = numberMap.get(entry) || "";
-    const maxTextLength = Math.max(String(meta.vehicleLine || "").length, String(meta.stage || "").length + String(meta.timeLine || "").length + 3);
-    const availableChars = Math.max(4, Math.floor(width * 1.2));
-    const numberOnly = Boolean(taskNumber) && (width < 14 || maxTextLength > availableChars);
-    const compactClass = numberOnly ? " number-only" : meta.minutes <= 20 ? " tiny" : meta.minutes <= 35 ? " compact" : "";
-    return `
-      <div class="booking${stateClass}${compactClass}" style="left:${left}%;width:${width}%;background:${escapeAttr(color)}" title="${escapeAttr(`#${taskNumber} - ${meta.vehicleLine} - ${meta.stage} - ${meta.timeLine}`)}">
-        <span class="task-no">${escapeHtml(String(taskNumber))}</span>
-        ${numberOnly ? "" : `<strong>${escapeHtml(meta.vehicleLine)}</strong><span>${escapeHtml(meta.stage)} · ${escapeHtml(meta.timeLine)}</span>`}
-      </div>`;
-  };
-
-  const renderStatusLegend = () => `
-    <section class="status-legend">
-      <span><i class="legend-normal"></i>Tâche normale</span>
-      <span><i class="legend-blocked"></i>Tâche bloquée</span>
-      <span><i class="legend-paused"></i>Tâche en pause</span>
-      <span><i class="legend-completed"></i>Tâche terminée</span>
-      <span><i class="legend-late"></i>Tâche en retard</span>
-      <span><i class="legend-closed"></i>Pause / fermeture atelier</span>
-    </section>
-  `;
-
-  const renderRows = (rows, numberMap) => rows.map(({ resource, bookings }) => `
-    <div class="gantt-row">
-      <div class="resource-label">
-        <strong>${escapeHtml(resource.name)}</strong>
-        <span>${escapeHtml(ROLE_LABELS[resource.role] || resource.role || "Atelier")}${resource.location ? ` · ${escapeHtml(resource.location)}` : ""}</span>
-      </div>
-      <div class="timeline">
-        ${pauseBands()}
-        ${bookings.map((entry) => bookingBlock(entry, numberMap)).join("")}
-      </div>
-    </div>`).join("");
-
-  const renderTaskLegend = (rows, numberMap) => {
-    const entries = rows.flatMap(({ resource, bookings }) => bookings.map((entry) => ({ resource, entry })));
-    if (!entries.length) return "";
-    return `
-      <section class="task-legend">
-        <h2>Liste détaillée des tâches</h2>
-        <p class="muted">Les numéros correspondent aux badges affichés dans le Gantt. Cette liste rend lisibles les créneaux courts.</p>
-        <table>
-          <thead><tr><th>N°</th><th>Ressource</th><th>Horaire</th><th>Véhicule</th><th>Étape</th><th>Durée</th></tr></thead>
-          <tbody>
-            ${entries.map(({ resource, entry }) => {
-              const meta = getEntryMeta(entry);
-              return `<tr>
-                <td class="num">${escapeHtml(String(numberMap.get(entry) || ""))}</td>
-                <td>${escapeHtml(resource.name)}</td>
-                <td>${escapeHtml(meta.timeLine)}</td>
-                <td>${escapeHtml(meta.vehicleLine)}</td>
-                <td>${escapeHtml(meta.stage)}</td>
-                <td>${formatLocalizedDecimal(meta.minutes / 60)} h</td>
-              </tr>`;
-            }).join("")}
-          </tbody>
-        </table>
-      </section>`;
-  };
-
-  const renderPage = (title, rows, extraClass = "") => {
-    const numberMap = getEntryNumberMap(rows);
-    return `
-    <section class="page ${extraClass}">
-      <header>
-        <div>
-          <h1>${escapeHtml(title)}</h1>
-          <p class="muted">NIMR SAV · Service Après-Vente Automobile</p>
-          <p>Document planning</p>
-          <p><strong>Journée :</strong> ${escapeHtml(longDate(date))}</p>
-          <p><strong>Horaires :</strong> ${escapeHtml(intervalText)}</p>
-        </div>
-        <div class="right">
-          <p><strong>Imprimé le :</strong> ${formatDateTime(new Date())}</p>
-          <p><strong>Ressources planifiées :</strong> ${rows.length}</p>
-          <p><strong>Format :</strong> A4 paysage</p>
-        </div>
-      </header>
-      <section class="summary">
-        <div><strong>Total planifié</strong><br>${formatLocalizedDecimal(primaryHumanMinutes / 60)} h</div>
-        <div><strong>Dossiers</strong><br>${dossierCount}</div>
-        <div><strong>Occup. humaine</strong><br>${Math.round(humanDayLoad(date) * 100)}%</div>
-        <div><strong>Occup. matérielle</strong><br>${Math.round(equipmentDayLoad(date) * 100)}%</div>
-        <div><strong>Calendrier</strong><br>${escapeHtml(intervals.length ? "Ouvert" : "Fermé")}</div>
-      </section>
-      ${renderStatusLegend()}
-      ${rows.length ? `
-        <div class="gantt-print">
-          <div class="gantt-header">
-            <div class="gantt-corner">Ressource</div>
-            <div class="time-scale">${timelineTicks()}${pauseBands()}</div>
-          </div>
-          ${renderRows(rows, numberMap)}
-        </div>
-        ${renderTaskLegend(rows, numberMap)}` : `<div class="empty">Aucune tâche planifiée pour cette catégorie.</div>`}
-    </section>`;
-  };
-
-  const renderSummaryPage = () => `
-    <section class="page">
-      <header>
-        <div>
-          <h1>Synthèse planning atelier</h1>
-          <p class="muted">NIMR SAV · Service Après-Vente Automobile</p>
-          <p>Document planning</p>
-          <p><strong>Journée :</strong> ${escapeHtml(longDate(date))}</p>
-          <p><strong>Horaires :</strong> ${escapeHtml(intervalText)}</p>
-        </div>
-        <div class="right">
-          <p><strong>Imprimé le :</strong> ${formatDateTime(new Date())}</p>
-          <p><strong>Format :</strong> A4 paysage</p>
-        </div>
-      </header>
-      <section class="summary large-summary">
-        <div><strong>Total dossiers</strong><br>${dossierCount}</div>
-        <div><strong>Total heures humaines</strong><br>${formatLocalizedDecimal(primaryHumanMinutes / 60)} h</div>
-        <div><strong>Occupation humaine</strong><br>${Math.round(humanDayLoad(date) * 100)}%</div>
-        <div><strong>Occupation matérielle</strong><br>${Math.round(equipmentDayLoad(date) * 100)}%</div>
-        <div><strong>Dossiers bloqués</strong><br>${blockedCases.length}</div>
-        <div><strong>Fins prévues</strong><br>${deliveryCases.length}</div>
-        <div><strong>Travaux en retard</strong><br>${lateEntries.length}</div>
-        <div><strong>Ressources absentes</strong><br>${absentResources.length}</div>
-      </section>
-      ${renderStatusLegend()}
-      <section class="task-legend">
-        <h2>Dossiers bloqués</h2>
-        ${blockedCases.length ? `<table><thead><tr><th>Client</th><th>Véhicule</th><th>Blocage</th></tr></thead><tbody>${blockedCases.map((item) => `<tr><td>${escapeHtml(item.clientName || "-")}</td><td>${escapeHtml(item.vehicle || "-")}<br><span class="muted">${escapeHtml(item.plate || item.vin || "-")}</span></td><td>${escapeHtml(getCaseBlockerLabel(item) || "-")}</td></tr>`).join("")}</tbody></table>` : `<div class="empty">Aucun dossier bloqué planifié ce jour.</div>`}
-      </section>
-      <section class="task-legend">
-        <h2>Fins prévues / retards / absences</h2>
-        <table>
-          <tbody>
-            <tr><th>Fins prévues</th><td>${deliveryCases.map((item) => escapeHtml(`${item.clientName || "-"} - ${item.plate || item.vin || ""}`)).join("<br>") || "Aucune"}</td></tr>
-            <tr><th>Travaux en retard</th><td>${lateEntries.map((entry) => escapeHtml(`${entry.item.clientName || "-"} - ${entry.booking.title || "Travail"}`)).join("<br>") || "Aucun"}</td></tr>
-            <tr><th>Ressources absentes</th><td>${absentResources.map((name) => escapeHtml(name)).join("<br>") || "Aucune"}</td></tr>
-          </tbody>
-        </table>
-      </section>
-    </section>
-  `;
-
-  const pages = [renderSummaryPage(), renderPage("Planning atelier journalier - Ressources humaines", humanRows, "page-break")];
-  if (equipmentRows.length) pages.push(renderPage("Planning atelier journalier - Ressources matérielles", equipmentRows, "page-break"));
-
-  const popup = window.open("", "_blank", "width=1400,height=900");
-  if (!popup) {
-    notifyUser("Le navigateur a bloqué l'ouverture. Autorisez les pop-ups pour imprimer le planning Gantt.", "error");
-    return;
-  }
-
-  popup.document.write(`
-    <!doctype html><html lang="fr"><head><meta charset="utf-8" />
-    <title>Planning Gantt - ${escapeHtml(longDate(date))}</title>
-    <style>
-      @page { size: A4 landscape; margin: 6mm; }
-      * { box-sizing: border-box; }
-      html, body { margin: 0; padding: 0; }
-      body { color: #0d2433; font-family: Arial, sans-serif; font-size: 9px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-      .page { margin: 0 auto; max-width: 285mm; min-height: 190mm; }
-      .page-break { break-before: page; page-break-before: always; }
-      header { align-items: flex-start; border-bottom: 2px solid #11415f; display: flex; justify-content: space-between; padding: 0 0 3mm; }
-      h1 { color: #11415f; font-size: 15px; line-height: 1.1; margin: 0 0 1mm; }
-      p { margin: 0.5mm 0; }
-      .right { text-align: right; }
-      .muted { color: #5f7280; font-size: 8px; }
-      .summary { display: grid; gap: 2mm; grid-template-columns: repeat(4, 1fr); margin: 3mm 0; }
-      .summary div { border: 1px solid #d9e2e8; font-size: 9px; line-height: 1.15; min-height: 10mm; padding: 1.5mm 2mm; }
-      .large-summary { grid-template-columns: repeat(4, 1fr); }
-      .status-legend { align-items: center; display: flex; flex-wrap: wrap; gap: 2mm 4mm; margin: 2mm 0 3mm; }
-      .status-legend span { align-items: center; color: #45606f; display: inline-flex; font-size: 7.5px; gap: 1mm; }
-      .status-legend i { border: 1px solid #50606b; display: inline-block; height: 3mm; width: 5mm; }
-      .legend-normal { background: #174f72; }
-      .legend-blocked { background: #7c2d12; }
-      .legend-paused { background: #7c3aed; }
-      .legend-completed { background: #047857; }
-      .legend-late { background: #b91c1c; }
-      .legend-closed { background: #f3eee6; }
-      .gantt-print { border: 1px solid #d9e2e8; overflow: hidden; width: 100%; }
-      .gantt-header, .gantt-row { display: grid; grid-template-columns: 34mm 1fr; }
-      .gantt-corner, .resource-label { background: #f5f8fa; border-right: 1px solid #d9e2e8; color: #45606f; }
-      .gantt-corner { font-weight: 700; min-height: 6mm; padding: 1mm 1.5mm; }
-      .time-scale, .timeline { position: relative; }
-      .time-scale { background: #f5f8fa; min-height: 6mm; }
-      .gantt-row { border-top: 1px solid #d9e2e8; min-height: 13mm; }
-      .resource-label { padding: 1.6mm 1.8mm; }
-      .resource-label strong { color: #001525; display: block; font-size: 9.5px; line-height: 1.05; }
-      .resource-label span { color: #5f7280; display: block; font-size: 7.2px; font-weight: 600; line-height: 1.1; margin-top: 0.8mm; }
-      .timeline { min-height: 13mm; }
-      .tick { border-left: 1px solid #d9e2e8; bottom: 0; color: #45606f; font-size: 7px; left: 0; position: absolute; top: 0; }
-      .tick span { display: block; padding-left: 1mm; padding-top: 1mm; }
-      .pause-band { background: #f3eee6; bottom: 0; left: 0; position: absolute; top: 0; z-index: 0; }
-      .booking { border-radius: 1.3mm; box-shadow: 0 1mm 3mm rgba(0,0,0,.16); color: #fff; display: flex; flex-direction: column; justify-content: center; min-height: 8.5mm; overflow: hidden; padding: 1mm 1.6mm; position: absolute; top: 2mm; z-index: 2; }
-      .booking.blocked { outline: 0.7mm solid #7c2d12; outline-offset: 0; }
-      .booking.paused { outline: 0.7mm dashed #7c3aed; outline-offset: 0; }
-      .booking.completed { opacity: 0.72; }
-      .booking.late { outline: 0.7mm solid #b91c1c; outline-offset: 0; }
-      .booking .task-no { background: rgba(255,255,255,.25); border: 0.25mm solid rgba(255,255,255,.35); border-radius: 999px; display: inline-flex; font-size: 6.5px; font-weight: 800; height: 3.4mm; line-height: 1; margin: 0; padding-top: 0.45mm; position: absolute; right: 0.8mm; text-align: center; top: 0.7mm; width: 3.4mm; }
-      .booking strong { display: block; font-size: 8px; line-height: 1.05; max-width: calc(100% - 4.5mm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .booking span { display: block; font-size: 7px; font-weight: 600; line-height: 1.05; margin-top: 0.8mm; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .booking.compact { min-width: 15mm; padding: 1mm 1.1mm; }
-      .booking.compact strong { font-size: 7px; }
-      .booking.compact span:not(.task-no) { font-size: 6.2px; }
-      .booking.tiny, .booking.number-only { min-width: 9mm; padding: 0.8mm; }
-      .booking.tiny strong, .booking.tiny span:not(.task-no), .booking.number-only strong, .booking.number-only span:not(.task-no) { display: none; }
-      .booking.tiny .task-no, .booking.number-only .task-no { left: 50%; right: auto; top: 50%; transform: translate(-50%, -50%); }
-      .task-legend { break-inside: avoid; margin-top: 3mm; page-break-inside: avoid; }
-      .task-legend h2 { color: #11415f; font-size: 10px; margin: 0 0 1mm; }
-      .task-legend table { border-collapse: collapse; font-size: 7.2px; width: 100%; }
-      .task-legend th, .task-legend td { border: 1px solid #d9e2e8; padding: 0.9mm 1.1mm; text-align: left; vertical-align: top; }
-      .task-legend th { background: #f5f8fa; color: #45606f; }
-      .task-legend .num { font-weight: 800; text-align: center; width: 8mm; }
-      .empty { border: 1px solid #d9e2e8; color: #5f7280; font-size: 11px; padding: 8mm; text-align: center; }
-      @media print {
-        body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-        .page { max-width: none; width: 100%; }
-        header, .summary, .gantt-print { break-inside: avoid; page-break-inside: avoid; }
-      }
-    </style></head><body>${pages.join("")}<script>window.addEventListener("load", () => setTimeout(() => window.print(), 150));</script></body></html>
-  `);
-  popup.document.close();
+  const body = `<header><h1>Planning Gantt · ${escapeHtml(formatDate(date))}</h1><p>Équipe atelier · les numéros renvoient au détail sous chaque ligne.</p><small>Édité le ${formatDateTime(new Date())}</small></header>${renderRows(humans, 'Techniciens')}
+    <section class="print-section equipment-annex"><header><h1>Équipements · ${escapeHtml(formatDate(date))}</h1><p>Annexe de réservation des moyens. Ces lignes ne s'ajoutent pas aux heures des techniciens.</p></header>${renderRows(equipment, 'Moyens réservés')}</section>`;
+  openWorkshopPrint('Planning Gantt', formatDate(date), body, {landscape:true,equipment:true});
 }
 
 function printDailyPlanning(dateKey = state.planningDate) {
-  const date = typeof dateKey === "string" ? parseDateKey(dateKey) : new Date(dateKey);
-  const dayKey = todayKey(date);
-  const dayStart = startOfDay(date);
-  const dayEnd = startOfDay(addDays(date, 1));
-  const activeResources = orderPlanningResources(state.resources.filter(isHumanPlanningResource));
-  const intervals = getDayIntervals(date);
-  const holiday = getHoliday(date);
-
-  const rowsByResource = activeResources.map((resource) => {
-    const rows = [];
-    state.bookings.forEach((booking) => {
-      if (!isPrintableWorkBooking(booking)) return;
-      if (!isPrimaryResourceBooking(booking, resource.id)) return;
-      const caseItem = state.cases.find((item) => item.id === booking.caseId);
-      if (!caseItem) return;
-      if (!isActivePrintableWorkBooking(booking, caseItem)) return;
-      (booking.segments || []).forEach((segment) => {
-        const segmentStart = new Date(segment.start);
-        const segmentEnd = new Date(segment.end);
-        if (segmentEnd <= dayStart || segmentStart >= dayEnd) return;
-        const clippedStart = maxDate(segmentStart, dayStart);
-        const clippedEnd = minDate(segmentEnd, dayEnd);
-        if (clippedEnd <= clippedStart) return;
-        rows.push({
-          booking,
-          caseItem,
-          start: clippedStart,
-          end: clippedEnd,
-          minutes: diffMinutes(clippedStart, clippedEnd),
-        });
-      });
-    });
-    rows.sort((a, b) => a.start - b.start || String(a.booking.title || "").localeCompare(String(b.booking.title || "")));
-    return { resource, rows };
-  });
-
-  const totalMinutes = rowsByResource.reduce(
-    (sum, group) => sum + group.rows.reduce((rowSum, row) => rowSum + row.minutes, 0),
-    0,
-  );
-  const resourceSections = rowsByResource
-    .filter(({ rows }) => rows.length)
-    .map(({ resource, rows }) => {
-      const resourceTotal = rows.reduce((sum, row) => sum + row.minutes, 0);
-      const body = rows.length
-        ? rows.map((row, index) => {
-            const item = row.caseItem || {};
-            const action = typeof getCaseNextAction === "function" ? getCaseNextAction(item) : null;
-            const riskLabel = isCaseBlocked(item) ? "Bloqué" : action?.priority === "urgent" ? "Urgent" : action?.priority === "attention" ? "Attention" : "Normal";
-            const partsLabel = PARTS_STATUS_LABELS[normalizePartsStatus(item.partsStatus)] || "Non vérifié";
-            const blockerLabel = getCaseBlockerLabel(item) || "-";
-            const delivery = row.booking.delivery || item.appointment?.delivery || "";
-            const actualStart = row.booking.actualStart || row.booking.startedAt || "";
-            const actualEnd = row.booking.actualEnd || row.booking.completedAt || "";
-            const observation = row.booking.pauseReason || row.booking.details || item.blockerDetails || "";
-            return `
-              <tr>
-                <td>${index + 1}</td>
-                <td>${formatTime(row.start)} - ${formatTime(row.end)}</td>
-                <td>${formatLocalizedDecimal(row.minutes / 60)} h</td>
-                <td>
-                  <strong>${escapeHtml(row.booking.title || getDurationLabel(row.booking.key) || "Travail atelier")}</strong>
-                  <div class="muted">${escapeHtml(getDurationLabel(row.booking.key) || row.booking.key || "-")}</div>
-                </td>
-                <td>
-                  <strong>${escapeHtml(item.clientName || "-")}</strong>
-                  <div class="muted">${escapeHtml(item.phone || "")}</div>
-                </td>
-                <td>
-                  ${escapeHtml(item.vehicle || "-")}
-                  <div class="muted">Immat.: ${escapeHtml(item.plate || "-")} · VIN: ${escapeHtml(item.vin || "-")}</div>
-                </td>
-                <td>${escapeHtml(getPrintOrderReference(item))}</td>
-                <td>${escapeHtml(riskLabel)}</td>
-                <td>${escapeHtml(getPrintStatusLabel(item))}</td>
-                <td>${escapeHtml(partsLabel)}</td>
-                <td>${escapeHtml(blockerLabel)}</td>
-                <td>${delivery ? formatDateTime(delivery) : "-"}</td>
-                <td>${actualStart ? formatDateTime(actualStart) : ""}</td>
-                <td>${actualEnd ? formatDateTime(actualEnd) : ""}</td>
-                <td>${escapeHtml(observation)}</td>
-                <td class="check-cell">□</td>
-                <td class="signature-cell"></td>
-              </tr>
-            `;
-          }).join("")
-        : ``;
-      return `
-        <section class="resource-block">
-          <h2>${escapeHtml(resource.name)} <span>${escapeHtml(ROLE_LABELS[resource.role] || resource.role || "Atelier")} · ${escapeHtml(resource.location || "Atelier")}${resource.fastLane ? " · Fast Lane" : ""}</span></h2>
-          <table>
-            <thead>
-              <tr>
-                <th>N°</th>
-                <th>Horaire</th>
-                <th>Durée</th>
-                <th>Tâche</th>
-                <th>Client</th>
-                <th>Véhicule</th>
-                <th>Réf. OR</th>
-                <th>Priorité / risque</th>
-                <th>Statut dossier</th>
-                <th>Statut pièces</th>
-                <th>Blocage</th>
-                <th>Fin prévue</th>
-                <th>Début réel</th>
-                <th>Fin réelle</th>
-                <th>Observation</th>
-                <th>Fait</th>
-                <th>Signature</th>
-              </tr>
-            </thead>
-            <tbody>${body}</tbody>
-          </table>
-          <p class="resource-total"><strong>Total ${escapeHtml(resource.name)} :</strong> ${formatLocalizedDecimal(resourceTotal / 60)} h</p>
-        </section>
-      `;
-    })
-    .join("");
-
-  const intervalText = intervals.length
-    ? intervals.map((interval) => `${formatTime(interval.start)}-${formatTime(interval.end)}`).join(" / ")
-    : holiday ? `Jour férié : ${holiday.label}` : "Jour fermé";
-
-  const popup = window.open("", "_blank", "width=1200,height=900");
-  if (!popup) {
-    notifyUser("Le navigateur a bloqué l'ouverture. Autorisez les pop-ups pour imprimer le planning journalier.", "error");
-    return;
-  }
-  popup.document.write(`
-    <!doctype html>
-    <html lang="fr">
-      <head>
-        <meta charset="utf-8" />
-        <title>Planning atelier - ${escapeHtml(longDate(date))}</title>
-        <style>
-          body { color: #14212b; font-family: Arial, sans-serif; margin: 22px; }
-          header { align-items: flex-start; border-bottom: 2px solid #11415f; display: flex; justify-content: space-between; padding-bottom: 14px; }
-          h1 { color: #11415f; font-size: 24px; margin: 0 0 6px; }
-          h2 { color: #14212b; font-size: 15px; margin: 20px 0 8px; }
-          h2 span { color: #687987; font-size: 12px; font-weight: normal; }
-          p { margin: 4px 0; }
-          table { border-collapse: collapse; font-size: 11px; margin-top: 8px; width: 100%; }
-          th, td { border: 1px solid #dce4e9; padding: 6px; text-align: left; vertical-align: top; }
-          th { background: #f5f8fa; }
-          .right { text-align: right; }
-          .muted { color: #687987; font-size: 10px; }
-          .summary { display: grid; gap: 10px; grid-template-columns: repeat(4, 1fr); margin: 16px 0; }
-          .summary div { border: 1px solid #dce4e9; padding: 10px; }
-          .resource-block { break-inside: avoid; page-break-inside: avoid; }
-          .resource-total { text-align: right; }
-          .check-cell { font-size: 18px; text-align: center; width: 38px; }
-          .signature-cell { min-width: 90px; }
-          .empty { color: #687987; text-align: center; }
-          .footer-signatures { display: grid; gap: 24px; grid-template-columns: repeat(3, 1fr); margin-top: 34px; }
-          .signature-box { border-top: 1px solid #14212b; min-height: 54px; padding-top: 8px; }
-          @media print { body { margin: 10mm; } header { break-after: avoid; } }
-        </style>
-      </head>
-      <body>
-        <header>
-          <div>
-            <h1>Planning atelier journalier</h1>
-            <p class="muted">NIMR SAV · Service Après-Vente Automobile</p>
-            <p>Document planning</p>
-            <p><strong>Journée :</strong> ${escapeHtml(longDate(date))}</p>
-            <p><strong>Horaires :</strong> ${escapeHtml(intervalText)}</p>
-          </div>
-          <div class="right">
-            <p><strong>Imprimé le :</strong> ${formatDateTime(new Date())}</p>
-            <p><strong>Ressources actives :</strong> ${activeResources.length}</p>
-          </div>
-        </header>
-        <section class="summary">
-          <div><strong>Total planifié</strong><br>${formatLocalizedDecimal(totalMinutes / 60)} h</div>
-          <div><strong>Dossiers concernés</strong><br>${new Set(rowsByResource.flatMap((group) => group.rows.map((row) => row.booking.caseId))).size}</div>
-          <div><strong>Occup. humaine</strong><br>${Math.round(humanDayLoad(date) * 100)}%</div>
-          <div><strong>Occup. matérielle</strong><br>${Math.round(equipmentDayLoad(date) * 100)}%</div>
-          <div><strong>État calendrier</strong><br>${escapeHtml(intervals.length ? "Ouvert" : "Fermé")}</div>
-        </section>
-        ${resourceSections}
-        <section class="footer-signatures">
-          <div class="signature-box">Chef atelier</div>
-          <div class="signature-box">Réception</div>
-          <div class="signature-box">Direction / contrôle</div>
-        </section>
-        <script>window.addEventListener("load", () => window.print());</script>
-      </body>
-    </html>
-  `);
-  popup.document.close();
+  const date = typeof dateKey === 'string' ? parseDateKey(dateKey) : new Date(dateKey);
+  const rows = getWorkshopPrintDayRows(date);
+  const body = `<header><h1>Planning atelier</h1><p>${escapeHtml(formatDate(date))} · ${rows.length} créneau(x)</p><small>Édité le ${formatDateTime(new Date())}</small></header>
+    <table><thead><tr><th style="width:14%">Technicien</th><th style="width:12%">Horaire prévu</th><th style="width:22%">Réf. OR / véhicule</th><th style="width:29%">Travail</th><th style="width:23%">État / Statut pièces / consignes</th></tr></thead><tbody>
+    ${rows.map(row => `<tr><td>${escapeHtml(row.resource.name)}</td><td>${formatTime(row.start)}–${formatTime(row.end)}<br>${formatLocalizedDecimal(row.minutes / 60)} h</td><td>${escapeHtml(getPrintOrderReference(row.item))}<br><strong>${escapeHtml(row.item.plate || '')}</strong> · ${escapeHtml(row.item.vehicle || '')}</td>
+      <td>${escapeHtml(getWorkshopPrintOperationTitle(row.booking))}</td><td>${escapeHtml(getBookingStatusLabel(row.booking))}<br>${escapeHtml(PARTS_STATUS_LABELS[normalizePartsStatus(row.item.partsStatus)] || 'Pièces à vérifier')}${row.booking.pauseReason || row.item.blockerDetails ? `<br>${escapeHtml(row.booking.pauseReason || row.item.blockerDetails)}` : ''}</td></tr>`).join('') || '<tr><td colspan="5">Aucun travail planifié sur cette journée.</td></tr>'}
+    </tbody></table><p class="muted">Les horaires sont des prévisions. Une tâche suivante attend la fin du travail en cours et la levée de ses prérequis.</p>`;
+  openWorkshopPrint('Planning atelier', formatDate(date), body, {landscape:true});
 }
 
 
@@ -1596,7 +1030,7 @@ function printSupplementWorkOrders(item, supplementId = null) {
         </header>
         ${archiveMode ? `<section class="avoid-break"><h2>Archive lecture seule</h2><p><strong>${escapeHtml(getArchivedCaseMessage(item))}</strong> Ce document est conservé pour consultation, historique et archivage.</p></section>` : ""}
         <section class="grid">
-          <div class="box"><h2>Client</h2><p><strong>Nom :</strong> ${escapeHtml(item.clientName || '-')}</p><p><strong>Téléphone :</strong> ${escapeHtml(item.phone || '-')}</p><p><strong>Assurance :</strong> ${escapeHtml(item.insurance || '-')}</p></div>
+          <div class="box"><h2>Client</h2><p>${escapeHtml(item.clientName || '-')}</p></div>
           <div class="box"><h2>Véhicule</h2><p><strong>Modèle :</strong> ${escapeHtml(item.vehicle || '-')}</p><p><strong>Immat. :</strong> ${escapeHtml(item.plate || '-')}</p><p><strong>VIN :</strong> ${escapeHtml(item.vin || '-')}</p><p><strong>Zone :</strong> ${escapeHtml(supplement.vehicleArea || '-')}</p></div>
         </section>
         <section><h2>Motif / dommage découvert</h2><p>${escapeHtml(supplement.reason || 'Aucun motif renseigné.')}</p></section>
@@ -1631,7 +1065,20 @@ function printSupplementWorkOrders(item, supplementId = null) {
       .right { text-align: right; } .grid { display: grid; gap: 12px; grid-template-columns: repeat(2, 1fr); margin-top: 16px; } .box { border: 1px solid #dce4e9; padding: 10px; }
       .muted { color: #687987; font-size: 12px; } .check-cell { font-size: 20px; text-align: center; width: 54px; } .notes-box { border: 1px solid #dce4e9; min-height: 90px; }
       .signature-grid { display: grid; gap: 24px; grid-template-columns: repeat(2, 1fr); margin-top: 48px; } .signature-box { border-top: 1px solid #14212b; min-height: 70px; padding-top: 8px; } .signature-box span { color: #687987; display: block; font-size: 12px; margin-top: 6px; }
-      .page-break { page-break-before: always; } @media print { body { margin: 14mm; } .page-break { break-before: page; } }
+      .page-break { page-break-before: always; } @media print { body { margin: 0; } .page-break { break-before: page; } }
+      ${buildWorkshopPrintCss(getPrintOrderReference(item))}
+      .supplement-page header{padding-bottom:2mm;margin-bottom:2mm}
+      .supplement-page h1{font-size:16pt;margin:0 0 1.5mm}
+      .supplement-page h2{font-size:11pt;margin:2mm 0 1mm}
+      .supplement-page p{margin:1mm 0}
+      .supplement-page .grid{gap:3mm;margin-top:2mm}
+      .supplement-page .box{padding:2mm}
+      .supplement-page table{margin:1.5mm 0 2mm}
+      .supplement-page th,.supplement-page td{padding:1.5mm 2mm}
+      .supplement-page .check-cell{width:36px;font-size:16px}
+      .supplement-page .notes-box{min-height:10mm}
+      .supplement-page .signature-grid{display:grid;gap:12mm;grid-template-columns:repeat(2,1fr);margin-top:4mm}
+      .supplement-page .signature-box{border-top:1px solid #14212b;min-height:10mm;padding-top:1.5mm}
     </style></head><body>${pages}<script>window.addEventListener('load', () => window.print());</script></body></html>
   `);
   popup.document.close();
@@ -1673,7 +1120,7 @@ function getPrintableTechnicianBusinessAssignments(assignments = []) {
     .filter(Boolean);
 }
 
-function buildTechnicianTaskPrintCss() {
+function buildTechnicianTaskPrintCss(reference = "Fiche technicien") {
   return `
     @page { size: A4 portrait; margin: 10mm; }
     * { box-sizing: border-box; }
@@ -1696,6 +1143,8 @@ function buildTechnicianTaskPrintCss() {
     .signature-box { border-top: 1px solid #14212b; min-height: 54px; padding-top: 6px; }
     footer { border-top: 1px solid #dce4e9; color: #687987; font-size: 9px; margin-top: 16px; padding-top: 5px; }
     @media print { body { margin: 0; } button, nav, .sidebar, .dashboard-strip, .sync-status-strip { display: none !important; } }
+    ${buildWorkshopPrintCss(reference)}
+    .signature-grid{margin-top:8mm}.signature-box{min-height:12mm}
   `;
 }
 
@@ -1721,18 +1170,16 @@ function printTechnicianTaskSheet(item, bookingId, technicianId = "") {
       <head>
         <meta charset="utf-8" />
         <title>Fiche tâche technicien - ${escapeHtml(item.clientName || "Dossier")}</title>
-        <style>${buildTechnicianTaskPrintCss()}</style>
+        <style>${buildTechnicianTaskPrintCss(getPrintOrderReference(item))}</style>
       </head>
       <body>
         <header>
           <div>
             <h1>NIMR SAV</h1>
             <p>${PRINT_WORKSHOP_SUBTITLE}</p>
-            <p>${PRINT_WORKSHOP_SCOPE}</p>
             <p><strong>Fiche de travail technicien</strong></p>
           </div>
           <div class="right">
-            <p><strong>Dossier :</strong> ${escapeHtml(getPrintCaseReference(item))}</p>
             <p><strong>Réf. OR :</strong> ${escapeHtml(getPrintOrderReference(item))}</p>
             <p><strong>Imprimé le :</strong> ${formatDateTime(new Date())}</p>
             <p><strong>Statut :</strong> ${escapeHtml(getPrintStatusLabel(item))}</p>
@@ -1742,15 +1189,14 @@ function printTechnicianTaskSheet(item, bookingId, technicianId = "") {
           <div class="box">
             <h2>Client / véhicule</h2>
             <p><strong>Client :</strong> ${escapeHtml(item.clientName || "-")}</p>
-            <p><strong>Téléphone :</strong> ${escapeHtml(item.phone || "-")}</p>
             <p><strong>Véhicule :</strong> ${escapeHtml(item.vehicle || "-")}</p>
             <p><strong>Immatriculation :</strong> ${escapeHtml(item.plate || "-")}</p>
-            <p><strong>VIN :</strong> ${escapeHtml(item.vin || "-")}</p>
-            <p><strong>Kilométrage :</strong> ${escapeHtml(item.mileage || "-")}</p>
+            ${item.vin ? `<p><strong>VIN :</strong> ${escapeHtml(item.vin)}</p>` : ''}
+            ${item.mileage ? `<p><strong>Kilométrage :</strong> ${escapeHtml(item.mileage)}</p>` : ''}
           </div>
           <div class="box">
             <h2>Tâche atelier</h2>
-            <p><strong>Ordre :</strong> ${escapeHtml(getPrintOrderReference(item))}</p>
+            <p><strong>Opération :</strong> ${escapeHtml(getWorkshopPrintOperationTitle(booking))}</p>
             <p><strong>Étape :</strong> ${escapeHtml(getDurationLabel(booking.key) || booking.title || "-")}</p>
             <p><strong>Technicien :</strong> ${escapeHtml(technicianName)}</p>
             <p><strong>Équipement :</strong> ${escapeHtml(equipment)}</p>
@@ -1762,13 +1208,14 @@ function printTechnicianTaskSheet(item, bookingId, technicianId = "") {
         <section>
           <h2>Consignes / pièces prévues</h2>
           <table><tbody>
-            <tr><th>Consignes</th><td>${escapeHtml(booking.details || item.damageNotes || "Aucune consigne renseignée.")}</td></tr>
-            <tr><th>Pièces prévues</th><td>${escapeHtml(getAllClaimEstimateParts(item).map((part) => `${part.designation || "Article"} x ${formatLocalizedDecimal(part.quantity || 0)}`).join(" / ") || "Aucune pièce renseignée.")}</td></tr>
+            <tr><th>Consignes</th><td>${escapeHtml(booking.details || item.visitReason || item.damageNotes || "Aucune consigne renseignée.")}</td></tr>
+            <tr><th>Pièces prévues</th><td>${escapeHtml(getPrintableWorkshopParts(item).map((part) => `${part.designation || "Article"} x ${formatLocalizedDecimal(part.quantity || 0)}`).join(" / ") || "Aucune pièce renseignée.")}</td></tr>
             <tr><th>Notes numériques</th><td>${notes}</td></tr>
           </tbody></table>
         </section>
         <section>
           <h2>Suivi manuscrit</h2>
+          <p>Début réel : ${booking.startedAt ? formatDateTime(booking.startedAt) : '________________'} · Fin réelle : ${booking.completedAt ? formatDateTime(booking.completedAt) : '________________'}</p>
           <ul class="checklist">
             <li>□ tâche démarrée</li>
             <li>□ tâche mise en pause</li>
@@ -1809,16 +1256,19 @@ function printPauseBlockSheet(item, bookingId, technicianId = "") {
   popup.document.write(`
     <!doctype html><html lang="fr"><head><meta charset="utf-8" />
     <title>Fiche pause blocage - ${escapeHtml(item.clientName || "Dossier")}</title>
-    <style>${buildTechnicianTaskPrintCss()}</style></head><body>
+    <style>${buildTechnicianTaskPrintCss(getPrintOrderReference(item))}</style></head><body>
       <header>
         <div><h1>NIMR SAV</h1><p>${PRINT_WORKSHOP_SUBTITLE}</p><p><strong>Fiche de pause / blocage</strong></p></div>
-        <div class="right"><p><strong>Dossier :</strong> ${escapeHtml(getPrintCaseReference(item))}</p><p><strong>Réf. OR :</strong> ${escapeHtml(getPrintOrderReference(item))}</p><p><strong>Imprimé le :</strong> ${formatDateTime(new Date())}</p></div>
+        <div class="right"><p><strong>Réf. OR :</strong> ${escapeHtml(getPrintOrderReference(item))}</p><p><strong>Imprimé le :</strong> ${formatDateTime(new Date())}</p></div>
       </header>
       <section class="grid">
         <div class="box"><h2>Véhicule</h2><p><strong>Client :</strong> ${escapeHtml(item.clientName || "-")}</p><p><strong>Véhicule :</strong> ${escapeHtml(item.vehicle || "-")}</p><p><strong>Immat. / VIN :</strong> ${escapeHtml(item.plate || item.vin || "-")}</p></div>
         <div class="box"><h2>Tâche concernée</h2><p><strong>Technicien :</strong> ${escapeHtml(technicianName)}</p><p><strong>Tâche :</strong> ${escapeHtml(booking.title || getDurationLabel(booking.key) || "-")}</p><p><strong>Heure pause :</strong> ${booking.pausedAt ? formatDateTime(booking.pausedAt) : ""}</p><p><strong>Heure reprise :</strong> ${booking.resumedAt ? formatDateTime(booking.resumedAt) : ""}</p></div>
       </section>
       <section><h2>Motif / commentaire</h2><table><tbody><tr><th>Motif pause</th><td>${escapeHtml(booking.pauseReason || "-")}</td></tr><tr><th>Motif blocage</th><td>${escapeHtml(booking.blockReason || "-")}</td></tr><tr><th>Commentaire</th><td>${escapeHtml(booking.blockDetails || "")}</td></tr><tr><th>Impact planning estimé</th><td>${booking.remainingMinutes ? `${formatLocalizedDecimal(booking.remainingMinutes / 60)} h restantes` : ""}</td></tr></tbody></table></section>
+      ${booking.actualWorkedMinutes ? `<p>Temps réalisé enregistré : ${formatLocalizedDecimal(booking.actualWorkedMinutes / 60)} h.</p>` : ''}
+      ${booking.remainingEstimateRequired || state.bookings.some(candidate => candidate.parentBookingId === booking.id && candidate.remainingEstimateRequired) ? '<p class="notice">Temps restant inconnu : estimation et nouvelle affectation requises auprès du Chef Atelier.</p>' : ''}
+      <p>Décision / prochaine revue : ____________________________________________________</p>
       <section class="signature-grid"><div class="signature-box"><strong>Signature technicien</strong></div><div class="signature-box"><strong>Signature chef atelier si nécessaire</strong></div></section>
       <footer>Document pause / blocage · ${formatDateTime(new Date())}</footer>
       <script>window.addEventListener('load', () => window.print());</script>
@@ -1828,215 +1278,17 @@ function printPauseBlockSheet(item, bookingId, technicianId = "") {
 }
 
 function printTechnicianWorkOrders(item) {
-  item.expertEstimate = normalizeExpertEstimate(item.expertEstimate);
-  if (isArchivedCaseForOperationalPrint(item)) {
-    notifyUser("Dossier clôturé : les ordres techniciens opérationnels ne sont plus proposés. Imprimez l'ordre de réparation archive.", "warn");
-    return;
-  }
-  const assignments = state.bookings.filter((booking) => booking.caseId === item.id && isPrintableWorkBooking(booking));
-  if (!assignments.length) {
-    notifyUser("Aucune tâche assignée. Calculez/validez le planning avant d'imprimer les ordres techniciens.", "error");
-    return;
-  }
-  const businessAssignments = getPrintableTechnicianBusinessAssignments(assignments);
-
-  const grouped = new Map();
-  businessAssignments.forEach((booking) => {
-    const humanResourceIds = (booking.resourceIds || []).filter((resourceId) => isPrintHumanResource(getResource(resourceId)));
-    humanResourceIds.forEach((resourceId) => {
-      const resource = getResource(resourceId) || { id: resourceId, name: "Technicien", role: "atelier", location: "" };
-      if (!grouped.has(resource.id)) grouped.set(resource.id, { resource, tasks: [] });
-      grouped.get(resource.id).tasks.push(booking);
-    });
-  });
-  if (!grouped.size) {
-    notifyUser("Aucune ressource humaine assignée. Les équipements seuls ne génèrent pas d'ordre technicien.", "warn");
-    return;
-  }
-
-  const pages = [...grouped.values()].map(({ resource, tasks }, index) => {
-    const sortedTasks = [...tasks].sort((a, b) => new Date(a.start) - new Date(b.start));
-    const taskPhases = new Set(sortedTasks.map((booking) => booking.key).filter(Boolean));
-    const taskRows = sortedTasks
-      .map((booking, taskIndex) => `
-        <tr>
-          <td>${taskIndex + 1}</td>
-          <td>
-            <strong>${escapeHtml(booking.title || getDurationLabel(booking.key) || "Travail atelier")}</strong>
-            <div class="muted">Étape: ${escapeHtml(getDurationLabel(booking.key) || booking.key || "-")}</div>
-            <div class="muted">Équipement: ${escapeHtml((booking.resourceIds || []).map((id) => getResource(id)).filter(isPrintEquipmentResource).map((resource) => resource.name).join(", ") || "-")}</div>
-          </td>
-          <td>${formatLocalizedDecimal((booking.plannedMinutes || getBookingDurationMinutes(booking)) / 60)}</td>
-          <td>${formatDateTime(booking.start)}</td>
-          <td>${formatDateTime(booking.end)}</td>
-          <td>${booking.actualStart ? formatDateTime(booking.actualStart) : ""}</td>
-          <td>${booking.actualEnd || booking.completedAt ? formatDateTime(booking.actualEnd || booking.completedAt) : ""}</td>
-          <td>${escapeHtml(booking.pauseReason || "")}</td>
-          <td class="check-cell">□</td>
-        </tr>
-      `)
-      .join("");
-
-    const estimateRows = buildTechnicianEstimateRows(item, taskPhases);
-    const estimateSection = estimateRows.length
-      ? `
-        <section>
-          <h2>Rappel main-d'œuvre du devis</h2>
-          <p class="muted">Lignes reprises du devis exactement pour rappeler les opérations à réaliser. Les lignes mixtes sont affichées aux techniciens concernés avec la part affectée.</p>
-          <table class="estimate-table">
-            <thead>
-              <tr><th>N°</th><th>Ligne devis / opération</th><th>Qté devis</th><th>Part affectée</th><th>Étape concernée</th><th>Fait</th></tr>
-            </thead>
-            <tbody>${estimateRows.map((line, lineIndex) => `
-              <tr>
-                <td>${lineIndex + 1}</td>
-                <td><strong>${escapeHtml(line.operation)}</strong>${line.rawText && line.rawText !== line.operation ? `<div class="muted">${escapeHtml(line.rawText)}</div>` : ""}</td>
-                <td>${formatLocalizedDecimal(line.laborHours)} h</td>
-                <td>${formatLocalizedDecimal(line.assignedHours)} h</td>
-                <td>${escapeHtml(line.phaseLabel)}</td>
-                <td class="check-cell">□</td>
-              </tr>
-            `).join("")}</tbody>
-          </table>
-        </section>
-      `
-      : `
-        <section>
-          <h2>Rappel main-d'œuvre du devis</h2>
-          <div class="empty-inline">Aucune ligne de main-d'œuvre devis affectée à ce technicien. Importez le devis dans l'onglet Ordres & devis.</div>
-        </section>
-      `;
-
-    return `
-      <section class="work-order-page ${index ? "page-break" : ""}">
-        <header>
-          <div>
-            <h1>Ordre de travail technicien</h1>
-            <p class="muted">NIMR SAV · Service Après-Vente Automobile</p>
-            <p>Document technicien</p>
-            <p><strong>Technicien / ressource :</strong> ${escapeHtml(resource.name)}</p>
-            <p><strong>Poste :</strong> ${escapeHtml(resource.location || resource.role || "-")}</p>
-          </div>
-          <div class="right">
-            <p><strong>Imprimé le :</strong> ${formatDateTime(new Date())}</p>
-            <p><strong>Réf. OR :</strong> ${escapeHtml(getPrintOrderReference(item))}</p>
-            <p><strong>Devis :</strong> ${escapeHtml(getClaimReferenceSummary(item, 'devis'))}</p>
-            <p><strong>Statut dossier :</strong> ${escapeHtml(getPrintStatusLabel(item))}</p>
-          </div>
-        </header>
-
-        <section class="grid">
-          <div class="box">
-            <h2>Client</h2>
-            <p><strong>Nom :</strong> ${escapeHtml(item.clientName || "-")}</p>
-            <p><strong>Téléphone :</strong> ${escapeHtml(item.phone || "-")}</p>
-            <p><strong>Assurance :</strong> ${escapeHtml(item.insurance || "-")}</p>
-          </div>
-          <div class="box">
-            <h2>Véhicule</h2>
-            <p><strong>Modèle :</strong> ${escapeHtml(item.vehicle || "-")}</p>
-            <p><strong>Immatriculation :</strong> ${escapeHtml(item.plate || "-")}</p>
-            <p><strong>Couleur :</strong> ${escapeHtml(item.color || "-")}</p>
-            <p><strong>Kilométrage :</strong> ${escapeHtml(item.mileage ? `${item.mileage} km` : "-")}</p>
-            <p><strong>VIN :</strong> ${escapeHtml(item.vin || "-")}</p>
-          </div>
-        </section>
-
-        <section>
-          <h2>Tâches planifiées</h2>
-          <table>
-            <thead>
-              <tr><th>N°</th><th>Tâche planning</th><th>Durée prévue (h)</th><th>Début prévu</th><th>Fin prévue</th><th>Début réel</th><th>Fin réelle</th><th>Pause / cause</th><th>Fait</th></tr>
-            </thead>
-            <tbody>${taskRows}</tbody>
-          </table>
-        </section>
-
-        ${estimateSection}
-
-        <section>
-          <h2>Consignes / observations</h2>
-          <p>${escapeHtml(item.damageNotes || "Aucune observation renseignée.")}</p>
-        </section>
-
-        <section>
-          <h2>Suivi atelier</h2>
-          <table>
-            <tbody>
-              <tr><td>Pièce manquante</td><td class="check-cell">□</td><td>Anomalie découverte</td><td class="check-cell">□</td></tr>
-              <tr><td>Besoin de complément</td><td class="check-cell">□</td><td>Essai réalisé</td><td class="check-cell">□</td></tr>
-              <tr><td>Travail terminé</td><td class="check-cell">□</td><td>Retour qualité</td><td class="check-cell">□</td></tr>
-            </tbody>
-          </table>
-          <div class="notes-box">Observations technicien / demande complément :</div>
-        </section>
-
-        <section class="signature-grid">
-          <div class="signature-box">
-            <strong>Signature technicien</strong>
-            <span>Nom, date et signature</span>
-          </div>
-          <div class="signature-box">
-            <strong>Validation chef atelier</strong>
-            <span>Nom, date et signature</span>
-          </div>
-        </section>
-      </section>
-    `;
-  }).join("");
-
-  const popup = window.open("", "_blank", "width=900,height=1100");
-  if (!popup) {
-    notifyUser("Le navigateur a bloqué l'ouverture. Autorisez les pop-ups pour imprimer les ordres techniciens.");
-    return;
-  }
-  popup.document.write(`
-    <!doctype html>
-    <html lang="fr">
-      <head>
-        <meta charset="utf-8" />
-        <title>Ordres techniciens - ${escapeHtml(item.clientName || "Dossier")}</title>
-        <style>
-          @page { size: A4 portrait; margin: 8mm; }
-          * { box-sizing: border-box; }
-          body { color: #14212b; font-family: Arial, sans-serif; font-size: 10.5px; line-height: 1.18; margin: 8mm auto; max-width: 194mm; }
-          .work-order-page { break-after: page; page-break-after: always; }
-          .work-order-page:last-child { break-after: auto; page-break-after: auto; }
-          header { align-items: flex-start; border-bottom: 2px solid #11415f; display: flex; justify-content: space-between; padding-bottom: 7px; }
-          h1 { color: #11415f; font-size: 16px; margin: 0 0 3px; }
-          h2 { font-size: 11px; margin: 8px 0 4px; }
-          p { margin: 2px 0; }
-          section { break-inside: avoid; page-break-inside: avoid; }
-          table { border-collapse: collapse; margin-top: 4px; table-layout: fixed; width: 100%; }
-          th, td { border: 1px solid #dce4e9; padding: 3px 4px; text-align: left; vertical-align: top; word-break: break-word; }
-          th { background: #f5f8fa; }
-          .right { text-align: right; }
-          .grid { display: grid; gap: 6px; grid-template-columns: repeat(2, 1fr); margin-top: 8px; }
-          .box { border: 1px solid #dce4e9; padding: 5px; }
-          .muted { color: #687987; font-size: 9.5px; }
-          .empty-inline { border: 1px dashed #dce4e9; color: #687987; padding: 6px; }
-          .notes-box { border: 1px solid #dce4e9; min-height: 42px; padding: 5px; }
-          .check-cell { font-size: 13px; text-align: center; width: 32px; }
-          .estimate-table th:nth-child(1), .estimate-table td:nth-child(1) { width: 24px; }
-          .estimate-table th:nth-child(2), .estimate-table td:nth-child(2) { width: 44%; }
-          .estimate-table th:nth-child(3), .estimate-table td:nth-child(3) { width: 42px; }
-          .estimate-table th:nth-child(4), .estimate-table td:nth-child(4) { width: 48px; }
-          .estimate-table th:nth-child(6), .estimate-table td:nth-child(6) { width: 32px; }
-          .estimate-table td { font-size: 9.5px; }
-          .signature-grid { break-inside: avoid; display: grid; gap: 28px; grid-template-columns: repeat(2, 1fr); margin-top: 18px; page-break-inside: avoid; }
-          .signature-box { border-top: 1px solid #14212b; min-height: 34px; padding-top: 5px; }
-          .signature-box span { color: #687987; display: block; font-size: 9px; margin-top: 3px; }
-          .page-break { page-break-before: always; }
-          @media print { body { margin: 0; max-width: none; } .page-break { break-before: page; } }
-        </style>
-      </head>
-      <body>${pages}<script>window.addEventListener("load", () => window.print());</script></body>
-    </html>
-  `);
-  popup.document.close();
-
-  addHistory(item, "work_orders.printed", "Ordres de travail techniciens imprimés", `${grouped.size} technicien${grouped.size > 1 ? "s" : ""}`);
-  saveState({ changedCase: item });
+  if (!item || isArchivedCaseForOperationalPrint(item)) { notifyUser("Dossier clôturé : imprimez l'ordre de réparation archive.", 'warn'); return; }
+  const assignments = getPrintableTechnicianBusinessAssignments(getCaseWorkBookings(item).filter(booking => !booking.deletedAt && booking.status !== 'cancelled'));
+  const groups = new Map();
+  assignments.forEach(booking => (booking.resourceIds || []).map(getResource).filter(isPrintHumanResource).forEach(resource => { if (!groups.has(resource.id)) groups.set(resource.id, {resource,tasks:[]}); groups.get(resource.id).tasks.push(booking); }));
+  if (!groups.size) { notifyUser("Aucune ressource humaine assignée. Planifiez les travaux avant l'impression.", 'warn'); return; }
+  const body = [...groups.values()].map(({resource,tasks}) => `<section class="print-section">
+    ${renderWorkshopPrintIdentity(item, 'Ordre de travail technicien', `${resource.name} · ${ROLE_LABELS[resource.role] || resource.role}`)}
+    ${renderPartsBlockerHtml(item)}${renderWorkshopPrintRequests(item)}
+    <table><thead><tr><th style="width:52%">Opération confiée à ${escapeHtml(resource.name)}</th><th style="width:27%">Prévision / état</th><th style="width:21%">Pointage</th></tr></thead><tbody>${tasks.sort((a,b)=>new Date(a.start)-new Date(b.start)).map(booking=>`<tr><td><strong>${escapeHtml(getWorkshopPrintOperationTitle(booking))}</strong>${booking.details ? `<p>${escapeHtml(booking.details)}</p>` : ''}${getBookingEquipmentNames(booking) ? `<p>Matériel : ${escapeHtml(getBookingEquipmentNames(booking))}</p>` : ''}</td><td>${booking.needsScheduling ? 'Reprise à planifier' : `${formatDateTime(booking.start)}<br>${formatTime(booking.end)} · ${formatLocalizedDecimal(getBookingPlannedMinutes(booking)/60)} h`}<br>${escapeHtml(getBookingStatusLabel(booking))}</td><td>Début réel :<br>${booking.startedAt || booking.actualStart ? formatDateTime(booking.startedAt || booking.actualStart) : '________'}<br>Fin réelle :<br>${booking.completedAt ? formatDateTime(booking.completedAt) : '________'}</td></tr>`).join('')}</tbody></table>
+    <p>□ tâche démarrée &nbsp; □ tâche terminée &nbsp; □ anomalie signalée</p><div class="avoid-break"><h2>Pause / cause · Constat / reste à faire</h2><div class="note-space"></div><p class="signature">Visa technicien : ____________________ · Date : ______________</p></div></section>`).join('');
+  openWorkshopPrint('Ordres techniciens', getPrintOrderReference(item), body);
 }
 
 function buildTechnicianEstimateRows(item, taskPhases) {

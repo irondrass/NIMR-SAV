@@ -16,38 +16,38 @@
 // FIELD-AUDIT source refresh: atomic worker-aligned release v23.3.36 with robust field PDF import and canonical technician linking.
 // WORK-AUTHORIZATION-001 source refresh: atomic worker-aligned release v23.3.37 with explicit evidence-backed work authorization.
 // OFFLINE-AUTH-001 source refresh: atomic worker-aligned release v23.3.38 with transport-aware auth startup.
-// F19-SYNC-CONFLICT-UX-001 source refresh: atomic worker-aligned release v23.3.39 with sync conflict UX, role guidance and durable outbox reconciliation.
-const CACHE_NAME = "nimr-sav-v23.3.39";
+// SUPPLEMENT-FORM-DRAFT-001: v23.3.42 preserve unsaved supplement drafts across case detail rerenders.
+const CACHE_NAME = "nimr-sav-v23.3.42";
 const ASSETS = [
   "./",
   "./index.html",
   "./offline.html",
   "./rescue.html",
-  "./styles.css?v=23.3.39",
-  "./app.js?v=23.3.39",
+  "./styles.css?v=23.3.42",
+  "./app.js?v=23.3.42",
   "./manifest.webmanifest",
-  "./js/version.js?v=23.3.39",
+  "./js/version.js?v=23.3.42",
   "./supabase-schema.sql",
   "./assets/icon.svg",
   "./assets/icon-192.png",
   "./assets/icon-512.png",
   "./assets/apple-touch-icon.png",
-  "./vendor/pdf.min.js?v=23.3.39",
-  "./vendor/pdf.worker.min.js?v=23.3.39",
-  "./js/utils.js?v=23.3.39",
-  "./js/state.js?v=23.3.39",
-  "./js/ui-cases.js?v=23.3.39",
-  "./js/estimate-import.js?v=23.3.39",
-  "./js/ui-planning.js?v=23.3.39",
-  "./js/photos.js?v=23.3.39",
-  "./js/storage.js?v=23.3.39",
-  "./js/work-hours-sync.js?v=23.3.39",
-  "./js/planning.js?v=23.3.39",
-  "./js/exports.js?v=23.3.39",
-  "./js/business-rules-v2187.js?v=23.3.39",
-  "./js/supabase-config.js?v=23.3.39",
-  "./js/supabase-client.js?v=23.3.39",
-  "./js/supabase-sync.js?v=23.3.39",
+  "./vendor/pdf.min.js?v=23.3.42",
+  "./vendor/pdf.worker.min.js?v=23.3.42",
+  "./js/utils.js?v=23.3.42",
+  "./js/state.js?v=23.3.42",
+  "./js/ui-cases.js?v=23.3.42",
+  "./js/estimate-import.js?v=23.3.42",
+  "./js/ui-planning.js?v=23.3.42",
+  "./js/photos.js?v=23.3.42",
+  "./js/storage.js?v=23.3.42",
+  "./js/work-hours-sync.js?v=23.3.42",
+  "./js/planning.js?v=23.3.42",
+  "./js/exports.js?v=23.3.42",
+  "./js/business-rules-v2187.js?v=23.3.42",
+  "./js/supabase-config.js?v=23.3.42",
+  "./js/supabase-client.js?v=23.3.42",
+  "./js/supabase-sync.js?v=23.3.42",
 ];
 
 async function precache() {
@@ -76,7 +76,7 @@ self.addEventListener("activate", (event) => {
 function isReleaseAsset(url) {
   try {
     const parsed = new URL(url);
-    return parsed.searchParams.get("v") === "23.3.39";
+    return parsed.searchParams.get("v") === "23.3.42";
   } catch {
     return false;
   }

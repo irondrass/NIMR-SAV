@@ -21,6 +21,7 @@ const functionalFiles = [
   'sync_role_transport_001',
   'offline_auth_001',
   'sync_conflict_ux_p1_matrix',
+  'supplement_form_draft_001',
 ];
 
 console.log('--- RELEASE AUDIT: Functional suite ---');

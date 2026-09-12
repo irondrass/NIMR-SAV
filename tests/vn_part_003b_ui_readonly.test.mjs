@@ -596,12 +596,12 @@ test("9. Filters: All 5 filters operate according to physical semantics", () => 
 test("10. PWA Precache: Both new JS files exist in sw.js ASSETS with exact release query", () => {
   // Check index.html references
   assert.ok(
-    indexHtmlContent.includes('<script src="js/vn-part-client.js?v=23.3.42" defer></script>'),
-    "index.html must include vn-part-client.js with active query v=23.3.42"
+    indexHtmlContent.includes('<script src="js/vn-part-client.js?v=23.3.43" defer></script>'),
+    "index.html must include vn-part-client.js with active query v=23.3.43"
   );
   assert.ok(
-    indexHtmlContent.includes('<script src="js/vn-part-ui.js?v=23.3.42" defer></script>'),
-    "index.html must include vn-part-ui.js with active query v=23.3.42"
+    indexHtmlContent.includes('<script src="js/vn-part-ui.js?v=23.3.43" defer></script>'),
+    "index.html must include vn-part-ui.js with active query v=23.3.43"
   );
 
   // Check sw.js ASSETS precache list
@@ -610,18 +610,18 @@ test("10. PWA Precache: Both new JS files exist in sw.js ASSETS with exact relea
   const assetsBlock = assetsMatch[1];
 
   assert.ok(
-    assetsBlock.includes('"./js/vn-part-client.js?v=23.3.42"'),
-    "sw.js ASSETS must precache ./js/vn-part-client.js?v=23.3.42"
+    assetsBlock.includes('"./js/vn-part-client.js?v=23.3.43"'),
+    "sw.js ASSETS must precache ./js/vn-part-client.js?v=23.3.43"
   );
   assert.ok(
-    assetsBlock.includes('"./js/vn-part-ui.js?v=23.3.42"'),
-    "sw.js ASSETS must precache ./js/vn-part-ui.js?v=23.3.42"
+    assetsBlock.includes('"./js/vn-part-ui.js?v=23.3.43"'),
+    "sw.js ASSETS must precache ./js/vn-part-ui.js?v=23.3.43"
   );
 
-  // Assert version was NOT bumped
+  // Assert version was bumped to v23.3.43
   assert.ok(
-    swJsContent.includes('const CACHE_NAME = "nimr-sav-v23.3.42";'),
-    "sw.js CACHE_NAME must remain nimr-sav-v23.3.42"
+    swJsContent.includes('const CACHE_NAME = "nimr-sav-v23.3.43";'),
+    "sw.js CACHE_NAME must be nimr-sav-v23.3.43"
   );
 });
 

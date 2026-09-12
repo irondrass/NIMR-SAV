@@ -161,16 +161,20 @@ test("H. Scheme versioning: legacy releases are worktree-raw-v1 and current is c
   assert.equal(FINGERPRINT_SCHEMES["v23.3.29"], "canonical-lf-v2");
   assert.equal(FINGERPRINT_SCHEMES["v23.3.30"], "canonical-lf-v2");
   assert.equal(FINGERPRINT_SCHEMES["v23.3.31"], "canonical-lf-v2");
+  assert.equal(FINGERPRINT_SCHEMES["v23.3.42"], "canonical-lf-v2");
+  assert.equal(FINGERPRINT_SCHEMES["v23.3.43"], "canonical-lf-v2");
   assert.equal(CURRENT_FINGERPRINT_SCHEME, "canonical-lf-v2");
 });
 
 // -------------------------------------------------------------
-// EXACT 23 RUNTIME-FILE INVENTORY
+// EXACT 25 RUNTIME-FILE INVENTORY
 // -------------------------------------------------------------
-test("I. Runtime files inventory: exactly 23 sorted release files declared", () => {
-  assert.equal(RELEASE_OWNED_RUNTIME_FILES.length, 23);
+test("I. Runtime files inventory: exactly 25 sorted release files declared", () => {
+  assert.equal(RELEASE_OWNED_RUNTIME_FILES.length, 25);
   const sortedCopy = [...RELEASE_OWNED_RUNTIME_FILES].sort();
   assert.deepEqual(RELEASE_OWNED_RUNTIME_FILES, sortedCopy, "File list must be pre-sorted");
+  assert.equal(RELEASE_OWNED_RUNTIME_FILES.includes("js/vn-part-client.js"), true);
+  assert.equal(RELEASE_OWNED_RUNTIME_FILES.includes("js/vn-part-ui.js"), true);
 
   // Verify each file exists on disk
   for (const file of RELEASE_OWNED_RUNTIME_FILES) {

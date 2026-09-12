@@ -132,6 +132,8 @@ create trigger trg_vn_part_audit_immutable
 before update or delete on public.vn_part_audit_events
 for each row execute function nimr_internal.vn_part_prevent_audit_mutation();
 
+revoke all on function nimr_internal.vn_part_prevent_audit_mutation() from public, anon, authenticated;
+
 -- 5. Donor State View: public.vn_part_donor_state_v1
 create or replace view public.vn_part_donor_state_v1
 with (security_invoker = true)
@@ -208,7 +210,9 @@ alter table public.vn_part_audit_events enable row level security;
 
 drop policy if exists vn_part_removals_read_policy on public.vn_part_removals;
 create policy vn_part_removals_read_policy on public.vn_part_removals
-for select using (
+for select
+to authenticated
+using (
   public.nimr_has_workshop_role(workshop_id, array[
     'admin_technique', 'directeur', 'chef_atelier', 'lecture_seule',
     'directeur_pieces', 'responsable_magasin', 'responsable_garantie_support',
@@ -218,7 +222,9 @@ for select using (
 
 drop policy if exists vn_part_approvals_read_policy on public.vn_part_approvals;
 create policy vn_part_approvals_read_policy on public.vn_part_approvals
-for select using (
+for select
+to authenticated
+using (
   public.nimr_has_workshop_role(workshop_id, array[
     'admin_technique', 'directeur', 'chef_atelier', 'lecture_seule',
     'directeur_pieces', 'responsable_magasin', 'responsable_garantie_support',
@@ -228,7 +234,9 @@ for select using (
 
 drop policy if exists vn_part_audit_events_read_policy on public.vn_part_audit_events;
 create policy vn_part_audit_events_read_policy on public.vn_part_audit_events
-for select using (
+for select
+to authenticated
+using (
   public.nimr_has_workshop_role(workshop_id, array[
     'admin_technique', 'directeur', 'chef_atelier', 'lecture_seule',
     'directeur_pieces', 'responsable_magasin', 'responsable_garantie_support',
@@ -236,15 +244,29 @@ for select using (
   ])
 );
 
--- Deny all direct client INSERT/UPDATE/DELETE explicitly
-revoke insert, update, delete on public.vn_part_removals from public, anon, authenticated;
-revoke insert, update, delete on public.vn_part_approvals from public, anon, authenticated;
-revoke insert, update, delete on public.vn_part_audit_events from public, anon, authenticated;
+-- Explicit least-privilege reset for tables
+revoke all privileges
+on table
+  public.vn_part_removals,
+  public.vn_part_approvals,
+  public.vn_part_audit_events
+from public, anon, authenticated;
 
-grant select on public.vn_part_removals to authenticated;
-grant select on public.vn_part_approvals to authenticated;
-grant select on public.vn_part_audit_events to authenticated;
-grant select on public.vn_part_donor_state_v1 to authenticated;
+grant select
+on table
+  public.vn_part_removals,
+  public.vn_part_approvals,
+  public.vn_part_audit_events
+to authenticated;
+
+-- Explicit least-privilege reset for donor view
+revoke all privileges
+on table public.vn_part_donor_state_v1
+from public, anon, authenticated;
+
+grant select
+on table public.vn_part_donor_state_v1
+to authenticated;
 
 -- 7. Authoritative Mutation Function in nimr_internal
 create or replace function nimr_internal.nimr_apply_vn_part_action_v1(

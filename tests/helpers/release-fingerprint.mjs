@@ -7,7 +7,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const repositoryRoot = path.resolve(__dirname, "../..");
 
 // Deterministic release fingerprint: SHA-256 over sorted release-owned runtime source files.
-// Exactly 23 files whose byte content determines actual application runtime behavior.
+// Exactly 25 files whose byte content determines actual application runtime behavior.
 export const RELEASE_OWNED_RUNTIME_FILES = Object.freeze([
   "app.js",
   "index.html",
@@ -25,6 +25,8 @@ export const RELEASE_OWNED_RUNTIME_FILES = Object.freeze([
   "js/ui-planning.js",
   "js/utils.js",
   "js/version.js",
+  "js/vn-part-client.js",
+  "js/vn-part-ui.js",
   "js/work-hours-sync.js",
   "manifest.webmanifest",
   "offline.html",
@@ -94,6 +96,7 @@ export const FINGERPRINT_SCHEMES = Object.freeze({
   "v23.3.40": "canonical-lf-v2",
   "v23.3.41": "canonical-lf-v2",
   "v23.3.42": "canonical-lf-v2",
+  "v23.3.43": "canonical-lf-v2",
 });
 
 export const CURRENT_FINGERPRINT_SCHEME = "canonical-lf-v2";
@@ -133,6 +136,7 @@ export const SEALED_RELEASE_FINGERPRINTS = Object.freeze({
   "v23.3.40": "0250bc08b36c1d77ee557c7ce16f6623e3f8bcfc8514dd5287e7bbb428beee81",
   "v23.3.41": "4ca539ad9125425230dd7360ee42dd82b6d95237f55f3e5abf949a65b8a94e29",
   "v23.3.42": "90a07b4e0f5f229c57e411d04b27dac62ed4a19d26a4974421cee6c324da5d03",
+  "v23.3.43": "6a7fa12d32bbe887be74fd3db82b6d2f46c672b050616756de845889b19a640b",
 });
 
 /**

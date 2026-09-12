@@ -365,25 +365,25 @@ test("A. SAME CACHE VERSION + CHANGED JS (HISTORICAL): first fetch returns OLD c
 
 test("B. NEW CACHE VERSION: bumping cache name purges old cache upon activation", async () => {
   const harness = createSwHarness({});
-  const oldCache = await harness.context.caches.open("nimr-sav-v23.3.41");
-  await oldCache.put(`${origin}/NIMR-SAV/js/storage.js?v=23.3.41`, new MockResponse("old-v41"));
+  const oldCache = await harness.context.caches.open("nimr-sav-v23.3.42");
+  await oldCache.put(`${origin}/NIMR-SAV/js/storage.js?v=23.3.42`, new MockResponse("old-v42"));
 
-  await harness.context.caches.open("nimr-sav-v23.3.42");
+  await harness.context.caches.open("nimr-sav-v23.3.43");
   await harness.triggerActivate();
 
   const keys = await harness.context.caches.keys();
-  assert.ok(!keys.includes("nimr-sav-v23.3.41"), "Old cache nimr-sav-v23.3.41 must be deleted on activate");
-  assert.ok(keys.includes("nimr-sav-v23.3.42"), "Current cache nimr-sav-v23.3.42 must be preserved");
+  assert.ok(!keys.includes("nimr-sav-v23.3.42"), "Old cache nimr-sav-v23.3.42 must be deleted on activate");
+  assert.ok(keys.includes("nimr-sav-v23.3.43"), "Current cache nimr-sav-v23.3.43 must be preserved");
 });
 
 test("C. HTML/JS VERSION MISMATCH: a foreign query version cannot reuse the active release cache entry", async () => {
   const harness = createSwHarness({
-    [`${origin}/NIMR-SAV/js/unrelated.js?v=23.3.43`]: new MockResponse("network-v33"),
+    [`${origin}/NIMR-SAV/js/unrelated.js?v=23.3.44`]: new MockResponse("network-v33"),
   });
-  const cache = await harness.context.caches.open("nimr-sav-v23.3.42");
-  await cache.put(`${origin}/NIMR-SAV/js/unrelated.js?v=23.3.42`, new MockResponse("cached-v32"));
+  const cache = await harness.context.caches.open("nimr-sav-v23.3.43");
+  await cache.put(`${origin}/NIMR-SAV/js/unrelated.js?v=23.3.43`, new MockResponse("cached-v32"));
 
-  const res = await harness.dispatchFetch(`${origin}/NIMR-SAV/js/unrelated.js?v=23.3.43`);
+  const res = await harness.dispatchFetch(`${origin}/NIMR-SAV/js/unrelated.js?v=23.3.44`);
   assert.equal(await res.text(), "network-v33");
 });
 
@@ -429,9 +429,9 @@ test("F. CSS ASSET (HISTORICAL): styles.css?v=23.3.20 exhibits identical stale-o
 });
 
 test("G. OFFLINE CONTROL: when offline, cached assets resolve immediately", async () => {
-  const storageUrl = `${origin}/NIMR-SAV/js/storage.js?v=23.3.42`;
+  const storageUrl = `${origin}/NIMR-SAV/js/storage.js?v=23.3.43`;
   const harness = createSwHarness({});
-  const cache = await harness.context.caches.open("nimr-sav-v23.3.42");
+  const cache = await harness.context.caches.open("nimr-sav-v23.3.43");
   await cache.put(storageUrl, new MockResponse("cached-offline-js", { url: storageUrl }));
 
   const res = await harness.dispatchFetch(storageUrl);
@@ -441,7 +441,7 @@ test("G. OFFLINE CONTROL: when offline, cached assets resolve immediately", asyn
 test("H. PERF-001 CONTROL: app navigation (index.html / ./) is fast cache-first without blocking on network", async () => {
   const indexUrl = `${origin}/NIMR-SAV/index.html`;
   const harness = createSwHarness({});
-  const cache = await harness.context.caches.open("nimr-sav-v23.3.42");
+  const cache = await harness.context.caches.open("nimr-sav-v23.3.43");
   await cache.put(indexUrl, new MockResponse("<!DOCTYPE html><html>cached shell</html>", { url: indexUrl }));
 
   const res = await harness.dispatchFetch(indexUrl, "navigate");
@@ -589,7 +589,7 @@ test("W. ATOMIC WORKER-ALIGNED ALTERNATIVE: Worker B serves complete immutable R
 // PHASE-2 IMPLEMENTATION & REGRESSION ASSERTIONS (AA - AP)
 // =============================================================
 
-test("AA. VERSION BUMP COMPLETE: all 7 production files agree on v23.3.42 and contain zero runtime v23.3.41 literals", () => {
+test("AA. VERSION BUMP COMPLETE: all 7 production files agree on v23.3.43 and contain zero runtime v23.3.42 literals", () => {
   const versionSrc = fs.readFileSync(path.join(rootDir, "js", "version.js"), "utf8");
   const stateSrc = fs.readFileSync(path.join(rootDir, "js", "state.js"), "utf8");
   const swSrc = fs.readFileSync(path.join(rootDir, "sw.js"), "utf8");
@@ -598,17 +598,17 @@ test("AA. VERSION BUMP COMPLETE: all 7 production files agree on v23.3.42 and co
   const estimateSrc = fs.readFileSync(path.join(rootDir, "js", "estimate-import.js"), "utf8");
   const offlineSrc = fs.readFileSync(path.join(rootDir, "offline.html"), "utf8");
 
-  assert.match(versionSrc, /window\.APP_VERSION = "v23\.3\.42";/);
-  assert.match(versionSrc, /window\.NIMR_BUILD = "v23\.3\.42";/);
-  assert.match(versionSrc, /window\.NIMR_CACHE_NAME = "nimr-sav-v23\.3\.42";/);
-  assert.match(stateSrc, /const APP_VERSION = "v23\.3\.42";/);
-  assert.match(swSrc, /const CACHE_NAME = "nimr-sav-v23\.3\.42";/);
-  assert.match(appSrc, /vendor\/pdf\.worker\.min\.js\?v=23\.3\.42/);
-  assert.match(appSrc, /sw\.js\?v=23\.3\.42/);
-  assert.match(estimateSrc, /vendor\/pdf\.worker\.min\.js\?v=23\.3\.42/);
-  assert.match(offlineSrc, /styles\.css\?v=23\.3\.42/);
+  assert.match(versionSrc, /window\.APP_VERSION = "v23\.3\.43";/);
+  assert.match(versionSrc, /window\.NIMR_BUILD = "v23\.3\.43";/);
+  assert.match(versionSrc, /window\.NIMR_CACHE_NAME = "nimr-sav-v23\.3\.43";/);
+  assert.match(stateSrc, /const APP_VERSION = "v23\.3\.43";/);
+  assert.match(swSrc, /const CACHE_NAME = "nimr-sav-v23\.3\.43";/);
+  assert.match(appSrc, /vendor\/pdf\.worker\.min\.js\?v=23\.3\.43/);
+  assert.match(appSrc, /sw\.js\?v=23\.3\.43/);
+  assert.match(estimateSrc, /vendor\/pdf\.worker\.min\.js\?v=23\.3\.43/);
+  assert.match(offlineSrc, /styles\.css\?v=23\.3\.43/);
 
-  // Assert no runtime code in the 7 production files contains v23.3.41
+  // Assert no runtime code in the 7 production files contains v23.3.42
   const codeFiles = [
     { file: "js/version.js", src: versionSrc },
     { file: "js/state.js", src: stateSrc },
@@ -618,21 +618,21 @@ test("AA. VERSION BUMP COMPLETE: all 7 production files agree on v23.3.42 and co
     { file: "offline.html", src: offlineSrc },
   ];
   for (const { file, src } of codeFiles) {
-    assert.doesNotMatch(src, /23\.3\.41/, `${file} must not contain any 23.3.41 literal`);
+    assert.doesNotMatch(src, /23\.3\.42/, `${file} must not contain any 23.3.42 literal`);
   }
 });
 
 test("AB. ACTIVE BUCKET ISOLATION: Worker B active with Cache B returns B even when Cache C exists with C", async () => {
   const sharedCaches = new Map();
   const network = new Map();
-  const assetUrl = `${origin}/NIMR-SAV/js/storage.js?v=23.3.42`;
+  const assetUrl = `${origin}/NIMR-SAV/js/storage.js?v=23.3.43`;
 
   const workerB = createSwHarness({}, { cacheStorage: sharedCaches, network });
-  const cacheB = await workerB.context.caches.open("nimr-sav-v23.3.42");
+  const cacheB = await workerB.context.caches.open("nimr-sav-v23.3.43");
   await cacheB.put(assetUrl, new MockResponse("// Storage Release B"));
 
   // Open and populate Cache C with C content
-  const cacheC = await workerB.context.caches.open("nimr-sav-v23.3.43");
+  const cacheC = await workerB.context.caches.open("nimr-sav-v23.3.44");
   await cacheC.put(assetUrl, new MockResponse("// Storage Release C"));
 
   // Worker B dispatchFetch must strictly return B from its own bucket
@@ -643,14 +643,14 @@ test("AB. ACTIVE BUCKET ISOLATION: Worker B active with Cache B returns B even w
 test("AC. WAITING CACHE INVISIBLE: matching URL in Cache C never satisfies Worker B lookup", async () => {
   const sharedCaches = new Map();
   const network = new Map();
-  const missingAssetUrl = `${origin}/NIMR-SAV/js/state.js?v=23.3.42`;
+  const missingAssetUrl = `${origin}/NIMR-SAV/js/state.js?v=23.3.43`;
 
   const workerB = createSwHarness({}, { cacheStorage: sharedCaches, network });
   // Cache B does NOT contain missingAssetUrl
-  await workerB.context.caches.open("nimr-sav-v23.3.42");
+  await workerB.context.caches.open("nimr-sav-v23.3.43");
 
   // Cache C DOES contain it
-  const cacheC = await workerB.context.caches.open("nimr-sav-v23.3.43");
+  const cacheC = await workerB.context.caches.open("nimr-sav-v23.3.44");
   await cacheC.put(missingAssetUrl, new MockResponse("// State Release C"));
 
   // Worker B must NOT look into Cache C and must fail closed
@@ -668,7 +668,7 @@ test("AD. NO RELEASE BACKGROUND REVALIDATION: cache hit for versioned JS/CSS mak
   network.set(`${origin}/NIMR-SAV/styles.css`, new MockResponse("/* new server css */"));
 
   const worker = createSwHarness({}, { cacheStorage: sharedCaches, network });
-  const cache = await worker.context.caches.open("nimr-sav-v23.3.42");
+  const cache = await worker.context.caches.open("nimr-sav-v23.3.43");
   await cache.put(jsUrl, new MockResponse("// pure B js"));
   await cache.put(cssUrl, new MockResponse("/* pure B css */"));
 
@@ -689,12 +689,12 @@ test("AD. NO RELEASE BACKGROUND REVALIDATION: cache hit for versioned JS/CSS mak
 test("AE. CACHE-MISS FAIL CLOSED: Worker B cache lacks release asset -> zero network requests, no foreign bytes executed", async () => {
   const sharedCaches = new Map();
   const network = new Map();
-  const assetUrl = `${origin}/NIMR-SAV/js/storage.js?v=23.3.42`;
+  const assetUrl = `${origin}/NIMR-SAV/js/storage.js?v=23.3.43`;
 
   network.set(`${origin}/NIMR-SAV/js/storage.js`, new MockResponse("// Release C server bytes"));
 
   const worker = createSwHarness({}, { cacheStorage: sharedCaches, network });
-  await worker.context.caches.open("nimr-sav-v23.3.42");
+  await worker.context.caches.open("nimr-sav-v23.3.43");
 
   worker.networkFetchCalls.length = 0;
 
@@ -702,7 +702,7 @@ test("AE. CACHE-MISS FAIL CLOSED: Worker B cache lacks release asset -> zero net
   assert.equal(res.status, 500, "Response must be fail-closed error");
   assert.equal(worker.networkFetchCalls.length, 0, "Must NOT fetch mutable origin on release asset cache miss");
 
-  const cache = await worker.context.caches.open("nimr-sav-v23.3.41");
+  const cache = await worker.context.caches.open("nimr-sav-v23.3.42");
   const stored = await cache.match(assetUrl);
   assert.equal(stored, undefined, "Cache B must not be polluted with foreign bytes");
 });
@@ -774,11 +774,11 @@ test("AI. CONTROLLED WAITING: new worker installs into its own bucket, stays wai
   const network = new Map();
 
   const workerB = createSwHarness({}, { cacheStorage: sharedCaches, network });
-  const cacheB = await workerB.context.caches.open("nimr-sav-v23.3.42");
+  const cacheB = await workerB.context.caches.open("nimr-sav-v23.3.43");
   await cacheB.put(`${origin}/NIMR-SAV/`, new MockResponse("<!DOCTYPE html><html>App B</html>"));
 
   // Worker C installs
-  const swSourceC = swSource.replace(/23\.3\.42/g, "23.3.43");
+  const swSourceC = swSource.replace(/23\.3\.43/g, "23.3.44");
   const workerC = createSwHarness({}, { cacheStorage: sharedCaches, network, swSource: swSourceC });
   await workerC.triggerInstall();
 
@@ -821,16 +821,16 @@ test("AL. POST-ACTIVATION: Worker C active serves complete Release C with no Cac
   const sharedCaches = new Map();
   const network = new Map();
 
-  const swSourceC = swSource.replace(/23\.3\.41/g, "23.3.42");
+  const swSourceC = swSource.replace(/23\.3\.42/g, "23.3.43");
   const workerC = createSwHarness({}, { cacheStorage: sharedCaches, network, swSource: swSourceC });
-  const cacheC = await workerC.context.caches.open("nimr-sav-v23.3.42");
+  const cacheC = await workerC.context.caches.open("nimr-sav-v23.3.43");
   await cacheC.put(`${origin}/NIMR-SAV/`, new MockResponse("<!DOCTYPE html><html>App C</html>"));
-  await cacheC.put(`${origin}/NIMR-SAV/js/storage.js?v=23.3.42`, new MockResponse("// Storage C"));
+  await cacheC.put(`${origin}/NIMR-SAV/js/storage.js?v=23.3.43`, new MockResponse("// Storage C"));
 
   await workerC.triggerActivate();
 
   const nav = await workerC.dispatchFetch(`${origin}/NIMR-SAV/`, "navigate");
-  const js = await workerC.dispatchFetch(`${origin}/NIMR-SAV/js/storage.js?v=23.3.42`);
+  const js = await workerC.dispatchFetch(`${origin}/NIMR-SAV/js/storage.js?v=23.3.43`);
   assert.equal(await nav.text(), "<!DOCTYPE html><html>App C</html>");
   assert.equal(await js.text(), "// Storage C");
 });
@@ -858,6 +858,7 @@ test("AM. OLD CACHE PRUNE: activate deletes older nimr-sav- buckets and preserve
   await worker.context.caches.open("nimr-sav-v23.3.40");
   await worker.context.caches.open("nimr-sav-v23.3.41");
   await worker.context.caches.open("nimr-sav-v23.3.42");
+  await worker.context.caches.open("nimr-sav-v23.3.43");
 
   await worker.triggerActivate();
 
@@ -879,7 +880,8 @@ test("AM. OLD CACHE PRUNE: activate deletes older nimr-sav- buckets and preserve
   assert.ok(!remainingKeys.includes("nimr-sav-v23.3.39"));
   assert.ok(!remainingKeys.includes("nimr-sav-v23.3.40"));
   assert.ok(!remainingKeys.includes("nimr-sav-v23.3.41"));
-  assert.ok(remainingKeys.includes("nimr-sav-v23.3.42"));
+  assert.ok(!remainingKeys.includes("nimr-sav-v23.3.42"));
+  assert.ok(remainingKeys.includes("nimr-sav-v23.3.43"));
 });
 
 test("AN. PDF WORKER CONTRACT: app.js, estimate-import.js, and sw.js precache PDF worker URLs agree exactly", () => {
@@ -891,27 +893,27 @@ test("AN. PDF WORKER CONTRACT: app.js, estimate-import.js, and sw.js precache PD
   const estimateMatch = estimateSrc.match(/GlobalWorkerOptions\.workerSrc\s*=\s*["']([^"']+)["']/);
 
   assert.ok(appMatch && estimateMatch);
-  assert.equal(appMatch[1], "vendor/pdf.worker.min.js?v=23.3.42");
-  assert.equal(estimateMatch[1], "vendor/pdf.worker.min.js?v=23.3.42");
-  assert.ok(swSrc.includes('"./vendor/pdf.worker.min.js?v=23.3.42"'));
+  assert.equal(appMatch[1], "vendor/pdf.worker.min.js?v=23.3.43");
+  assert.equal(estimateMatch[1], "vendor/pdf.worker.min.js?v=23.3.43");
+  assert.ok(swSrc.includes('"./vendor/pdf.worker.min.js?v=23.3.43"'));
 });
 
 test("AO. OFFLINE: complete release usable entirely from active cache when offline", async () => {
   const sharedCaches = new Map();
   const network = new Map();
   const worker = createSwHarness({}, { cacheStorage: sharedCaches, network });
-  const cache = await worker.context.caches.open("nimr-sav-v23.3.42");
+  const cache = await worker.context.caches.open("nimr-sav-v23.3.43");
 
   await cache.put(`${origin}/NIMR-SAV/`, new MockResponse("<!DOCTYPE html><html>App Shell</html>"));
-  await cache.put(`${origin}/NIMR-SAV/js/storage.js?v=23.3.42`, new MockResponse("// Storage"));
-  await cache.put(`${origin}/NIMR-SAV/styles.css?v=23.3.42`, new MockResponse("/* Styles */"));
+  await cache.put(`${origin}/NIMR-SAV/js/storage.js?v=23.3.43`, new MockResponse("// Storage"));
+  await cache.put(`${origin}/NIMR-SAV/styles.css?v=23.3.43`, new MockResponse("/* Styles */"));
 
   // Completely empty network
   network.clear();
 
   const navRes = await worker.dispatchFetch(`${origin}/NIMR-SAV/`, "navigate");
-  const jsRes = await worker.dispatchFetch(`${origin}/NIMR-SAV/js/storage.js?v=23.3.42`);
-  const cssRes = await worker.dispatchFetch(`${origin}/NIMR-SAV/styles.css?v=23.3.42`);
+  const jsRes = await worker.dispatchFetch(`${origin}/NIMR-SAV/js/storage.js?v=23.3.43`);
+  const cssRes = await worker.dispatchFetch(`${origin}/NIMR-SAV/styles.css?v=23.3.43`);
 
   assert.equal(await navRes.text(), "<!DOCTYPE html><html>App Shell</html>");
   assert.equal(await jsRes.text(), "// Storage");
@@ -922,7 +924,7 @@ test("AP. PERF-001: active shell navigation resolves instantaneously from CacheS
   const sharedCaches = new Map();
   const network = new Map();
   const worker = createSwHarness({}, { cacheStorage: sharedCaches, network });
-  const cache = await worker.context.caches.open("nimr-sav-v23.3.42");
+  const cache = await worker.context.caches.open("nimr-sav-v23.3.43");
   await cache.put(`${origin}/NIMR-SAV/`, new MockResponse("<!DOCTYPE html><html>Fast Shell</html>"));
 
   // Stalled network
@@ -950,7 +952,7 @@ import {
   validateReleaseFingerprintContract,
 } from "./helpers/release-fingerprint.mjs";
 
-const EXPECTED_RELEASE_VERSION = "v23.3.42";
+const EXPECTED_RELEASE_VERSION = "v23.3.43";
 
 test("AQ. RECURRENCE GUARD: runtime source change without version bump MUST fail", async () => {
   // Simulate changing one byte in js/storage.js without updating version identity
@@ -964,13 +966,13 @@ test("AQ. RECURRENCE GUARD: runtime source change without version bump MUST fail
 
   assert.notEqual(
     mutatedFingerprint,
-    SEALED_RELEASE_FINGERPRINTS["v23.3.42"],
+    SEALED_RELEASE_FINGERPRINTS["v23.3.43"],
     "Mutating runtime source MUST produce a different fingerprint"
   );
 
   // Verify the version identity was NOT changed
   const versionSource = fs.readFileSync(path.join(rootDir, "js/version.js"), "utf8");
-  assert.match(versionSource, /APP_VERSION\s*=\s*"v23\.3\.42"/u);
+  assert.match(versionSource, /APP_VERSION\s*=\s*"v23\.3\.43"/u);
 });
 
 test("AR. RECURRENCE GUARD: current release matches sealed fingerprint registry", async () => {
@@ -991,7 +993,7 @@ test("AR. RECURRENCE GUARD: current release matches sealed fingerprint registry"
   );
 });
 
-test("AT. SEALED RELEASE MUTATION: modifying runtime source under any sealed v23.3.21 through v23.3.42 fails validation", () => {
+test("AT. SEALED RELEASE MUTATION: modifying runtime source under any sealed v23.3.21 through v23.3.43 fails validation", () => {
   const originalContent = fs.readFileSync(path.join(rootDir, "js/storage.js"));
   const mutatedContent = Buffer.concat([originalContent, Buffer.from(" ")]);
 
@@ -1015,6 +1017,7 @@ test("AT. SEALED RELEASE MUTATION: modifying runtime source under any sealed v23
   assert.notEqual(mutatedFingerprint, SEALED_RELEASE_FINGERPRINTS["v23.3.40"]);
   assert.notEqual(mutatedFingerprint, SEALED_RELEASE_FINGERPRINTS["v23.3.41"]);
   assert.notEqual(mutatedFingerprint, SEALED_RELEASE_FINGERPRINTS["v23.3.42"]);
+  assert.notEqual(mutatedFingerprint, SEALED_RELEASE_FINGERPRINTS["v23.3.43"]);
 
   for (const v of Object.keys(SEALED_RELEASE_FINGERPRINTS)) {
     assert.throws(
@@ -1036,7 +1039,7 @@ test("AU. FINGERPRINT-ONLY UPDATE IS NOT THE WORKFLOW: attempting to rewrite sea
   assert.throws(
     () => {
       validateReleaseFingerprintContract({
-        appVersion: "v23.3.42",
+        appVersion: "v23.3.43",
         actualFingerprint: modifiedFingerprint,
         registry: SEALED_RELEASE_FINGERPRINTS,
       });
@@ -1051,10 +1054,10 @@ test("AU. FINGERPRINT-ONLY UPDATE IS NOT THE WORKFLOW: attempting to rewrite sea
   );
 });
 
-test("AV. NEW RELEASE ENTRY: bumping release to v23.3.43 with new sealed entry passes while v23.3.21 through v23.3.42 stay sealed", () => {
+test("AV. NEW RELEASE ENTRY: bumping release to v23.3.44 with new sealed entry passes while v23.3.21 through v23.3.43 stay sealed", () => {
   const simulatedRegistry = {
     ...SEALED_RELEASE_FINGERPRINTS,
-    "v23.3.43": "1111111111111111111111111111111111111111111111111111111111111111",
+    "v23.3.44": "1111111111111111111111111111111111111111111111111111111111111111",
   };
 
   for (const v of Object.keys(SEALED_RELEASE_FINGERPRINTS)) {
@@ -1070,7 +1073,7 @@ test("AV. NEW RELEASE ENTRY: bumping release to v23.3.43 with new sealed entry p
 
   assert.equal(
     validateReleaseFingerprintContract({
-      appVersion: "v23.3.43",
+      appVersion: "v23.3.44",
       actualFingerprint: "1111111111111111111111111111111111111111111111111111111111111111",
       registry: simulatedRegistry,
     }),
@@ -1078,7 +1081,7 @@ test("AV. NEW RELEASE ENTRY: bumping release to v23.3.43 with new sealed entry p
   );
 });
 
-test("AS. isReleaseAsset MEMBERSHIP: only declared ASSETS with ?v=23.3.42 are classified as release assets", async () => {
+test("AS. isReleaseAsset MEMBERSHIP: only declared ASSETS with ?v=23.3.43 are classified as release assets", async () => {
   // Extract isReleaseAsset from the actual sw.js source
   const worker = createSwHarness();
 
@@ -1102,9 +1105,9 @@ test("AS. isReleaseAsset MEMBERSHIP: only declared ASSETS with ?v=23.3.42 are cl
 
   // Verify arbitrary same-origin requests are NOT classified
   const arbitraryUrls = [
-    `${origin}/NIMR-SAV/api/data?v=23.3.42`,
-    `${origin}/NIMR-SAV/some-other-page?v=23.3.42&extra=true`,
-    `${origin}/other-app/js/storage.js?v=23.3.42`,
+    `${origin}/NIMR-SAV/api/data?v=23.3.43`,
+    `${origin}/NIMR-SAV/some-other-page?v=23.3.43&extra=true`,
+    `${origin}/other-app/js/storage.js?v=23.3.43`,
   ];
   for (const url of arbitraryUrls) {
     const result = vm.runInContext(`isReleaseAsset(${JSON.stringify(url)})`, worker.context);

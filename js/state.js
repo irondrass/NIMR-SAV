@@ -294,6 +294,10 @@ const CANONICAL_USER_ROLES = Object.freeze({
   technicien: "Technicien",
   controle_qualite: "Contrôleur Qualité",
   lecture_seule: "Lecture seule",
+  directeur_pieces: "Directeur Pièces",
+  responsable_magasin: "Responsable Magasin",
+  responsable_garantie_support: "Responsable Garantie / Support Technique",
+  responsable_qualite_parc_vn: "Responsable Qualité / Chef de Parc VN",
 });
 
 // Les clés historiques restent lisibles par l'UI existante pendant la migration.
@@ -314,6 +318,10 @@ const USER_ROLE_RUNTIME_KEYS = Object.freeze({
   technicien: "technicien",
   controle_qualite: "controle_qualite",
   lecture_seule: "readonly",
+  directeur_pieces: "directeur_pieces",
+  responsable_magasin: "responsable_magasin",
+  responsable_garantie_support: "responsable_garantie_support",
+  responsable_qualite_parc_vn: "responsable_qualite_parc_vn",
 });
 
 const USER_ROLE_ALIASES = Object.freeze({
@@ -340,6 +348,22 @@ const USER_ROLE_ALIASES = Object.freeze({
   "read only": "lecture_seule",
   readonly: "lecture_seule",
   qualite: "controle_qualite",
+  "directeur pieces": "directeur_pieces",
+  "directeur piece": "directeur_pieces",
+  "directeur des pieces": "directeur_pieces",
+  "responsable magasin": "responsable_magasin",
+  magasin: "responsable_magasin",
+  magasinier: "responsable_magasin",
+  "responsable garantie support": "responsable_garantie_support",
+  "responsable garantie support technique": "responsable_garantie_support",
+  "responsable garantie / support technique": "responsable_garantie_support",
+  "garantie support": "responsable_garantie_support",
+  garantie: "responsable_garantie_support",
+  "responsable qualite parc vn": "responsable_qualite_parc_vn",
+  "responsable qualite / chef de parc vn": "responsable_qualite_parc_vn",
+  "responsable qualite vn": "responsable_qualite_parc_vn",
+  "chef parc vn": "responsable_qualite_parc_vn",
+  "chef de parc vn": "responsable_qualite_parc_vn",
 });
 
 const DIRECTOR_PERMISSIONS = [
@@ -439,6 +463,10 @@ const ROLE_PERMISSIONS = {
   technicien: ["workshop.sync.read", "workshop.sync.write", "task.start", "task.pause", "task.resume", "task.complete", "task.block", "task.unblock", "task.note", "task.actual_time", "print.task"],
   controle_qualite: QUALITY_CONTROLLER_PERMISSIONS,
   lecture_seule: READ_ONLY_PERMISSIONS,
+  directeur_pieces: READ_ONLY_PERMISSIONS,
+  responsable_magasin: READ_ONLY_PERMISSIONS,
+  responsable_garantie_support: READ_ONLY_PERMISSIONS,
+  responsable_qualite_parc_vn: READ_ONLY_PERMISSIONS,
   // Alias de lecture transitoires pour les anciens tests/modules. hasPermission
   // utilise toujours le rôle canonique et ne dépend pas de ces entrées.
   admin: ["*"],
@@ -5246,6 +5274,10 @@ const ROLE_TABS = {
   controle_qualite: ["today", "dossiers"],
   qualite:       ["today", "dossiers"],
   readonly:      ["dossiers", "pilotage", "planning"],
+  directeur_pieces: ["dossiers", "pilotage"],
+  responsable_magasin: ["dossiers"],
+  responsable_garantie_support: ["dossiers"],
+  responsable_qualite_parc_vn: ["dossiers"],
 };
 
 // Tab par défaut à afficher lors de la connexion selon le rôle
@@ -5258,6 +5290,10 @@ const ROLE_DEFAULT_TABS = {
   controle_qualite: "today",
   qualite:       "today",
   readonly:      "dossiers",
+  directeur_pieces: "dossiers",
+  responsable_magasin: "dossiers",
+  responsable_garantie_support: "dossiers",
+  responsable_qualite_parc_vn: "dossiers",
 };
 
 function getDefaultTabForRole(role) {

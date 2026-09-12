@@ -17,6 +17,10 @@ const CANONICAL_WORKSHOP_ROLES = new Set([
   "technicien",
   "controle_qualite",
   "lecture_seule",
+  "directeur_pieces",
+  "responsable_magasin",
+  "responsable_garantie_support",
+  "responsable_qualite_parc_vn",
 ]);
 const WORKSHOP_ADMIN_ROLES = new Set(["admin_technique", "directeur"]);
 const HUMAN_RESOURCE_TYPES = new Set(["controle", "electricien", "mecanicien", "peintre", "tolier"]);
@@ -27,6 +31,17 @@ const CALLER_ROLE_ALIASES: Record<string, string> = Object.freeze({
   chef: "chef_atelier",
   controleur_qualite: "controle_qualite",
   readonly: "lecture_seule",
+  directeur_piece: "directeur_pieces",
+  directeur_des_pieces: "directeur_pieces",
+  magasin: "responsable_magasin",
+  magasinier: "responsable_magasin",
+  garantie: "responsable_garantie_support",
+  garantie_support: "responsable_garantie_support",
+  responsable_garantie: "responsable_garantie_support",
+  responsable_qualite_parc_vn: "responsable_qualite_parc_vn",
+  responsable_qualite_vn: "responsable_qualite_parc_vn",
+  chef_parc_vn: "responsable_qualite_parc_vn",
+  chef_de_parc_vn: "responsable_qualite_parc_vn",
 });
 
 const CORS_HEADERS = Object.freeze({

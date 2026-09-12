@@ -297,6 +297,7 @@ const CANONICAL_USER_ROLES = Object.freeze({
   directeur_pieces: "Directeur Pièces",
   responsable_magasin: "Responsable Magasin",
   responsable_garantie_support: "Responsable Garantie / Support Technique",
+  responsable_qualite_parc_vn: "Responsable Qualité / Chef de Parc VN",
 });
 
 // Les clés historiques restent lisibles par l'UI existante pendant la migration.
@@ -320,6 +321,7 @@ const USER_ROLE_RUNTIME_KEYS = Object.freeze({
   directeur_pieces: "directeur_pieces",
   responsable_magasin: "responsable_magasin",
   responsable_garantie_support: "responsable_garantie_support",
+  responsable_qualite_parc_vn: "responsable_qualite_parc_vn",
 });
 
 const USER_ROLE_ALIASES = Object.freeze({
@@ -357,6 +359,11 @@ const USER_ROLE_ALIASES = Object.freeze({
   "responsable garantie / support technique": "responsable_garantie_support",
   "garantie support": "responsable_garantie_support",
   garantie: "responsable_garantie_support",
+  "responsable qualite parc vn": "responsable_qualite_parc_vn",
+  "responsable qualite / chef de parc vn": "responsable_qualite_parc_vn",
+  "responsable qualite vn": "responsable_qualite_parc_vn",
+  "chef parc vn": "responsable_qualite_parc_vn",
+  "chef de parc vn": "responsable_qualite_parc_vn",
 });
 
 const DIRECTOR_PERMISSIONS = [
@@ -459,6 +466,7 @@ const ROLE_PERMISSIONS = {
   directeur_pieces: READ_ONLY_PERMISSIONS,
   responsable_magasin: READ_ONLY_PERMISSIONS,
   responsable_garantie_support: READ_ONLY_PERMISSIONS,
+  responsable_qualite_parc_vn: READ_ONLY_PERMISSIONS,
   // Alias de lecture transitoires pour les anciens tests/modules. hasPermission
   // utilise toujours le rôle canonique et ne dépend pas de ces entrées.
   admin: ["*"],
@@ -5269,6 +5277,7 @@ const ROLE_TABS = {
   directeur_pieces: ["dossiers", "pilotage"],
   responsable_magasin: ["dossiers"],
   responsable_garantie_support: ["dossiers"],
+  responsable_qualite_parc_vn: ["dossiers"],
 };
 
 // Tab par défaut à afficher lors de la connexion selon le rôle
@@ -5284,6 +5293,7 @@ const ROLE_DEFAULT_TABS = {
   directeur_pieces: "dossiers",
   responsable_magasin: "dossiers",
   responsable_garantie_support: "dossiers",
+  responsable_qualite_parc_vn: "dossiers",
 };
 
 function getDefaultTabForRole(role) {

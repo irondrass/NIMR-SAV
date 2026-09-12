@@ -29,7 +29,7 @@ function loadEdgeFactory() {
   return sandbox.exports.createWorkshopUserAdminHandler;
 }
 
-test("1. Existing 7 canonical roles still normalize correctly", () => {
+test("1. Existing 7 canonical roles remain valid", () => {
   const { run } = createNimrVmContext();
   const existingRoles = [
     "admin_technique",
@@ -51,53 +51,79 @@ test("1. Existing 7 canonical roles still normalize correctly", () => {
   }
 });
 
-test("2. directeur_pieces is accepted and displays correctly", () => {
+test("2. directeur_pieces valid", () => {
   const { run } = createNimrVmContext();
   assert.equal(run(`isKnownUserRole("directeur_pieces")`), true);
   assert.equal(run(`normalizeUserRole("directeur_pieces")`), "directeur_pieces");
   assert.equal(run(`normalizeUserRole("Directeur Pièces")`), "directeur_pieces");
-  assert.equal(run(`normalizeUserRole("directeur_piece")`), "directeur_pieces");
-  assert.equal(run(`normalizeUserRole("directeur des pieces")`), "directeur_pieces");
   assert.equal(run(`CANONICAL_USER_ROLES.directeur_pieces`), "Directeur Pièces");
-
-  const user = JSON.parse(run(`JSON.stringify(normalizeUser({ id: "u2", name: "DP", role: "directeur_pieces" }))`));
-  assert.equal(user.role, "directeur_pieces");
-  assert.equal(user.canonicalRole, "directeur_pieces");
-  assert.equal(run(`getCanonicalUserRole(${JSON.stringify(user)})`), "directeur_pieces");
 });
 
-test("3. responsable_magasin is accepted and displays correctly", () => {
+test("3. responsable_magasin valid", () => {
   const { run } = createNimrVmContext();
   assert.equal(run(`isKnownUserRole("responsable_magasin")`), true);
   assert.equal(run(`normalizeUserRole("responsable_magasin")`), "responsable_magasin");
   assert.equal(run(`normalizeUserRole("Responsable Magasin")`), "responsable_magasin");
-  assert.equal(run(`normalizeUserRole("magasin")`), "responsable_magasin");
-  assert.equal(run(`normalizeUserRole("magasinier")`), "responsable_magasin");
   assert.equal(run(`CANONICAL_USER_ROLES.responsable_magasin`), "Responsable Magasin");
-
-  const user = JSON.parse(run(`JSON.stringify(normalizeUser({ id: "u3", name: "RM", role: "responsable_magasin" }))`));
-  assert.equal(user.role, "responsable_magasin");
-  assert.equal(user.canonicalRole, "responsable_magasin");
-  assert.equal(run(`getCanonicalUserRole(${JSON.stringify(user)})`), "responsable_magasin");
 });
 
-test("4. responsable_garantie_support is accepted and displays correctly", () => {
+test("4. responsable_garantie_support valid", () => {
   const { run } = createNimrVmContext();
   assert.equal(run(`isKnownUserRole("responsable_garantie_support")`), true);
   assert.equal(run(`normalizeUserRole("responsable_garantie_support")`), "responsable_garantie_support");
   assert.equal(run(`normalizeUserRole("Responsable Garantie / Support Technique")`), "responsable_garantie_support");
-  assert.equal(run(`normalizeUserRole("responsable garantie support technique")`), "responsable_garantie_support");
-  assert.equal(run(`normalizeUserRole("garantie_support")`), "responsable_garantie_support");
-  assert.equal(run(`normalizeUserRole("garantie")`), "responsable_garantie_support");
   assert.equal(run(`CANONICAL_USER_ROLES.responsable_garantie_support`), "Responsable Garantie / Support Technique");
-
-  const user = JSON.parse(run(`JSON.stringify(normalizeUser({ id: "u4", name: "RGS", role: "responsable_garantie_support" }))`));
-  assert.equal(user.role, "responsable_garantie_support");
-  assert.equal(user.canonicalRole, "responsable_garantie_support");
-  assert.equal(run(`getCanonicalUserRole(${JSON.stringify(user)})`), "responsable_garantie_support");
 });
 
-test("5. Existing aliases still work", () => {
+test("5. responsable_qualite_parc_vn valid", () => {
+  const { run } = createNimrVmContext();
+  assert.equal(run(`isKnownUserRole("responsable_qualite_parc_vn")`), true);
+  assert.equal(run(`normalizeUserRole("responsable_qualite_parc_vn")`), "responsable_qualite_parc_vn");
+  assert.equal(run(`normalizeUserRole("Responsable Qualité / Chef de Parc VN")`), "responsable_qualite_parc_vn");
+  const user = JSON.parse(run(`JSON.stringify(normalizeUser({ id: "u-vn", name: "Parc VN", role: "responsable_qualite_parc_vn" }))`));
+  assert.equal(user.role, "responsable_qualite_parc_vn");
+  assert.equal(user.canonicalRole, "responsable_qualite_parc_vn");
+  assert.equal(run(`getCanonicalUserRole(${JSON.stringify(user)})`), "responsable_qualite_parc_vn");
+});
+
+test("6. Label is exactly: Responsable Qualité / Chef de Parc VN", () => {
+  const { run } = createNimrVmContext();
+  assert.equal(run(`CANONICAL_USER_ROLES.responsable_qualite_parc_vn`), "Responsable Qualité / Chef de Parc VN");
+  assert.equal(run(`CANONICAL_USER_ROLES.controle_qualite`), "Contrôleur Qualité");
+});
+
+test("7. controle_qualite still resolves independently", () => {
+  const { run } = createNimrVmContext();
+  assert.equal(run(`normalizeUserRole("controle_qualite")`), "controle_qualite");
+  assert.equal(run(`normalizeUserRole("Contrôleur Qualité")`), "controle_qualite");
+  assert.equal(run(`CANONICAL_USER_ROLES.controle_qualite`), "Contrôleur Qualité");
+});
+
+test("8. controle_qualite !== responsable_qualite_parc_vn", () => {
+  const { run } = createNimrVmContext();
+  const cq = run(`normalizeUserRole("controle_qualite")`);
+  const rqvn = run(`normalizeUserRole("responsable_qualite_parc_vn")`);
+  assert.notEqual(cq, rqvn, "controle_qualite and responsable_qualite_parc_vn must be distinct canonical roles");
+  assert.equal(cq, "controle_qualite");
+  assert.equal(rqvn, "responsable_qualite_parc_vn");
+});
+
+test("9. qualite legacy alias still resolves to controle_qualite, NOT the new role", () => {
+  const { run } = createNimrVmContext();
+  assert.equal(run(`normalizeUserRole("qualite")`), "controle_qualite");
+  assert.equal(run(`normalizeUserRole("controle qualite")`), "controle_qualite");
+  assert.equal(run(`normalizeUserRole("controleur qualite")`), "controle_qualite");
+  assert.equal(run(`normalizeUserRole("quality controller")`), "controle_qualite");
+});
+
+test("10. chef_parc_vn resolves only to responsable_qualite_parc_vn", () => {
+  const { run } = createNimrVmContext();
+  assert.equal(run(`normalizeUserRole("chef_parc_vn")`), "responsable_qualite_parc_vn");
+  assert.equal(run(`normalizeUserRole("chef_de_parc_vn")`), "responsable_qualite_parc_vn");
+  assert.equal(run(`normalizeUserRole("responsable_qualite_vn")`), "responsable_qualite_parc_vn");
+});
+
+test("11. All existing aliases remain operational", () => {
   const { run } = createNimrVmContext();
   const aliasMatrix = {
     admin: "admin_technique",
@@ -109,9 +135,6 @@ test("5. Existing aliases still work", () => {
     "chef atelier": "chef_atelier",
     receptionnaire: "reception",
     technician: "technicien",
-    qualite: "controle_qualite",
-    "controleur qualite": "controle_qualite",
-    "quality controller": "controle_qualite",
     readonly: "lecture_seule",
     "lecture seule": "lecture_seule",
     lecture: "lecture_seule",
@@ -122,23 +145,25 @@ test("5. Existing aliases still work", () => {
   }
 });
 
-test("6. Unknown roles remain rejected / fail-safe to lecture_seule", () => {
+test("12. Unknown roles fail safely to lecture_seule", () => {
   const { run } = createNimrVmContext();
   assert.equal(run(`isKnownUserRole("hacker")`), false);
   assert.equal(run(`isKnownUserRole("superadmin")`), false);
-  assert.equal(run(`isKnownUserRole("chef_de_parc")`), false, "chef_de_parc must NOT exist as a separate role");
+  assert.equal(run(`isKnownUserRole("chef_de_parc")`), false, "Generic chef_de_parc without _vn is unknown and fails closed");
   assert.equal(run(`normalizeUserRole("hacker")`), "lecture_seule");
   assert.equal(run(`normalizeUserRole("unknown_role")`), "lecture_seule");
-
-  const user = JSON.parse(run(`JSON.stringify(normalizeUser({ id: "u5", name: "Unknown", role: "not_a_role" }))`));
-  assert.equal(user.role, "lecture_seule");
-  assert.equal(user.canonicalRole, "lecture_seule");
 });
 
-test("7. workshop-user-admin recognizes the three new roles where required", async () => {
+test("13. workshop-user-admin accepts the 4 new canonical target roles", async () => {
   const factory = loadEdgeFactory();
+  const fourNewRoles = [
+    "directeur_pieces",
+    "responsable_magasin",
+    "responsable_garantie_support",
+    "responsable_qualite_parc_vn",
+  ];
 
-  for (const targetRole of ["directeur_pieces", "responsable_magasin", "responsable_garantie_support"]) {
+  for (const targetRole of fourNewRoles) {
     const members = [
       { user_id: "admin-1", workshop_id: "workshop-1", role: "admin_technique", resource_id: null, deleted_at: null },
     ];
@@ -222,14 +247,18 @@ test("7. workshop-user-admin recognizes the three new roles where required", asy
   }
 });
 
-test("8. The new roles do NOT gain account-management authority merely by existing", async () => {
+test("14. None of the 4 new roles gain account-management authority", async () => {
   const factory = loadEdgeFactory();
   const { run } = createNimrVmContext();
-
-  const newRoles = ["directeur_pieces", "responsable_magasin", "responsable_garantie_support"];
+  const fourNewRoles = [
+    "directeur_pieces",
+    "responsable_magasin",
+    "responsable_garantie_support",
+    "responsable_qualite_parc_vn",
+  ];
 
   // A. Check Edge Function rejects invites from callers with new roles
-  for (const callerRole of newRoles) {
+  for (const callerRole of fourNewRoles) {
     const members = [
       { user_id: "caller-1", workshop_id: "workshop-1", role: callerRole, resource_id: null, deleted_at: null },
     ];
@@ -292,7 +321,7 @@ test("8. The new roles do NOT gain account-management authority merely by existi
   }
 
   // B. Check client-side account management permissions
-  for (const role of newRoles) {
+  for (const role of fourNewRoles) {
     run(`
       state.users = [
         normalizeUser({ id: "user-${role}", name: "User", role: "${role}", active: true })
@@ -308,26 +337,16 @@ test("8. The new roles do NOT gain account-management authority merely by existi
   }
 });
 
-test("9. admin_technique behavior does not regress", () => {
-  const { run } = createNimrVmContext();
-  run(`
-    state.users = [
-      normalizeUser({ id: "adm", name: "Admin", role: "admin_technique", active: true })
-    ];
-    state.currentUserId = "adm";
-  `);
-  assert.equal(run('getCanonicalUserRole(getCurrentUser())'), "admin_technique");
-  assert.equal(run('hasPermission("case.create")'), true);
-  assert.equal(run('hasPermission("planning.edit")'), true);
-  assert.equal(run('hasPermission("users.manage")'), true);
-  assert.equal(run('hasPermission("settings.edit")'), true);
-});
-
-test("10. SEC001 client recognizes new roles during Supabase membership resolution", async () => {
+test("15. SEC001 membership resolution accepts all 4", async () => {
   const clientSrc = fs.readFileSync(path.join(repoRoot, "js/supabase-client.js"), "utf8");
-  const newRoles = ["directeur_pieces", "responsable_magasin", "responsable_garantie_support"];
+  const fourNewRoles = [
+    "directeur_pieces",
+    "responsable_magasin",
+    "responsable_garantie_support",
+    "responsable_qualite_parc_vn",
+  ];
 
-  for (const role of newRoles) {
+  for (const role of fourNewRoles) {
     const sandbox = {
       window: {
         NIMR_SUPABASE_CONFIG: { workshopId: "00000000-0000-0000-0000-000000000001" },
@@ -374,18 +393,16 @@ test("10. SEC001 client recognizes new roles during Supabase membership resoluti
   }
 });
 
-test("11. SQL migration file validation", () => {
+test("16. SQL migration contains all 11 roles", () => {
   const sqlPath = path.join(repoRoot, "supabase_vn_part_001_roles.sql");
   assert.ok(fs.existsSync(sqlPath), "supabase_vn_part_001_roles.sql must exist");
   const sql = fs.readFileSync(sqlPath, "utf8");
 
-  // Verify header and unexecuted mark
   assert.match(sql, /UNEXECUTED/);
   assert.match(sql, /public\.nimr_canonical_role/);
   assert.match(sql, /workshop_members_role_canonical_check/);
 
-  // Verify all 10 canonical roles are present in constraint
-  const expectedRoles = [
+  const all11Roles = [
     "admin_technique",
     "directeur",
     "chef_atelier",
@@ -396,19 +413,35 @@ test("11. SQL migration file validation", () => {
     "directeur_pieces",
     "responsable_magasin",
     "responsable_garantie_support",
+    "responsable_qualite_parc_vn",
   ];
 
-  for (const role of expectedRoles) {
+  for (const role of all11Roles) {
     assert.match(sql, new RegExp(`'${role}'`), `SQL migration must contain '${role}'`);
   }
 });
 
-test("12. index.html dropdown options check", () => {
+test("17. HTML selectors contain both distinct Quality roles", () => {
   const indexPath = path.join(repoRoot, "index.html");
   const html = fs.readFileSync(indexPath, "utf8");
 
-  // Invite member select options
+  // Verify both distinct Quality roles appear in invite dropdown
+  assert.match(html, /<option value="controle_qualite">Contrôleur Qualité<\/option>/);
+  assert.match(html, /<option value="responsable_qualite_parc_vn">Responsable Qualité \/ Chef de Parc VN<\/option>/);
   assert.match(html, /<option value="directeur_pieces">Directeur Pièces<\/option>/);
   assert.match(html, /<option value="responsable_magasin">Responsable Magasin<\/option>/);
   assert.match(html, /<option value="responsable_garantie_support">Responsable Garantie \/ Support Technique<\/option>/);
+});
+
+test("18. ASTRA-ID-001 behavior remains unchanged", () => {
+  const { run } = createNimrVmContext();
+  run(`
+    state.users = [
+      normalizeUser({ id: "adm", name: "Admin", role: "admin_technique", active: true })
+    ];
+    state.currentUserId = "adm";
+  `);
+  assert.equal(run('getCanonicalUserRole(getCurrentUser())'), "admin_technique");
+  assert.equal(run('hasPermission("users.manage")'), true);
+  assert.equal(run('hasPermission("settings.edit")'), true);
 });

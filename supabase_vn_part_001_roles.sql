@@ -1,6 +1,6 @@
 -- ===========================================================================
 -- NIMR SAV — VN-PART-001: Canonical Roles & Identity Parity
--- Foundation for VN-PART module: directeur_pieces, responsable_magasin, responsable_garantie_support
+-- Foundation for VN-PART module: directeur_pieces, responsable_magasin, responsable_garantie_support, responsable_qualite_parc_vn
 -- Additive, idempotent, non-destructive migration.
 -- UNEXECUTED: Local preparation only. Awaiting deployment authorization gate.
 -- ===========================================================================
@@ -8,7 +8,7 @@
 begin;
 
 -- ---------------------------------------------------------------------------
--- 1. Alignement des rôles canoniques serveur avec le frontend (10 rôles)
+-- 1. Alignement des rôles canoniques serveur avec le frontend (11 rôles)
 -- ---------------------------------------------------------------------------
 
 create or replace function public.nimr_canonical_role(input_role text)
@@ -46,12 +46,16 @@ as $nimr$
     when 'responsable_garantie' then 'responsable_garantie_support'
     when 'garantie_support' then 'responsable_garantie_support'
     when 'garantie' then 'responsable_garantie_support'
+    when 'responsable_qualite_parc_vn' then 'responsable_qualite_parc_vn'
+    when 'responsable_qualite_vn' then 'responsable_qualite_parc_vn'
+    when 'chef_parc_vn' then 'responsable_qualite_parc_vn'
+    when 'chef_de_parc_vn' then 'responsable_qualite_parc_vn'
     else null
   end
 $nimr$;
 
 -- ---------------------------------------------------------------------------
--- 2. Recréation de la contrainte canonique workshop_members (10 rôles)
+-- 2. Recréation de la contrainte canonique workshop_members (11 rôles)
 -- ---------------------------------------------------------------------------
 
 alter table public.workshop_members
@@ -69,7 +73,8 @@ alter table public.workshop_members
     'lecture_seule',
     'directeur_pieces',
     'responsable_magasin',
-    'responsable_garantie_support'
+    'responsable_garantie_support',
+    'responsable_qualite_parc_vn'
   )) not valid;
 
 do $nimr$
@@ -86,7 +91,8 @@ begin
       'lecture_seule',
       'directeur_pieces',
       'responsable_magasin',
-      'responsable_garantie_support'
+      'responsable_garantie_support',
+      'responsable_qualite_parc_vn'
     )
   ) then
     alter table public.workshop_members

@@ -109,10 +109,11 @@ test("17. Stale version fails with VERSION_CONFLICT code and structured payload"
   assert.match(sql, /'current_version',\s*v_row\.version/i);
 });
 
-test("18. Audit is immutable: trigger prevents update and delete", () => {
+test("18. Audit is immutable: trigger prevents update and delete, and direct execute revoked", () => {
   assert.match(sql, /create\s+or\s+replace\s+function\s+nimr_internal\.vn_part_prevent_audit_mutation/i);
   assert.match(sql, /before\s+update\s+or\s+delete\s+on\s+public\.vn_part_audit_events/i);
   assert.match(sql, /strictement immuables/i);
+  assert.match(sql, /revoke\s+(?:all|execute)\s+on\s+function\s+nimr_internal\.vn_part_prevent_audit_mutation\(\)\s+from\s+public,\s*anon,\s*authenticated/i);
 });
 
 test("19. Every mutation path appends audit", () => {
@@ -135,16 +136,26 @@ test("19. Every mutation path appends audit", () => {
   }
 });
 
-test("20. Direct client business DML blocked", () => {
-  assert.match(sql, /revoke\s+insert,\s*update,\s*delete\s+on\s+public\.vn_part_removals\s+from\s+public,\s*anon,\s*authenticated/i);
-  assert.match(sql, /revoke\s+insert,\s*update,\s*delete\s+on\s+public\.vn_part_approvals\s+from\s+public,\s*anon,\s*authenticated/i);
-  assert.match(sql, /revoke\s+insert,\s*update,\s*delete\s+on\s+public\.vn_part_audit_events\s+from\s+public,\s*anon,\s*authenticated/i);
+test("20. Table and view ACLs reset to explicit least-privilege contract", () => {
+  // 1. REVOKE ALL privileges on tables from public, anon, authenticated
+  assert.match(sql, /revoke\s+all\s+privileges\s+on\s+table\s+public\.vn_part_removals,\s*public\.vn_part_approvals,\s*public\.vn_part_audit_events\s+from\s+public,\s*anon,\s*authenticated/i);
+  // 2. authenticated receives only SELECT on the 3 tables
+  assert.match(sql, /grant\s+select\s+on\s+table\s+public\.vn_part_removals,\s*public\.vn_part_approvals,\s*public\.vn_part_audit_events\s+to\s+authenticated/i);
+  // 3. donor view has no anon/public access (REVOKE ALL)
+  assert.match(sql, /revoke\s+all\s+privileges\s+on\s+table\s+public\.vn_part_donor_state_v1\s+from\s+public,\s*anon,\s*authenticated/i);
+  // 4. donor view SELECT granted to authenticated
+  assert.match(sql, /grant\s+select\s+on\s+table\s+public\.vn_part_donor_state_v1\s+to\s+authenticated/i);
+  // 5. RPC grants remain unchanged
+  assert.match(sql, /revoke\s+all\s+on\s+function\s+nimr_internal\.nimr_apply_vn_part_action_v1[\s\S]*?from\s+public,\s*anon/i);
+  assert.match(sql, /grant\s+execute\s+on\s+function\s+nimr_internal\.nimr_apply_vn_part_action_v1[\s\S]*?to\s+authenticated,\s*service_role/i);
+  assert.match(sql, /revoke\s+all\s+on\s+function\s+public\.nimr_apply_vn_part_action_v1[\s\S]*?from\s+public,\s*anon/i);
+  assert.match(sql, /grant\s+execute\s+on\s+function\s+public\.nimr_apply_vn_part_action_v1[\s\S]*?to\s+authenticated,\s*service_role/i);
 });
 
-test("21. Workshop isolation enforced in RLS policies and RPC", () => {
-  assert.match(sql, /create\s+policy\s+vn_part_removals_read_policy[\s\S]*?public\.nimr_has_workshop_role\(workshop_id,/i);
-  assert.match(sql, /create\s+policy\s+vn_part_approvals_read_policy[\s\S]*?public\.nimr_has_workshop_role\(workshop_id,/i);
-  assert.match(sql, /create\s+policy\s+vn_part_audit_events_read_policy[\s\S]*?public\.nimr_has_workshop_role\(workshop_id,/i);
+test("21. Workshop isolation enforced in RLS policies targeting authenticated explicitly, and RPC", () => {
+  assert.match(sql, /create\s+policy\s+vn_part_removals_read_policy\s+on\s+public\.vn_part_removals\s+for\s+select\s+to\s+authenticated\s+using\s*\(\s*public\.nimr_has_workshop_role\(workshop_id,/i);
+  assert.match(sql, /create\s+policy\s+vn_part_approvals_read_policy\s+on\s+public\.vn_part_approvals\s+for\s+select\s+to\s+authenticated\s+using\s*\(\s*public\.nimr_has_workshop_role\(workshop_id,/i);
+  assert.match(sql, /create\s+policy\s+vn_part_audit_events_read_policy\s+on\s+public\.vn_part_audit_events\s+for\s+select\s+to\s+authenticated\s+using\s*\(\s*public\.nimr_has_workshop_role\(workshop_id,/i);
   assert.match(sql, /where\s+id\s*=\s*p_removal_id\s+and\s+workshop_id\s*=\s*p_workshop_id/i);
 });
 

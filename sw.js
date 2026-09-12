@@ -48,6 +48,8 @@ const ASSETS = [
   "./js/supabase-config.js?v=23.3.42",
   "./js/supabase-client.js?v=23.3.42",
   "./js/supabase-sync.js?v=23.3.42",
+  "./js/vn-part-client.js?v=23.3.42",
+  "./js/vn-part-ui.js?v=23.3.42",
 ];
 
 async function precache() {

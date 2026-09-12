@@ -5266,18 +5266,18 @@ function showInputPromptModal({
 // controle_qualite : inspection et contrôle qualité sans administration atelier
 // readonly : uniquement pilotage (lecture)
 const ROLE_TABS = {
-  admin:         ["reception-workspace", "dossiers", "today", "pilotage", "planning", "technician", "atelier"],
-  directeur_sav: ["reception-workspace", "dossiers", "today", "pilotage", "planning", "atelier"],
-  chef_atelier:  ["reception-workspace", "dossiers", "today", "pilotage", "planning", "technician", "atelier"],
+  admin:         ["reception-workspace", "dossiers", "today", "pilotage", "planning", "technician", "atelier", "vn-part"],
+  directeur_sav: ["reception-workspace", "dossiers", "today", "pilotage", "planning", "atelier", "vn-part"],
+  chef_atelier:  ["reception-workspace", "dossiers", "today", "pilotage", "planning", "technician", "atelier", "vn-part"],
   reception:     ["reception-workspace", "dossiers", "today"],
   technicien:    ["technician"],
   controle_qualite: ["today", "dossiers"],
   qualite:       ["today", "dossiers"],
-  readonly:      ["dossiers", "pilotage", "planning"],
-  directeur_pieces: ["dossiers", "pilotage"],
-  responsable_magasin: ["dossiers"],
-  responsable_garantie_support: ["dossiers"],
-  responsable_qualite_parc_vn: ["dossiers"],
+  readonly:      ["dossiers", "pilotage", "planning", "vn-part"],
+  directeur_pieces: ["vn-part", "dossiers", "pilotage"],
+  responsable_magasin: ["vn-part", "dossiers"],
+  responsable_garantie_support: ["vn-part", "dossiers"],
+  responsable_qualite_parc_vn: ["vn-part", "dossiers"],
 };
 
 // Tab par défaut à afficher lors de la connexion selon le rôle
@@ -5290,10 +5290,10 @@ const ROLE_DEFAULT_TABS = {
   controle_qualite: "today",
   qualite:       "today",
   readonly:      "dossiers",
-  directeur_pieces: "dossiers",
-  responsable_magasin: "dossiers",
-  responsable_garantie_support: "dossiers",
-  responsable_qualite_parc_vn: "dossiers",
+  directeur_pieces: "vn-part",
+  responsable_magasin: "vn-part",
+  responsable_garantie_support: "vn-part",
+  responsable_qualite_parc_vn: "vn-part",
 };
 
 function getDefaultTabForRole(role) {

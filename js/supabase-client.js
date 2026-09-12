@@ -25,6 +25,9 @@ const SEC001_SERVER_WORKSHOP_ROLES = new Set([
   "technicien",
   "controle_qualite",
   "lecture_seule",
+  "directeur_pieces",
+  "responsable_magasin",
+  "responsable_garantie_support",
 ]);
 
 function getSupabaseConfig() {

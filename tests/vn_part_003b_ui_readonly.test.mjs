@@ -111,23 +111,31 @@ test("2. Default Tabs: 4 new roles default to vn-part, 7 existing unchanged", ()
 });
 
 // ============================================================================
-// 3. Absolute Read-Only Contract
+// 3. Authoritative Mutation RPC Contract / Table Mutation Invariant
 // ============================================================================
-test("3. Read-Only Invariant: No mutation methods or mutating UI buttons", () => {
+test("3. Authoritative Mutation RPC Contract: Only nimr_apply_vn_part_action_v1, zero direct table mutations", () => {
   const combinedVnCode = clientJsContent + "\n" + uiJsContent;
   const strippedCode = combinedVnCode.replace(/\/\*[\s\S]*?\*\/|\/\/.*/g, "");
 
-  // Forbidden RPC or mutation calls in executable VN-PART code
+  // Authoritative RPC only: nimr_apply_vn_part_action_v1
   assert.strictEqual(
     strippedCode.includes('.rpc("nimr_apply_vn_part_action_v1"'),
-    false,
-    "VN-PART code must never call nimr_apply_vn_part_action_v1"
+    true,
+    "VN-PART code must use authoritative RPC nimr_apply_vn_part_action_v1"
   );
-  assert.strictEqual(
-    strippedCode.includes(".rpc("),
-    false,
-    "VN-PART code must contain NO .rpc() calls"
-  );
+
+  // No other / unexpected RPC calls
+  const rpcMatches = strippedCode.match(/\.rpc\s*\(\s*["']([^"']+)["']/g) || [];
+  for (const m of rpcMatches) {
+    const rpcName = m.replace(/.*["']([^"']+)["'].*/, "$1");
+    assert.strictEqual(
+      rpcName,
+      "nimr_apply_vn_part_action_v1",
+      `Unexpected RPC called in VN-PART code: ${rpcName}`
+    );
+  }
+
+  // Strictly NO direct table mutations on business tables
   assert.strictEqual(
     strippedCode.includes(".insert("),
     false,
@@ -148,25 +156,6 @@ test("3. Read-Only Invariant: No mutation methods or mutating UI buttons", () =>
     false,
     "VN-PART code must contain NO .upsert() calls"
   );
-
-  // Forbidden mutation buttons in UI templates
-  const forbiddenButtonLabels = [
-    "Nouveau prélèvement",
-    "Valider",
-    "Refuser",
-    "Annuler",
-    "Confirmer prélèvement",
-    "Pièce disponible",
-    "Restituer",
-  ];
-
-  for (const label of forbiddenButtonLabels) {
-    assert.strictEqual(
-      uiJsContent.includes(label),
-      false,
-      `VN-PART UI must NOT contain mutation button with label: ${label}`
-    );
-  }
 
   // Forbidden financial/ERP fields in executable code
   const forbiddenKeywords = ["price", "tarif", "fournisseur", "supplier", "bin_location", "stock_qty"];
@@ -195,7 +184,7 @@ test("3. Read-Only Invariant: No mutation methods or mutating UI buttons", () =>
 // ============================================================================
 // 4. Client SELECT Queries and Workshop Scoping
 // ============================================================================
-test("4. Client Queries: SELECT from vn_part_donor_state_v1 and vn_part_removals with workshop scoping", async () => {
+test("4. Client Queries: SELECT from vn_part_donor_state_v1, vn_part_removals, and vn_part_approvals with workshop scoping", async () => {
   const recordedCalls = [];
 
   const mockClient = {
@@ -230,13 +219,15 @@ test("4. Client Queries: SELECT from vn_part_donor_state_v1 and vn_part_removals
 
   assert.strictEqual(res.ok, true, "Client load must succeed");
   assert.strictEqual(res.workshopId, testWorkshopId);
-  assert.strictEqual(recordedCalls.length, 2, "Must execute exactly 2 queries");
+  assert.strictEqual(recordedCalls.length, 3, "Must execute exactly 3 queries");
 
   const donorQuery = recordedCalls.find((c) => c.table === "vn_part_donor_state_v1");
   const removalQuery = recordedCalls.find((c) => c.table === "vn_part_removals");
+  const approvalQuery = recordedCalls.find((c) => c.table === "vn_part_approvals");
 
   assert.ok(donorQuery, "Must query vn_part_donor_state_v1");
   assert.ok(removalQuery, "Must query vn_part_removals");
+  assert.ok(approvalQuery, "Must query vn_part_approvals");
 
   // Workshop scoping check
   const donorWorkshopFilter = donorQuery.filters.find((f) => f.col === "workshop_id");
@@ -246,6 +237,10 @@ test("4. Client Queries: SELECT from vn_part_donor_state_v1 and vn_part_removals
   const removalWorkshopFilter = removalQuery.filters.find((f) => f.col === "workshop_id");
   assert.ok(removalWorkshopFilter, "Removal query must filter by workshop_id");
   assert.strictEqual(removalWorkshopFilter.val, testWorkshopId);
+
+  const approvalWorkshopFilter = approvalQuery.filters.find((f) => f.col === "workshop_id");
+  assert.ok(approvalWorkshopFilter, "Approval query must filter by workshop_id");
+  assert.strictEqual(approvalWorkshopFilter.val, testWorkshopId);
 
   // Helper for mock Supabase client
   function createMockSupabaseClient() {
@@ -335,12 +330,14 @@ test("4. Client Queries: SELECT from vn_part_donor_state_v1 and vn_part_removals
     const resC = await vnPartClient.loadVnPartDashboard({ client: clientC });
     assert.strictEqual(resC.ok, true);
     assert.strictEqual(resC.workshopId, authWorkshopId);
-    assert.strictEqual(clientC.calls.length, 2, "Scenario C: exactly 2 queries executed");
+    assert.strictEqual(clientC.calls.length, 3, "Scenario C: exactly 3 queries executed");
     const donorQueryC = clientC.calls.find((c) => c.table === "vn_part_donor_state_v1");
     const removalQueryC = clientC.calls.find((c) => c.table === "vn_part_removals");
-    assert.ok(donorQueryC && removalQueryC);
+    const approvalQueryC = clientC.calls.find((c) => c.table === "vn_part_approvals");
+    assert.ok(donorQueryC && removalQueryC && approvalQueryC);
     assert.strictEqual(donorQueryC.filters[0].val, authWorkshopId);
     assert.strictEqual(removalQueryC.filters[0].val, authWorkshopId);
+    assert.strictEqual(approvalQueryC.filters[0].val, authWorkshopId);
   } finally {
     // Restore global state
     if (prevGetWorkshopId !== undefined) {
@@ -734,7 +731,7 @@ test("13. Startup identity: loaded VN-PART scripts issue zero SELECTs until memb
   for (const readyState of ["loading", "interactive"]) {
     const { context, getElement, listeners } = createVnPartBrowserHarness(readyState);
     const workshopId = "11111111-2222-3333-4444-555555555555";
-    const counts = { vn_part_donor_state_v1: 0, vn_part_removals: 0 };
+    const counts = { vn_part_donor_state_v1: 0, vn_part_removals: 0, vn_part_approvals: 0 };
     const queries = [];
     let releaseSession, releaseMembership, sessionStarted = false, membershipStarted = false, renders = 0;
     const sessionPending = new Promise((resolve) => { releaseSession = resolve; });
@@ -761,7 +758,7 @@ test("13. Startup identity: loaded VN-PART scripts issue zero SELECTs until memb
     for (const file of ["js/utils.js", "js/state.js", "js/vn-part-client.js", "js/vn-part-ui.js"]) {
       vm.runInContext(fs.readFileSync(path.join(WORKDIR, file), "utf8"), context, { filename: file });
     }
-    assert.deepStrictEqual(counts, { vn_part_donor_state_v1: 0, vn_part_removals: 0 }, "Script loading must not query");
+    assert.deepStrictEqual(counts, { vn_part_donor_state_v1: 0, vn_part_removals: 0, vn_part_approvals: 0 }, "Script loading must not query");
     const onVnPartDomReady = listeners.get("DOMContentLoaded");
     const appSource = fs.readFileSync(path.join(WORKDIR, "app.js"), "utf8");
     vm.runInContext(appSource.replace("initApp();", "/* initApp invoked below after transport stubs */"), context);
@@ -790,8 +787,8 @@ test("13. Startup identity: loaded VN-PART scripts issue zero SELECTs until memb
       assert.equal(getElement("app-shell").attributes.has("inert"), true, phase);
       assert.equal(context.__nimrAppReady, false, phase);
       assert.equal(renders, 0, phase);
-      assert.deepStrictEqual(counts, { vn_part_donor_state_v1: 0, vn_part_removals: 0 }, phase);
-      t.diagnostic(`${readyState} ${phase}: donor SELECT=0; removals SELECT=0; shell inert=true`);
+      assert.deepStrictEqual(counts, { vn_part_donor_state_v1: 0, vn_part_removals: 0, vn_part_approvals: 0 }, phase);
+      t.diagnostic(`${readyState} ${phase}: donor SELECT=0; removals SELECT=0; approvals SELECT=0; shell inert=true`);
     };
     for (let i = 0; i < 30 && !sessionStarted; i += 1) await Promise.resolve();
     assert.equal(sessionStarted, true);
@@ -807,15 +804,15 @@ test("13. Startup identity: loaded VN-PART scripts issue zero SELECTs until memb
     assert.equal(getElement("app-shell").attributes.has("inert"), false);
     assert.equal(renders, 1);
     assert.equal(context.canAccessTab("vn-part"), true);
-    assert.deepStrictEqual(counts, { vn_part_donor_state_v1: 0, vn_part_removals: 0 }, "Authorization alone must not query the dashboard");
+    assert.deepStrictEqual(counts, { vn_part_donor_state_v1: 0, vn_part_removals: 0, vn_part_approvals: 0 }, "Authorization alone must not query the dashboard");
     context.setActiveTab("vn-part");
     for (let i = 0; i < 30 && context.vnPartEphemeralState.loading; i += 1) await Promise.resolve();
     assert.equal(context.document.body.dataset.activeTab, "vn-part");
     assert.equal(context.vnPartEphemeralState.loading, false);
     assert.equal(context.vnPartEphemeralState.error, null);
-    assert.deepStrictEqual(counts, { vn_part_donor_state_v1: 1, vn_part_removals: 1 });
+    assert.deepStrictEqual(counts, { vn_part_donor_state_v1: 1, vn_part_removals: 1, vn_part_approvals: 1 });
     for (const query of queries) assert.deepStrictEqual(query.filters, [["workshop_id", workshopId]]);
-    t.diagnostic(`${readyState} authorized before access: donor SELECT=0; removals SELECT=0; after vn-part access: donor SELECT=1; removals SELECT=1`);
+    t.diagnostic(`${readyState} authorized before access: donor SELECT=0; removals SELECT=0; approvals SELECT=0; after vn-part access: donor SELECT=1; removals SELECT=1; approvals SELECT=1`);
   }
 });
 

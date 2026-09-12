@@ -177,6 +177,19 @@ test("3. Read-Only Invariant: No mutation methods or mutating UI buttons", () =>
       `VN-PART code must not reference ERP/financial keyword: ${kw}`
     );
   }
+
+  // Forbidden fallback strings in executable VN-PART client code
+  const strippedClient = clientJsContent.replace(/\/\*[\s\S]*?\*\/|\/\/.*/g, "");
+  assert.strictEqual(
+    strippedClient.includes("NIMR_DEFAULT_WORKSHOP_ID"),
+    false,
+    "VN-PART client must NOT contain NIMR_DEFAULT_WORKSHOP_ID fallback"
+  );
+  assert.strictEqual(
+    strippedClient.includes("00000000-0000-0000-0000-000000000001"),
+    false,
+    "VN-PART client must NOT contain hardcoded workshop UUID fallback"
+  );
 });
 
 // ============================================================================
@@ -233,6 +246,114 @@ test("4. Client Queries: SELECT from vn_part_donor_state_v1 and vn_part_removals
   const removalWorkshopFilter = removalQuery.filters.find((f) => f.col === "workshop_id");
   assert.ok(removalWorkshopFilter, "Removal query must filter by workshop_id");
   assert.strictEqual(removalWorkshopFilter.val, testWorkshopId);
+
+  // Helper for mock Supabase client
+  function createMockSupabaseClient() {
+    const calls = [];
+    const client = {
+      calls,
+      from(tableName) {
+        const callRecord = { table: tableName, filters: [], order: null };
+        calls.push(callRecord);
+        return {
+          select(fields) {
+            callRecord.select = fields;
+            return this;
+          },
+          eq(col, val) {
+            callRecord.filters.push({ col, val });
+            return this;
+          },
+          order(col, opts) {
+            callRecord.order = { col, opts };
+            return this;
+          },
+          then(resolve) {
+            resolve({ data: [], error: null });
+          },
+        };
+      },
+    };
+    return client;
+  }
+
+  // Preserve global state
+  const prevGetWorkshopId = globalThis.getSupabaseWorkshopId;
+  const prevWindow = globalThis.window;
+
+  try {
+    // Scenario A: no workshop resolver available + NIMR_DEFAULT_WORKSHOP_ID may exist on window
+    delete globalThis.getSupabaseWorkshopId;
+    globalThis.window = { NIMR_DEFAULT_WORKSHOP_ID: "00000000-0000-0000-0000-000000000001" };
+
+    assert.strictEqual(
+      vnPartClient.resolveCurrentWorkshopId(),
+      null,
+      "Scenario A: resolveCurrentWorkshopId() must be null with no resolver, ignoring NIMR_DEFAULT_WORKSHOP_ID"
+    );
+
+    const clientA = createMockSupabaseClient();
+    const resA = await vnPartClient.loadVnPartDashboard({ client: clientA });
+    assert.strictEqual(resA.ok, false);
+    assert.strictEqual(resA.code, "WORKSHOP_REQUIRED");
+    assert.strictEqual(clientA.calls.length, 0, "Scenario A: 0 SELECT queries executed");
+
+    // Scenario B: resolver returns empty / whitespace / null, or explicit empty workshopId
+    globalThis.getSupabaseWorkshopId = () => "   ";
+    globalThis.window = { getSupabaseWorkshopId: () => "   " };
+
+    assert.strictEqual(
+      vnPartClient.resolveCurrentWorkshopId(),
+      null,
+      "Scenario B: resolveCurrentWorkshopId() must return null on empty/whitespace resolver"
+    );
+
+    const clientB1 = createMockSupabaseClient();
+    const resB1 = await vnPartClient.loadVnPartDashboard({ client: clientB1 });
+    assert.strictEqual(resB1.ok, false);
+    assert.strictEqual(resB1.code, "WORKSHOP_REQUIRED");
+    assert.strictEqual(clientB1.calls.length, 0, "Scenario B1: 0 SELECT queries executed");
+
+    const clientB2 = createMockSupabaseClient();
+    const resB2 = await vnPartClient.loadVnPartDashboard({ client: clientB2, workshopId: "" });
+    assert.strictEqual(resB2.ok, false);
+    assert.strictEqual(resB2.code, "WORKSHOP_REQUIRED");
+    assert.strictEqual(clientB2.calls.length, 0, "Scenario B2: 0 SELECT queries executed");
+
+    // Scenario C: authoritative resolver returns workshop UUID
+    const authWorkshopId = "22222222-3333-4444-5555-666666666666";
+    globalThis.getSupabaseWorkshopId = () => authWorkshopId;
+    globalThis.window = { getSupabaseWorkshopId: () => authWorkshopId };
+
+    assert.strictEqual(
+      vnPartClient.resolveCurrentWorkshopId(),
+      authWorkshopId,
+      "Scenario C: resolveCurrentWorkshopId() must return trimmed authoritative UUID"
+    );
+
+    const clientC = createMockSupabaseClient();
+    const resC = await vnPartClient.loadVnPartDashboard({ client: clientC });
+    assert.strictEqual(resC.ok, true);
+    assert.strictEqual(resC.workshopId, authWorkshopId);
+    assert.strictEqual(clientC.calls.length, 2, "Scenario C: exactly 2 queries executed");
+    const donorQueryC = clientC.calls.find((c) => c.table === "vn_part_donor_state_v1");
+    const removalQueryC = clientC.calls.find((c) => c.table === "vn_part_removals");
+    assert.ok(donorQueryC && removalQueryC);
+    assert.strictEqual(donorQueryC.filters[0].val, authWorkshopId);
+    assert.strictEqual(removalQueryC.filters[0].val, authWorkshopId);
+  } finally {
+    // Restore global state
+    if (prevGetWorkshopId !== undefined) {
+      globalThis.getSupabaseWorkshopId = prevGetWorkshopId;
+    } else {
+      delete globalThis.getSupabaseWorkshopId;
+    }
+    if (prevWindow !== undefined) {
+      globalThis.window = prevWindow;
+    } else {
+      delete globalThis.window;
+    }
+  }
 });
 
 // ============================================================================

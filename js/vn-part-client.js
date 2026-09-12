@@ -40,17 +40,19 @@
 
   function resolveCurrentWorkshopId() {
     if (typeof getSupabaseWorkshopId === "function") {
-      return getSupabaseWorkshopId();
+      const workshopId = String(getSupabaseWorkshopId() || "").trim();
+      return workshopId || null;
     }
-    if (typeof window !== "undefined") {
-      if (typeof window.getSupabaseWorkshopId === "function") {
-        return window.getSupabaseWorkshopId();
-      }
-      if (window.NIMR_DEFAULT_WORKSHOP_ID) {
-        return String(window.NIMR_DEFAULT_WORKSHOP_ID).trim();
-      }
+
+    if (
+      typeof window !== "undefined"
+      && typeof window.getSupabaseWorkshopId === "function"
+    ) {
+      const workshopId = String(window.getSupabaseWorkshopId() || "").trim();
+      return workshopId || null;
     }
-    return "00000000-0000-0000-0000-000000000001";
+
+    return null;
   }
 
   /**
@@ -71,7 +73,10 @@
       };
     }
 
-    const workshopId = options.workshopId || resolveCurrentWorkshopId();
+    const workshopId =
+      options.workshopId !== undefined
+        ? String(options.workshopId || "").trim() || null
+        : resolveCurrentWorkshopId();
     if (!workshopId) {
       return {
         ok: false,

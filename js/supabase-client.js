@@ -632,6 +632,32 @@ async function resolveSupabaseWorkshopMembership(authUser) {
     if (!SEC001_SERVER_WORKSHOP_ROLES.has(rawRole)) {
       return { ok: false, message: "Rôle d'atelier inconnu ou non supporté.", code: "UNSUPPORTED_ROLE" };
     }
+    if (String(data.user_id || "") !== String(authUser.id)
+      || String(data.workshop_id || "") !== workshopId) {
+      return { ok: false, message: "L'appartenance ne correspond pas au compte et à l'atelier connectés.", code: "MEMBERSHIP_IDENTITY_MISMATCH" };
+    }
+
+    // The membership stores the server UUID; the local planning uses local_id.
+    let resourceLocalId = "";
+    if (rawRole === "technicien" && data.resource_id) {
+      const { data: resource, error: resourceError } = await client
+        .from("planning_resources")
+        .select("id, workshop_id, local_id, type, active, deleted_at")
+        .eq("workshop_id", workshopId)
+        .eq("id", data.resource_id)
+        .maybeSingle();
+      if (resourceError) {
+        return { ok: false, message: "Impossible de vérifier votre ressource atelier. Réessayez la connexion.", code: "RESOURCE_LOOKUP_FAILED" };
+      }
+      if (resource
+        && String(resource.id || "") === String(data.resource_id)
+        && String(resource.workshop_id || "") === workshopId
+        && resource.active === true
+        && !resource.deleted_at
+        && ["tolier", "peintre", "mecanicien", "electricien", "controle"].includes(String(resource.type || "").trim())) {
+        resourceLocalId = String(resource.local_id || "").trim();
+      }
+    }
     return {
       ok: true,
       membership: {
@@ -639,6 +665,7 @@ async function resolveSupabaseWorkshopMembership(authUser) {
         user_id: data.user_id,
         role: rawRole,
         resource_id: data.resource_id || null,
+        resource_local_id: resourceLocalId,
       },
     };
   } catch (err) {

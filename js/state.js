@@ -21,7 +21,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v23.3.44";
+const APP_VERSION = "v23.3.45";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const CURRENT_DATA_SCHEMA_VERSION = 2;
@@ -2145,6 +2145,16 @@ function sanitizeAccountAuthIdentity(authIdentity) {
   });
 }
 
+function getMembershipPlanningResourceId(membership) {
+  if (!membership?.resource_id) return "";
+  if (Object.prototype.hasOwnProperty.call(membership, "resource_local_id")) {
+    return String(membership.resource_local_id || "").trim();
+  }
+  // Historical local memberships already used planning IDs; an unresolved server UUID is never a fallback.
+  const legacyId = String(membership.resource_id || "").trim();
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(legacyId) ? "" : legacyId;
+}
+
 function sanitizeAccountServerMembership(membership) {
   if (!membership || typeof membership !== "object") return null;
   return Object.freeze({
@@ -2152,6 +2162,7 @@ function sanitizeAccountServerMembership(membership) {
     user_id: String(membership.user_id || "").trim(),
     role: String(membership.role || "").trim(),
     resource_id: membership.resource_id ? String(membership.resource_id).trim() : "",
+    resource_local_id: getMembershipPlanningResourceId(membership),
   });
 }
 
@@ -2220,8 +2231,9 @@ function getAccountAccessSnapshot(options = {}) {
   const serverRoleValid = Boolean(CANONICAL_USER_ROLES[serverRole]);
   const localRole = localUser ? getCanonicalUserRole(localUser) : "";
   const serverResourceId = String(serverMembership?.resource_id || "").trim();
+  const serverResourceLocalId = getMembershipPlanningResourceId(serverMembership);
   const localResourceId = String(localUser?.resourceId || "").trim();
-  const authoritativeResourceId = online && serverMembership ? serverResourceId : localResourceId;
+  const authoritativeResourceId = online && serverMembership ? serverResourceLocalId : localResourceId;
   const resource = authoritativeResourceId
     ? resources.find((candidate) => candidate?.id === authoritativeResourceId) || null
     : null;
@@ -2274,7 +2286,7 @@ function getAccountAccessSnapshot(options = {}) {
   }
 
   const resourceParity = serverMembership && localUser
-    ? (serverResourceId === localResourceId ? "pass" : "warning")
+    ? (serverResourceLocalId === localResourceId ? "pass" : "warning")
     : "unavailable";
   if (resourceParity === "warning") {
     addIssue("RESOURCE_PARITY_MISMATCH", "warning", "La ressource locale diffère de la ressource workshop_members.");
@@ -2301,7 +2313,7 @@ function getAccountAccessSnapshot(options = {}) {
   const accountHumanResources = resources.filter((candidate) => {
     if (!isAccountAccessHumanResource(candidate)) return false;
     return Boolean(
-      (serverResourceId && candidate.id === serverResourceId)
+      (serverResourceLocalId && candidate.id === serverResourceLocalId)
       || (localResourceId && candidate.id === localResourceId)
       || (localUser?.id && candidate.userId === localUser.id)
       || (authIdentity?.id && candidate.authUserId === authIdentity.id)
@@ -2311,8 +2323,8 @@ function getAccountAccessSnapshot(options = {}) {
     addIssue("ACCOUNT_MULTIPLE_HUMAN_RESOURCES", "error", "Le même compte semble lié à plusieurs ressources humaines locales.");
   }
 
-  if (serverResourceId) {
-    const duplicateLocalLinks = users.filter((user) => user?.active !== false && String(user?.resourceId || "").trim() === serverResourceId);
+  if (serverResourceLocalId) {
+    const duplicateLocalLinks = users.filter((user) => user?.active !== false && String(user?.resourceId || "").trim() === serverResourceLocalId);
     if (duplicateLocalLinks.length > 1) {
       addIssue("DUPLICATE_ACTIVE_RESOURCE_LINK", "error", "Plusieurs profils locaux actifs utilisent la même ressource technicien.");
     }
@@ -2342,6 +2354,7 @@ function getAccountAccessSnapshot(options = {}) {
     serverRole,
     localRole,
     serverResourceId,
+    serverResourceLocalId,
     localResourceId,
     resource: resource ? {
       id: resource.id,
@@ -2851,7 +2864,7 @@ function syncLocalUserFromSupabaseMembership(authUser, membership) {
   const normalizedEmail = String(authUser.email || "").trim().toLowerCase();
   const workshopId = membershipWorkshopId;
   const canonicalRole = typeof normalizeUserRole === "function" ? normalizeUserRole(membership.role) : membership.role;
-  const resourceId = membership.resource_id ? String(membership.resource_id).trim() : "";
+  const resourceId = getMembershipPlanningResourceId(membership);
 
   let user = state.users.find((candidate) => String(candidate.authUserId || "").trim() === authUserId);
   let migratedEmailIdentity = false;

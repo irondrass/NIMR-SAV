@@ -259,6 +259,12 @@ await checkAsync("E Server membership query required and fails closed on unliste
   let filters = {};
   context.getSupabaseClient = () => ({
     from: (table) => {
+      if (table === "planning_resources") {
+        return { select: () => ({ eq: () => ({ eq: () => ({ maybeSingle: async () => ({
+          data: { id: "res-tolier-1", workshop_id: "00000000-0000-0000-0000-000000000001", local_id: "tolier-1", type: "tolier", active: true, deleted_at: null },
+          error: null,
+        }) }) }) }) };
+      }
       queriedTable = table;
       return {
         select: (fields) => {
@@ -291,6 +297,7 @@ await checkAsync("E Server membership query required and fails closed on unliste
   assert.equal(validRes.ok, true);
   assert.equal(validRes.membership.role, "technicien");
   assert.equal(validRes.membership.resource_id, "res-tolier-1");
+  assert.equal(validRes.membership.resource_local_id, "tolier-1");
   assert.equal(queriedTable, "workshop_members");
   assert.equal(selectFields, "workshop_id, user_id, role, resource_id");
   assert.equal(filters.workshop_id, "00000000-0000-0000-0000-000000000001");

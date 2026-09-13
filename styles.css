@@ -9337,3 +9337,154 @@ select:focus {
   padding-top: 14px;
   border-top: 1px solid var(--line, #e2e8f0);
 }
+
+/* ==========================================================================
+   VN-PART 003C Hotfix — Dual Operational Sections & Request Cards
+   ========================================================================== */
+.vn-part-section {
+  margin-bottom: 32px;
+}
+
+.vn-part-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 16px 20px;
+  background: var(--paper, #fff);
+  border: 1px solid var(--line, #e2e8f0);
+  border-radius: var(--radius, 12px);
+  margin-bottom: 16px;
+}
+
+.vn-part-section-title-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.vn-part-section-title {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--brand, #0f3b57);
+  letter-spacing: -0.01em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.vn-part-section-count {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--muted, #64748b);
+}
+
+.vn-part-section-sub {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted, #64748b);
+}
+
+.vn-part-req-filters {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.vn-part-req-filter-btn {
+  padding: 6px 14px;
+  border-radius: var(--radius-sm, 6px);
+  border: 1px solid var(--line, #cbd5e1);
+  background: var(--paper, #fff);
+  color: var(--ink, #1e293b);
+  font-size: 0.82rem;
+  font-weight: 550;
+  cursor: pointer;
+  transition: var(--transition, all 0.2s ease);
+}
+
+.vn-part-req-filter-btn:hover {
+  border-color: var(--brand, #0f3b57);
+  background: #f8fafc;
+}
+
+.vn-part-req-filter-btn.active {
+  background: var(--brand, #0f3b57);
+  border-color: var(--brand, #0f3b57);
+  color: #fff;
+}
+
+.vn-part-requests-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.vn-part-request-card {
+  background: var(--paper, #fff);
+  border: 1px solid var(--line, #e2e8f0);
+  border-radius: var(--radius, 12px);
+  padding: 20px;
+  box-shadow: var(--shadow-sm, 0 1px 3px rgba(0,0,0,0.04));
+  transition: var(--transition, border-color 0.2s ease, box-shadow 0.2s ease);
+}
+
+.vn-part-request-card:hover {
+  border-color: var(--line-focus, #94a3b8);
+  box-shadow: var(--shadow-md, 0 4px 6px -1px rgba(0,0,0,0.07));
+}
+
+.vn-part-request-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line, #f1f5f9);
+}
+
+.vn-part-request-card-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.vn-part-request-part-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--ink, #0f172a);
+}
+
+.vn-part-request-card-badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.vn-part-request-details-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.vn-part-section-empty {
+  padding: 32px 20px;
+  text-align: center;
+  background: var(--paper, #fff);
+  border: 1px dashed var(--line, #cbd5e1);
+  border-radius: var(--radius, 12px);
+  color: var(--muted, #64748b);
+  font-size: 0.92rem;
+}
+
+.vn-part-section-empty p {
+  margin: 0;
+}

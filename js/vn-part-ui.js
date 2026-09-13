@@ -43,6 +43,7 @@
     error: null,
     conflictMessage: null,
     activeFilter: "all-open", // 'all-open' | 'ready' | 'overdue' | 'waiting' | 'history'
+    activeRequestFilter: "all", // 'all' | 'pending' | 'authorized' | 'history'
     searchQuery: "",
     lastLoadedAt: null,
     mutationInProgress: false,
@@ -193,6 +194,57 @@
             }
           }
         }
+        if (!matchesSearch) return false;
+      }
+
+      return true;
+    });
+  }
+
+  /**
+   * Filter and search pre-removal workflow requests (Section A).
+   * Requests remain in Section A until physical removal (CONFIRM_REMOVAL).
+   */
+  function filterVnPartRequests(removals = [], filter = "all", search = "") {
+    const term = String(search || "").trim().toLowerCase();
+
+    return (removals || []).filter((rem) => {
+      // 1. Duplication rule: once physically removed, it belongs exclusively to Section B
+      if (rem.removed_at) return false;
+
+      // 2. Filter by status category
+      if (filter === "pending" || filter === "to-validate") {
+        if (rem.status !== "EN_ATTENTE_VALIDATIONS") return false;
+      } else if (filter === "authorized") {
+        if (rem.status !== "AUTORISE_A_PRELEVER") return false;
+      } else if (filter === "history") {
+        if (!["REFUSE", "ANNULE", "CLOTURE"].includes(rem.status)) return false;
+      } else if (filter === "all" || filter === "all-open" || !filter) {
+        // Active pre-removal workflow requests: terminal statuses are strictly excluded
+        if (["REFUSE", "ANNULE", "CLOTURE"].includes(rem.status)) return false;
+      }
+
+      // 3. Search query across removal fields
+      if (term) {
+        const benModel = String(rem.beneficiary_model || "").toLowerCase();
+        const benVin = String(rem.beneficiary_vin || "").toLowerCase();
+        const benOr = String(rem.beneficiary_or || "").toLowerCase();
+        const partRef = String(rem.part_reference || "").toLowerCase();
+        const partDes = String(rem.part_designation || "").toLowerCase();
+        const donorModel = String(rem.donor_model || "").toLowerCase();
+        const donorVin = String(rem.donor_vin || "").toLowerCase();
+        const reason = String(rem.reason || "").toLowerCase();
+
+        const matchesSearch =
+          benModel.includes(term) ||
+          benVin.includes(term) ||
+          benOr.includes(term) ||
+          partRef.includes(term) ||
+          partDes.includes(term) ||
+          donorModel.includes(term) ||
+          donorVin.includes(term) ||
+          reason.includes(term);
+
         if (!matchesSearch) return false;
       }
 
@@ -498,6 +550,118 @@
   }
 
   /**
+   * Render an individual pre-removal request card for Section A.
+   */
+  function renderRequestCard(rem, approvalLookup, identity) {
+    let statusBadge = "";
+    if (rem.status === "EN_ATTENTE_VALIDATIONS") {
+      statusBadge = `<span class="vn-part-badge badge-waiting">🟠 EN ATTENTE DE VALIDATION</span>`;
+    } else if (rem.status === "AUTORISE_A_PRELEVER") {
+      statusBadge = `<span class="vn-part-badge badge-ready">🔵 AUTORISÉ À PRÉLEVER</span>`;
+    } else if (rem.status === "REFUSE") {
+      statusBadge = `<span class="vn-part-badge badge-overdue">🔴 REFUSÉ</span>`;
+    } else if (rem.status === "ANNULE") {
+      statusBadge = `<span class="vn-part-badge badge-neutral">⚪ ANNULÉ</span>`;
+    } else {
+      statusBadge = `<span class="vn-part-badge badge-neutral">${escapeHtml(rem.status)}</span>`;
+    }
+
+    let urgencyBadge = "";
+    if (rem.urgency && rem.urgency !== "NORMAL") {
+      urgencyBadge = `<span class="vn-part-badge badge-overdue" title="Urgence">${escapeHtml(rem.urgency)}</span>`;
+    }
+
+    const approvalStripHtml = renderApprovalStrip(rem, approvalLookup);
+    const availableActions = getAvailableVnPartActions(rem, vnPartEphemeralState.approvals, identity);
+    const actionsHtml = renderRemovalActionButtons(rem, availableActions, vnPartEphemeralState.mutationInProgress);
+
+    return `
+      <article class="vn-part-request-card" data-id="${escapeHtml(rem.id)}" data-version="${rem.version}">
+        <header class="vn-part-request-card-header">
+          <div class="vn-part-request-card-title">
+            <h3 class="vn-part-request-part-title">${escapeHtml(rem.part_designation)}</h3>
+            ${rem.part_reference ? `<code class="vn-part-part-ref">${escapeHtml(rem.part_reference)}</code>` : ""}
+            <span class="vn-part-qty">Qté: ${Number(rem.quantity) || 1}</span>
+          </div>
+          <div class="vn-part-request-card-badges">
+            ${urgencyBadge}
+            ${statusBadge}
+          </div>
+        </header>
+
+        <div class="vn-part-request-details-grid">
+          <div class="vn-part-detail-cell">
+            <span class="cell-label">Véhicule bénéficiaire:</span>
+            <span class="cell-val">${escapeHtml(rem.beneficiary_model || "—")}${rem.beneficiary_vin ? ` (${escapeHtml(rem.beneficiary_vin)})` : ""}</span>
+          </div>
+          ${rem.beneficiary_or ? `
+            <div class="vn-part-detail-cell">
+              <span class="cell-label">N° Ordre de Réparation:</span>
+              <span class="cell-val">${escapeHtml(rem.beneficiary_or)}</span>
+            </div>
+          ` : ""}
+          ${rem.reason ? `
+            <div class="vn-part-detail-cell">
+              <span class="cell-label">Motif / Justification:</span>
+              <span class="cell-val">${escapeHtml(rem.reason)}</span>
+            </div>
+          ` : ""}
+          ${rem.comments ? `
+            <div class="vn-part-detail-cell">
+              <span class="cell-label">Remarques / Précisions:</span>
+              <span class="cell-val">${escapeHtml(rem.comments)}</span>
+            </div>
+          ` : ""}
+          ${rem.created_at ? `
+            <div class="vn-part-detail-cell">
+              <span class="cell-label">Date de création:</span>
+              <span class="cell-val">${escapeHtml(formatDateTimeFr(rem.created_at))}</span>
+            </div>
+          ` : ""}
+          ${rem.donor_vin ? `
+            <div class="vn-part-detail-cell">
+              <span class="cell-label">Véhicule donneur:</span>
+              <span class="cell-val">${escapeHtml(rem.donor_model || "")} (${escapeHtml(rem.donor_vin)})${rem.donor_location ? ` — ${escapeHtml(rem.donor_location)}` : ""}</span>
+            </div>
+          ` : `
+            <div class="vn-part-detail-cell">
+              <span class="cell-label">Véhicule donneur:</span>
+              <span class="cell-val text-muted">Non assigné (à désigner par Chef de Parc VN)</span>
+            </div>
+          `}
+          ${rem.expected_replacement_date ? `
+            <div class="vn-part-detail-cell">
+              <span class="cell-label">Date estimée (ETA):</span>
+              <span class="cell-val">${escapeHtml(formatDateFr(rem.expected_replacement_date))}</span>
+            </div>
+          ` : ""}
+          ${rem.removed_at ? `
+            <div class="vn-part-detail-cell">
+              <span class="cell-label">Date prélèvement:</span>
+              <span class="cell-val">${escapeHtml(formatDateTimeFr(rem.removed_at))}</span>
+            </div>
+          ` : ""}
+          ${rem.replacement_available_at ? `
+            <div class="vn-part-detail-cell">
+              <span class="cell-label">Pièce reçue le:</span>
+              <span class="cell-val">${escapeHtml(formatDateTimeFr(rem.replacement_available_at))}</span>
+            </div>
+          ` : ""}
+          ${rem.restored_at ? `
+            <div class="vn-part-detail-cell">
+              <span class="cell-label">Restitué au VN le:</span>
+              <span class="cell-val">${escapeHtml(formatDateTimeFr(rem.restored_at))}</span>
+            </div>
+          ` : ""}
+        </div>
+
+        ${approvalStripHtml}
+        ${actionsHtml}
+      </article>
+    `;
+  }
+
+  /**
    * Ensure that navigation button, view section, and mutation modals are mounted in DOM.
    */
   function ensureVnPartDomMounted() {
@@ -780,6 +944,12 @@
       return;
     }
 
+    const workflowRequests = filterVnPartRequests(
+      vnPartEphemeralState.removals,
+      vnPartEphemeralState.activeRequestFilter,
+      vnPartEphemeralState.searchQuery
+    );
+
     const filteredDonors = filterVnPartDonors(
       vnPartEphemeralState.donors,
       vnPartEphemeralState.removals,
@@ -787,13 +957,14 @@
       vnPartEphemeralState.searchQuery
     );
 
-    if (!filteredDonors.length) {
+    if (!workflowRequests.length && !filteredDonors.length) {
       const isSearchOrFilter =
         vnPartEphemeralState.searchQuery ||
-        vnPartEphemeralState.activeFilter !== "all-open";
+        vnPartEphemeralState.activeFilter !== "all-open" ||
+        vnPartEphemeralState.activeRequestFilter !== "all";
       const emptyMsg = isSearchOrFilter
         ? "Aucun prélèvement VN ne correspond aux critères sélectionnés."
-        : "Aucun prélèvement VN à restituer pour cet atelier.";
+        : "Aucun prélèvement VN en cours ou à restituer pour cet atelier.";
 
       container.innerHTML = `
         <div class="vn-part-empty" role="status">
@@ -805,186 +976,261 @@
       return;
     }
 
-    const groups = groupVnPartByModelAndVin(
-      filteredDonors,
-      vnPartEphemeralState.removals
-    );
-
     const approvalLookup = buildApprovalLookup(vnPartEphemeralState.approvals);
 
     let html = "";
 
-    for (const group of groups) {
-      html += `
-        <section class="vn-part-model-group" aria-labelledby="vn-model-${escapeHtml(group.model)}">
-          <div class="vn-part-model-header">
-            <h2 id="vn-model-${escapeHtml(group.model)}">${escapeHtml(group.model)}</h2>
-            <span class="vn-part-model-count">${group.items.length} véhicule(s)</span>
+    // ------------------------------------------------------------------------
+    // SECTION A — DEMANDES DE PRÉLÈVEMENT EN COURS
+    // ------------------------------------------------------------------------
+    const preRemovalRequests = vnPartEphemeralState.removals.filter((r) => !r.removed_at);
+    const countAll = preRemovalRequests.filter((r) =>
+      ["EN_ATTENTE_VALIDATIONS", "AUTORISE_A_PRELEVER"].includes(r.status)
+    ).length;
+    const countPending = preRemovalRequests.filter(
+      (r) => r.status === "EN_ATTENTE_VALIDATIONS"
+    ).length;
+    const countAuth = preRemovalRequests.filter(
+      (r) => r.status === "AUTORISE_A_PRELEVER"
+    ).length;
+    const activeReqFilter = vnPartEphemeralState.activeRequestFilter || "all";
+
+    html += `
+      <section class="vn-part-section vn-part-requests-section" aria-labelledby="vn-part-requests-heading">
+        <div class="vn-part-section-header">
+          <div class="vn-part-section-title-wrap">
+            <h2 id="vn-part-requests-heading" class="vn-part-section-title">
+              DEMANDES DE PRÉLÈVEMENT EN COURS
+              <span class="vn-part-section-count" id="vn-part-requests-count">(${workflowRequests.length})</span>
+            </h2>
+            <p class="vn-part-section-sub">Demandes en attente de validation ou autorisées à prélever</p>
           </div>
-          <div class="vn-part-donor-list">
+          <div class="vn-part-req-filters" role="group" aria-label="Filtrer les demandes">
+            <button type="button" class="vn-part-req-filter-btn ${activeReqFilter === "all" ? "active" : ""}" data-req-filter="all" aria-pressed="${activeReqFilter === "all"}">Toutes (${countAll})</button>
+            <button type="button" class="vn-part-req-filter-btn ${activeReqFilter === "pending" ? "active" : ""}" data-req-filter="pending" aria-pressed="${activeReqFilter === "pending"}">À valider (${countPending})</button>
+            <button type="button" class="vn-part-req-filter-btn ${activeReqFilter === "authorized" ? "active" : ""}" data-req-filter="authorized" aria-pressed="${activeReqFilter === "authorized"}">Autorisées (${countAuth})</button>
+          </div>
+        </div>
+    `;
+
+    if (!workflowRequests.length) {
+      html += `
+        <div class="vn-part-section-empty" id="vn-part-requests-empty">
+          <p>Aucune demande de prélèvement en cours pour ces critères.</p>
+        </div>
       `;
+    } else {
+      html += `<div class="vn-part-requests-list">`;
+      for (const req of workflowRequests) {
+        html += renderRequestCard(req, approvalLookup, identity);
+      }
+      html += `</div>`;
+    }
 
-      for (const item of group.items) {
-        const donor = item.donor;
-        const donorRemovals = item.removals;
-        const isOverdue = Number(donor.overdue_count || 0) > 0;
-        const isReady = Boolean(donor.can_be_restored_today);
-        const isFullyRestored = Boolean(donor.is_fully_restored);
+    html += `</section>`;
 
+    // ------------------------------------------------------------------------
+    // SECTION B — VN RESTANT À RESTITUER
+    // ------------------------------------------------------------------------
+    html += `
+      <section class="vn-part-section vn-part-donors-section" aria-labelledby="vn-part-donors-heading">
+        <div class="vn-part-section-header">
+          <div class="vn-part-section-title-wrap">
+            <h2 id="vn-part-donors-heading" class="vn-part-section-title">
+              VN RESTANT À RESTITUER
+              <span class="vn-part-section-count" id="vn-part-donors-count">(${filteredDonors.length} véhicule(s))</span>
+            </h2>
+            <p class="vn-part-section-sub">Véhicules neufs donneurs ayant des pièces physiquement prélevées à restituer</p>
+          </div>
+        </div>
+    `;
+
+    if (!filteredDonors.length) {
+      html += `
+        <div class="vn-part-section-empty" id="vn-part-donors-empty">
+          <p>Aucun véhicule donneur incomplet à restituer pour cet atelier.</p>
+        </div>
+      `;
+    } else {
+      const groups = groupVnPartByModelAndVin(
+        filteredDonors,
+        vnPartEphemeralState.removals
+      );
+
+      for (const group of groups) {
         html += `
-          <article class="vn-part-donor-card ${isOverdue ? "is-overdue" : ""} ${isReady ? "is-ready" : ""}" data-vin="${escapeHtml(donor.donor_vin)}">
-            <header class="vn-part-donor-header">
-              <div class="vn-part-donor-identity">
-                <div class="vn-part-donor-vin-line">
-                  <span class="vn-part-donor-vin">${escapeHtml(donor.donor_vin)}</span>
-                  ${donor.donor_location ? `<span class="vn-part-location-badge"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg> ${escapeHtml(donor.donor_location)}</span>` : ""}
-                </div>
-                <div class="vn-part-donor-sub">${escapeHtml(donor.donor_model)}</div>
-              </div>
-              <div class="vn-part-donor-badges">
-                ${isOverdue ? `<span class="vn-part-badge badge-overdue">🔴 EN RETARD (${escapeHtml(donor.overdue_count)})</span>` : ""}
-                ${isReady ? `<span class="vn-part-badge badge-ready">🟢 PRÊT À RESTITUER</span>` : ""}
-                ${isFullyRestored ? `<span class="vn-part-badge badge-restored">✅ ÉTAT D’ORIGINE VN-PART RESTITUÉ</span>` : ""}
-              </div>
-            </header>
-
-            <div class="vn-part-donor-metrics">
-              <div class="vn-part-metric-chip">
-                <span>Prélèvements actifs:</span>
-                <strong>${Number(donor.active_removals_remaining || 0)}</strong>
-              </div>
-              <div class="vn-part-metric-chip">
-                <span>En attente pièce:</span>
-                <strong>${Number(donor.waiting_replacement_count || 0)}</strong>
-              </div>
-              <div class="vn-part-metric-chip">
-                <span>Prêts à restituer:</span>
-                <strong>${Number(donor.available_to_restore_count || 0)}</strong>
-              </div>
-              ${donor.oldest_opened_at ? `
-                <div class="vn-part-metric-chip">
-                  <span>Plus ancien retrait:</span>
-                  <strong>${escapeHtml(formatDateTimeFr(donor.oldest_opened_at))}</strong>
-                </div>
-              ` : ""}
-              ${donor.expected_replacement_date ? `
-                <div class="vn-part-metric-chip ${isOverdue ? "text-danger" : ""}">
-                  <span>Date estimée (ETA):</span>
-                  <strong>${escapeHtml(formatDateFr(donor.expected_replacement_date))}</strong>
-                </div>
-              ` : ""}
+          <section class="vn-part-model-group" aria-labelledby="vn-model-${escapeHtml(group.model)}">
+            <div class="vn-part-model-header">
+              <h2 id="vn-model-${escapeHtml(group.model)}">${escapeHtml(group.model)}</h2>
+              <span class="vn-part-model-count">${group.items.length} véhicule(s)</span>
             </div>
-
-            ${isFullyRestored ? `
-              <div class="vn-part-restored-banner" role="status">
-                <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-                <span>TOUS LES PRÉLÈVEMENTS VN-PART ONT ÉTÉ RESTITUÉS — AUCUN PRÉLÈVEMENT OUVERT</span>
-              </div>
-            ` : ""}
-
-            <div class="vn-part-removals-wrap">
-              <details class="vn-part-removals-disclosure" ${Number(donor.active_removals_remaining || 0) > 0 ? "open" : ""}>
-                <summary class="vn-part-removals-summary">
-                  Détail des pièces (${donorRemovals.length})
-                </summary>
-                <div class="vn-part-removals-list">
+            <div class="vn-part-donor-list">
         `;
 
-        if (!donorRemovals.length) {
-          html += `<p class="vn-part-no-removals">Aucun détail de prélèvement disponible.</p>`;
-        } else {
-          for (const rem of donorRemovals) {
-            let badgeHtml = "";
-            if (rem.restored_at) {
-              badgeHtml = `<span class="vn-part-badge badge-restored">✅ RESTITUÉ / CLÔTURÉ</span>`;
-            } else if (rem.replacement_available_at) {
-              badgeHtml = `<span class="vn-part-badge badge-available">🟢 PIÈCE DISPONIBLE</span>`;
-            } else if (rem.removed_at) {
-              badgeHtml = `<span class="vn-part-badge badge-waiting">🟠 EN ATTENTE PIÈCE</span>`;
-            } else {
-              badgeHtml = `<span class="vn-part-badge badge-neutral">${escapeHtml(rem.status)}</span>`;
-            }
+        for (const item of group.items) {
+          const donor = item.donor;
+          const donorRemovals = item.removals.filter((r) => Boolean(r.removed_at));
+          const isOverdue = Number(donor.overdue_count || 0) > 0;
+          const isReady = Boolean(donor.can_be_restored_today);
+          const isFullyRestored = Boolean(donor.is_fully_restored);
 
-            const approvalStripHtml = renderApprovalStrip(rem, approvalLookup);
-            const availableActions = getAvailableVnPartActions(rem, vnPartEphemeralState.approvals, identity);
-            const actionsHtml = renderRemovalActionButtons(rem, availableActions, vnPartEphemeralState.mutationInProgress);
-
-            html += `
-              <div class="vn-part-removal-item" data-id="${escapeHtml(rem.id)}" data-version="${rem.version}">
-                <div class="vn-part-removal-top">
-                  <div class="vn-part-removal-title">
-                    <strong>${escapeHtml(rem.part_designation)}</strong>
-                    ${rem.part_reference ? `<code class="vn-part-part-ref">${escapeHtml(rem.part_reference)}</code>` : ""}
-                    <span class="vn-part-qty">Qté: ${Number(rem.quantity) || 1}</span>
+          html += `
+            <article class="vn-part-donor-card ${isOverdue ? "is-overdue" : ""} ${isReady ? "is-ready" : ""}" data-vin="${escapeHtml(donor.donor_vin)}">
+              <header class="vn-part-donor-header">
+                <div class="vn-part-donor-identity">
+                  <div class="vn-part-donor-vin-line">
+                    <span class="vn-part-donor-vin">${escapeHtml(donor.donor_vin)}</span>
+                    ${donor.donor_location ? `<span class="vn-part-location-badge"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg> ${escapeHtml(donor.donor_location)}</span>` : ""}
                   </div>
-                  <div class="vn-part-removal-status">
-                    ${badgeHtml}
-                  </div>
+                  <div class="vn-part-donor-sub">${escapeHtml(donor.donor_model)}</div>
                 </div>
-
-                <div class="vn-part-removal-details-grid">
-                  <div class="vn-part-detail-cell">
-                    <span class="cell-label">Véhicule bénéficiaire:</span>
-                    <span class="cell-val">${escapeHtml(rem.beneficiary_model || "—")}${rem.beneficiary_vin ? ` (${escapeHtml(rem.beneficiary_vin)})` : ""}</span>
-                  </div>
-                  ${rem.beneficiary_or ? `
-                    <div class="vn-part-detail-cell">
-                      <span class="cell-label">N° Ordre de Réparation:</span>
-                      <span class="cell-val">${escapeHtml(rem.beneficiary_or)}</span>
-                    </div>
-                  ` : ""}
-                  ${rem.removed_at ? `
-                    <div class="vn-part-detail-cell">
-                      <span class="cell-label">Date prélèvement:</span>
-                      <span class="cell-val">${escapeHtml(formatDateTimeFr(rem.removed_at))}</span>
-                    </div>
-                  ` : ""}
-                  ${rem.expected_replacement_date ? `
-                    <div class="vn-part-detail-cell">
-                      <span class="cell-label">Date estimée (ETA):</span>
-                      <span class="cell-val">${escapeHtml(formatDateFr(rem.expected_replacement_date))}</span>
-                    </div>
-                  ` : ""}
-                  ${rem.replacement_available_at ? `
-                    <div class="vn-part-detail-cell">
-                      <span class="cell-label">Pièce reçue le:</span>
-                      <span class="cell-val">${escapeHtml(formatDateTimeFr(rem.replacement_available_at))}</span>
-                    </div>
-                  ` : ""}
-                  ${rem.store_ack_at ? `
-                    <div class="vn-part-detail-cell">
-                      <span class="cell-label">Prise en compte magasin:</span>
-                      <span class="cell-val">${escapeHtml(formatDateTimeFr(rem.store_ack_at))}</span>
-                    </div>
-                  ` : ""}
-                  ${rem.restored_at ? `
-                    <div class="vn-part-detail-cell">
-                      <span class="cell-label">Restitué au VN le:</span>
-                      <span class="cell-val">${escapeHtml(formatDateTimeFr(rem.restored_at))}</span>
-                    </div>
-                  ` : ""}
+                <div class="vn-part-donor-badges">
+                  ${isOverdue ? `<span class="vn-part-badge badge-overdue">🔴 EN RETARD (${escapeHtml(donor.overdue_count)})</span>` : ""}
+                  ${isReady ? `<span class="vn-part-badge badge-ready">🟢 PRÊT À RESTITUER</span>` : ""}
+                  ${isFullyRestored ? `<span class="vn-part-badge badge-restored">✅ ÉTAT D’ORIGINE VN-PART RESTITUÉ</span>` : ""}
                 </div>
+              </header>
 
-                ${approvalStripHtml}
-                ${actionsHtml}
+              <div class="vn-part-donor-metrics">
+                <div class="vn-part-metric-chip">
+                  <span>Prélèvements actifs:</span>
+                  <strong>${Number(donor.active_removals_remaining || 0)}</strong>
+                </div>
+                <div class="vn-part-metric-chip">
+                  <span>En attente pièce:</span>
+                  <strong>${Number(donor.waiting_replacement_count || 0)}</strong>
+                </div>
+                <div class="vn-part-metric-chip">
+                  <span>Prêts à restituer:</span>
+                  <strong>${Number(donor.available_to_restore_count || 0)}</strong>
+                </div>
+                ${donor.oldest_opened_at ? `
+                  <div class="vn-part-metric-chip">
+                    <span>Plus ancien retrait:</span>
+                    <strong>${escapeHtml(formatDateTimeFr(donor.oldest_opened_at))}</strong>
+                  </div>
+                ` : ""}
+                ${donor.expected_replacement_date ? `
+                  <div class="vn-part-metric-chip ${isOverdue ? "text-danger" : ""}">
+                    <span>Date estimée (ETA):</span>
+                    <strong>${escapeHtml(formatDateFr(donor.expected_replacement_date))}</strong>
+                  </div>
+                ` : ""}
               </div>
-            `;
+
+              ${isFullyRestored ? `
+                <div class="vn-part-restored-banner" role="status">
+                  <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                  <span>TOUS LES PRÉLÈVEMENTS VN-PART ONT ÉTÉ RESTITUÉS — AUCUN PRÉLÈVEMENT OUVERT</span>
+                </div>
+              ` : ""}
+
+              <div class="vn-part-removals-wrap">
+                <details class="vn-part-removals-disclosure" ${Number(donor.active_removals_remaining || 0) > 0 ? "open" : ""}>
+                  <summary class="vn-part-removals-summary">
+                    Détail des pièces (${donorRemovals.length})
+                  </summary>
+                  <div class="vn-part-removals-list">
+          `;
+
+          if (!donorRemovals.length) {
+            html += `<p class="vn-part-no-removals">Aucun détail de prélèvement disponible.</p>`;
+          } else {
+            for (const rem of donorRemovals) {
+              let badgeHtml = "";
+              if (rem.restored_at) {
+                badgeHtml = `<span class="vn-part-badge badge-restored">✅ RESTITUÉ / CLÔTURÉ</span>`;
+              } else if (rem.replacement_available_at) {
+                badgeHtml = `<span class="vn-part-badge badge-available">🟢 PIÈCE DISPONIBLE</span>`;
+              } else if (rem.removed_at) {
+                badgeHtml = `<span class="vn-part-badge badge-waiting">🟠 EN ATTENTE PIÈCE</span>`;
+              } else {
+                badgeHtml = `<span class="vn-part-badge badge-neutral">${escapeHtml(rem.status)}</span>`;
+              }
+
+              const approvalStripHtml = renderApprovalStrip(rem, approvalLookup);
+              const availableActions = getAvailableVnPartActions(rem, vnPartEphemeralState.approvals, identity);
+              const actionsHtml = renderRemovalActionButtons(rem, availableActions, vnPartEphemeralState.mutationInProgress);
+
+              html += `
+                <div class="vn-part-removal-item" data-id="${escapeHtml(rem.id)}" data-version="${rem.version}">
+                  <div class="vn-part-removal-top">
+                    <div class="vn-part-removal-title">
+                      <strong>${escapeHtml(rem.part_designation)}</strong>
+                      ${rem.part_reference ? `<code class="vn-part-part-ref">${escapeHtml(rem.part_reference)}</code>` : ""}
+                      <span class="vn-part-qty">Qté: ${Number(rem.quantity) || 1}</span>
+                    </div>
+                    <div class="vn-part-removal-status">
+                      ${badgeHtml}
+                    </div>
+                  </div>
+
+                  <div class="vn-part-removal-details-grid">
+                    <div class="vn-part-detail-cell">
+                      <span class="cell-label">Véhicule bénéficiaire:</span>
+                      <span class="cell-val">${escapeHtml(rem.beneficiary_model || "—")}${rem.beneficiary_vin ? ` (${escapeHtml(rem.beneficiary_vin)})` : ""}</span>
+                    </div>
+                    ${rem.beneficiary_or ? `
+                      <div class="vn-part-detail-cell">
+                        <span class="cell-label">N° Ordre de Réparation:</span>
+                        <span class="cell-val">${escapeHtml(rem.beneficiary_or)}</span>
+                      </div>
+                    ` : ""}
+                    ${rem.removed_at ? `
+                      <div class="vn-part-detail-cell">
+                        <span class="cell-label">Date prélèvement:</span>
+                        <span class="cell-val">${escapeHtml(formatDateTimeFr(rem.removed_at))}</span>
+                      </div>
+                    ` : ""}
+                    ${rem.expected_replacement_date ? `
+                      <div class="vn-part-detail-cell">
+                        <span class="cell-label">Date estimée (ETA):</span>
+                        <span class="cell-val">${escapeHtml(formatDateFr(rem.expected_replacement_date))}</span>
+                      </div>
+                    ` : ""}
+                    ${rem.replacement_available_at ? `
+                      <div class="vn-part-detail-cell">
+                        <span class="cell-label">Pièce reçue le:</span>
+                        <span class="cell-val">${escapeHtml(formatDateTimeFr(rem.replacement_available_at))}</span>
+                      </div>
+                    ` : ""}
+                    ${rem.store_ack_at ? `
+                      <div class="vn-part-detail-cell">
+                        <span class="cell-label">Prise en compte magasin:</span>
+                        <span class="cell-val">${escapeHtml(formatDateTimeFr(rem.store_ack_at))}</span>
+                      </div>
+                    ` : ""}
+                    ${rem.restored_at ? `
+                      <div class="vn-part-detail-cell">
+                        <span class="cell-label">Restitué au VN le:</span>
+                        <span class="cell-val">${escapeHtml(formatDateTimeFr(rem.restored_at))}</span>
+                      </div>
+                    ` : ""}
+                  </div>
+
+                  ${approvalStripHtml}
+                  ${actionsHtml}
+                </div>
+              `;
+            }
           }
+
+          html += `
+                  </div>
+                </details>
+              </div>
+            </article>
+          `;
         }
 
         html += `
-                </div>
-              </details>
             </div>
-          </article>
+          </section>
         `;
       }
-
-      html += `
-          </div>
-        </section>
-      `;
     }
+
+    html += `</section>`;
 
     container.innerHTML = html;
   }
@@ -1168,7 +1414,40 @@
     }
 
     closeModals();
+
+    // Determine authoritative identifier (prefer res.removal_id, fallback to res.record?.id)
+    const createdId = res.removal_id || res.record?.id;
+
     await refreshVnPartDashboard();
+
+    // Step 14: If dashboard refresh failed after successful commit
+    if (vnPartEphemeralState.error) {
+      vnPartEphemeralState.conflictMessage =
+        "Demande enregistrée, mais la liste n'a pas pu être actualisée. Actualisez l'écran avant toute nouvelle saisie.";
+      renderVnPartView();
+      return;
+    }
+
+    // Step 13: If createdId is absent, fail closed for consistency verification without guessing
+    if (!createdId) {
+      vnPartEphemeralState.conflictMessage =
+        "Demande acceptée par le serveur, mais l'identifiant de la nouvelle demande n'a pas pu être déterminé avec certitude. Veuillez actualiser la page.";
+      renderVnPartView();
+      return;
+    }
+
+    // Step 12: Locate exact created id in refreshed removals
+    const found = vnPartEphemeralState.removals.some(
+      (r) => String(r.id) === String(createdId)
+    );
+    if (!found) {
+      vnPartEphemeralState.conflictMessage =
+        "Attention : La demande a été enregistrée avec succès mais n'apparaît pas encore dans l'actualisation du tableau de bord. Veuillez rafraîchir à nouveau.";
+    } else {
+      vnPartEphemeralState.conflictMessage = null;
+    }
+
+    renderVnPartView();
   }
 
   /**
@@ -1507,8 +1786,16 @@
       });
     });
 
-    // Global click listener for contextual action buttons
+    // Global click listener for contextual action buttons and request filter buttons
     document.addEventListener("click", (e) => {
+      const reqBtn = e.target?.closest?.(".vn-part-req-filter-btn");
+      if (reqBtn) {
+        const filter = reqBtn.dataset.reqFilter || "all";
+        vnPartEphemeralState.activeRequestFilter = filter;
+        renderVnPartView();
+        return;
+      }
+
       const btn = e.target?.closest?.(".vn-part-action-btn");
       if (btn) {
         const action = btn.dataset.action;
@@ -1587,6 +1874,8 @@
     syncVnPartNavVisibility,
     refreshVnPartDashboard,
     renderVnPartView,
+    filterVnPartRequests,
+    renderRequestCard,
     bindVnPartUiEvents,
     openCreateModal,
     openActionModal,

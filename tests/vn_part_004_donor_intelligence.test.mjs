@@ -825,7 +825,7 @@ test("26. Creator self-approval ban remains strictly enforced", () => {
   // Even if user has qualite/parc role, they cannot approve their own creation
   const identitySelf = { ok: true, role: "responsable_qualite_parc_vn", authUserId: "user-multi-role" };
   const actions = vnPartUi.getAvailableVnPartActions(removal, [], identitySelf);
-  assert.equal(actions.some((a) => a.action === "APPROVE"), false, "Creator must not approve own request");
+  assert.equal(actions.includes("APPROVE"), false, "Creator must not approve own request");
 });
 
 // ============================================================================

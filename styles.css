@@ -9052,3 +9052,288 @@ select:focus {
     grid-template-columns: 1fr;
   }
 }
+
+/* ==========================================================================
+   VN-PART-003C — Mutations, Approval Progress, and Contextual Modals
+   ========================================================================== */
+
+/* Conflict Notification Banner */
+.vn-part-conflict-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: #fef2f2;
+  border: 1px solid #fca5a5;
+  border-radius: var(--radius-sm, 8px);
+  color: #991b1b;
+  margin-bottom: 16px;
+}
+
+.vn-part-conflict-banner svg {
+  stroke: #dc2626;
+  fill: none;
+  stroke-width: 2;
+  flex-shrink: 0;
+}
+
+.vn-part-conflict-text {
+  flex: 1;
+  font-size: 0.88rem;
+}
+
+.vn-part-conflict-text strong {
+  display: block;
+  font-size: 0.92rem;
+  margin-bottom: 2px;
+}
+
+.vn-part-conflict-text p {
+  margin: 0;
+}
+
+/* Approval Strip on Removal Card */
+.vn-part-approvals-strip {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--line, #e2e8f0);
+}
+
+.vn-part-approvals-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.vn-part-approvals-title {
+  font-size: 0.82rem;
+  font-weight: 650;
+  color: var(--muted, #64748b);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.vn-part-approvals-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.vn-part-approval-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  color: #475569;
+}
+
+.vn-part-approval-pill .pill-role {
+  font-weight: 650;
+  color: #1e293b;
+}
+
+.vn-part-approval-pill.status-approved {
+  background: #dcfce7;
+  border-color: #bbf7d0;
+  color: #166534;
+}
+
+.vn-part-approval-pill.status-approved .pill-role {
+  color: #14532d;
+}
+
+.vn-part-approval-pill.status-refused {
+  background: #fee2e2;
+  border-color: #fecaca;
+  color: #991b1b;
+}
+
+.vn-part-approval-pill.status-refused .pill-role {
+  color: #7f1d1d;
+}
+
+.vn-part-approval-pill.status-pending {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  color: #64748b;
+}
+
+/* Removal Card Actions */
+.vn-part-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line, #f1f5f9);
+}
+
+.vn-part-action-btn {
+  font-size: 0.82rem;
+  padding: 6px 12px;
+  min-height: 34px;
+}
+
+/* Modals System (Scoped) */
+.vn-part-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.vn-part-modal-dialog {
+  background: var(--paper, #fff);
+  border-radius: var(--radius, 12px);
+  box-shadow: var(--shadow-lg, 0 10px 25px rgba(0, 0, 0, 0.15));
+  width: 100%;
+  max-width: 540px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--line, #e2e8f0);
+}
+
+.vn-part-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--line, #e2e8f0);
+  background: var(--soft, #f8fafc);
+}
+
+.vn-part-modal-header h2 {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--brand, #0f3b57);
+}
+
+.vn-part-modal-close {
+  background: transparent;
+  border: none;
+  font-size: 1.25rem;
+  line-height: 1;
+  color: var(--muted, #64748b);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+}
+
+.vn-part-modal-close:hover {
+  color: var(--ink, #0f172a);
+  background: #e2e8f0;
+}
+
+.vn-part-modal-summary {
+  padding: 10px 14px;
+  background: #f1f5f9;
+  border-radius: var(--radius-sm, 8px);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.85rem;
+  margin-bottom: 14px;
+}
+
+.vn-part-modal-summary strong {
+  color: var(--brand, #0f3b57);
+  font-size: 0.92rem;
+}
+
+.vn-part-modal-summary span {
+  color: var(--muted, #475569);
+}
+
+.vn-part-form {
+  padding: 20px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.vn-part-form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.vn-part-form-row-half {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.vn-part-form-row label {
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--ink, #1e293b);
+}
+
+.vn-part-form-row label .required {
+  color: var(--danger, #dc2626);
+}
+
+.vn-part-form-row input,
+.vn-part-form-row select,
+.vn-part-form-row textarea {
+  padding: 8px 12px;
+  border: 1px solid var(--line, #cbd5e1);
+  border-radius: var(--radius-sm, 6px);
+  font-size: 0.88rem;
+  background: var(--paper, #fff);
+  color: var(--ink, #0f172a);
+  font-family: inherit;
+  transition: var(--transition, border-color 0.2s ease);
+}
+
+.vn-part-form-row input:focus,
+.vn-part-form-row select:focus,
+.vn-part-form-row textarea:focus {
+  outline: none;
+  border-color: var(--brand, #0f3b57);
+  box-shadow: 0 0 0 3px rgba(15, 59, 87, 0.15);
+}
+
+.vn-part-form-error {
+  padding: 10px 14px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: var(--radius-sm, 6px);
+  color: #991b1b;
+  font-size: 0.86rem;
+  font-weight: 550;
+}
+
+.vn-part-action-prompt {
+  font-size: 0.92rem;
+  color: var(--ink, #1e293b);
+  line-height: 1.45;
+  margin: 0 0 10px;
+}
+
+.vn-part-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line, #e2e8f0);
+}

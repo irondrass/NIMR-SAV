@@ -1,13 +1,20 @@
 /**
- * NIMR-SAV — VN-PART Read-Only Dashboard UI (003B)
+ * NIMR-SAV — VN-PART Dashboard UI (003C)
  *
- * Ephemeral, strictly READ-ONLY user interface for the VN-PART dashboard.
+ * Ephemeral user interface for the VN-PART dashboard:
+ *   - Read presentation: KPIs, dynamic grouping, multi-field search, 5 operational filters
+ *   - Authoritative mutation workflows: 10 actions via Postgres RPC
+ *   - Approval lookup & multi-approver progress strip (3 mandatory approvers)
+ *   - Optimistic concurrency & CAS conflict handling
  *
  * ABSOLUTE INVARIANTS:
- *   - Strictly read-only presentation layer
- *   - No mutation calls or buttons
- *   - No price, cost, supplier, stock quantity, bin location, or invoice fields
- *   - Ephemeral in-memory state only (not serialized to localStorage/IndexedDB/backups)
+ *   - Strictly ephemeral in-memory state only (not serialized to localStorage/IndexedDB/backups)
+ *   - No direct table mutations (.insert, .update, .delete, .upsert)
+ *   - Exactly one mutation RPC allowed: nimr_apply_vn_part_action_v1
+ *   - Mutation workshop ID derived strictly from validated membership identity
+ *   - Output escaping via escapeHtml() or textContent at rendering sinks
+ *   - No pre-storage HTML entity conversion
+ *   - Generic beneficiary VIN length validation: NONE
  */
 
 (function (root, factory) {
@@ -16,7 +23,12 @@
       typeof require === "function" ? require("./vn-part-client.js") : null
     );
   } else {
-    const exportsObj = factory(root.loadVnPartDashboard ? { loadVnPartDashboard: root.loadVnPartDashboard } : null);
+    const client = {
+      loadVnPartDashboard: root.loadVnPartDashboard,
+      applyVnPartAction: root.applyVnPartAction,
+      resolveVnPartMutationIdentity: root.resolveVnPartMutationIdentity,
+    };
+    const exportsObj = factory(client);
     Object.assign(root, exportsObj);
   }
 })(typeof globalThis !== "undefined" ? globalThis : this, function (clientModule) {
@@ -26,15 +38,18 @@
   const vnPartEphemeralState = {
     donors: [],
     removals: [],
+    approvals: [],
     loading: false,
     error: null,
+    conflictMessage: null,
     activeFilter: "all-open", // 'all-open' | 'ready' | 'overdue' | 'waiting' | 'history'
     searchQuery: "",
     lastLoadedAt: null,
+    mutationInProgress: false,
   };
 
   /**
-   * Escape HTML to prevent XSS injection.
+   * Escape HTML to prevent XSS injection at rendering sinks.
    */
   function escapeHtml(str) {
     if (str === null || str === undefined) return "";
@@ -187,7 +202,6 @@
 
   /**
    * Group filtered donors dynamically by Model -> Donor VIN -> Removals.
-   * Dynamic models (no hardcoded model names).
    */
   function groupVnPartByModelAndVin(donors = [], removals = []) {
     const removalsByVin = new Map();
@@ -214,14 +228,12 @@
       });
     }
 
-    // Sort models ascending
     const sortedModelNames = Array.from(groups.keys()).sort((a, b) =>
       a.localeCompare(b, "fr", { sensitivity: "base" })
     );
 
     const sortedGroups = sortedModelNames.map((model) => {
       const items = groups.get(model);
-      // Sort donors: overdue first, then active first, then oldest opened at, then VIN ascending
       items.sort((a, b) => {
         const aOverdue = Number(a.donor.overdue_count || 0) > 0 ? 1 : 0;
         const bOverdue = Number(b.donor.overdue_count || 0) > 0 ? 1 : 0;
@@ -247,8 +259,246 @@
   }
 
   /**
-   * Ensure that both the navigation button and view section for VN-PART
-   * are mounted in the DOM.
+   * Deterministic approval indexing: Map keyed by `${removal_id}:${approval_role}`.
+   */
+  function buildApprovalLookup(approvals = []) {
+    const lookup = new Map();
+    for (const a of approvals) {
+      if (a && a.removal_id && a.approval_role) {
+        lookup.set(`${a.removal_id}:${a.approval_role}`, a);
+      }
+    }
+    return lookup;
+  }
+
+  /**
+   * Resolve current active identity safely using the client module or global resolver.
+   */
+  function getCurrentIdentity() {
+    if (clientModule && typeof clientModule.resolveVnPartMutationIdentity === "function") {
+      return clientModule.resolveVnPartMutationIdentity();
+    }
+    if (typeof resolveVnPartMutationIdentity === "function") {
+      return resolveVnPartMutationIdentity();
+    }
+    if (typeof window !== "undefined" && typeof window.resolveVnPartMutationIdentity === "function") {
+      return window.resolveVnPartMutationIdentity();
+    }
+    return { ok: false, code: "IDENTITY_NOT_READY" };
+  }
+
+  /**
+   * Helper to determine available UI mutation actions for a given removal row and identity.
+   * NOTE: This controls UI visibility only. The server remains final authority.
+   */
+  function getAvailableVnPartActions(removal, approvals = [], identity = null) {
+    if (!removal || !removal.id) return [];
+    if (!identity || !identity.ok) return [];
+
+    const role = identity.role;
+    const authUserId = identity.authUserId;
+    const isCreator = Boolean(
+      removal.created_by &&
+      authUserId &&
+      String(removal.created_by).trim() === String(authUserId).trim()
+    );
+    const status = removal.status;
+    const approvalLookup = buildApprovalLookup(approvals);
+    const hasDecided = approvalLookup.has(`${removal.id}:${role}`);
+
+    const actions = [];
+
+    // APPROVE
+    if (
+      status === "EN_ATTENTE_VALIDATIONS" &&
+      ["directeur", "directeur_pieces", "responsable_qualite_parc_vn"].includes(role) &&
+      !isCreator &&
+      !hasDecided
+    ) {
+      actions.push("APPROVE");
+    }
+
+    // REFUSE
+    if (
+      status === "EN_ATTENTE_VALIDATIONS" &&
+      ["directeur", "directeur_pieces", "responsable_qualite_parc_vn"].includes(role) &&
+      !hasDecided
+    ) {
+      actions.push("REFUSE");
+    }
+
+    // CANCEL
+    if (
+      ["EN_ATTENTE_VALIDATIONS", "AUTORISE_A_PRELEVER"].includes(status) &&
+      (isCreator || role === "directeur")
+    ) {
+      actions.push("CANCEL");
+    }
+
+    // REVISE_ETA
+    if (
+      !["CLOTURE", "ANNULE", "REFUSE"].includes(status) &&
+      role === "directeur_pieces"
+    ) {
+      actions.push("REVISE_ETA");
+    }
+
+    // REVISE_DONOR
+    if (
+      ["EN_ATTENTE_VALIDATIONS", "AUTORISE_A_PRELEVER"].includes(status) &&
+      role === "responsable_qualite_parc_vn"
+    ) {
+      actions.push("REVISE_DONOR");
+    }
+
+    // CONFIRM_REMOVAL
+    if (
+      status === "AUTORISE_A_PRELEVER" &&
+      role === "chef_atelier"
+    ) {
+      actions.push("CONFIRM_REMOVAL");
+    }
+
+    // STORE_ACK (UI Rule: only offered when store_ack_at is null)
+    if (
+      ["AUTORISE_A_PRELEVER", "PRELEVE_EN_ATTENTE_PIECE"].includes(status) &&
+      role === "responsable_magasin" &&
+      (removal.store_ack_at === null || removal.store_ack_at === undefined)
+    ) {
+      actions.push("STORE_ACK");
+    }
+
+    // MARK_REPLACEMENT_AVAILABLE
+    if (
+      status === "PRELEVE_EN_ATTENTE_PIECE" &&
+      ["responsable_magasin", "directeur_pieces"].includes(role)
+    ) {
+      actions.push("MARK_REPLACEMENT_AVAILABLE");
+    }
+
+    // CONFIRM_RESTITUTION
+    if (
+      status === "PIECE_DISPONIBLE" &&
+      role === "chef_atelier"
+    ) {
+      actions.push("CONFIRM_RESTITUTION");
+    }
+
+    return actions;
+  }
+
+  /**
+   * Render the 3-position approval progress strip for a removal.
+   */
+  function renderApprovalStrip(removal, approvalLookup) {
+    const roles = [
+      { roleKey: "directeur", label: "Direction" },
+      { roleKey: "directeur_pieces", label: "Direction Pièces (ETA)" },
+      { roleKey: "responsable_qualite_parc_vn", label: "Chef de Parc VN (Donneur)" },
+    ];
+
+    let approvedCount = 0;
+    for (const r of roles) {
+      const a = approvalLookup.get(`${removal.id}:${r.roleKey}`);
+      if (a && a.decision === "APPROVED") approvedCount++;
+    }
+
+    let pillsHtml = "";
+    for (const r of roles) {
+      const a = approvalLookup.get(`${removal.id}:${r.roleKey}`);
+      let statusClass = "status-pending";
+      let statusText = "En attente";
+
+      if (a) {
+        if (a.decision === "APPROVED") {
+          statusClass = "status-approved";
+          if (r.roleKey === "directeur_pieces" && removal.expected_replacement_date) {
+            statusText = `Validé (ETA: ${formatDateFr(removal.expected_replacement_date)})`;
+          } else if (r.roleKey === "responsable_qualite_parc_vn" && removal.donor_vin) {
+            statusText = `Validé (${escapeHtml(removal.donor_vin)})`;
+          } else {
+            statusText = `Validé le ${formatDateFr(a.decided_at)}`;
+          }
+        } else if (a.decision === "REFUSED") {
+          statusClass = "status-refused";
+          statusText = `Refusé (${escapeHtml(a.reason || "Motif non spécifié")})`;
+        }
+      }
+
+      pillsHtml += `
+        <div class="vn-part-approval-pill ${statusClass}">
+          <span class="pill-role">${escapeHtml(r.label)}:</span>
+          <span class="pill-status">${statusText}</span>
+        </div>
+      `;
+    }
+
+    return `
+      <div class="vn-part-approvals-strip" aria-label="État des validations">
+        <div class="vn-part-approvals-heading">
+          <span class="vn-part-approvals-title">Validations requises (${approvedCount}/3)</span>
+        </div>
+        <div class="vn-part-approvals-list">
+          ${pillsHtml}
+        </div>
+      </div>
+    `;
+  }
+
+  /**
+   * Action button labels dictionary.
+   */
+  const ACTION_LABELS = {
+    APPROVE: "Valider",
+    REFUSE: "Refuser",
+    CANCEL: "Annuler la demande",
+    REVISE_ETA: "Réviser date (ETA)",
+    REVISE_DONOR: "Modifier véhicule donneur",
+    CONFIRM_REMOVAL: "Confirmer prélèvement",
+    STORE_ACK: "Prise en compte magasin",
+    MARK_REPLACEMENT_AVAILABLE: "Déclarer pièce disponible",
+    CONFIRM_RESTITUTION: "Confirmer restitution VN",
+  };
+
+  /**
+   * Render contextual mutation action buttons for a removal card.
+   */
+  function renderRemovalActionButtons(removal, availableActions, isLocked) {
+    if (!availableActions || !availableActions.length) return "";
+
+    let buttonsHtml = "";
+    for (const action of availableActions) {
+      const label = ACTION_LABELS[action] || action;
+      let btnClass = "secondary-button vn-part-action-btn";
+      if (action === "APPROVE" || action === "CONFIRM_REMOVAL" || action === "CONFIRM_RESTITUTION" || action === "MARK_REPLACEMENT_AVAILABLE") {
+        btnClass = "primary-button vn-part-action-btn";
+      } else if (action === "REFUSE" || action === "CANCEL") {
+        btnClass = "ghost-button vn-part-action-btn text-danger";
+      }
+
+      buttonsHtml += `
+        <button
+          type="button"
+          class="${btnClass}"
+          data-action="${escapeHtml(action)}"
+          data-removal-id="${escapeHtml(removal.id)}"
+          data-version="${removal.version}"
+          ${isLocked ? "disabled" : ""}
+        >
+          ${escapeHtml(label)}
+        </button>
+      `;
+    }
+
+    return `
+      <div class="vn-part-card-actions">
+        ${buttonsHtml}
+      </div>
+    `;
+  }
+
+  /**
+   * Ensure that navigation button, view section, and mutation modals are mounted in DOM.
    */
   function ensureVnPartDomMounted() {
     if (typeof document === "undefined") return;
@@ -299,11 +549,25 @@
                   <p class="vn-part-subtitle">Suivi opérationnel des pièces prélevées sur véhicules neufs</p>
                 </div>
                 <div class="vn-part-header-actions">
+                  <button type="button" class="primary-button" id="vn-part-new-request-btn" style="display:none;">
+                    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                    Nouveau Prélèvement VN
+                  </button>
                   <button type="button" class="ghost-button" id="vn-part-refresh-btn" title="Actualiser les données">
                     <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
                     Actualiser
                   </button>
                 </div>
+              </div>
+
+              <!-- Conflict notification banner if version mismatch occurs -->
+              <div id="vn-part-conflict-banner" class="vn-part-conflict-banner" role="alert" style="display:none;">
+                <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                <div class="vn-part-conflict-text">
+                  <strong>Conflit de version détecté</strong>
+                  <p id="vn-part-conflict-message">Ce dossier a été mis à jour par un autre utilisateur. Les données ont été actualisées. Veuillez vérifier les nouvelles informations avant de recommencer.</p>
+                </div>
+                <button type="button" class="ghost-button" id="vn-part-conflict-dismiss">Fermer</button>
               </div>
 
               <!-- 4 KPI Cards -->
@@ -359,6 +623,9 @@
                 <p>Chargement des prélèvements VN...</p>
               </div>
             </div>
+
+            <!-- Modals Container -->
+            <div id="vn-part-modals-host" class="vn-part-modals-host"></div>
           </div>
         `;
         mainContent.appendChild(viewSection);
@@ -367,12 +634,7 @@
   }
 
   /**
-   * Synchronize the primary navigation button visibility for the 'vn-part' tab.
-   * Allowed roles:
-   *   admin_technique, directeur, chef_atelier, lecture_seule,
-   *   directeur_pieces, responsable_magasin, responsable_garantie_support, responsable_qualite_parc_vn
-   * Excluded roles:
-   *   reception, technicien, controle_qualite
+   * Synchronize the primary navigation button visibility and create request button.
    */
   function syncVnPartNavVisibility() {
     if (typeof document === "undefined") return;
@@ -382,6 +644,13 @@
     const isAllowed = typeof canAccessTab === "function" ? canAccessTab("vn-part") : false;
     btn.hidden = !isAllowed;
     btn.style.display = isAllowed ? "" : "none";
+
+    const createBtn = document.getElementById("vn-part-new-request-btn");
+    if (createBtn) {
+      const identity = getCurrentIdentity();
+      const canCreate = identity.ok && ["chef_atelier", "responsable_garantie_support"].includes(identity.role);
+      createBtn.style.display = canCreate ? "" : "none";
+    }
   }
 
   /**
@@ -430,6 +699,7 @@
     } else {
       vnPartEphemeralState.donors = result.donors || [];
       vnPartEphemeralState.removals = result.removals || [];
+      vnPartEphemeralState.approvals = result.approvals || [];
       vnPartEphemeralState.lastLoadedAt = new Date().toISOString();
     }
 
@@ -458,7 +728,27 @@
     if (kpiReady) kpiReady.textContent = String(kpis.readyDonorsCount);
     if (kpiOverdue) kpiOverdue.textContent = String(kpis.overdueDonorsCount);
 
-    // 2. Main content container
+    // 2. Synchronize Create Request button visibility
+    const identity = getCurrentIdentity();
+    const createBtn = document.getElementById("vn-part-new-request-btn");
+    if (createBtn) {
+      const canCreate = identity.ok && ["chef_atelier", "responsable_garantie_support"].includes(identity.role);
+      createBtn.style.display = canCreate ? "" : "none";
+    }
+
+    // 3. Conflict banner
+    const conflictBanner = document.getElementById("vn-part-conflict-banner");
+    const conflictMsgEl = document.getElementById("vn-part-conflict-message");
+    if (conflictBanner && conflictMsgEl) {
+      if (vnPartEphemeralState.conflictMessage) {
+        conflictMsgEl.textContent = vnPartEphemeralState.conflictMessage;
+        conflictBanner.style.display = "flex";
+      } else {
+        conflictBanner.style.display = "none";
+      }
+    }
+
+    // 4. Main content container
     const container = document.getElementById("vn-part-content");
     if (!container) return;
 
@@ -490,7 +780,6 @@
       return;
     }
 
-    // Filter & group donors
     const filteredDonors = filterVnPartDonors(
       vnPartEphemeralState.donors,
       vnPartEphemeralState.removals,
@@ -520,6 +809,8 @@
       filteredDonors,
       vnPartEphemeralState.removals
     );
+
+    const approvalLookup = buildApprovalLookup(vnPartEphemeralState.approvals);
 
     let html = "";
 
@@ -603,7 +894,6 @@
           html += `<p class="vn-part-no-removals">Aucun détail de prélèvement disponible.</p>`;
         } else {
           for (const rem of donorRemovals) {
-            // Determine physical display badge
             let badgeHtml = "";
             if (rem.restored_at) {
               badgeHtml = `<span class="vn-part-badge badge-restored">✅ RESTITUÉ / CLÔTURÉ</span>`;
@@ -615,8 +905,12 @@
               badgeHtml = `<span class="vn-part-badge badge-neutral">${escapeHtml(rem.status)}</span>`;
             }
 
+            const approvalStripHtml = renderApprovalStrip(rem, approvalLookup);
+            const availableActions = getAvailableVnPartActions(rem, vnPartEphemeralState.approvals, identity);
+            const actionsHtml = renderRemovalActionButtons(rem, availableActions, vnPartEphemeralState.mutationInProgress);
+
             html += `
-              <div class="vn-part-removal-item" data-id="${escapeHtml(rem.id)}">
+              <div class="vn-part-removal-item" data-id="${escapeHtml(rem.id)}" data-version="${rem.version}">
                 <div class="vn-part-removal-top">
                   <div class="vn-part-removal-title">
                     <strong>${escapeHtml(rem.part_designation)}</strong>
@@ -657,6 +951,12 @@
                       <span class="cell-val">${escapeHtml(formatDateTimeFr(rem.replacement_available_at))}</span>
                     </div>
                   ` : ""}
+                  ${rem.store_ack_at ? `
+                    <div class="vn-part-detail-cell">
+                      <span class="cell-label">Prise en compte magasin:</span>
+                      <span class="cell-val">${escapeHtml(formatDateTimeFr(rem.store_ack_at))}</span>
+                    </div>
+                  ` : ""}
                   ${rem.restored_at ? `
                     <div class="vn-part-detail-cell">
                       <span class="cell-label">Restitué au VN le:</span>
@@ -664,6 +964,9 @@
                     </div>
                   ` : ""}
                 </div>
+
+                ${approvalStripHtml}
+                ${actionsHtml}
               </div>
             `;
           }
@@ -687,6 +990,475 @@
   }
 
   /**
+   * Open the "Nouveau Prélèvement VN" creation modal.
+   */
+  function openCreateModal() {
+    const host = document.getElementById("vn-part-modals-host");
+    if (!host) return;
+
+    host.innerHTML = `
+      <div class="vn-part-modal-backdrop" id="vn-part-create-backdrop" role="dialog" aria-modal="true" aria-labelledby="vn-part-create-title">
+        <div class="vn-part-modal-dialog">
+          <header class="vn-part-modal-header">
+            <h2 id="vn-part-create-title">Nouveau Prélèvement sur Véhicule Neuf</h2>
+            <button type="button" class="vn-part-modal-close" id="vn-part-create-close" aria-label="Fermer">✕</button>
+          </header>
+          <form id="vn-part-create-form" class="vn-part-form">
+            <div id="vn-part-create-error" class="vn-part-form-error" style="display:none;" role="alert"></div>
+
+            <div class="vn-part-form-row">
+              <label for="vn-create-ben-model">Modèle bénéficiaire <span class="required">*</span></label>
+              <input type="text" id="vn-create-ben-model" name="beneficiary_model" required placeholder="Ex: Peugeot Partner">
+            </div>
+
+            <div class="vn-part-form-row">
+              <label for="vn-create-ben-vin">N° Châssis / VIN bénéficiaire (optionnel)</label>
+              <input type="text" id="vn-create-ben-vin" name="beneficiary_vin" placeholder="Numéro VIN (optionnel)">
+            </div>
+
+            <div class="vn-part-form-row">
+              <label for="vn-create-ben-or">N° Ordre de Réparation (OR)</label>
+              <input type="text" id="vn-create-ben-or" name="beneficiary_or" placeholder="Ex: OR-2026-0012">
+            </div>
+
+            <div class="vn-part-form-row">
+              <label for="vn-create-part-desig">Désignation de la pièce <span class="required">*</span></label>
+              <input type="text" id="vn-create-part-desig" name="part_designation" required placeholder="Ex: Calculateur d'injection">
+            </div>
+
+            <div class="vn-part-form-row">
+              <label for="vn-create-part-ref">Référence pièce (optionnel)</label>
+              <input type="text" id="vn-create-part-ref" name="part_reference" placeholder="Ex: 1611234580">
+            </div>
+
+            <div class="vn-part-form-row vn-part-form-row-half">
+              <div>
+                <label for="vn-create-qty">Quantité <span class="required">*</span></label>
+                <input type="number" id="vn-create-qty" name="quantity" min="1" value="1" required>
+              </div>
+              <div>
+                <label for="vn-create-urgency">Urgence</label>
+                <select id="vn-create-urgency" name="urgency">
+                  <option value="Normale">Normale</option>
+                  <option value="Urgente">Urgente</option>
+                  <option value="Véhicule immobilisé">Véhicule immobilisé</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="vn-part-form-row">
+              <label for="vn-create-reason">Motif de la demande <span class="required">*</span></label>
+              <textarea id="vn-create-reason" name="reason" rows="3" required placeholder="Indiquez le motif précis justifiant le prélèvement..."></textarea>
+            </div>
+
+            <div class="vn-part-form-row">
+              <label for="vn-create-comments">Commentaires additionnels</label>
+              <textarea id="vn-create-comments" name="comments" rows="2" placeholder="Précisions éventuelles..."></textarea>
+            </div>
+
+            <footer class="vn-part-modal-footer">
+              <button type="button" class="ghost-button" id="vn-part-create-cancel">Annuler</button>
+              <button type="submit" class="primary-button" id="vn-part-create-submit">Transmettre la demande</button>
+            </footer>
+          </form>
+        </div>
+      </div>
+    `;
+
+    document.getElementById("vn-part-create-close")?.addEventListener("click", closeModals);
+    document.getElementById("vn-part-create-cancel")?.addEventListener("click", closeModals);
+    document.getElementById("vn-part-create-form")?.addEventListener("submit", handleCreateFormSubmit);
+    document.getElementById("vn-create-ben-model")?.focus();
+  }
+
+  /**
+   * Validate CREATE_REQUEST payload before transmission.
+   * Enforces mandatory fields: beneficiary_model, part_designation, reason, quantity (integer >= 1).
+   * Explicit invariant: NO donor fields (donor_model, donor_vin, etc.) are required or validated.
+   */
+  function validateCreateRequestPayload(payload) {
+    if (!payload || typeof payload !== "object") {
+      return { ok: false, field: "payload", message: "Données de la demande manquantes." };
+    }
+    const benModel = String(payload.beneficiary_model || "").trim();
+    if (!benModel) {
+      return { ok: false, field: "beneficiary_model", message: "Le modèle du véhicule bénéficiaire est obligatoire." };
+    }
+    const partDesig = String(payload.part_designation || "").trim();
+    if (!partDesig) {
+      return { ok: false, field: "part_designation", message: "La désignation de la pièce est obligatoire." };
+    }
+    const reason = String(payload.reason || "").trim();
+    if (!reason) {
+      return { ok: false, field: "reason", message: "Le motif du prélèvement est obligatoire." };
+    }
+    const qty = payload.quantity;
+    const qtyNum = typeof qty === "number" ? qty : parseInt(qty, 10);
+    if (!Number.isInteger(qtyNum) || qtyNum < 1) {
+      return { ok: false, field: "quantity", message: "La quantité doit être un nombre entier supérieur ou égal à 1." };
+    }
+    return { ok: true };
+  }
+
+  /**
+   * Handle submission of the Create Request form.
+   */
+  async function handleCreateFormSubmit(e) {
+    e.preventDefault();
+    if (vnPartEphemeralState.mutationInProgress) return;
+
+    const form = e.target;
+    const errorEl = document.getElementById("vn-part-create-error");
+    const submitBtn = document.getElementById("vn-part-create-submit");
+
+    const benModel = form.beneficiary_model?.value?.trim() || "";
+    const partDesig = form.part_designation?.value?.trim() || "";
+    const reason = form.reason?.value?.trim() || "";
+    const qtyNum = parseInt(form.quantity?.value, 10);
+
+    const payload = {
+      beneficiary_model: benModel,
+      part_designation: partDesig,
+      reason: reason,
+      quantity: qtyNum,
+      beneficiary_vin: form.beneficiary_vin?.value?.trim() || undefined,
+      beneficiary_or: form.beneficiary_or?.value?.trim() || undefined,
+      part_reference: form.part_reference?.value?.trim() || undefined,
+      urgency: form.urgency?.value?.trim() || undefined,
+      comments: form.comments?.value?.trim() || undefined,
+    };
+
+    const valRes = validateCreateRequestPayload(payload);
+    if (!valRes.ok) {
+      showModalError(errorEl, valRes.message);
+      return;
+    }
+
+    vnPartEphemeralState.mutationInProgress = true;
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Transmission en cours...";
+    }
+
+    const applyFn =
+      (clientModule && clientModule.applyVnPartAction) ||
+      (typeof applyVnPartAction === "function" ? applyVnPartAction : null) ||
+      (typeof window !== "undefined" ? window.applyVnPartAction : null);
+
+    if (!applyFn) {
+      showModalError(errorEl, "Module d'action introuvable.");
+      vnPartEphemeralState.mutationInProgress = false;
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = "Transmettre la demande";
+      }
+      return;
+    }
+
+    const res = await applyFn(null, null, "CREATE_REQUEST", payload);
+    vnPartEphemeralState.mutationInProgress = false;
+
+    if (!res.ok) {
+      showModalError(errorEl, res.message || "Erreur lors de la création de la demande.");
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = "Transmettre la demande";
+      }
+      return;
+    }
+
+    closeModals();
+    await refreshVnPartDashboard();
+  }
+
+  /**
+   * Open dynamic contextual modal for an action on a removal item.
+   */
+  function openActionModal(removalId, action) {
+    const removal = vnPartEphemeralState.removals.find((r) => r.id === removalId);
+    if (!removal) return;
+
+    const host = document.getElementById("vn-part-modals-host");
+    if (!host) return;
+
+    const identity = getCurrentIdentity();
+    const role = identity.role;
+    const title = ACTION_LABELS[action] || action;
+
+    let fieldsHtml = "";
+
+    if (action === "REFUSE" || action === "CANCEL") {
+      fieldsHtml = `
+        <div class="vn-part-form-row">
+          <label for="vn-action-reason">Motif obligatoire <span class="required">*</span></label>
+          <textarea id="vn-action-reason" name="reason" rows="3" required placeholder="Précisez la raison de cette décision..."></textarea>
+        </div>
+      `;
+    } else if (action === "APPROVE") {
+      if (role === "directeur_pieces") {
+        fieldsHtml = `
+          <div class="vn-part-form-row">
+            <label for="vn-action-eta">Date d'arrivée prévue de la pièce (ETA) <span class="required">*</span></label>
+            <input type="date" id="vn-action-eta" name="expected_replacement_date" required>
+          </div>
+          <div class="vn-part-form-row">
+            <label for="vn-action-reason">Commentaire / Remarque (optionnel)</label>
+            <textarea id="vn-action-reason" name="reason" rows="2" placeholder="Précisions sur la commande..."></textarea>
+          </div>
+        `;
+      } else if (role === "responsable_qualite_parc_vn") {
+        fieldsHtml = `
+          <div class="vn-part-form-row">
+            <label for="vn-action-donor-model">Modèle véhicule donneur <span class="required">*</span></label>
+            <input type="text" id="vn-action-donor-model" name="donor_model" required placeholder="Ex: Peugeot 208">
+          </div>
+          <div class="vn-part-form-row">
+            <label for="vn-action-donor-vin">N° Châssis / VIN véhicule donneur <span class="required">*</span></label>
+            <input type="text" id="vn-action-donor-vin" name="donor_vin" required placeholder="Numéro VIN donneur">
+          </div>
+          <div class="vn-part-form-row">
+            <label for="vn-action-donor-loc">Emplacement du véhicule donneur (optionnel)</label>
+            <input type="text" id="vn-action-donor-loc" name="donor_location" placeholder="Ex: Parc VN - Rangée 4">
+          </div>
+          <div class="vn-part-form-row">
+            <label for="vn-action-reason">Commentaire / Remarque (optionnel)</label>
+            <textarea id="vn-action-reason" name="reason" rows="2" placeholder="Précisions état donneur..."></textarea>
+          </div>
+        `;
+      } else {
+        fieldsHtml = `
+          <div class="vn-part-form-row">
+            <label for="vn-action-reason">Remarque de validation (optionnel)</label>
+            <textarea id="vn-action-reason" name="reason" rows="2" placeholder="Remarque direction..."></textarea>
+          </div>
+        `;
+      }
+    } else if (action === "REVISE_ETA") {
+      fieldsHtml = `
+        <div class="vn-part-form-row">
+          <label for="vn-action-eta">Nouvelle date d'arrivée prévue (ETA) <span class="required">*</span></label>
+          <input type="date" id="vn-action-eta" name="expected_replacement_date" required value="${escapeHtml(removal.expected_replacement_date || "")}">
+        </div>
+        <div class="vn-part-form-row">
+          <label for="vn-action-reason">Motif de la révision (optionnel)</label>
+          <textarea id="vn-action-reason" name="reason" rows="2" placeholder="Motif du décalage..."></textarea>
+        </div>
+      `;
+    } else if (action === "REVISE_DONOR") {
+      fieldsHtml = `
+        <div class="vn-part-form-row">
+          <label for="vn-action-donor-model">Modèle véhicule donneur <span class="required">*</span></label>
+          <input type="text" id="vn-action-donor-model" name="donor_model" required value="${escapeHtml(removal.donor_model || "")}">
+        </div>
+        <div class="vn-part-form-row">
+          <label for="vn-action-donor-vin">N° Châssis / VIN véhicule donneur <span class="required">*</span></label>
+          <input type="text" id="vn-action-donor-vin" name="donor_vin" required value="${escapeHtml(removal.donor_vin || "")}">
+        </div>
+        <div class="vn-part-form-row">
+          <label for="vn-action-donor-loc">Emplacement du véhicule donneur (optionnel)</label>
+          <input type="text" id="vn-action-donor-loc" name="donor_location" value="${escapeHtml(removal.donor_location || "")}">
+        </div>
+        <div class="vn-part-form-row">
+          <label for="vn-action-reason">Motif de la modification (optionnel)</label>
+          <textarea id="vn-action-reason" name="reason" rows="2" placeholder="Motif du changement..."></textarea>
+        </div>
+      `;
+    } else {
+      // Actions: CONFIRM_REMOVAL, STORE_ACK, MARK_REPLACEMENT_AVAILABLE, CONFIRM_RESTITUTION
+      let confirmationPrompt = "Confirmez-vous cette action opérationnelle sur le dossier ?";
+      if (action === "CONFIRM_REMOVAL") {
+        confirmationPrompt = `Confirmez-vous que la pièce "${escapeHtml(removal.part_designation)}" a été physiquement démontée du véhicule donneur ${escapeHtml(removal.donor_vin || "")} ?`;
+      } else if (action === "STORE_ACK") {
+        confirmationPrompt = `Confirmez-vous la prise en compte magasin pour la commande de réapprovisionnement de la pièce "${escapeHtml(removal.part_designation)}" ?`;
+      } else if (action === "MARK_REPLACEMENT_AVAILABLE") {
+        confirmationPrompt = `Confirmez-vous que la pièce neuve de remplacement "${escapeHtml(removal.part_designation)}" a été reçue et est disponible pour restitution ?`;
+      } else if (action === "CONFIRM_RESTITUTION") {
+        confirmationPrompt = `Confirmez-vous que la pièce neuve a été physiquement remontée sur le véhicule donneur ${escapeHtml(removal.donor_vin || "")} et le dossier clôturé ?`;
+      }
+
+      fieldsHtml = `
+        <p class="vn-part-action-prompt">${confirmationPrompt}</p>
+        <div class="vn-part-form-row">
+          <label for="vn-action-reason">Commentaire / Remarque (optionnel)</label>
+          <textarea id="vn-action-reason" name="reason" rows="2" placeholder="Remarque..."></textarea>
+        </div>
+      `;
+    }
+
+    host.innerHTML = `
+      <div class="vn-part-modal-backdrop" id="vn-part-action-backdrop" role="dialog" aria-modal="true" aria-labelledby="vn-part-action-title">
+        <div class="vn-part-modal-dialog">
+          <header class="vn-part-modal-header">
+            <h2 id="vn-part-action-title">${escapeHtml(title)}</h2>
+            <button type="button" class="vn-part-modal-close" id="vn-part-action-close" aria-label="Fermer">✕</button>
+          </header>
+          <form id="vn-part-action-form" class="vn-part-form" data-removal-id="${escapeHtml(removal.id)}" data-action="${escapeHtml(action)}" data-version="${removal.version}">
+            <div class="vn-part-modal-summary">
+              <strong>${escapeHtml(removal.part_designation)}</strong>
+              <span>Bénéficiaire : ${escapeHtml(removal.beneficiary_model || "—")}</span>
+              <span>Statut actuel : ${escapeHtml(removal.status)}</span>
+            </div>
+
+            <div id="vn-part-action-error" class="vn-part-form-error" style="display:none;" role="alert"></div>
+
+            ${fieldsHtml}
+
+            <footer class="vn-part-modal-footer">
+              <button type="button" class="ghost-button" id="vn-part-action-cancel">Annuler</button>
+              <button type="submit" class="primary-button" id="vn-part-action-submit">Confirmer l'action</button>
+            </footer>
+          </form>
+        </div>
+      </div>
+    `;
+
+    document.getElementById("vn-part-action-close")?.addEventListener("click", closeModals);
+    document.getElementById("vn-part-action-cancel")?.addEventListener("click", closeModals);
+    document.getElementById("vn-part-action-form")?.addEventListener("submit", handleActionFormSubmit);
+
+    // Auto-focus first input
+    const firstInput = document.querySelector("#vn-part-action-form input, #vn-part-action-form textarea");
+    firstInput?.focus();
+  }
+
+  /**
+   * Show error inside modal.
+   */
+  function showModalError(el, msg) {
+    if (!el) return;
+    el.textContent = msg;
+    el.style.display = "block";
+  }
+
+  /**
+   * Close all active modals.
+   */
+  function closeModals() {
+    const host = document.getElementById("vn-part-modals-host");
+    if (host) host.innerHTML = "";
+  }
+
+  /**
+   * Handle submission of the Action form.
+   */
+  async function handleActionFormSubmit(e) {
+    e.preventDefault();
+    if (vnPartEphemeralState.mutationInProgress) return;
+
+    const form = e.target;
+    const removalId = form.dataset.removalId;
+    const action = form.dataset.action;
+    const expectedVersion = parseInt(form.dataset.version, 10);
+    const errorEl = document.getElementById("vn-part-action-error");
+    const submitBtn = document.getElementById("vn-part-action-submit");
+
+    const removal = vnPartEphemeralState.removals.find((r) => r.id === removalId);
+    if (!removal) {
+      showModalError(errorEl, "Dossier introuvable.");
+      return;
+    }
+
+    const payload = {};
+
+    // 1. Validate reason if required
+    const reasonVal = form.reason?.value?.trim();
+    if (action === "REFUSE" || action === "CANCEL") {
+      if (!reasonVal) {
+        showModalError(errorEl, "Le motif est obligatoire pour cette action.");
+        return;
+      }
+      payload.reason = reasonVal;
+    } else if (reasonVal) {
+      payload.reason = reasonVal;
+    }
+
+    // 2. Validate ETA if required
+    if (action === "REVISE_ETA" || (action === "APPROVE" && form.expected_replacement_date)) {
+      const etaVal = form.expected_replacement_date?.value?.trim();
+      if (!etaVal) {
+        showModalError(errorEl, "La date d'arrivée prévue de la pièce est obligatoire.");
+        return;
+      }
+      // Check valid ISO date format YYYY-MM-DD
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(etaVal) || isNaN(new Date(etaVal).getTime())) {
+        showModalError(errorEl, "Format de date invalide (attendu : AAAA-MM-JJ).");
+        return;
+      }
+      payload.expected_replacement_date = etaVal;
+    }
+
+    // 3. Validate Donor data if required
+    if (action === "REVISE_DONOR" || (action === "APPROVE" && form.donor_model)) {
+      const modelVal = form.donor_model?.value?.trim();
+      const vinVal = form.donor_vin?.value?.trim();
+      const locVal = form.donor_location?.value?.trim();
+
+      if (!modelVal) {
+        showModalError(errorEl, "Le modèle du véhicule donneur est obligatoire.");
+        return;
+      }
+      if (!vinVal) {
+        showModalError(errorEl, "Le numéro de châssis / VIN du donneur est obligatoire.");
+        return;
+      }
+
+      if (removal.beneficiary_vin && removal.beneficiary_vin.trim().toUpperCase() === vinVal.toUpperCase()) {
+        showModalError(errorEl, "Le véhicule donneur ne peut pas être identique au véhicule bénéficiaire.");
+        return;
+      }
+
+      payload.donor_model = modelVal;
+      payload.donor_vin = vinVal;
+      if (locVal) payload.donor_location = locVal;
+    }
+
+    vnPartEphemeralState.mutationInProgress = true;
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Traitement en cours...";
+    }
+
+    const applyFn =
+      (clientModule && clientModule.applyVnPartAction) ||
+      (typeof applyVnPartAction === "function" ? applyVnPartAction : null) ||
+      (typeof window !== "undefined" ? window.applyVnPartAction : null);
+
+    if (!applyFn) {
+      showModalError(errorEl, "Module d'action introuvable.");
+      vnPartEphemeralState.mutationInProgress = false;
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = "Confirmer l'action";
+      }
+      return;
+    }
+
+    const res = await applyFn(removalId, expectedVersion, action, payload);
+    vnPartEphemeralState.mutationInProgress = false;
+
+    // Concurrency conflict handling
+    if (!res.ok && res.code === "VERSION_CONFLICT") {
+      closeModals();
+      vnPartEphemeralState.conflictMessage = "Ce dossier a été mis à jour par un autre utilisateur. Les données ont été actualisées. Veuillez vérifier les nouvelles informations avant de recommencer.";
+      await refreshVnPartDashboard();
+      return;
+    }
+
+    if (!res.ok) {
+      showModalError(errorEl, res.message || "Erreur lors de l'exécution de l'action.");
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = "Confirmer l'action";
+      }
+      return;
+    }
+
+    closeModals();
+    vnPartEphemeralState.conflictMessage = null;
+    await refreshVnPartDashboard();
+  }
+
+  /**
    * Bind event listeners for the VN-PART dashboard.
    */
   function bindVnPartUiEvents() {
@@ -706,6 +1478,20 @@
       refreshVnPartDashboard();
     });
 
+    // Create Request button
+    const createBtn = document.getElementById("vn-part-new-request-btn");
+    createBtn?.addEventListener("click", () => {
+      openCreateModal();
+    });
+
+    // Conflict banner dismiss button
+    const conflictDismissBtn = document.getElementById("vn-part-conflict-dismiss");
+    conflictDismissBtn?.addEventListener("click", () => {
+      vnPartEphemeralState.conflictMessage = null;
+      const conflictBanner = document.getElementById("vn-part-conflict-banner");
+      if (conflictBanner) conflictBanner.style.display = "none";
+    });
+
     // Filter buttons
     const filterButtons = document.querySelectorAll(".vn-part-filter-btn");
     filterButtons.forEach((btn) => {
@@ -721,12 +1507,24 @@
       });
     });
 
-    // Clean hook into setActiveTab to automatically refresh when switching to vn-part
+    // Global click listener for contextual action buttons
+    document.addEventListener("click", (e) => {
+      const btn = e.target?.closest?.(".vn-part-action-btn");
+      if (btn) {
+        const action = btn.dataset.action;
+        const removalId = btn.dataset.removalId;
+        if (action && removalId) {
+          openActionModal(removalId, action);
+        }
+      }
+    });
+
+    // Global navigation tab hooks
     if (typeof window !== "undefined") {
       const originalSetActiveTab = window.setActiveTab;
       if (typeof originalSetActiveTab === "function" && !originalSetActiveTab._vnPartWrapped) {
-        const wrapped = function (tab) {
-          const res = originalSetActiveTab.apply(this, arguments);
+        const wrapped = function (tab, ...rest) {
+          const res = originalSetActiveTab.call(this, tab, ...rest);
           if (tab === "vn-part") {
             refreshVnPartDashboard();
           }
@@ -736,7 +1534,6 @@
         window.setActiveTab = wrapped;
       }
 
-      // Clean hook into renderPrimaryNavigationVisibility to synchronize vn-part nav button
       const originalRenderNav = window.renderPrimaryNavigationVisibility;
       if (typeof originalRenderNav === "function" && !originalRenderNav._vnPartWrapped) {
         const wrappedNav = function (...args) {
@@ -749,7 +1546,6 @@
       }
     }
 
-    // Direct click listener on the nav button as extra resilience
     document.addEventListener("click", (e) => {
       const btn = e.target?.closest?.('.nav-button[data-tab="vn-part"]');
       if (btn) {
@@ -757,7 +1553,13 @@
       }
     });
 
-    // Initial sync of nav visibility
+    // Escape key closes modals
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        closeModals();
+      }
+    });
+
     syncVnPartNavVisibility();
   }
 
@@ -779,12 +1581,17 @@
     computeVnPartKpis,
     filterVnPartDonors,
     groupVnPartByModelAndVin,
+    buildApprovalLookup,
+    getAvailableVnPartActions,
     ensureVnPartDomMounted,
+    syncVnPartNavVisibility,
     refreshVnPartDashboard,
     renderVnPartView,
-    syncVnPartNavVisibility,
     bindVnPartUiEvents,
-    formatDateFr,
-    formatDateTimeFr,
+    openCreateModal,
+    openActionModal,
+    closeModals,
+    validateCreateRequestPayload,
+    renderApprovalStrip,
   };
 });

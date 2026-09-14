@@ -1088,10 +1088,20 @@ function bindWorkshopForms() {
     if (!permission.ok) return notifyUser(permission.message, "error");
     const form = event.currentTarget;
     const data = new FormData(form);
+    const scheduleProfile = data.get("scheduleProfile");
+    const role = data.get("role");
+    const isEquip = typeof isEquipmentResource === "function"
+      ? isEquipmentResource({ role })
+      : ["zone_preparation", "cabine", "pont_vidange", "pont_mecanique", "transport"].includes(role);
+    const calendar = {};
+    if (!isEquip && (scheduleProfile === "team_1" || scheduleProfile === "team_2") && typeof RESOURCE_SCHEDULE_PROFILES !== "undefined") {
+      calendar.scheduleProfile = scheduleProfile;
+      calendar.workHours = cloneWorkHours(RESOURCE_SCHEDULE_PROFILES[scheduleProfile].workHours);
+    }
     state.resources.push(normalizeResource({
       id: uid("resource"),
       name: normalizeTextInputValue(data.get("name")),
-      role: data.get("role"),
+      role,
       location: normalizeTextInputValue(data.get("location")),
       site: data.get("site") === "external" ? "external" : "internal",
       kind: data.get("site") === "external" ? "external" : "internal",
@@ -1104,6 +1114,8 @@ function bindWorkshopForms() {
       transferReturnMinutes: Math.max(0, Number(data.get("transferReturnMinutes") || 0) || 0),
       standardLeadTimeMinutes: Math.max(0, Number(data.get("standardLeadTimeMinutes") || 0) || 0),
       fastLane: Boolean(data.get("fastLane")),
+      calendar,
+      scheduleProfile: calendar.scheduleProfile || null,
       active: true,
     }));
     saveState();

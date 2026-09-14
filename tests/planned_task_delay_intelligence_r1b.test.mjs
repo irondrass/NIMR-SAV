@@ -457,6 +457,32 @@ test("S10: Finish late + stale eligible -> finish-late only, generic stale suppr
   assert.equal(exceptions.some((e) => e.code === "stale"), false, "Duplicate generic stale must be suppressed");
 });
 
+test("R1B-REV-001: Start late + stale eligible -> start-late only, generic stale suppressed", () => {
+  // Vehicle physically present, received Monday 2026-09-07 at 07:45.
+  // Booking planned Monday 08:00-10:00, unstarted.
+  // By Thursday 2026-09-10 at 10:00:
+  // - start delay threshold (08:30) exceeded by days (>30 resource-working minutes) -> task_start_late present
+  // - workshop activity is >24 workshop-open hours old
+  // -> stale must be suppressed by task_start_late
+  const { c, item, setBookings } = createR1bFixture({ receivedAt: "2026-09-07T07:45:00" });
+  setBookings([{
+    id: "b1",
+    caseId: item.id,
+    type: "work",
+    title: "Diagnostic moteur",
+    status: "planned",
+    start: "2026-09-07T08:00:00",
+    end: "2026-09-07T10:00:00",
+    segments: [{ start: "2026-09-07T08:00:00", end: "2026-09-07T10:00:00" }],
+    resourceIds: ["tech-generic"],
+  }]);
+
+  const exceptions = c.getOperationalExceptions(item, D("2026-09-10T10:00:00"));
+  assert.ok(exceptions.some((e) => e.code === "task_start_late"), "Specific start late must be emitted");
+  assert.equal(exceptions.some((e) => e.code === "stale"), false, "Duplicate generic stale must be suppressed by start late");
+  assert.equal(exceptions.filter((e) => ["task_start_late", "task_finish_late", "stale"].includes(e.code)).length, 1, "Exactly one specific delay explanation must be emitted");
+});
+
 test("S11: Holiday inside tolerance period -> holiday minutes excluded", () => {
   const { c, item, setBookings } = createR1bFixture({
     holidays: [{ date: "2026-09-08", name: "Jour férié" }],

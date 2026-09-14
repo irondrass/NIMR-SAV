@@ -2536,7 +2536,7 @@ function getOperationalExceptions(item, now = new Date()) {
     });
 
     const activity = getWorkshopProgressLastActivityAt(item, { flowOnly: true });
-    if (!hasFinishDelay && !hasActiveTaskWithinWindow && getWorkshopOpenElapsedHours(activity, now) >= WORKSHOP_PROGRESS_STALE_HOURS) {
+    if (!hasFinishDelay && !hasStartDelay && !hasActiveTaskWithinWindow && getWorkshopOpenElapsedHours(activity, now) >= WORKSHOP_PROGRESS_STALE_HOURS) {
       add("stale", "Sans évolution atelier depuis 24 h", "warn", "Chef Atelier");
     }
 

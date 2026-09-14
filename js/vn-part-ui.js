@@ -37,6 +37,7 @@
   // Ephemeral in-memory UI state (never persisted to durable store)
   const vnPartEphemeralState = {
     donors: [],
+    donorCommitments: [],
     removals: [],
     approvals: [],
     loading: false,
@@ -98,6 +99,191 @@
     } catch {
       return String(dateVal);
     }
+  }
+
+  /**
+   * Canonical donor VIN normalization helper.
+   * Compares strings using trimmed uppercase.
+   * Empty or whitespace-only returns empty string.
+   */
+  function normalizeDonorVin(vin) {
+    if (vin === null || vin === undefined) return "";
+    return String(vin).trim().toUpperCase();
+  }
+
+  /**
+   * Format part identity prioritizing reference over designation.
+   * Primary: "REF. <part_reference> — <part_designation>"
+   * Fallback: "RÉF. NON RENSEIGNÉE — <part_designation>"
+   */
+  function formatPartIdentity(partReference, partDesignation) {
+    const ref = String(partReference || "").trim();
+    const desig = String(partDesignation || "").trim() || "Pièce non spécifiée";
+    if (ref) {
+      return "RÉF. " + ref + " — " + desig;
+    }
+    return "RÉF. NON RENSEIGNÉE — " + desig;
+  }
+
+  /**
+   * Render HTML markup for part identity prioritizing reference.
+   */
+  function renderPartIdentityHtml(partReference, partDesignation) {
+    const ref = String(partReference || "").trim();
+    const desig = String(partDesignation || "").trim() || "Pièce non spécifiée";
+    if (ref) {
+      return '<span class="vn-part-identity"><code class="vn-part-ref-tag vn-part-part-ref">RÉF. ' + escapeHtml(ref) + '</code> <span class="vn-part-desig vn-part-desig-text">— ' + escapeHtml(desig) + '</span></span>';
+    }
+    return '<span class="vn-part-identity"><span class="vn-part-ref-missing">RÉF. NON RENSEIGNÉE</span> <span class="vn-part-desig vn-part-desig-text">— ' + escapeHtml(desig) + '</span></span>';
+  }
+
+  /**
+   * Pure deterministic helper computing donor commitment summary.
+   *
+   * @param {Array} removals - Workshop removal records
+   * @param {string} donorVin - Target donor VIN (raw or normalized)
+   * @param {Object} [options={}]
+   * @param {string} [options.workshopId] - Optional workshop ID scope
+   * @param {string} [options.excludeRemovalId] - Exclude current removal ID
+   * @param {string} [options.currentRemovalEta] - Projected ETA for current removal (what-if)
+   * @returns {Object} Summary metrics and commitment records
+   */
+  function computeDonorCommitmentSummary(removals = [], donorVin = "", options = {}) {
+    const normTarget = normalizeDonorVin(donorVin);
+    if (!normTarget) {
+      return {
+        normalizedVin: "",
+        openCommitmentCount: 0,
+        plannedRemovalCount: 0,
+        physicalOpenRemovalCount: 0,
+        waitingReplacementCount: 0,
+        physicalWaitingReplacementCount: 0,
+        physicalReplacementAvailableCount: 0,
+        etaMissingCount: 0,
+        nextExpectedReplacementDate: null,
+        estimatedFullRestorationDate: null,
+        canBeRestoredToday: false,
+        donorModel: null,
+        donorLocation: null,
+        commitments: [],
+        projectedFullRestorationDate: null,
+        currentRemovalHasEta: Boolean(options.newExpectedDate || options.currentRemovalEta),
+        hasCollision: false,
+        collisionCount: 0,
+        donorVin: "",
+        donorModel: null,
+        plannedCount: 0,
+        physicalCount: 0,
+        nextEta: null,
+        fullRestorationEta: null,
+        isFullEtaDefinitive: false,
+        can_be_restored_today: false,
+        projectedFullEta: null,
+        projectedTotalCount: 0,
+      };
+    }
+
+    const workshopId = options.workshopId ? String(options.workshopId).trim() : null;
+    const excludeId = options.excludeRemovalId ? String(options.excludeRemovalId).trim() : null;
+
+    // Filter matching commitments
+    const matching = removals.filter((r) => {
+      if (normalizeDonorVin(r.donor_vin) !== normTarget) return false;
+      if (workshopId && String(r.workshop_id || "").trim() !== workshopId) return false;
+      if (excludeId && String(r.id || "").trim() === excludeId) return false;
+      // Exclude terminal statuses and fully restored pieces
+      if (["REFUSE", "ANNULE", "CLOTURE"].includes(r.status)) return false;
+      if (r.restored_at !== null && r.restored_at !== undefined) return false;
+      return true;
+    });
+
+    const openCommitmentCount = matching.length;
+    const plannedRemovals = matching.filter((r) => !r.removed_at);
+    const plannedRemovalCount = plannedRemovals.length;
+    const physicalOpenRemovals = matching.filter((r) => Boolean(r.removed_at));
+    const physicalOpenRemovalCount = physicalOpenRemovals.length;
+
+    // Waiting for replacement arrival across open commitments
+    const waitingReplacement = matching.filter((r) => !r.replacement_available_at);
+    const waitingReplacementCount = waitingReplacement.length;
+
+    // Physical waiting vs available
+    const physicalWaitingReplacementCount = physicalOpenRemovals.filter(
+      (r) => !r.replacement_available_at
+    ).length;
+    const physicalReplacementAvailableCount = physicalOpenRemovals.filter(
+      (r) => Boolean(r.replacement_available_at)
+    ).length;
+
+    // Missing ETA count among open commitments still needing replacement
+    const etaMissing = waitingReplacement.filter(
+      (r) => !r.expected_replacement_date
+    );
+    const etaMissingCount = etaMissing.length;
+
+    // Valid ETA dates for commitments still needing replacement
+    const etaDates = waitingReplacement
+      .map((r) => r.expected_replacement_date)
+      .filter((d) => Boolean(d) && !isNaN(new Date(d).getTime()))
+      .sort();
+
+    const nextExpectedReplacementDate = etaDates.length > 0 ? etaDates[0] : null;
+    const estimatedFullRestorationDate = etaDates.length > 0 ? etaDates[etaDates.length - 1] : null;
+
+    // Section 11: can_be_restored_today is STRICTLY PHYSICAL
+    // physical_open_removal_count > 0 AND physical_waiting_replacement_count = 0
+    const canBeRestoredToday =
+      physicalOpenRemovalCount > 0 && physicalWaitingReplacementCount === 0;
+
+    // Most recent donor_model and donor_location from matching
+    const sortedByTime = [...matching].sort((a, b) => {
+      const ta = new Date(a.updated_at || a.created_at || 0).getTime();
+      const tb = new Date(b.updated_at || b.created_at || 0).getTime();
+      return tb - ta;
+    });
+    const donorModel = sortedByTime.find((r) => r.donor_model)?.donor_model || null;
+    const donorLocation = sortedByTime.find((r) => r.donor_location)?.donor_location || null;
+
+    // What-if projection
+    let projectedFullRestorationDate = estimatedFullRestorationDate;
+    const currentEta = (options.newExpectedDate || options.currentRemovalEta)
+      ? String(options.newExpectedDate || options.currentRemovalEta).trim()
+      : null;
+    if (currentEta && !isNaN(new Date(currentEta).getTime())) {
+      const allDates = [...etaDates, currentEta].sort();
+      projectedFullRestorationDate = allDates[allDates.length - 1];
+    }
+
+    return {
+      normalizedVin: normTarget,
+      openCommitmentCount,
+      plannedRemovalCount,
+      physicalOpenRemovalCount,
+      waitingReplacementCount,
+      physicalWaitingReplacementCount,
+      physicalReplacementAvailableCount,
+      etaMissingCount,
+      nextExpectedReplacementDate,
+      estimatedFullRestorationDate,
+      canBeRestoredToday,
+      donorModel,
+      donorLocation,
+      commitments: matching,
+      projectedFullRestorationDate,
+      currentRemovalHasEta: Boolean(currentEta),
+      // Aliases for convenience & test parity
+      hasCollision: openCommitmentCount > 0,
+      collisionCount: openCommitmentCount,
+      donorVin: normTarget,
+      plannedCount: plannedRemovalCount,
+      physicalCount: physicalOpenRemovalCount,
+      nextEta: nextExpectedReplacementDate,
+      fullRestorationEta: estimatedFullRestorationDate,
+      isFullEtaDefinitive: openCommitmentCount > 0 && etaMissingCount === 0,
+      can_be_restored_today: canBeRestoredToday,
+      projectedFullEta: projectedFullRestorationDate,
+      projectedTotalCount: openCommitmentCount + (currentEta ? 1 : 0),
+    };
   }
 
   /**
@@ -443,21 +629,24 @@
    * Render the 3-position approval progress strip for a removal.
    */
   function renderApprovalStrip(removal, approvalLookup) {
+    const lookup = (approvalLookup && typeof approvalLookup.get === "function")
+      ? approvalLookup
+      : (Array.isArray(approvalLookup) ? buildApprovalLookup(approvalLookup) : new Map());
     const roles = [
-      { roleKey: "directeur", label: "Direction" },
+      { roleKey: "directeur", label: "Directeur SAV" },
       { roleKey: "directeur_pieces", label: "Direction Pièces (ETA)" },
       { roleKey: "responsable_qualite_parc_vn", label: "Chef de Parc VN (Donneur)" },
     ];
 
     let approvedCount = 0;
     for (const r of roles) {
-      const a = approvalLookup.get(`${removal.id}:${r.roleKey}`);
+      const a = lookup.get(`${removal.id}:${r.roleKey}`);
       if (a && a.decision === "APPROVED") approvedCount++;
     }
 
     let pillsHtml = "";
     for (const r of roles) {
-      const a = approvalLookup.get(`${removal.id}:${r.roleKey}`);
+      const a = lookup.get(`${removal.id}:${r.roleKey}`);
       let statusClass = "status-pending";
       let statusText = "En attente";
 
@@ -579,8 +768,7 @@
       <article class="vn-part-request-card" data-id="${escapeHtml(rem.id)}" data-version="${rem.version}">
         <header class="vn-part-request-card-header">
           <div class="vn-part-request-card-title">
-            <h3 class="vn-part-request-part-title">${escapeHtml(rem.part_designation)}</h3>
-            ${rem.part_reference ? `<code class="vn-part-part-ref">${escapeHtml(rem.part_reference)}</code>` : ""}
+            <h3 class="vn-part-request-part-title">${renderPartIdentityHtml(rem.part_reference, rem.part_designation)}</h3>
             <span class="vn-part-qty">Qté: ${Number(rem.quantity) || 1}</span>
           </div>
           <div class="vn-part-request-card-badges">
@@ -862,6 +1050,7 @@
       };
     } else {
       vnPartEphemeralState.donors = result.donors || [];
+      vnPartEphemeralState.donorCommitments = result.donorCommitments || [];
       vnPartEphemeralState.removals = result.removals || [];
       vnPartEphemeralState.approvals = result.approvals || [];
       vnPartEphemeralState.lastLoadedAt = new Date().toISOString();
@@ -1074,6 +1263,12 @@
           const isReady = Boolean(donor.can_be_restored_today);
           const isFullyRestored = Boolean(donor.is_fully_restored);
 
+          const donorSummary = computeDonorCommitmentSummary(
+            vnPartEphemeralState.removals,
+            donor.donor_vin,
+            { workshopId: donor.workshop_id }
+          );
+
           html += `
             <article class="vn-part-donor-card ${isOverdue ? "is-overdue" : ""} ${isReady ? "is-ready" : ""}" data-vin="${escapeHtml(donor.donor_vin)}">
               <header class="vn-part-donor-header">
@@ -1116,7 +1311,18 @@
                     <strong>${escapeHtml(formatDateFr(donor.expected_replacement_date))}</strong>
                   </div>
                 ` : ""}
+                <div class="vn-part-metric-chip ${donorSummary.etaMissingCount > 0 ? "is-warning" : (isOverdue ? "text-danger" : "")}">
+                  <span>Restitution complète projetée:</span>
+                  <strong>${donorSummary.etaMissingCount > 0 ? `À CONFIRMER (${donorSummary.etaMissingCount} manquante${donorSummary.etaMissingCount > 1 ? "s" : ""})` : (donorSummary.estimatedFullRestorationDate ? escapeHtml(formatDateFr(donorSummary.estimatedFullRestorationDate)) : "—")}</strong>
+                </div>
               </div>
+
+              ${donorSummary.plannedRemovalCount > 0 ? `
+                <div class="vn-part-planning-notice" role="note">
+                  <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                  <span>⚠️ <strong>${donorSummary.plannedRemovalCount} prochain(s) prélèvement(s)</strong> déjà planifié(s) sur ce véhicule donneur.</span>
+                </div>
+              ` : ""}
 
               ${isFullyRestored ? `
                 <div class="vn-part-restored-banner" role="status">
@@ -1156,8 +1362,7 @@
                 <div class="vn-part-removal-item" data-id="${escapeHtml(rem.id)}" data-version="${rem.version}">
                   <div class="vn-part-removal-top">
                     <div class="vn-part-removal-title">
-                      <strong>${escapeHtml(rem.part_designation)}</strong>
-                      ${rem.part_reference ? `<code class="vn-part-part-ref">${escapeHtml(rem.part_reference)}</code>` : ""}
+                      <strong>${renderPartIdentityHtml(rem.part_reference, rem.part_designation)}</strong>
                       <span class="vn-part-qty">Qté: ${Number(rem.quantity) || 1}</span>
                     </div>
                     <div class="vn-part-removal-status">
@@ -1494,6 +1699,7 @@
           <div class="vn-part-form-row">
             <label for="vn-action-donor-vin">N° Châssis / VIN véhicule donneur <span class="required">*</span></label>
             <input type="text" id="vn-action-donor-vin" name="donor_vin" required placeholder="Numéro VIN donneur">
+              <div id="vn-action-donor-preview" class="vn-part-donor-preview" aria-live="polite" style="display:none;"></div>
           </div>
           <div class="vn-part-form-row">
             <label for="vn-action-donor-loc">Emplacement du véhicule donneur (optionnel)</label>
@@ -1508,7 +1714,7 @@
         fieldsHtml = `
           <div class="vn-part-form-row">
             <label for="vn-action-reason">Remarque de validation (optionnel)</label>
-            <textarea id="vn-action-reason" name="reason" rows="2" placeholder="Remarque direction..."></textarea>
+            <textarea id="vn-action-reason" name="reason" rows="2" placeholder="Remarque Directeur SAV..."></textarea>
           </div>
         `;
       }
@@ -1532,6 +1738,7 @@
         <div class="vn-part-form-row">
           <label for="vn-action-donor-vin">N° Châssis / VIN véhicule donneur <span class="required">*</span></label>
           <input type="text" id="vn-action-donor-vin" name="donor_vin" required value="${escapeHtml(removal.donor_vin || "")}">
+          <div id="vn-action-donor-preview" class="vn-part-donor-preview" aria-live="polite" style="display:none;"></div>
         </div>
         <div class="vn-part-form-row">
           <label for="vn-action-donor-loc">Emplacement du véhicule donneur (optionnel)</label>
@@ -1545,12 +1752,13 @@
     } else {
       // Actions: CONFIRM_REMOVAL, STORE_ACK, MARK_REPLACEMENT_AVAILABLE, CONFIRM_RESTITUTION
       let confirmationPrompt = "Confirmez-vous cette action opérationnelle sur le dossier ?";
+      const partDisplay = formatPartIdentity(removal.part_reference, removal.part_designation);
       if (action === "CONFIRM_REMOVAL") {
-        confirmationPrompt = `Confirmez-vous que la pièce "${escapeHtml(removal.part_designation)}" a été physiquement démontée du véhicule donneur ${escapeHtml(removal.donor_vin || "")} ?`;
+        confirmationPrompt = `Confirmez-vous que la pièce "${escapeHtml(partDisplay)}" a été physiquement démontée du véhicule donneur ${escapeHtml(removal.donor_vin || "")} ?`;
       } else if (action === "STORE_ACK") {
-        confirmationPrompt = `Confirmez-vous la prise en compte magasin pour la commande de réapprovisionnement de la pièce "${escapeHtml(removal.part_designation)}" ?`;
+        confirmationPrompt = `Confirmez-vous la prise en compte magasin pour la commande de réapprovisionnement de la pièce "${escapeHtml(partDisplay)}" ?`;
       } else if (action === "MARK_REPLACEMENT_AVAILABLE") {
-        confirmationPrompt = `Confirmez-vous que la pièce neuve de remplacement "${escapeHtml(removal.part_designation)}" a été reçue et est disponible pour restitution ?`;
+        confirmationPrompt = `Confirmez-vous que la pièce neuve de remplacement "${escapeHtml(partDisplay)}" a été reçue et est disponible pour restitution ?`;
       } else if (action === "CONFIRM_RESTITUTION") {
         confirmationPrompt = `Confirmez-vous que la pièce neuve a été physiquement remontée sur le véhicule donneur ${escapeHtml(removal.donor_vin || "")} et le dossier clôturé ?`;
       }
@@ -1573,7 +1781,7 @@
           </header>
           <form id="vn-part-action-form" class="vn-part-form" data-removal-id="${escapeHtml(removal.id)}" data-action="${escapeHtml(action)}" data-version="${removal.version}">
             <div class="vn-part-modal-summary">
-              <strong>${escapeHtml(removal.part_designation)}</strong>
+              <strong>${renderPartIdentityHtml(removal.part_reference, removal.part_designation)}</strong>
               <span>Bénéficiaire : ${escapeHtml(removal.beneficiary_model || "—")}</span>
               <span>Statut actuel : ${escapeHtml(removal.status)}</span>
             </div>
@@ -1593,7 +1801,121 @@
 
     document.getElementById("vn-part-action-close")?.addEventListener("click", closeModals);
     document.getElementById("vn-part-action-cancel")?.addEventListener("click", closeModals);
+
     document.getElementById("vn-part-action-form")?.addEventListener("submit", handleActionFormSubmit);
+
+    // Live preview for donor VIN collisions & restoration ETA
+    const donorVinInput = document.getElementById("vn-action-donor-vin");
+    const previewContainer = document.getElementById("vn-action-donor-preview");
+
+    function updateDonorVinPreview() {
+      if (!donorVinInput || !previewContainer) return;
+      const rawVin = donorVinInput.value;
+      const normVin = normalizeDonorVin(rawVin);
+
+      if (!normVin) {
+        previewContainer.innerHTML = "";
+        previewContainer.style.display = "none";
+        return;
+      }
+
+      const summary = computeDonorCommitmentSummary(
+        vnPartEphemeralState.removals,
+        normVin,
+        {
+          workshopId: identity.workshopId,
+          excludeRemovalId: removal.id,
+          currentRemovalEta: removal.expected_replacement_date,
+        }
+      );
+
+      previewContainer.style.display = "block";
+
+      if (summary.openCommitmentCount === 0) {
+        previewContainer.innerHTML = `
+          <div class="vn-part-donor-clean-alert">
+            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>
+            <span>✓ Aucun autre prélèvement en cours sur ce véhicule donneur</span>
+          </div>
+        `;
+        return;
+      }
+
+      previewContainer.innerHTML = `
+        <div class="vn-part-donor-warning-alert" role="alert">
+          <div class="vn-part-donor-warning-header">
+            <div class="vn-part-donor-warning-title">
+              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+              <strong>⚠️ VIN DONNEUR DÉJÀ ENGAGÉ</strong>
+            </div>
+            <span class="vn-part-donor-warning-count">${summary.openCommitmentCount} prélèvement(s) ouvert(s)</span>
+          </div>
+
+          <div class="vn-part-donor-warning-stats">
+            <span>• ${summary.physicalOpenRemovalCount} pièce(s) déjà prélevée(s)</span>
+            <span>• ${summary.plannedRemovalCount} prélèvement(s) planifié(s)</span>
+          </div>
+
+          <div class="vn-part-donor-warning-dates">
+            ${summary.nextExpectedReplacementDate ? `
+              <div class="vn-part-warning-date-row">
+                <span class="date-lbl">Prochaine ETA :</span>
+                <strong class="date-val">${escapeHtml(formatDateFr(summary.nextExpectedReplacementDate))}</strong>
+              </div>
+            ` : ""}
+            <div class="vn-part-warning-date-row">
+              <span class="date-lbl">Restitution complète actuellement estimée :</span>
+              <strong class="date-val">${summary.etaMissingCount > 0 ? `À CONFIRMER — ${summary.etaMissingCount} ETA manquante(s)` : (summary.estimatedFullRestorationDate ? escapeHtml(formatDateFr(summary.estimatedFullRestorationDate)) : "—")}</strong>
+            </div>
+            ${summary.etaMissingCount > 0 && summary.estimatedFullRestorationDate ? `
+              <div class="vn-part-warning-subdate">
+                (Dernière ETA connue : ${escapeHtml(formatDateFr(summary.estimatedFullRestorationDate))} — sous réserve des ETA manquantes)
+              </div>
+            ` : ""}
+          </div>
+
+          <div class="vn-part-donor-whatif">
+            ${removal.expected_replacement_date ? `
+              <div class="vn-part-whatif-row">
+                <span class="whatif-lbl">Nouvelle restitution complète estimée après cette affectation :</span>
+                <strong class="whatif-val">${escapeHtml(formatDateFr(summary.projectedFullRestorationDate))}</strong>
+              </div>
+            ` : `
+              <div class="vn-part-whatif-row text-muted">
+                <span class="whatif-lbl">Nouvelle date finale après affectation :</span>
+                <span class="whatif-val">À CONFIRMER — ETA de cette pièce non encore renseignée</span>
+              </div>
+            `}
+          </div>
+
+          <details class="vn-part-donor-commitments-disclosure">
+            <summary>Voir les autres pièces engagées sur ce donneur (${summary.commitments.length})</summary>
+            <div class="vn-part-donor-commitments-list">
+              ${summary.commitments.map((c) => `
+                <div class="vn-part-donor-commitment-row">
+                  <div class="vn-part-commitment-main">
+                    <strong>${renderPartIdentityHtml(c.part_reference, c.part_designation)}</strong>
+                    <span class="vn-part-commitment-meta">Bénéficiaire : ${escapeHtml(c.beneficiary_model || "—")}${c.beneficiary_vin ? ` (${escapeHtml(c.beneficiary_vin)})` : ""}${c.beneficiary_or ? ` • OR: ${escapeHtml(c.beneficiary_or)}` : ""}</span>
+                  </div>
+                  <div class="vn-part-commitment-side">
+                    <span class="vn-part-badge badge-${c.removed_at ? (c.replacement_available_at ? 'available' : 'waiting') : 'neutral'}">${c.removed_at ? (c.replacement_available_at ? 'DISPONIBLE' : 'PRÉLEVÉ') : 'PLANIFIÉ'}</span>
+                    <span class="vn-part-commitment-eta">${c.expected_replacement_date ? `ETA: ${escapeHtml(formatDateFr(c.expected_replacement_date))}` : 'ETA: non renseignée'}</span>
+                  </div>
+                </div>
+              `).join("")}
+            </div>
+          </details>
+        </div>
+      `;
+    }
+
+    if (donorVinInput && previewContainer) {
+      donorVinInput.addEventListener("input", updateDonorVinPreview);
+      donorVinInput.addEventListener("change", updateDonorVinPreview);
+      if (donorVinInput.value) {
+        updateDonorVinPreview();
+      }
+    }
 
     // Auto-focus first input
     const firstInput = document.querySelector("#vn-part-action-form input, #vn-part-action-form textarea");
@@ -1882,5 +2204,9 @@
     closeModals,
     validateCreateRequestPayload,
     renderApprovalStrip,
+    normalizeDonorVin,
+    formatPartIdentity,
+    renderPartIdentityHtml,
+    computeDonorCommitmentSummary,
   };
 });

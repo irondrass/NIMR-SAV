@@ -9488,3 +9488,234 @@ select:focus {
 .vn-part-section-empty p {
   margin: 0;
 }
+
+/* ==========================================================================
+   VN-PART 004 — Donor Intelligence, Reference Priority & Live Collision Preview
+   ========================================================================== */
+
+.vn-part-identity {
+  display: inline-flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.vn-part-ref-tag {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--brand, #0f3b57);
+  background: rgba(15, 59, 87, 0.08);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.vn-part-ref-missing {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted, #64748b);
+  background: #f1f5f9;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-style: italic;
+}
+
+.vn-part-desig-text {
+  font-weight: 650;
+  color: var(--ink, #0f172a);
+}
+
+.vn-part-metric-chip.is-warning {
+  background: #fffbeb;
+  border: 1px solid #fef3c7;
+  color: #92400e;
+}
+
+.vn-part-planning-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: var(--radius-sm, 6px);
+  color: #92400e;
+  font-size: 0.85rem;
+  margin: 10px 0;
+}
+
+.vn-part-planning-notice svg {
+  stroke: #d97706;
+  fill: none;
+  stroke-width: 2;
+  flex-shrink: 0;
+}
+
+.vn-part-planned-disclosure {
+  margin-top: 8px;
+  border-top: 1px dashed var(--line, #cbd5e1);
+  padding-top: 8px;
+}
+
+.vn-part-removal-item.is-planned-item {
+  border-left: 3px solid #f59e0b;
+  background: #fffdfa;
+}
+
+/* Donor Collision Modal Preview */
+.vn-part-donor-preview {
+  margin-top: 6px;
+}
+
+.vn-part-donor-clean-alert {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: var(--radius-sm, 6px);
+  color: #166534;
+  font-size: 0.84rem;
+  font-weight: 500;
+}
+
+.vn-part-donor-clean-alert svg {
+  stroke: #16a34a;
+  fill: none;
+  stroke-width: 2.5;
+  flex-shrink: 0;
+}
+
+.vn-part-donor-warning-alert {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: var(--radius-sm, 8px);
+  color: #92400e;
+  font-size: 0.86rem;
+}
+
+.vn-part-donor-warning-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.vn-part-donor-warning-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #b45309;
+}
+
+.vn-part-donor-warning-count {
+  font-weight: 700;
+  background: #fef3c7;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+}
+
+.vn-part-donor-warning-stats {
+  display: flex;
+  gap: 14px;
+  font-size: 0.82rem;
+  color: #78350f;
+  font-weight: 600;
+}
+
+.vn-part-donor-warning-dates {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.7);
+  border-radius: 4px;
+  border-left: 3px solid #d97706;
+}
+
+.vn-part-warning-date-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.vn-part-warning-subdate {
+  font-size: 0.78rem;
+  color: #b45309;
+  font-style: italic;
+}
+
+.vn-part-donor-whatif {
+  font-size: 0.82rem;
+  padding-top: 4px;
+  border-top: 1px dashed #fcd34d;
+}
+
+.vn-part-whatif-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.vn-part-donor-commitments-disclosure {
+  margin-top: 4px;
+}
+
+.vn-part-donor-commitments-disclosure summary {
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #b45309;
+}
+
+.vn-part-donor-commitments-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.vn-part-donor-commitment-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: #ffffff;
+  border: 1px solid #fef3c7;
+  border-radius: 4px;
+  font-size: 0.8rem;
+}
+
+.vn-part-commitment-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+
+.vn-part-commitment-meta {
+  font-size: 0.75rem;
+  color: #78350f;
+}
+
+.vn-part-commitment-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.vn-part-commitment-eta {
+  font-size: 0.72rem;
+  color: #64748b;
+}

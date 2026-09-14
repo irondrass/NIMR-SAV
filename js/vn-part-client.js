@@ -150,15 +150,16 @@
 
   /**
    * Load VN-PART dashboard data via authenticated SELECT queries.
-   * Executes exactly 3 workshop-scoped queries:
+   * Executes exactly 4 workshop-scoped queries:
    *   1. vn_part_donor_state_v1
-   *   2. vn_part_removals
-   *   3. vn_part_approvals
+   *   2. vn_part_donor_commitment_v1
+   *   3. vn_part_removals
+   *   4. vn_part_approvals
    *
    * @param {Object} [options]
    * @param {Object} [options.client] - Injected Supabase client (for testing)
    * @param {string} [options.workshopId] - Injected workshop ID (strictly read tests only)
-   * @returns {Promise<{ ok: boolean, workshopId?: string, donors?: Array, removals?: Array, approvals?: Array, code?: string, message?: string }>}
+   * @returns {Promise<{ ok: boolean, workshopId?: string, donors?: Array, donorCommitments?: Array, removals?: Array, approvals?: Array, code?: string, message?: string }>}
    */
   async function loadVnPartDashboard(options = {}) {
     const client = options.client || resolveSupabaseClient();
@@ -183,9 +184,13 @@
     }
 
     try {
-      const [donorsRes, removalsRes, approvalsRes] = await Promise.all([
+      const [donorsRes, donorCommitmentsRes, removalsRes, approvalsRes] = await Promise.all([
         client
           .from("vn_part_donor_state_v1")
+          .select("*")
+          .eq("workshop_id", workshopId),
+        client
+          .from("vn_part_donor_commitment_v1")
           .select("*")
           .eq("workshop_id", workshopId),
         client
@@ -205,6 +210,14 @@
           ok: false,
           code: donorsRes.error.code || "QUERY_ERROR",
           message: donorsRes.error.message || "Erreur lors du chargement de la vue donneurs VN.",
+        };
+      }
+
+      if (donorCommitmentsRes && donorCommitmentsRes.error) {
+        return {
+          ok: false,
+          code: donorCommitmentsRes.error.code || "QUERY_ERROR",
+          message: donorCommitmentsRes.error.message || "Erreur lors du chargement de la vue des engagements donneurs VN.",
         };
       }
 
@@ -228,6 +241,7 @@
         ok: true,
         workshopId,
         donors: donorsRes.data || [],
+        donorCommitments: (donorCommitmentsRes && donorCommitmentsRes.data) || [],
         removals: removalsRes.data || [],
         approvals: approvalsRes.data || [],
       };

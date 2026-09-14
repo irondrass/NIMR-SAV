@@ -535,7 +535,7 @@ test("Group N: Mutation fails closed with zero RPC and zero workshop_members que
   // Verify dashboard reads: exactly 3 queries, none to workshop_members or audit_events
   queriedTables.length = 0;
   await vnPartClient.loadVnPartDashboard({ client: mockClient, workshopId: "ws-1" });
-  assert.deepEqual(queriedTables.sort(), ["vn_part_approvals", "vn_part_donor_state_v1", "vn_part_removals"]);
+  assert.deepEqual(queriedTables.sort(), ["vn_part_approvals", "vn_part_donor_commitment_v1", "vn_part_donor_state_v1", "vn_part_removals"]);
   assert.equal(queriedTables.includes("workshop_members"), false, "Dashboard must NOT read workshop_members");
   assert.equal(queriedTables.includes("vn_part_audit_events"), false, "Dashboard must NOT read vn_part_audit_events");
 

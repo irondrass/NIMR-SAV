@@ -223,8 +223,7 @@ function renderMobilePlanningList(date, resources, taskNumberMap, filters = null
   const target = $("#mobile-planning-list");
   if (!target) return;
   const day = todayKey(date);
-  const dayStart = atTime(date, "08:00");
-  const dayEnd = atTime(date, "17:00");
+  const { dayStart, dayEnd } = getGanttDayBounds(date);
   const rows = [];
   const dayBookings = typeof getIndexedDayBookings === "function" ? getIndexedDayBookings(day) : state.bookings;
   dayBookings.forEach((booking) => {
@@ -395,8 +394,7 @@ function renderResourceBookings(resource, date, dayStart, dayEnd, total, dailyCo
 
 function buildDailyPlanningTaskNumberMap(date, resources) {
   const day = todayKey(date);
-  const dayStart = atTime(date, "08:00");
-  const dayEnd = atTime(date, "17:00");
+  const { dayStart, dayEnd } = getGanttDayBounds(date);
   const rows = [];
   const dayBookings = typeof getIndexedDayBookings === "function" ? getIndexedDayBookings(day) : state.bookings;
   dayBookings.forEach((booking) => {

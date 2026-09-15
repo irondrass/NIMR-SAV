@@ -203,7 +203,7 @@
     const status = String(removal.status || "").trim();
 
     if (
-      ["REFUSE", "ANNULE", "CLOTURE", "PIECE_DISPONIBLE"].includes(status) ||
+      status !== "PRELEVE_EN_ATTENTE_PIECE" ||
       removal.replacement_available_at ||
       removal.restored_at
     ) {

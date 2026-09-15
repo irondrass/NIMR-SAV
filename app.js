@@ -1143,6 +1143,7 @@ function bindWorkshopForms() {
     }));
     saveState();
     form.reset();
+    syncResourceScheduleProfileVisibility();
     render();
   });
 

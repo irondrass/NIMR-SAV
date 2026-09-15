@@ -697,6 +697,77 @@ const team2Tech = {
   assert.equal(scheduleSelect.value, "team_2", "Operator must remain able to explicitly select Team 2");
 
   console.log("✔ R3-S26: Equipment -> human transition restores explicit team selection without automatic assignment");
+
+  // --- R3-S27: Equipment submit -> native reset restores human UI state ---
+  roleSelect.value = "cabine";
+  scheduleSelect.value = "team_1";
+  roleChangeListener();
+
+  assert.equal(scheduleField.hidden, true);
+  assert.equal(scheduleSelect.disabled, true);
+  assert.equal(scheduleSelect.value, "workshop");
+
+  const beforeResetSubmit = c.state.resources.length;
+
+  const equipmentSubmitForm = {
+    __formData: {
+      role: "cabine",
+      name: "Cabine Reset Test",
+      site: "internal",
+      capacity: "1",
+    },
+    reset() {
+      // Simulate native form.reset():
+      // role returns to first/default option = tolier,
+      // schedule value returns to workshop.
+      // hidden/disabled DOM properties are NOT reset automatically.
+      roleSelect.value = "tolier";
+      scheduleSelect.value = "workshop";
+    },
+  };
+
+  submitListener({
+    preventDefault() {},
+    currentTarget: equipmentSubmitForm,
+  });
+
+  assert.equal(
+    c.state.resources.length,
+    beforeResetSubmit + 1,
+    "Equipment submit must still create the resource"
+  );
+
+  const resetEquipment = c.state.resources[c.state.resources.length - 1];
+
+  assert.equal(resetEquipment.role, "cabine");
+  assert.equal(resetEquipment.scheduleProfile, null);
+  assert.deepEqual(toPlain(resetEquipment.calendar), {});
+
+  assert.equal(
+    roleSelect.value,
+    "tolier",
+    "Native reset simulation must restore default human role"
+  );
+
+  assert.equal(
+    scheduleField.hidden,
+    false,
+    "After submit/reset the default human role must show Horaire / Équipe"
+  );
+
+  assert.equal(
+    scheduleSelect.disabled,
+    false,
+    "After submit/reset the default human role schedule selector must be enabled"
+  );
+
+  assert.equal(
+    scheduleSelect.value,
+    "workshop",
+    "Reset form must return to workshop profile without automatic team assignment"
+  );
+
+  console.log("✔ R3-S27: Equipment submit/reset resynchronizes default human schedule UI");
 }
 
-console.log("\nALL 26 TEST SCENARIOS PASSED SUCCESSFULLY!");
+console.log("\nALL 27 TEST SCENARIOS PASSED SUCCESSFULLY!");

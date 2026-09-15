@@ -553,6 +553,14 @@
                     </select>
                     <input name="capacity" type="number" min="1" step="1" value="1" placeholder="Capacité simultanée" />
                     <input name="dailyCapacityMinutes" type="number" min="0" step="15" placeholder="Capacité/jour en minutes (optionnel)" />
+                    <label data-resource-schedule-profile-field>
+                      Horaire / Équipe
+                      <select name="scheduleProfile" aria-label="Horaire ou équipe de la ressource">
+                        <option value="workshop">Horaire atelier (par défaut)</option>
+                        <option value="team_1">Équipe 1 — 40 h</option>
+                        <option value="team_2">Équipe 2 — 40 h</option>
+                      </select>
+                    </label>
                     <input name="compatibleRoles" placeholder="Métiers compatibles, séparés par virgule" />
                     <input name="transferOutMinutes" type="number" min="0" step="15" placeholder="Transfert aller (min, externe)" />
                     <input name="transferReturnMinutes" type="number" min="0" step="15" placeholder="Transfert retour (min, externe)" />

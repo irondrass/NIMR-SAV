@@ -3309,7 +3309,7 @@ function getResourceDayIntervals(resource, dateLike) {
 
 function getResourceUnavailableRanges(resource) {
   const calendar = resource?.calendar || resource?.availabilityCalendar || {};
-  return [
+  const ranges = [
     ...(Array.isArray(calendar.unavailable) ? calendar.unavailable : []),
     ...(Array.isArray(calendar.blackouts) ? calendar.blackouts : []),
     ...(Array.isArray(resource?.unavailable) ? resource.unavailable : []),
@@ -3318,6 +3318,27 @@ function getResourceUnavailableRanges(resource) {
     start: new Date(entry?.start || entry?.from || entry?.startAt || ""),
     end: new Date(entry?.end || entry?.to || entry?.endAt || ""),
   })).filter((entry) => entry.start < entry.end);
+
+  try {
+    if (typeof state !== "undefined" && Array.isArray(state?.bookings) && resource?.id) {
+      state.bookings.forEach((booking) => {
+        if (booking?.type === "leave" && !booking.deletedAt && (booking.resourceIds || []).includes(resource.id)) {
+          const segments = Array.isArray(booking.segments) && booking.segments.length
+            ? booking.segments
+            : (booking.start && booking.end ? [{ start: booking.start, end: booking.end }] : []);
+          segments.forEach((segment) => {
+            const start = new Date(segment.start);
+            const end = new Date(segment.end);
+            if (start < end) ranges.push({ start, end });
+          });
+        }
+      });
+    }
+  } catch (error) {
+    // state might not be initialized in some isolated environments
+  }
+
+  return ranges;
 }
 
 function getPlanningSlotSegments(slot) {
@@ -3504,6 +3525,9 @@ function getBookingResourceUnits(booking, resourceId) {
 }
 
 function isResourceAvailableForSlot(resource, slot) {
+  if (resource && resource.active === false) {
+    return { ok: false, code: "inactive", nextAt: null };
+  }
   const segments = getPlanningSlotSegments(slot);
   if (!segments.length) return { ok: false, code: "invalid_slot", nextAt: null };
   const unavailable = getResourceUnavailableRanges(resource);

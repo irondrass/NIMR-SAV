@@ -112,6 +112,32 @@
   }
 
   /**
+   * Validate a donor VIN against the authoritative VN-PART VIN17 contract.
+   * Donor VINs must contain exactly 17 characters and exclude I, O and Q.
+   */
+  function validateDonorVin(vin) {
+    const normalizedVin = normalizeDonorVin(vin);
+    const isValid = /^[A-HJ-NPR-Z0-9]{17}$/.test(normalizedVin);
+
+    if (!isValid) {
+      return {
+        ok: false,
+        normalizedVin,
+        code: "INVALID_DONOR_VIN",
+        message:
+          "Le VIN donneur doit contenir exactement 17 caractères valides (A-H, J-N, P, R-Z et 0-9).",
+      };
+    }
+
+    return {
+      ok: true,
+      normalizedVin,
+      code: null,
+      message: "",
+    };
+  }
+
+  /**
    * Format part identity prioritizing reference over designation.
    * Primary: "REF. <part_reference> — <part_designation>"
    * Fallback: "RÉF. NON RENSEIGNÉE — <part_designation>"
@@ -1698,7 +1724,7 @@
           </div>
           <div class="vn-part-form-row">
             <label for="vn-action-donor-vin">N° Châssis / VIN véhicule donneur <span class="required">*</span></label>
-            <input type="text" id="vn-action-donor-vin" name="donor_vin" required placeholder="Numéro VIN donneur">
+            <input type="text" id="vn-action-donor-vin" name="donor_vin" required minlength="17" maxlength="17" pattern="[A-HJ-NPR-Z0-9]{17}" autocapitalize="characters" spellcheck="false" placeholder="VIN complet à 17 caractères">
               <div id="vn-action-donor-preview" class="vn-part-donor-preview" aria-live="polite" style="display:none;"></div>
           </div>
           <div class="vn-part-form-row">
@@ -1737,7 +1763,7 @@
         </div>
         <div class="vn-part-form-row">
           <label for="vn-action-donor-vin">N° Châssis / VIN véhicule donneur <span class="required">*</span></label>
-          <input type="text" id="vn-action-donor-vin" name="donor_vin" required value="${escapeHtml(removal.donor_vin || "")}">
+          <input type="text" id="vn-action-donor-vin" name="donor_vin" required minlength="17" maxlength="17" pattern="[A-HJ-NPR-Z0-9]{17}" autocapitalize="characters" spellcheck="false" value="${escapeHtml(removal.donor_vin || "")}">
           <div id="vn-action-donor-preview" class="vn-part-donor-preview" aria-live="polite" style="display:none;"></div>
         </div>
         <div class="vn-part-form-row">
@@ -1810,10 +1836,14 @@
 
     function updateDonorVinPreview() {
       if (!donorVinInput || !previewContainer) return;
-      const rawVin = donorVinInput.value;
-      const normVin = normalizeDonorVin(rawVin);
+      const validation = validateDonorVin(donorVinInput.value);
+      const normVin = validation.normalizedVin;
 
-      if (!normVin) {
+      if (donorVinInput.value !== normVin) {
+        donorVinInput.value = normVin;
+      }
+
+      if (!normVin || !validation.ok) {
         previewContainer.innerHTML = "";
         previewContainer.style.display = "none";
         return;
@@ -1991,19 +2021,30 @@
     // 3. Validate Donor data if required
     if (action === "REVISE_DONOR" || (action === "APPROVE" && form.donor_model)) {
       const modelVal = form.donor_model?.value?.trim();
-      const vinVal = form.donor_vin?.value?.trim();
+      const rawVinVal = form.donor_vin?.value ?? "";
+      const vinValidation = validateDonorVin(rawVinVal);
+      const vinVal = vinValidation.normalizedVin;
       const locVal = form.donor_location?.value?.trim();
 
       if (!modelVal) {
         showModalError(errorEl, "Le modèle du véhicule donneur est obligatoire.");
         return;
       }
-      if (!vinVal) {
+
+      if (!String(rawVinVal).trim()) {
         showModalError(errorEl, "Le numéro de châssis / VIN du donneur est obligatoire.");
         return;
       }
 
-      if (removal.beneficiary_vin && removal.beneficiary_vin.trim().toUpperCase() === vinVal.toUpperCase()) {
+      if (!vinValidation.ok) {
+        showModalError(errorEl, vinValidation.message);
+        return;
+      }
+
+      if (
+        removal.beneficiary_vin &&
+        normalizeDonorVin(removal.beneficiary_vin) === vinVal
+      ) {
         showModalError(errorEl, "Le véhicule donneur ne peut pas être identique au véhicule bénéficiaire.");
         return;
       }
@@ -2205,6 +2246,7 @@
     validateCreateRequestPayload,
     renderApprovalStrip,
     normalizeDonorVin,
+    validateDonorVin,
     formatPartIdentity,
     renderPartIdentityHtml,
     computeDonorCommitmentSummary,

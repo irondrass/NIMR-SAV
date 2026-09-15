@@ -578,8 +578,19 @@ test("10. Duplication Rule & Preleve Handoff: Pre-removal in Section A, Post-rem
   context.renderVnPartView();
   const html = getElement("vn-part-content").innerHTML;
 
-  const [sectionA, sectionB] = html.split('<section class="vn-part-section vn-part-donors-section"');
-  assert.ok(sectionA && sectionB, "Both sections must exist");
+  // 005B1 introduces an independent ETA operational queue before the
+  // historical A/B workflow sections. ETA cards intentionally reference
+  // post-removal records, so they must not be interpreted as Section A.
+  const htmlWithoutEta = html.replace(
+    /<section\s+id="vn-part-eta-section"[\s\S]*?<\/section>/u,
+    ""
+  );
+
+  const [sectionA, sectionB] = htmlWithoutEta.split(
+    '<section class="vn-part-section vn-part-donors-section"'
+  );
+
+  assert.ok(sectionA && sectionB, "Both historical A/B sections must exist");
 
   // Pre-removal: in Section A, NOT in Section B
   assert.ok(sectionA.includes("Compresseur Climatisation"), "Pre-removal must be in Section A");

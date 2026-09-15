@@ -45,6 +45,7 @@
     conflictMessage: null,
     activeFilter: "all-open", // 'all-open' | 'ready' | 'overdue' | 'waiting' | 'history'
     activeRequestFilter: "all", // 'all' | 'pending' | 'authorized' | 'history'
+    activeEtaFilter: "all", // 'all' | 'missing' | 'overdue' | 'followup'
     searchQuery: "",
     lastLoadedAt: null,
     mutationInProgress: false,
@@ -137,6 +138,209 @@
     };
   }
 
+  /**
+   * Return today's local calendar date as YYYY-MM-DD.
+   * Calendar calculations are then performed in UTC to avoid DST/timezone drift.
+   */
+  function getLocalTodayIso() {
+    const now = new Date();
+    const year = String(now.getFullYear()).padStart(4, "0");
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const day = String(now.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  /**
+   * Strictly parse an ISO calendar date (YYYY-MM-DD).
+   * Returns null for impossible calendar dates.
+   */
+  function parseEtaDateOnly(value) {
+    const raw = String(value || "").trim();
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw);
+    if (!match) return null;
+
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const utcMs = Date.UTC(year, month - 1, day);
+    const date = new Date(utcMs);
+
+    if (
+      date.getUTCFullYear() !== year ||
+      date.getUTCMonth() !== month - 1 ||
+      date.getUTCDate() !== day
+    ) {
+      return null;
+    }
+
+    return {
+      iso: raw,
+      utcMs,
+    };
+  }
+
+  /**
+   * Classify one VN-PART removal for operational ETA follow-up.
+   *
+   * Cadence:
+   *   D0, D+1, D+3, D+5, D+7...
+   *
+   * Resolved/terminal records are automatically excluded.
+   */
+  function classifyEtaTracking(removal, todayIso = null) {
+    const base = {
+      trackable: false,
+      category: null,
+      daysFromEta: null,
+      needsFollowUpToday: false,
+      etaDate: null,
+    };
+
+    if (!removal || typeof removal !== "object") {
+      return base;
+    }
+
+    const status = String(removal.status || "").trim();
+
+    if (
+      ["REFUSE", "ANNULE", "CLOTURE", "PIECE_DISPONIBLE"].includes(status) ||
+      removal.replacement_available_at ||
+      removal.restored_at
+    ) {
+      return base;
+    }
+
+    const rawEta = String(removal.expected_replacement_date || "").trim();
+
+    // While the request is still awaiting validations, absence of ETA
+    // is not yet considered an operational anomaly: Direction Pièces
+    // may simply not have validated its position yet.
+    if (status === "EN_ATTENTE_VALIDATIONS" && !rawEta) {
+      return base;
+    }
+
+    const today =
+      parseEtaDateOnly(todayIso) ||
+      parseEtaDateOnly(getLocalTodayIso());
+
+    const eta = parseEtaDateOnly(rawEta);
+
+    if (!eta) {
+      return {
+        ...base,
+        trackable: true,
+        category: "MISSING_ETA",
+      };
+    }
+
+    const daysFromEta = Math.round(
+      (today.utcMs - eta.utcMs) / 86400000
+    );
+
+    let category = "UPCOMING";
+
+    if (daysFromEta === 0) {
+      category = "DUE_TODAY";
+    } else if (daysFromEta > 0) {
+      category = "OVERDUE";
+    }
+
+    const needsFollowUpToday =
+      daysFromEta === 0 ||
+      daysFromEta === 1 ||
+      (daysFromEta >= 3 && daysFromEta % 2 === 1);
+
+    return {
+      trackable: true,
+      category,
+      daysFromEta,
+      needsFollowUpToday,
+      etaDate: eta.iso,
+    };
+  }
+
+  /**
+   * Compute global operational ETA counters from removal rows.
+   */
+  function computeEtaTrackingSummary(removals = [], todayIso = null) {
+    const rows = (removals || [])
+      .map((removal) => ({
+        removal,
+        ...classifyEtaTracking(removal, todayIso),
+      }))
+      .filter((row) => row.trackable);
+
+    return {
+      trackableCount: rows.length,
+      etaMissingCount: rows.filter(
+        (row) => row.category === "MISSING_ETA"
+      ).length,
+      etaDueTodayCount: rows.filter(
+        (row) => row.category === "DUE_TODAY"
+      ).length,
+      etaOverdueCount: rows.filter(
+        (row) => row.category === "OVERDUE"
+      ).length,
+      followUpTodayCount: rows.filter(
+        (row) => row.needsFollowUpToday
+      ).length,
+    };
+  }
+
+  /**
+   * Return the operational ETA queue for the requested filter.
+   */
+  function filterEtaTrackingRows(
+    removals = [],
+    filter = "all",
+    todayIso = null,
+    search = ""
+  ) {
+    const term = String(search || "").trim().toLowerCase();
+
+    let rows = (removals || [])
+      .map((removal) => ({
+        removal,
+        ...classifyEtaTracking(removal, todayIso),
+      }))
+      .filter((row) => row.trackable);
+
+    if (filter === "missing") {
+      rows = rows.filter(
+        (row) => row.category === "MISSING_ETA"
+      );
+    } else if (filter === "overdue") {
+      rows = rows.filter(
+        (row) => row.category === "OVERDUE"
+      );
+    } else if (filter === "followup") {
+      rows = rows.filter(
+        (row) => row.needsFollowUpToday
+      );
+    }
+
+    if (term) {
+      rows = rows.filter((row) => {
+        const removal = row.removal || {};
+
+        const searchable = [
+          removal.donor_vin,
+          removal.donor_model,
+          removal.beneficiary_vin,
+          removal.beneficiary_model,
+          removal.beneficiary_or,
+          removal.part_reference,
+          removal.part_designation,
+        ]
+          .map((value) => String(value || "").toLowerCase())
+          .join(" ");
+
+        return searchable.includes(term);
+      });
+    }
+
+    return rows;
+  }
   /**
    * Format part identity prioritizing reference over designation.
    * Primary: "REF. <part_reference> — <part_designation>"
@@ -765,6 +969,178 @@
   }
 
   /**
+   * Render the operational ETA tracking section.
+   * Uses existing VN-PART card/filter styles to keep this slice scoped.
+   */
+  function renderEtaTrackingSection(
+    removals,
+    identity,
+    activeFilter = "all",
+    todayIso = null,
+    search = ""
+  ) {
+    const summary = computeEtaTrackingSummary(removals, todayIso);
+    const rows = filterEtaTrackingRows(
+      removals,
+      activeFilter,
+      todayIso,
+      search
+    );
+
+    const filterButton = (filter, label, count) => `
+      <button
+        type="button"
+        class="vn-part-req-filter-btn vn-part-eta-filter-btn ${activeFilter === filter ? "active" : ""}"
+        data-eta-filter="${filter}"
+        aria-pressed="${activeFilter === filter}"
+      >${label} (${count})</button>
+    `;
+
+    let html = `
+      <section
+        id="vn-part-eta-section"
+        class="vn-part-section vn-part-eta-section"
+        aria-labelledby="vn-part-eta-heading"
+      >
+        <div class="vn-part-section-header">
+          <div class="vn-part-section-title-wrap">
+            <h2 id="vn-part-eta-heading" class="vn-part-section-title">
+              ÉCHÉANCES PIÈCES
+              <span class="vn-part-section-count">(${summary.trackableCount})</span>
+            </h2>
+            <p class="vn-part-section-sub">
+              ETA manquante: ${summary.etaMissingCount}
+              • ETA aujourd'hui: ${summary.etaDueTodayCount}
+              • ETA dépassée: ${summary.etaOverdueCount}
+              • À relancer aujourd'hui: ${summary.followUpTodayCount}
+            </p>
+          </div>
+
+          <div
+            class="vn-part-req-filters"
+            role="group"
+            aria-label="Filtrer les échéances pièces"
+          >
+            ${filterButton("all", "Toutes", summary.trackableCount)}
+            ${filterButton("missing", "ETA manquante", summary.etaMissingCount)}
+            ${filterButton("overdue", "ETA dépassée", summary.etaOverdueCount)}
+            ${filterButton("followup", "À relancer aujourd'hui", summary.followUpTodayCount)}
+          </div>
+        </div>
+    `;
+
+    if (!rows.length) {
+      html += `
+        <div class="vn-part-section-empty">
+          <p>Aucune échéance pièce ne correspond aux critères sélectionnés.</p>
+        </div>
+      `;
+    } else {
+      html += `<div class="vn-part-requests-list">`;
+
+      for (const row of rows) {
+        const rem = row.removal;
+
+        let etaBadge = "";
+        let etaValue = "Non renseignée";
+
+        if (row.category === "MISSING_ETA") {
+          etaBadge =
+            `<span class="vn-part-badge badge-waiting">🟠 ETA MANQUANTE</span>`;
+        } else if (row.category === "DUE_TODAY") {
+          etaBadge =
+            `<span class="vn-part-badge badge-overdue">🔴 ÉCHÉANCE AUJOURD'HUI</span>`;
+          etaValue = formatDateFr(rem.expected_replacement_date);
+        } else if (row.category === "OVERDUE") {
+          etaBadge =
+            `<span class="vn-part-badge badge-overdue">🔴 ETA DÉPASSÉE D+${Number(row.daysFromEta)}</span>`;
+          etaValue = formatDateFr(rem.expected_replacement_date);
+        } else {
+          etaBadge =
+            `<span class="vn-part-badge badge-neutral">🔵 ETA À VENIR</span>`;
+          etaValue = formatDateFr(rem.expected_replacement_date);
+        }
+
+        const followUpBadge = row.needsFollowUpToday
+          ? `<span class="vn-part-badge badge-waiting">📞 À relancer aujourd'hui</span>`
+          : "";
+
+        const availableActions = getAvailableVnPartActions(
+          rem,
+          vnPartEphemeralState.approvals,
+          identity
+        ).filter((action) =>
+          ["REVISE_ETA", "MARK_REPLACEMENT_AVAILABLE"].includes(action)
+        );
+
+        const actionsHtml = renderRemovalActionButtons(
+          rem,
+          availableActions,
+          vnPartEphemeralState.mutationInProgress
+        );
+
+        html += `
+          <article
+            class="vn-part-request-card vn-part-eta-card"
+            data-id="${escapeHtml(rem.id)}"
+            data-version="${Number(rem.version) || 0}"
+          >
+            <header class="vn-part-request-card-header">
+              <div class="vn-part-request-card-title">
+                <h3 class="vn-part-request-part-title">
+                  ${renderPartIdentityHtml(rem.part_reference, rem.part_designation)}
+                </h3>
+              </div>
+
+              <div class="vn-part-request-card-badges">
+                ${etaBadge}
+                ${followUpBadge}
+              </div>
+            </header>
+
+            <div class="vn-part-request-details-grid">
+              <div class="vn-part-detail-cell">
+                <span class="cell-label">ETA actuelle:</span>
+                <strong class="cell-val">${escapeHtml(etaValue)}</strong>
+              </div>
+
+              <div class="vn-part-detail-cell">
+                <span class="cell-label">Véhicule donneur:</span>
+                <span class="cell-val">
+                  ${escapeHtml(rem.donor_model || "—")}
+                  ${rem.donor_vin ? ` (${escapeHtml(rem.donor_vin)})` : ""}
+                </span>
+              </div>
+
+              <div class="vn-part-detail-cell">
+                <span class="cell-label">Véhicule bénéficiaire:</span>
+                <span class="cell-val">
+                  ${escapeHtml(rem.beneficiary_model || "—")}
+                  ${rem.beneficiary_vin ? ` (${escapeHtml(rem.beneficiary_vin)})` : ""}
+                </span>
+              </div>
+
+              ${rem.beneficiary_or ? `
+                <div class="vn-part-detail-cell">
+                  <span class="cell-label">N° OR:</span>
+                  <span class="cell-val">${escapeHtml(rem.beneficiary_or)}</span>
+                </div>
+              ` : ""}
+            </div>
+
+            ${actionsHtml}
+          </article>
+        `;
+      }
+
+      html += `</div>`;
+    }
+
+    html += `</section>`;
+
+    return html;
+  }
+  /**
    * Render an individual pre-removal request card for Section A.
    */
   function renderRequestCard(rem, approvalLookup, identity) {
@@ -1172,7 +1548,19 @@
       vnPartEphemeralState.searchQuery
     );
 
-    if (!workflowRequests.length && !filteredDonors.length) {
+    const etaTodayIso = getLocalTodayIso();
+    const etaAllRows = filterEtaTrackingRows(
+      vnPartEphemeralState.removals,
+      "all",
+      etaTodayIso,
+      vnPartEphemeralState.searchQuery
+    );
+
+    if (
+      !workflowRequests.length &&
+      !filteredDonors.length &&
+      !etaAllRows.length
+    ) {
       const isSearchOrFilter =
         vnPartEphemeralState.searchQuery ||
         vnPartEphemeralState.activeFilter !== "all-open" ||
@@ -1194,6 +1582,17 @@
     const approvalLookup = buildApprovalLookup(vnPartEphemeralState.approvals);
 
     let html = "";
+
+    // ------------------------------------------------------------------------
+    // ETA TRACKING — ÉCHÉANCES PIÈCES
+    // ------------------------------------------------------------------------
+    html += renderEtaTrackingSection(
+      vnPartEphemeralState.removals,
+      identity,
+      vnPartEphemeralState.activeEtaFilter,
+      etaTodayIso,
+      vnPartEphemeralState.searchQuery
+    );
 
     // ------------------------------------------------------------------------
     // SECTION A — DEMANDES DE PRÉLÈVEMENT EN COURS
@@ -2151,6 +2550,14 @@
 
     // Global click listener for contextual action buttons and request filter buttons
     document.addEventListener("click", (e) => {
+      const etaBtn = e.target?.closest?.(".vn-part-eta-filter-btn");
+      if (etaBtn) {
+        const filter = etaBtn.dataset.etaFilter || "all";
+        vnPartEphemeralState.activeEtaFilter = filter;
+        renderVnPartView();
+        return;
+      }
+
       const reqBtn = e.target?.closest?.(".vn-part-req-filter-btn");
       if (reqBtn) {
         const filter = reqBtn.dataset.reqFilter || "all";
@@ -2247,6 +2654,9 @@
     renderApprovalStrip,
     normalizeDonorVin,
     validateDonorVin,
+    classifyEtaTracking,
+    computeEtaTrackingSummary,
+    filterEtaTrackingRows,
     formatPartIdentity,
     renderPartIdentityHtml,
     computeDonorCommitmentSummary,

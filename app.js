@@ -1082,6 +1082,29 @@ function bindSettingsWorkspaceNavigation() {
 window.bindSettingsWorkspaceNavigation = bindSettingsWorkspaceNavigation;
 
 function bindWorkshopForms() {
+  const resourceRoleSelect = document.querySelector('#resource-form [name="role"]');
+  const resourceScheduleProfileSelect = document.querySelector('#resource-form [name="scheduleProfile"]');
+  const resourceScheduleProfileField = document.querySelector("#resource-form [data-resource-schedule-profile-field]");
+
+  const syncResourceScheduleProfileVisibility = () => {
+    if (!resourceRoleSelect || !resourceScheduleProfileSelect || !resourceScheduleProfileField) return;
+
+    const role = resourceRoleSelect.value;
+    const isEquip = typeof isEquipmentResource === "function"
+      ? isEquipmentResource({ role })
+      : ["zone_preparation", "cabine", "pont_vidange", "pont_mecanique", "transport"].includes(role);
+
+    resourceScheduleProfileField.hidden = isEquip;
+    resourceScheduleProfileSelect.disabled = isEquip;
+
+    if (isEquip) {
+      resourceScheduleProfileSelect.value = "workshop";
+    }
+  };
+
+  resourceRoleSelect?.addEventListener("change", syncResourceScheduleProfileVisibility);
+  syncResourceScheduleProfileVisibility();
+
   $("#resource-form")?.addEventListener("submit", (event) => {
     event.preventDefault();
     const permission = guardAction("resource.manage", {}, { notify: false });

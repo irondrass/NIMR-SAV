@@ -530,16 +530,43 @@ const team2Tech = {
   c.run(fnMatch[0]);
 
   let submitListener = null;
+  let roleChangeListener = null;
+
+  const roleSelect = {
+    value: "tolier",
+    addEventListener(evt, listener) {
+      if (evt === "change") roleChangeListener = listener;
+    },
+  };
+
+  const scheduleSelect = {
+    value: "workshop",
+    disabled: false,
+  };
+
+  const scheduleField = {
+    hidden: false,
+  };
+
   const formElement = {
     addEventListener(evt, listener) {
       if (evt === "submit") submitListener = listener;
     },
     reset() {},
   };
-  c.document.querySelector = (selector) => (selector === "#resource-form" ? formElement : null);
+
+  c.document.querySelector = (selector) => {
+    if (selector === "#resource-form") return formElement;
+    if (selector === '#resource-form [name="role"]') return roleSelect;
+    if (selector === '#resource-form [name="scheduleProfile"]') return scheduleSelect;
+    if (selector === "#resource-form [data-resource-schedule-profile-field]") return scheduleField;
+    return null;
+  };
 
   c.bindWorkshopForms();
+
   assert.ok(typeof submitListener === "function", "submit listener must be attached to #resource-form");
+  assert.ok(typeof roleChangeListener === "function", "role change listener must be attached for R3-REV-001");
 
   // Ensure current user is authorized to manage resources (e.g. chef_atelier)
   const adminUser = c.state.users.find((u) => u.role === "chef_atelier" || u.role === "admin_technique")
@@ -590,6 +617,86 @@ const team2Tech = {
   assert.deepEqual(toPlain(addedEquip.calendar), {}, "Equipment calendar must remain empty to follow workshop union");
 
   console.log("✔ R3-S22: Form submission in app.js handles scheduleProfile and equipment correctly (DEF-R3-001 verified resolved)");
+
+  // --- R3-S23: Human creation role exposes team schedule selector ---
+  roleSelect.value = "tolier";
+  scheduleSelect.value = "workshop";
+  roleChangeListener();
+
+  assert.equal(scheduleField.hidden, false, "Human role must show Horaire / Équipe field");
+  assert.equal(scheduleSelect.disabled, false, "Human role schedule selector must be enabled");
+
+  console.log("✔ R3-S23: Human creation role exposes enabled team schedule selector");
+
+  // --- R3-S24: Equipment creation role hides team schedule selector ---
+  roleSelect.value = "cabine";
+  scheduleSelect.value = "team_1";
+  roleChangeListener();
+
+  assert.equal(scheduleField.hidden, true, "Equipment role must hide Horaire / Équipe field");
+  assert.equal(scheduleSelect.disabled, true, "Equipment role schedule selector must be disabled");
+  assert.equal(scheduleSelect.value, "workshop", "Equipment role must reset schedule selector to workshop");
+
+  console.log("✔ R3-S24: Equipment creation role hides and disables team schedule selector");
+
+  // --- R3-S25: Human -> equipment transition clears selected team ---
+  roleSelect.value = "tolier";
+  roleChangeListener();
+
+  scheduleSelect.value = "team_1";
+
+  roleSelect.value = "cabine";
+  roleChangeListener();
+
+  assert.equal(scheduleField.hidden, true, "Human -> equipment must hide schedule field");
+  assert.equal(scheduleSelect.disabled, true, "Human -> equipment must disable schedule selector");
+  assert.equal(scheduleSelect.value, "workshop", "Human -> equipment must clear previous team assignment");
+
+  const beforeTransitionSubmit = c.state.resources.length;
+
+  submitListener({
+    preventDefault() {},
+    currentTarget: {
+      __formData: {
+        role: "cabine",
+        name: "Cabine Transition Test",
+        site: "internal",
+        capacity: "1",
+      },
+      reset() {},
+    },
+  });
+
+  assert.equal(c.state.resources.length, beforeTransitionSubmit + 1);
+  const transitionedEquipment = c.state.resources[c.state.resources.length - 1];
+
+  assert.equal(transitionedEquipment.role, "cabine");
+  assert.equal(transitionedEquipment.scheduleProfile, null);
+  assert.deepEqual(
+    toPlain(transitionedEquipment.calendar),
+    {},
+    "Equipment created after role transition must keep empty calendar"
+  );
+
+  console.log("✔ R3-S25: Human -> equipment transition clears team and preserves equipment workshop behavior");
+
+  // --- R3-S26: Equipment -> human transition re-enables explicit selection ---
+  roleSelect.value = "cabine";
+  roleChangeListener();
+
+  assert.equal(scheduleSelect.disabled, true);
+
+  roleSelect.value = "mecanicien";
+  roleChangeListener();
+
+  assert.equal(scheduleField.hidden, false, "Equipment -> human must show schedule field");
+  assert.equal(scheduleSelect.disabled, false, "Equipment -> human must enable schedule selector");
+  assert.equal(scheduleSelect.value, "workshop", "No team may be auto-selected after equipment -> human");
+
+  scheduleSelect.value = "team_2";
+  assert.equal(scheduleSelect.value, "team_2", "Operator must remain able to explicitly select Team 2");
+
+  console.log("✔ R3-S26: Equipment -> human transition restores explicit team selection without automatic assignment");
 }
 
-console.log("\nALL 22 TEST SCENARIOS PASSED SUCCESSFULLY!");
+console.log("\nALL 26 TEST SCENARIOS PASSED SUCCESSFULLY!");

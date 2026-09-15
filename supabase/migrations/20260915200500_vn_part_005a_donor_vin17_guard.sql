@@ -18,8 +18,8 @@ set search_path = pg_catalog, public
 as $fn$
 begin
   -- Donor VIN is assigned later in the approval workflow.
-  -- NULL/empty remains permitted until that business step.
-  if new.donor_vin is null or trim(new.donor_vin) = '' then
+  -- NULL remains permitted until that business step.
+  if new.donor_vin is null then
     return new;
   end if;
 

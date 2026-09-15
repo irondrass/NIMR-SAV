@@ -235,11 +235,12 @@ resetState(tolierResources, [
 const lowerLoadProposal = context.generateSingleProposal({ id: "pdf-lower-load", durations: { body: 1 } }, mondayStart);
 assert.equal(getStep(lowerLoadProposal, "body").primaryResourceId, "tolier-2", "à départ égal, la ressource la moins chargée doit être choisie");
 
-// 7 — Continuité sur la pause déjeuner.
+// 7 — Continuité sur la pause déjeuner (vendredi dispose de la fermeture déjeuner 12:30–13:45).
+const fridayStart = new Date("2026-05-22T08:00:00+01:00");
 resetState(tolierResources, [
-  booking("t1-full-day", "case-t1-full", ["tolier-1"], "2026-05-18T08:00:00+01:00", "2026-05-18T17:00:00+01:00"),
+  booking("t1-full-day", "case-t1-full", ["tolier-1"], "2026-05-22T08:00:00+01:00", "2026-05-22T17:00:00+01:00"),
 ]);
-const lunchProposal = context.generateSingleProposal({ id: "pdf-lunch", durations: { body: 6 } }, mondayStart);
+const lunchProposal = context.generateSingleProposal({ id: "pdf-lunch", durations: { body: 6 } }, fridayStart);
 const lunchBody = getStep(lunchProposal, "body");
 assert.equal(lunchBody.primaryResourceId, "tolier-2", "le lot doit démarrer chez Tôlier 2");
 assert.equal(lunchBody.segments.length, 2, "le lot doit être coupé par la pause déjeuner");

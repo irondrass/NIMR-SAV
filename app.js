@@ -131,7 +131,7 @@ function bindSyncConflictUsability() {
 
 function configurePdfWorker() {
   if (window.pdfjsLib?.GlobalWorkerOptions) {
-    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.47";
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.48";
   }
 }
 
@@ -1082,16 +1082,49 @@ function bindSettingsWorkspaceNavigation() {
 window.bindSettingsWorkspaceNavigation = bindSettingsWorkspaceNavigation;
 
 function bindWorkshopForms() {
+  const resourceRoleSelect = document.querySelector('#resource-form [name="role"]');
+  const resourceScheduleProfileSelect = document.querySelector('#resource-form [name="scheduleProfile"]');
+  const resourceScheduleProfileField = document.querySelector("#resource-form [data-resource-schedule-profile-field]");
+
+  const syncResourceScheduleProfileVisibility = () => {
+    if (!resourceRoleSelect || !resourceScheduleProfileSelect || !resourceScheduleProfileField) return;
+
+    const role = resourceRoleSelect.value;
+    const isEquip = typeof isEquipmentResource === "function"
+      ? isEquipmentResource({ role })
+      : ["zone_preparation", "cabine", "pont_vidange", "pont_mecanique", "transport"].includes(role);
+
+    resourceScheduleProfileField.hidden = isEquip;
+    resourceScheduleProfileSelect.disabled = isEquip;
+
+    if (isEquip) {
+      resourceScheduleProfileSelect.value = "workshop";
+    }
+  };
+
+  resourceRoleSelect?.addEventListener("change", syncResourceScheduleProfileVisibility);
+  syncResourceScheduleProfileVisibility();
+
   $("#resource-form")?.addEventListener("submit", (event) => {
     event.preventDefault();
     const permission = guardAction("resource.manage", {}, { notify: false });
     if (!permission.ok) return notifyUser(permission.message, "error");
     const form = event.currentTarget;
     const data = new FormData(form);
+    const scheduleProfile = data.get("scheduleProfile");
+    const role = data.get("role");
+    const isEquip = typeof isEquipmentResource === "function"
+      ? isEquipmentResource({ role })
+      : ["zone_preparation", "cabine", "pont_vidange", "pont_mecanique", "transport"].includes(role);
+    const calendar = {};
+    if (!isEquip && (scheduleProfile === "team_1" || scheduleProfile === "team_2") && typeof RESOURCE_SCHEDULE_PROFILES !== "undefined") {
+      calendar.scheduleProfile = scheduleProfile;
+      calendar.workHours = cloneWorkHours(RESOURCE_SCHEDULE_PROFILES[scheduleProfile].workHours);
+    }
     state.resources.push(normalizeResource({
       id: uid("resource"),
       name: normalizeTextInputValue(data.get("name")),
-      role: data.get("role"),
+      role,
       location: normalizeTextInputValue(data.get("location")),
       site: data.get("site") === "external" ? "external" : "internal",
       kind: data.get("site") === "external" ? "external" : "internal",
@@ -1104,10 +1137,13 @@ function bindWorkshopForms() {
       transferReturnMinutes: Math.max(0, Number(data.get("transferReturnMinutes") || 0) || 0),
       standardLeadTimeMinutes: Math.max(0, Number(data.get("standardLeadTimeMinutes") || 0) || 0),
       fastLane: Boolean(data.get("fastLane")),
+      calendar,
+      scheduleProfile: calendar.scheduleProfile || null,
       active: true,
     }));
     saveState();
     form.reset();
+    syncResourceScheduleProfileVisibility();
     render();
   });
 
@@ -1501,7 +1537,7 @@ function registerServiceWorker() {
   });
   const registerCurrentServiceWorker = async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=23.3.47", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=23.3.48", { updateViaCache: "none" });
       const refreshRegistration = async () => {
         try {
           await registration.update?.();

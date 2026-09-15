@@ -80,7 +80,8 @@ test('a workshop assignee and deadline never replace client deadlines', () => {
 });
 
 test('a recent customer call does not conceal a stationary vehicle', () => {
-  const {c,item} = fixture();
+  const {c,run,item} = fixture();
+  run('state.bookings = []; invalidateUiRuntimeIndexes();');
   item.history=[{at:'2026-09-07T10:00:00Z',type:'client.commitment'}];
   const last=c.getWorkshopProgressLastActivityAt(item,{flowOnly:true});
   assert.equal(last.toISOString(),'2026-09-01T08:00:00.000Z');

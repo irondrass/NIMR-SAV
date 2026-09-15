@@ -21,7 +21,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v23.3.47";
+const APP_VERSION = "v23.3.48";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const CURRENT_DATA_SCHEMA_VERSION = 2;
@@ -63,6 +63,19 @@ const MAX_STEP_DURATION_HOURS = 80;
 
 const DEFAULT_WORK_HOURS = {
   0: [],
+  1: [["07:45", "17:00"]],
+  2: [["07:45", "17:00"]],
+  3: [["07:45", "17:00"]],
+  4: [["07:45", "17:00"]],
+  5: [
+    ["07:45", "12:30"],
+    ["13:45", "17:00"],
+  ],
+  6: [["08:00", "12:00"]],
+};
+
+const HISTORICAL_DEFAULT_WORK_HOURS = Object.freeze({
+  0: [],
   1: [
     ["08:00", "12:00"],
     ["13:00", "17:00"],
@@ -84,7 +97,45 @@ const DEFAULT_WORK_HOURS = {
     ["13:00", "17:00"],
   ],
   6: [["08:00", "13:00"]],
-};
+});
+
+const RESOURCE_SCHEDULE_PROFILES = Object.freeze({
+  team_1: {
+    id: "team_1",
+    label: "Équipe 1 — 40 h",
+    description: "Lun–Jeu 07:45–15:00 · Ven 07:45–12:30 / 13:45–16:00 · Sam 08:00–12:00",
+    workHours: {
+      0: [],
+      1: [["07:45", "15:00"]],
+      2: [["07:45", "15:00"]],
+      3: [["07:45", "15:00"]],
+      4: [["07:45", "15:00"]],
+      5: [
+        ["07:45", "12:30"],
+        ["13:45", "16:00"],
+      ],
+      6: [["08:00", "12:00"]],
+    },
+  },
+  team_2: {
+    id: "team_2",
+    label: "Équipe 2 — 40 h",
+    description: "Lun–Jeu 09:45–17:00 · Ven 08:45–12:30 / 13:45–17:00 · Sam 08:00–12:00",
+    workHours: {
+      0: [],
+      1: [["09:45", "17:00"]],
+      2: [["09:45", "17:00"]],
+      3: [["09:45", "17:00"]],
+      4: [["09:45", "17:00"]],
+      5: [
+        ["08:45", "12:30"],
+        ["13:45", "17:00"],
+      ],
+      6: [["08:00", "12:00"]],
+    },
+  },
+});
+
 
 const DEFAULT_DURATIONS = {
   body: 0,
@@ -3332,6 +3383,7 @@ function normalizeResource(resource) {
     simultaneousCapacity: Math.max(1, Number(resource.simultaneousCapacity ?? capacity) || capacity),
     dailyCapacityMinutes: Number.isFinite(dailyCapacityMinutes) ? Math.max(0, dailyCapacityMinutes) : null,
     calendar: resource.calendar && typeof resource.calendar === "object" ? cloneMigrationValue(resource.calendar) : {},
+    scheduleProfile: resource.scheduleProfile || resource.calendar?.scheduleProfile || null,
     compatibleRoles: normalizeStringList(resource.compatibleRoles?.length ? resource.compatibleRoles : [role]),
     specialties: normalizeStringList(resource.specialties || resource.specialites),
     site: String(resource.site || (external ? "external" : "internal")),
@@ -4954,9 +5006,98 @@ function cloneWorkHours(workHours) {
   return Object.fromEntries(Object.entries(workHours).map(([day, intervals]) => [day, intervals.map((interval) => [...interval])]));
 }
 
+function areWorkHoursEqual(a, b) {
+  if (!a || !b || typeof a !== "object" || typeof b !== "object") return false;
+  for (let day = 0; day <= 6; day += 1) {
+    const rawA = a[day] ?? a[String(day)] ?? [];
+    const rawB = b[day] ?? b[String(day)] ?? [];
+    const intervalsA = Array.isArray(rawA)
+      ? rawA.filter((i) => Array.isArray(i) && i.length === 2).map(([s, e]) => [String(s).trim(), String(e).trim()])
+      : [];
+    const intervalsB = Array.isArray(rawB)
+      ? rawB.filter((i) => Array.isArray(i) && i.length === 2).map(([s, e]) => [String(s).trim(), String(e).trim()])
+      : [];
+    if (intervalsA.length !== intervalsB.length) return false;
+    for (let i = 0; i < intervalsA.length; i += 1) {
+      if (intervalsA[i][0] !== intervalsB[i][0] || intervalsA[i][1] !== intervalsB[i][1]) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+function calculateWeeklyWorkMinutes(workHours) {
+  if (!workHours || typeof workHours !== "object") return 0;
+  let total = 0;
+  for (let day = 0; day <= 6; day += 1) {
+    const raw = workHours[day] ?? workHours[String(day)] ?? [];
+    if (Array.isArray(raw)) {
+      for (const item of raw) {
+        if (Array.isArray(item) && item.length === 2) {
+          const [sh, sm] = String(item[0]).split(":").map(Number);
+          const [eh, em] = String(item[1]).split(":").map(Number);
+          if (Number.isFinite(sh) && Number.isFinite(sm) && Number.isFinite(eh) && Number.isFinite(em)) {
+            const startMin = sh * 60 + sm;
+            const endMin = eh * 60 + em;
+            if (endMin > startMin) {
+              total += endMin - startMin;
+            }
+          }
+        }
+      }
+    }
+  }
+  return total;
+}
+
+function migrateLegacyWorkHours(workHours) {
+  if (!workHours || typeof workHours !== "object") return cloneWorkHours(DEFAULT_WORK_HOURS);
+  if (areWorkHoursEqual(workHours, HISTORICAL_DEFAULT_WORK_HOURS)) {
+    return cloneWorkHours(DEFAULT_WORK_HOURS);
+  }
+  return workHours;
+}
+
+function getResourceScheduleProfile(resource) {
+  if (!resource) return "workshop";
+  const explicit = resource.calendar?.scheduleProfile || resource.scheduleProfile;
+  if (explicit && (explicit in RESOURCE_SCHEDULE_PROFILES || explicit === "custom" || explicit === "workshop")) {
+    return explicit;
+  }
+  const hours = resource.calendar?.workHours || resource.calendar?.hours || resource.workHours;
+  if (!hours) return "workshop";
+  if (areWorkHoursEqual(hours, RESOURCE_SCHEDULE_PROFILES.team_1.workHours)) return "team_1";
+  if (areWorkHoursEqual(hours, RESOURCE_SCHEDULE_PROFILES.team_2.workHours)) return "team_2";
+  return "custom";
+}
+
+function setResourceScheduleProfile(resource, profileKey) {
+  if (!resource) return;
+  if (!resource.calendar || typeof resource.calendar !== "object") {
+    resource.calendar = {};
+  }
+  if (profileKey === "team_1" || profileKey === "team_2") {
+    resource.calendar.scheduleProfile = profileKey;
+    resource.calendar.workHours = cloneWorkHours(RESOURCE_SCHEDULE_PROFILES[profileKey].workHours);
+    resource.scheduleProfile = profileKey;
+  } else if (profileKey === "workshop" || profileKey === "none" || !profileKey) {
+    delete resource.calendar.scheduleProfile;
+    delete resource.calendar.workHours;
+    delete resource.scheduleProfile;
+  } else if (profileKey === "custom") {
+    resource.calendar.scheduleProfile = "custom";
+    resource.scheduleProfile = "custom";
+    if (!resource.calendar.workHours) {
+      resource.calendar.workHours = cloneWorkHours(DEFAULT_WORK_HOURS);
+    }
+  }
+}
+
 function normalizeWorkHours(workHours) {
+  const source = migrateLegacyWorkHours(workHours);
   const normalized = cloneWorkHours(DEFAULT_WORK_HOURS);
-  Object.entries(workHours || {}).forEach(([day, intervals]) => {
+  Object.entries(source || {}).forEach(([day, intervals]) => {
     const parsed = Array.isArray(intervals)
       ? intervals
           .filter((interval) => Array.isArray(interval) && interval.length === 2)
@@ -5749,4 +5890,12 @@ if (typeof window !== "undefined") {
   window.CANONICAL_TASK_KINDS = CANONICAL_TASK_KINDS;
   window.normalizeCanonicalTaskKind = normalizeCanonicalTaskKind;
   window.getCasePlanningTasks = getCasePlanningTasks;
+  window.DEFAULT_WORK_HOURS = DEFAULT_WORK_HOURS;
+  window.HISTORICAL_DEFAULT_WORK_HOURS = HISTORICAL_DEFAULT_WORK_HOURS;
+  window.RESOURCE_SCHEDULE_PROFILES = RESOURCE_SCHEDULE_PROFILES;
+  window.calculateWeeklyWorkMinutes = calculateWeeklyWorkMinutes;
+  window.areWorkHoursEqual = areWorkHoursEqual;
+  window.migrateLegacyWorkHours = migrateLegacyWorkHours;
+  window.getResourceScheduleProfile = getResourceScheduleProfile;
+  window.setResourceScheduleProfile = setResourceScheduleProfile;
 }

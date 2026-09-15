@@ -223,8 +223,7 @@ function renderMobilePlanningList(date, resources, taskNumberMap, filters = null
   const target = $("#mobile-planning-list");
   if (!target) return;
   const day = todayKey(date);
-  const dayStart = atTime(date, "08:00");
-  const dayEnd = atTime(date, "17:00");
+  const { dayStart, dayEnd } = getGanttDayBounds(date);
   const rows = [];
   const dayBookings = typeof getIndexedDayBookings === "function" ? getIndexedDayBookings(day) : state.bookings;
   dayBookings.forEach((booking) => {
@@ -395,8 +394,7 @@ function renderResourceBookings(resource, date, dayStart, dayEnd, total, dailyCo
 
 function buildDailyPlanningTaskNumberMap(date, resources) {
   const day = todayKey(date);
-  const dayStart = atTime(date, "08:00");
-  const dayEnd = atTime(date, "17:00");
+  const { dayStart, dayEnd } = getGanttDayBounds(date);
   const rows = [];
   const dayBookings = typeof getIndexedDayBookings === "function" ? getIndexedDayBookings(day) : state.bookings;
   dayBookings.forEach((booking) => {
@@ -468,6 +466,17 @@ function renderResources() {
               Capacité journalière (min)
               <input type="number" min="0" step="15" data-resource-field="dailyCapacityMinutes" data-resource-id="${escapeAttr(resource.id)}" value="${Number(resource.dailyCapacityMinutes || 0) || ""}" placeholder="Selon calendrier" ${canEditPlanning ? "" : `disabled title="${escapeAttr(deniedTitle)}"`} />
             </label>
+            ${!(typeof isEquipmentResource === "function" ? isEquipmentResource(resource) : ["zone_preparation", "cabine", "pont_vidange", "pont_mecanique", "transport"].includes(resource.role)) ? `
+              <label>
+                Horaire / Équipe
+                <select data-resource-field="scheduleProfile" data-resource-id="${escapeAttr(resource.id)}" ${canEditPlanning ? "" : `disabled title="${escapeAttr(deniedTitle)}"`}>
+                  <option value="workshop" ${(typeof getResourceScheduleProfile === "function" ? getResourceScheduleProfile(resource) : "workshop") === "workshop" ? "selected" : ""}>Horaire atelier (par défaut)</option>
+                  <option value="team_1" ${(typeof getResourceScheduleProfile === "function" ? getResourceScheduleProfile(resource) : "workshop") === "team_1" ? "selected" : ""}>Équipe 1 — 40 h (07:45–15:00 / Ven 16:00)</option>
+                  <option value="team_2" ${(typeof getResourceScheduleProfile === "function" ? getResourceScheduleProfile(resource) : "workshop") === "team_2" ? "selected" : ""}>Équipe 2 — 40 h (09:45–17:00 / Ven 17:00)</option>
+                  <option value="custom" ${(typeof getResourceScheduleProfile === "function" ? getResourceScheduleProfile(resource) : "workshop") === "custom" ? "selected" : ""}>Horaire personnalisé</option>
+                </select>
+              </label>
+            ` : ""}
             ${resource.site === "external" ? `
               <label>Transfert aller (min)<input type="number" min="0" step="15" data-resource-field="transferOutMinutes" data-resource-id="${escapeAttr(resource.id)}" value="${Number(resource.transferOutMinutes || 0)}" ${canEditPlanning ? "" : `disabled title="${escapeAttr(deniedTitle)}"`} /></label>
               <label>Transfert retour (min)<input type="number" min="0" step="15" data-resource-field="transferReturnMinutes" data-resource-id="${escapeAttr(resource.id)}" value="${Number(resource.transferReturnMinutes || 0)}" ${canEditPlanning ? "" : `disabled title="${escapeAttr(deniedTitle)}"`} /></label>
@@ -502,7 +511,11 @@ function renderResources() {
       }
       const resource = getResource(input.dataset.resourceId);
       const field = input.dataset.resourceField;
-      if (["capacity", "dailyCapacityMinutes", "transferOutMinutes", "transferReturnMinutes", "standardLeadTimeMinutes"].includes(field)) {
+      if (field === "scheduleProfile") {
+        if (typeof setResourceScheduleProfile === "function") {
+          setResourceScheduleProfile(resource, input.value);
+        }
+      } else if (["capacity", "dailyCapacityMinutes", "transferOutMinutes", "transferReturnMinutes", "standardLeadTimeMinutes"].includes(field)) {
         resource[field] = input.value === "" ? null : Number(input.value);
         if (field === "capacity") resource.simultaneousCapacity = Math.max(1, Number(input.value || 1));
       } else {
@@ -562,7 +575,7 @@ function renderWorkHoursSettings() {
     (label, day) => `
       <label class="work-hour-row">
         <span>${label}</span>
-        <input data-work-day="${day}" value="${formatWorkIntervals(state.workHours[day] || [])}" placeholder="08:00-12:00,13:00-17:00 ou fermé" ${canEditPlanning ? "" : `disabled title="${escapeAttr(deniedTitle)}"`} />
+        <input data-work-day="${day}" value="${formatWorkIntervals(state.workHours[day] || [])}" placeholder="07:45-17:00 ou fermé" ${canEditPlanning ? "" : `disabled title="${escapeAttr(deniedTitle)}"`} />
       </label>
     `,
   ).join("");
@@ -578,7 +591,7 @@ function parseWorkIntervals(value) {
   return cleaned.split(",").map((part) => {
     const [start, end] = part.trim().split("-").map((item) => item.trim());
     if (!isValidTime(start) || !isValidTime(end) || atTime(new Date(), start) >= atTime(new Date(), end)) {
-      throw new Error("Format horaire invalide. Exemple attendu: 08:00-12:00,13:00-17:00");
+      throw new Error("Format horaire invalide. Exemple attendu: 07:45-17:00 ou 07:45-12:30,13:45-17:00");
     }
     return [start, end];
   });

@@ -83,7 +83,7 @@ self.addEventListener("activate", (event) => {
 function isReleaseAsset(url) {
   try {
     const parsed = new URL(url);
-    return parsed.searchParams.get("v") === "23.3.47";
+    return parsed.searchParams.get("v") === "23.3.48";
   } catch {
     return false;
   }

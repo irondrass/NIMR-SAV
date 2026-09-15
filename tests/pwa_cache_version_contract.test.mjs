@@ -69,6 +69,20 @@ vm.runInContext(swSource, context, { filename: "sw.js" });
 const declaredCacheName = vm.runInContext("CACHE_NAME", context);
 const declaredAssets = Array.from(vm.runInContext("ASSETS", context));
 assert.equal(declaredCacheName, currentBuild.cacheName, "le service worker doit utiliser le cache déclaré dans js/version.js");
+
+const currentReleaseAssetProbe = new URL("./js/storage.js?v=" + currentBuild.queryVersion, origin + "/").href;
+assert.equal(
+  vm.runInContext(`isReleaseAsset(${JSON.stringify(currentReleaseAssetProbe)})`, context),
+  true,
+  "isReleaseAsset doit reconnaître la query version de la release courante"
+);
+
+const foreignReleaseAssetProbe = new URL("./js/storage.js?v=0.0.0", origin + "/").href;
+assert.equal(
+  vm.runInContext(`isReleaseAsset(${JSON.stringify(foreignReleaseAssetProbe)})`, context),
+  false,
+  "isReleaseAsset doit refuser une query version étrangère"
+);
 assert.equal(new Set(declaredAssets).size, declaredAssets.length, "le précache ne doit contenir aucun doublon");
 assert.doesNotMatch(versionSource, /caches\.delete/u, "l'ancien cache doit rester disponible jusqu'à l'activation du nouveau service worker");
 assert.doesNotMatch(swSource, /cache\.add\([^)]*\)\.catch/u, "un précache partiel ne doit jamais être accepté");

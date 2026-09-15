@@ -14,7 +14,7 @@
  *   Group J: Action 9 MARK_REPLACEMENT_AVAILABLE
  *   Group K: Action 10 CONFIRM_RESTITUTION
  *   Group L: CAS & Concurrency Strategy (VERSION_CONFLICT)
- *   Group M: No Generic 17-char VIN Rule
+ *   Group M: Strict Donor VIN17 Contract
  *   Group N: Mutation Identity Gate Fail-Closed & Workshop Authority
  *   Group O: Approval Read Model & Lookup
  *   Group P: STORE_ACK Repeat Prevention in UI
@@ -448,16 +448,146 @@ test("Group L: Concurrency conflict returns VERSION_CONFLICT and triggers clean 
 });
 
 // ============================================================================
-// Group M: No Generic 17-char VIN Rule
+// Group M: Strict Donor VIN17 Contract
 // ============================================================================
-test("Group M: No generic 17-char VIN constraint enforced", () => {
-  // Verify client code contains no length 17 constraint
-  assert.equal(clientJsContent.includes("17"), false, "vn-part-client must not have 17-char check");
-  assert.equal(uiJsContent.includes('maxlength="17"'), false, "vn-part-ui must not have maxlength 17");
-  assert.equal(uiJsContent.includes('minlength="17"'), false, "vn-part-ui must not have minlength 17");
-  assert.equal(uiJsContent.includes(".length === 17"), false, "vn-part-ui must not have strict length 17 check");
+
+test("Group M1: Donor VIN validator accepts only a canonical 17-character VIN", () => {
+  assert.equal(
+    typeof vnPartUi.validateDonorVin,
+    "function",
+    "VIN17_RED_HELPER_MISSING"
+  );
+
+  const valid = vnPartUi.validateDonorVin(" ldp43a963ss112296 ");
+
+  assert.deepEqual(valid, {
+    ok: true,
+    normalizedVin: "LDP43A963SS112296",
+    code: null,
+    message: "",
+  });
+
+  const invalidCases = [
+    "3SS112296",
+    "SS112296",
+    "112296",
+    "2296",
+    "LDP43A963SS11229",
+    "LDP43A963SS1122968",
+    "LDP43A963SI112296",
+    "LDP43A963SO112296",
+    "LDP43A963SQ112296",
+    "LDP43A963S-112296",
+  ];
+
+  for (const rawVin of invalidCases) {
+    const result = vnPartUi.validateDonorVin(rawVin);
+
+    assert.equal(
+      result.ok,
+      false,
+      `VIN donneur invalide accepté: ${rawVin}`
+    );
+
+    assert.equal(
+      result.code,
+      "INVALID_DONOR_VIN",
+      `Code attendu INVALID_DONOR_VIN pour ${rawVin}`
+    );
+  }
 });
 
+test("Group M2: Both donor VIN form inputs expose the strict VIN17 browser contract", () => {
+  const donorInputs = [
+    ...uiJsContent.matchAll(
+      /<input\b[^>]*\bid="vn-action-donor-vin"[^>]*>/gu
+    ),
+  ].map((match) => match[0]);
+
+  assert.equal(
+    donorInputs.length,
+    2,
+    "VIN17_RED_UI_INPUT_COUNT"
+  );
+
+  for (const tag of donorInputs) {
+    assert.match(
+      tag,
+      /\bminlength="17"/u,
+      "VIN17_RED_UI_MINLENGTH_MISSING"
+    );
+
+    assert.match(
+      tag,
+      /\bmaxlength="17"/u,
+      "VIN17_RED_UI_MAXLENGTH_MISSING"
+    );
+
+    assert.match(
+      tag,
+      /\bpattern="\[A-HJ-NPR-Z0-9\]\{17\}"/u,
+      "VIN17_RED_UI_PATTERN_MISSING"
+    );
+  }
+});
+
+test("Group M3: Supabase authoritatively normalizes and rejects invalid donor VIN writes", () => {
+  const migrationsDir = path.join(
+    WORKDIR,
+    "supabase",
+    "migrations"
+  );
+
+  const allMigrationSql = fs
+    .readdirSync(migrationsDir)
+    .filter((name) => name.endsWith(".sql"))
+    .sort()
+    .map((name) =>
+      fs.readFileSync(path.join(migrationsDir, name), "utf8")
+    )
+    .join("\n");
+
+  assert.match(
+    allMigrationSql,
+    /INVALID_DONOR_VIN/u,
+    "VIN17_RED_SERVER_GUARD_MISSING"
+  );
+
+  assert.match(
+    allMigrationSql,
+    /\^\[A-HJ-NPR-Z0-9\]\{17\}\$/u,
+    "VIN17_RED_SERVER_PATTERN_MISSING"
+  );
+
+  assert.match(
+    allMigrationSql,
+    /new\.donor_vin\s*:=\s*upper\s*\(\s*trim\s*\(\s*new\.donor_vin\s*\)\s*\)/iu,
+    "VIN17_RED_SERVER_CANONICALIZATION_MISSING"
+  );
+
+  assert.match(
+    allMigrationSql,
+    /before\s+insert\s+or\s+update\s+of\s+donor_vin\s+on\s+public\.vn_part_removals/iu,
+    "VIN17_RED_SERVER_SCOPED_TRIGGER_MISSING"
+  );
+});
+
+test("Group M4: Beneficiary VIN remains optional and is not constrained by donor VIN17 UI rules", () => {
+  const beneficiaryInput = uiJsContent.match(
+    /<input\b[^>]*\bid="vn-create-ben-vin"[^>]*>/u
+  )?.[0];
+
+  assert.ok(
+    beneficiaryInput,
+    "Beneficiary VIN input must still exist"
+  );
+
+  assert.doesNotMatch(
+    beneficiaryInput,
+    /\b(?:minlength|maxlength|pattern)=/u,
+    "VIN17 donor rule must not alter beneficiary VIN input"
+  );
+});
 // ============================================================================
 // Group N: Mutation Identity Gate Fail-Closed & Workshop Authority
 // ============================================================================

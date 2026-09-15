@@ -1875,6 +1875,7 @@ const TODAY_GROUP_CONFIG = [
 ];
 
 const WORKSHOP_PROGRESS_STALE_HOURS = 24;
+const PLANNED_TASK_DELAY_TOLERANCE_MINUTES = 30;
 const WORKSHOP_PROGRESS_BLOCKED_CRITICAL_HOURS = 7 * 24;
 
 let workshopProgressSearch = "";
@@ -2487,8 +2488,58 @@ function getOperationalExceptions(item, now = new Date()) {
   if (["rejected", "rework"].includes(item.receptionWorkflow?.qualityStatus)) add("quality", "Anomalie qualité à corriger", "danger", "Chef Atelier");
   if (isCasePhysicallyPresent(item) && !item.flags?.workCompleted && getWorkAuthorizationIssues(item).length) add("authorization", "Accord travaux à obtenir", "warn", "Réception");
   if (isCasePhysicallyPresent(item) && !item.flags?.workCompleted) {
+    let hasFinishDelay = false;
+    let hasStartDelay = false;
+    bookings.forEach((booking) => {
+      const status = getBookingOperationalStatus(booking);
+      if (status === "completed" || booking.actualEnd || booking.completedAt) return;
+      if (isWorkshopProgressBookingBlocked(booking)) return;
+
+      const resourceId = (booking.resourceIds || []).find((id) => {
+        const r = typeof getResource === "function" ? getResource(id) : state.resources?.find((x) => x.id === id);
+        return r && r.active !== false && (typeof isEquipmentResource === "function" ? !isEquipmentResource(r) : true);
+      }) || booking.primaryResourceId || booking.resourceIds?.[0];
+      const resource = typeof getResource === "function" ? getResource(resourceId) : state.resources?.find((r) => r.id === resourceId) || null;
+
+      const plannedEnd = getWorkshopProgressValidDate(booking.plannedEnd || booking.end);
+      const finishThreshold = plannedEnd ? addResourceWorkingMinutes(resource, plannedEnd, PLANNED_TASK_DELAY_TOLERANCE_MINUTES) : null;
+
+      if (finishThreshold && now > finishThreshold && (status === "started" || booking.actualStart || booking.startedAt)) {
+        const opTitle = (typeof getPlanningOperationTitle === "function" ? getPlanningOperationTitle(booking) : "") || getWorkshopProgressBookingLabel(booking) || "Opération atelier";
+        add("task_finish_late", `Fin de tâche en retard : ${opTitle}`, "warn", "Chef Atelier", booking.plannedEnd || booking.end);
+        hasFinishDelay = true;
+        return;
+      }
+
+      if (status === "planned" && !booking.actualStart && !booking.startedAt) {
+        const plannedStart = getWorkshopProgressValidDate(booking.plannedStart || booking.start);
+        const startThreshold = plannedStart ? addResourceWorkingMinutes(resource, plannedStart, PLANNED_TASK_DELAY_TOLERANCE_MINUTES) : null;
+        if (startThreshold && now > startThreshold) {
+          const opTitle = (typeof getPlanningOperationTitle === "function" ? getPlanningOperationTitle(booking) : "") || getWorkshopProgressBookingLabel(booking) || "Opération atelier";
+          add("task_start_late", `Démarrage en retard : ${opTitle}`, "warn", "Chef Atelier", booking.plannedStart || booking.start);
+          hasStartDelay = true;
+        }
+      }
+    });
+
+    const hasActiveTaskWithinWindow = bookings.some((booking) => {
+      if (getBookingOperationalStatus(booking) !== "started") return false;
+      const plannedEnd = getWorkshopProgressValidDate(booking.plannedEnd || booking.end);
+      if (!plannedEnd) return true;
+      const resourceId = (booking.resourceIds || []).find((id) => {
+        const r = typeof getResource === "function" ? getResource(id) : state.resources?.find((x) => x.id === id);
+        return r && r.active !== false && (typeof isEquipmentResource === "function" ? !isEquipmentResource(r) : true);
+      }) || booking.primaryResourceId || booking.resourceIds?.[0];
+      const resource = typeof getResource === "function" ? getResource(resourceId) : state.resources?.find((r) => r.id === resourceId) || null;
+      const finishThreshold = addResourceWorkingMinutes(resource, plannedEnd, PLANNED_TASK_DELAY_TOLERANCE_MINUTES);
+      return !finishThreshold || now <= finishThreshold;
+    });
+
     const activity = getWorkshopProgressLastActivityAt(item, { flowOnly: true });
-    if (!bookings.some(b => getBookingOperationalStatus(b) === "started") && getWorkshopProgressAgeHours(activity, now) >= WORKSHOP_PROGRESS_STALE_HOURS) add("stale", "Sans évolution atelier depuis 24 h", "warn", "Chef Atelier");
+    if (!hasFinishDelay && !hasStartDelay && !hasActiveTaskWithinWindow && getWorkshopOpenElapsedHours(activity, now) >= WORKSHOP_PROGRESS_STALE_HOURS) {
+      add("stale", "Sans évolution atelier depuis 24 h", "warn", "Chef Atelier");
+    }
+
     if (eta && eta < now) add("eta", "Fin estimée dépassée", "danger", "Chef Atelier");
     const unavailableAssignment = bookings.some(b => !["completed", "cancelled"].includes(getBookingOperationalStatus(b)) &&
       (b.resourceIds || []).some(id => {
@@ -2496,13 +2547,12 @@ function getOperationalExceptions(item, now = new Date()) {
         return !resource || resource.active === false || (typeof isResourceAvailableForSlot === "function" && !isResourceAvailableForSlot(resource, b).ok);
       }));
     if (unavailableAssignment) add("assignment", "Affectation à revoir : ressource indisponible", "warn", "Chef Atelier");
-    if (bookings.some(b => getBookingOperationalStatus(b) === "started" && new Date(b.end || b.plannedEnd) < now)) add("overrun", "Durée d’opération dépassée", "warn", "Chef Atelier");
   }
   const followup = item.exceptionFollowup || {};
   const owner = state.users?.find(u => u.id === followup.ownerId && u.active !== false);
   const due = getWorkshopProgressValidDate(followup.dueAt);
   if (due && due <= now && result.some(e => e.owner === "Chef Atelier")) add("decision_late", "Décision atelier en retard", "danger", "Chef Atelier", followup.dueAt);
-  const order = { quality: 0, blocked: 1, promise_late: 2, decision_late: 3, contact: 4, eta: 5, promise_risk: 6, assignment: 7, overrun: 8, authorization: 9, stale: 10 };
+  const order = { quality: 0, blocked: 1, promise_late: 2, decision_late: 3, contact: 4, eta: 5, promise_risk: 6, task_finish_late: 7, task_start_late: 8, assignment: 9, overrun: 10, authorization: 11, stale: 12 };
   return result.map(e => ({ ...e,
     // A workshop decision never changes a client promise or callback deadline.
     owner: e.owner === "Chef Atelier" ? owner?.name || e.owner : e.owner,

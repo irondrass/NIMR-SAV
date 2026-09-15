@@ -285,6 +285,68 @@ function getHoliday(dateLike) {
   return state.holidays.find((holiday) => holiday.date === key) || null;
 }
 
+function addResourceWorkingMinutes(resource, dateLike, minutes) {
+  const start = new Date(dateLike);
+  if (Number.isNaN(start.getTime())) return null;
+  const targetMinutes = Number(minutes || 0);
+  if (targetMinutes <= 0) return start;
+
+  let remaining = targetMinutes;
+  let cursor = new Date(start);
+  const horizon = addDays(cursor, 60);
+
+  while (remaining > 0 && cursor < horizon) {
+    const intervals = (typeof getEffectiveResourceDayIntervals === "function" && resource)
+      ? getEffectiveResourceDayIntervals(resource, cursor)
+      : (typeof getResourceDayIntervals === "function" && resource)
+        ? getResourceDayIntervals(resource, cursor)
+        : getDayIntervals(cursor);
+
+    for (const interval of intervals) {
+      if (cursor >= interval.end) continue;
+      const segmentStart = maxDate(cursor, interval.start);
+      if (segmentStart >= interval.end) continue;
+      const available = diffMinutes(segmentStart, interval.end);
+      if (available <= 0) continue;
+
+      if (remaining <= available) {
+        return addMinutes(segmentStart, remaining);
+      }
+      remaining -= available;
+      cursor = new Date(interval.end);
+    }
+    cursor = startOfDay(addDays(cursor, 1));
+  }
+  return cursor;
+}
+
+function getWorkshopOpenElapsedHours(fromDate, toDate) {
+  const from = new Date(fromDate);
+  const to = new Date(toDate);
+  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || to <= from) {
+    return 0;
+  }
+
+  let totalMinutes = 0;
+  let cursor = new Date(from);
+  const endLimit = new Date(to);
+
+  while (cursor < endLimit) {
+    const intervals = getDayIntervals(cursor);
+    for (const interval of intervals) {
+      if (interval.end <= from || interval.start >= to) continue;
+      const segStart = maxDate(interval.start, from);
+      const segEnd = minDate(interval.end, to);
+      if (segEnd > segStart) {
+        totalMinutes += diffMinutes(segStart, segEnd);
+      }
+    }
+    cursor = startOfDay(addDays(cursor, 1));
+  }
+
+  return totalMinutes / 60;
+}
+
 function getResource(id) {
   return state.resources.find((resource) => resource.id === id);
 }

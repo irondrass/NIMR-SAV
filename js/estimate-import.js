@@ -1030,7 +1030,7 @@ async function extractPdfTextWithPdfJs(buffer) {
   if (!window.pdfjsLib?.getDocument) return "";
   try {
     window.pdfjsLib.GlobalWorkerOptions = window.pdfjsLib.GlobalWorkerOptions || {};
-    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.48";
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.49";
     const pdf = await window.pdfjsLib.getDocument({ data: buffer }).promise;
     const pages = [];
     for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {

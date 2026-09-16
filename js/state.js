@@ -5428,10 +5428,10 @@ const ROLE_TABS = {
   controle_qualite: ["today", "dossiers"],
   qualite:       ["today", "dossiers"],
   readonly:      ["dossiers", "pilotage", "planning", "vn-part"],
-  directeur_pieces: ["vn-part", "dossiers", "pilotage"],
-  responsable_magasin: ["vn-part", "dossiers"],
+  directeur_pieces: ["vn-part"],
+  responsable_magasin: ["vn-part"],
   responsable_garantie_support: ["vn-part", "dossiers"],
-  responsable_qualite_parc_vn: ["vn-part", "dossiers"],
+  responsable_qualite_parc_vn: ["vn-part"],
 };
 
 // Tab par défaut à afficher lors de la connexion selon le rôle

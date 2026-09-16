@@ -25,6 +25,7 @@ import fs from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
 import { createRequire } from "node:module";
+import { currentBuild } from "./helpers/build_version.mjs";
 
 const require = createRequire(import.meta.url);
 const vnPartClient = require("../js/vn-part-client.js");
@@ -600,37 +601,37 @@ test("9. Filters: All 5 filters operate according to physical semantics", () => 
 // 10. Service Worker Precache Alignment
 // ============================================================================
 test("10. PWA Precache: Both new JS files exist in sw.js ASSETS with exact release query", () => {
-  // Check index.html references
+  const queryVersion = currentBuild.queryVersion;
+
+  // Check index.html references against the authoritative current build.
   assert.ok(
-    indexHtmlContent.includes('<script src="js/vn-part-client.js?v=23.3.47" defer></script>'),
-    "index.html must include vn-part-client.js with active query v=23.3.47"
+    indexHtmlContent.includes(`<script src="js/vn-part-client.js?v=${queryVersion}" defer></script>`),
+    `index.html must include vn-part-client.js with active query v=${queryVersion}`
   );
   assert.ok(
-    indexHtmlContent.includes('<script src="js/vn-part-ui.js?v=23.3.47" defer></script>'),
-    "index.html must include vn-part-ui.js with active query v=23.3.47"
+    indexHtmlContent.includes(`<script src="js/vn-part-ui.js?v=${queryVersion}" defer></script>`),
+    `index.html must include vn-part-ui.js with active query v=${queryVersion}`
   );
 
-  // Check sw.js ASSETS precache list
+  // Check sw.js ASSETS precache list against the authoritative current build.
   const assetsMatch = swJsContent.match(/const ASSETS = \[([\s\S]*?)\];/);
   assert.ok(assetsMatch, "sw.js must contain ASSETS array");
   const assetsBlock = assetsMatch[1];
 
   assert.ok(
-    assetsBlock.includes('"./js/vn-part-client.js?v=23.3.47"'),
-    "sw.js ASSETS must precache ./js/vn-part-client.js?v=23.3.47"
+    assetsBlock.includes(`"./js/vn-part-client.js?v=${queryVersion}"`),
+    `sw.js ASSETS must precache ./js/vn-part-client.js?v=${queryVersion}`
   );
   assert.ok(
-    assetsBlock.includes('"./js/vn-part-ui.js?v=23.3.47"'),
-    "sw.js ASSETS must precache ./js/vn-part-ui.js?v=23.3.47"
+    assetsBlock.includes(`"./js/vn-part-ui.js?v=${queryVersion}"`),
+    `sw.js ASSETS must precache ./js/vn-part-ui.js?v=${queryVersion}`
   );
 
-  // Assert version was bumped to v23.3.47
   assert.ok(
-    swJsContent.includes('const CACHE_NAME = "nimr-sav-v23.3.47";'),
-    "sw.js CACHE_NAME must be nimr-sav-v23.3.47"
+    swJsContent.includes(`const CACHE_NAME = "${currentBuild.cacheName}";`),
+    `sw.js CACHE_NAME must be ${currentBuild.cacheName}`
   );
 });
-
 // ============================================================================
 // 11. CSS Styles: Responsive Layout & Mobile Contract
 // ============================================================================

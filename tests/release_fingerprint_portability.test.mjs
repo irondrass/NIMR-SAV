@@ -164,18 +164,20 @@ test("H. Scheme versioning: legacy releases are worktree-raw-v1 and current is c
   assert.equal(FINGERPRINT_SCHEMES["v23.3.42"], "canonical-lf-v2");
   assert.equal(FINGERPRINT_SCHEMES["v23.3.43"], "canonical-lf-v2");
   assert.equal(FINGERPRINT_SCHEMES["v23.3.44"], "canonical-lf-v2");
+  assert.equal(FINGERPRINT_SCHEMES["v23.3.50"], "canonical-lf-v2");
   assert.equal(CURRENT_FINGERPRINT_SCHEME, "canonical-lf-v2");
 });
 
 // -------------------------------------------------------------
-// EXACT 25 RUNTIME-FILE INVENTORY
+// EXACT 26 RUNTIME-FILE INVENTORY
 // -------------------------------------------------------------
-test("I. Runtime files inventory: exactly 25 sorted release files declared", () => {
-  assert.equal(RELEASE_OWNED_RUNTIME_FILES.length, 25);
+test("I. Runtime files inventory: exactly 26 sorted release files declared", () => {
+  assert.equal(RELEASE_OWNED_RUNTIME_FILES.length, 26);
   const sortedCopy = [...RELEASE_OWNED_RUNTIME_FILES].sort();
   assert.deepEqual(RELEASE_OWNED_RUNTIME_FILES, sortedCopy, "File list must be pre-sorted");
   assert.equal(RELEASE_OWNED_RUNTIME_FILES.includes("js/vn-part-client.js"), true);
   assert.equal(RELEASE_OWNED_RUNTIME_FILES.includes("js/vn-part-ui.js"), true);
+  assert.equal(RELEASE_OWNED_RUNTIME_FILES.includes("vendor/xlsx.mini.min.js"), true);
 
   // Verify each file exists on disk
   for (const file of RELEASE_OWNED_RUNTIME_FILES) {
@@ -224,6 +226,24 @@ test("J. Cross-EOL proof: normal worktree files vs in-memory CRLF version yield 
   assert.equal(normalHash, inMemoryLFHash, "Normal worktree canonical hash must match LF hash");
   assert.equal(inMemoryCRLFHash, inMemoryLFHash, "In-memory CRLF canonical hash must match LF hash");
   assert.equal(normalHash, inMemoryCRLFHash, "Normal worktree canonical hash must match in-memory CRLF hash");
+});
+
+// -------------------------------------------------------------
+// K. XLSX VENDOR ASSET SENSITIVITY & SEALED MATCH
+// -------------------------------------------------------------
+test("K. XLSX vendor asset sensitivity & sealed v23.3.50 match: mutating 1 byte in vendor/xlsx.mini.min.js changes fingerprint; canonical matches sealed", () => {
+  const normalHash = computeReleaseFingerprint(repositoryRoot, RELEASE_OWNED_RUNTIME_FILES);
+  assert.equal(normalHash, SEALED_RELEASE_FINGERPRINTS["v23.3.50"], "Canonical release fingerprint must match sealed v23.3.50");
+
+  const originalXlsx = fs.readFileSync(path.join(repositoryRoot, "vendor/xlsx.mini.min.js"));
+  const mutatedXlsx = Buffer.from(originalXlsx);
+  mutatedXlsx[0] = mutatedXlsx[0] ^ 0xff;
+
+  const mutatedHash = computeReleaseFingerprint(repositoryRoot, RELEASE_OWNED_RUNTIME_FILES, {
+    "vendor/xlsx.mini.min.js": mutatedXlsx,
+  });
+
+  assert.notEqual(normalHash, mutatedHash, "Mutating 1 byte in vendor/xlsx.mini.min.js MUST produce a different canonical fingerprint");
 });
 
 // -------------------------------------------------------------

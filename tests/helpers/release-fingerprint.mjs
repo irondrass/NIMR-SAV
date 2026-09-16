@@ -7,7 +7,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const repositoryRoot = path.resolve(__dirname, "../..");
 
 // Deterministic release fingerprint: SHA-256 over sorted release-owned runtime source files.
-// Exactly 25 files whose byte content determines actual application runtime behavior.
+// Exactly 26 files whose byte content determines actual application runtime behavior.
 export const RELEASE_OWNED_RUNTIME_FILES = Object.freeze([
   "app.js",
   "index.html",
@@ -34,6 +34,7 @@ export const RELEASE_OWNED_RUNTIME_FILES = Object.freeze([
   "sw.js",
   "vendor/pdf.min.js",
   "vendor/pdf.worker.min.js",
+  "vendor/xlsx.mini.min.js",
 ]);
 
 /**
@@ -101,6 +102,9 @@ export const FINGERPRINT_SCHEMES = Object.freeze({
   "v23.3.45": "canonical-lf-v2",
   "v23.3.46": "canonical-lf-v2",
   "v23.3.47": "canonical-lf-v2",
+  "v23.3.48": "canonical-lf-v2",
+  "v23.3.49": "canonical-lf-v2",
+  "v23.3.50": "canonical-lf-v2",
 });
 
 export const CURRENT_FINGERPRINT_SCHEME = "canonical-lf-v2";
@@ -145,6 +149,9 @@ export const SEALED_RELEASE_FINGERPRINTS = Object.freeze({
   "v23.3.45": "95d3635433dc99c188dbb358ab5d52fda5e5faf915bb9189d979af1aa6cf3e68",
   "v23.3.46": "1bdae81ef8e4266733ac355c794c08c35e7b708f9217a01c5106f6f470a5c9e6",
   "v23.3.47": "1ffb6001a76a513c2f23a6742f25cec282e63bf6a67f802903b2c40e44cbb90b",
+  "v23.3.48": "13a09266581574ad3da685a0b7d724294e9afcc3f490ef47a3d8bf807e00f30c",
+  "v23.3.49": "0dcf7936a57c31a7ec832683b171c7b113637db7b9e71a5d705cbccddfa8344e",
+  "v23.3.50": "3bcbe865559a44cd5961f5143b6989d14469bbd0e64cd4c7edc4b7deb91f8f5b",
 });
 
 /**

@@ -618,6 +618,375 @@
   }
 
   /**
+   * Resolve XLSX browser/node library instance safely without runtime CDN.
+   */
+  function resolveXlsxLibrary() {
+    if (typeof XLSX !== "undefined") return XLSX;
+    if (typeof globalThis !== "undefined" && globalThis.XLSX) return globalThis.XLSX;
+    if (typeof window !== "undefined" && window.XLSX) return window.XLSX;
+    if (typeof require === "function") {
+      try {
+        return require("../vendor/xlsx.mini.min.js");
+      } catch {
+        try {
+          return require("./vendor/xlsx.mini.min.js");
+        } catch {}
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Canonical single row selector for visible physical removals.
+   * Guarantees 100% parity between Section B UI and XLSX export.
+   */
+  function getVisiblePhysicalRemovalRows({
+    donors = [],
+    removals = [],
+    activeFilter = "all-open",
+    searchQuery = "",
+  } = {}) {
+    const filteredDonors = filterVnPartDonors(donors, removals, activeFilter, searchQuery);
+    const groups = groupVnPartByModelAndVin(filteredDonors, removals);
+
+    const rows = [];
+    for (const group of groups) {
+      for (const item of group.items) {
+        const donor = item.donor;
+        const donorRemovals = (item.removals || []).filter((r) => Boolean(r.removed_at));
+        for (const rem of donorRemovals) {
+          rows.push({
+            ...rem,
+            donor_model: donor.donor_model || rem.donor_model || "",
+            donor_location: donor.donor_location || rem.donor_location || "",
+          });
+        }
+      }
+    }
+    return rows;
+  }
+
+  /**
+   * Generate canonical export filename: Etat_prelevements_YYYY-MM-DD_HHmm.xlsx.
+   */
+  function generateVnPartExportFilename(dateVal = null) {
+    const d = dateVal instanceof Date ? dateVal : new Date();
+    const pad = (n) => String(n).padStart(2, "0");
+    const yyyy = d.getFullYear();
+    const mm = pad(d.getMonth() + 1);
+    const dd = pad(d.getDate());
+    const hh = pad(d.getHours());
+    const min = pad(d.getMinutes());
+    return `Etat_prelevements_${yyyy}-${mm}-${dd}_${hh}${min}.xlsx`;
+  }
+
+  /**
+   * Helper to convert raw date/timestamp into Date object for XLSX date cell.
+   */
+  function toSafeXlsxDate(val) {
+    if (!val) return "";
+    const d = new Date(val);
+    return isNaN(d.getTime()) ? "" : d;
+  }
+
+  /**
+   * Build complete Excel workbook for physical removals with exact 17 columns.
+   */
+  function buildVnPartExportWorkbook(rows, options = {}) {
+    const xlsxLib = (options && options.xlsx) || resolveXlsxLibrary();
+    if (!xlsxLib || !xlsxLib.utils) {
+      throw new Error("Bibliothèque XLSX non disponible.");
+    }
+
+    const todayIso = options.todayIso || getLocalTodayIso();
+
+    const headers = [
+      "Statut",
+      "VIN donneur",
+      "Modèle donneur",
+      "Emplacement donneur",
+      "VIN bénéficiaire",
+      "Modèle bénéficiaire",
+      "N° OR",
+      "Référence pièce",
+      "Désignation pièce",
+      "Quantité",
+      "Date prélèvement",
+      "ETA remplacement",
+      "État ETA",
+      "Jours de retard",
+      "Pièce de remplacement disponible",
+      "Date disponibilité",
+      "Date restitution",
+    ];
+
+    const data = [headers];
+
+    for (const r of (rows || [])) {
+      const etaClassification = classifyEtaTracking(r, todayIso);
+      let etaStateText = "Non applicable";
+      if (etaClassification.trackable) {
+        if (etaClassification.category === "MISSING_ETA") {
+          etaStateText = "ETA MANQUANTE";
+        } else if (etaClassification.category === "DUE_TODAY") {
+          etaStateText = "ÉCHÉANCE AUJOURD'HUI";
+        } else if (etaClassification.category === "OVERDUE") {
+          etaStateText = `ETA DÉPASSÉE (D+${etaClassification.daysFromEta})`;
+        } else {
+          etaStateText = "ETA À VENIR";
+        }
+      } else if (r.restored_at) {
+        etaStateText = "RESTITUÉ";
+      } else if (r.replacement_available_at) {
+        etaStateText = "PIÈCE DISPONIBLE";
+      }
+
+      let overdueDaysVal = "";
+      if (
+        etaClassification.trackable &&
+        etaClassification.category === "OVERDUE" &&
+        Number(etaClassification.daysFromEta) > 0
+      ) {
+        overdueDaysVal = Number(etaClassification.daysFromEta);
+      }
+
+      const isReplacementAvailable = Boolean(r.replacement_available_at);
+
+      let statusLabel = r.status || "";
+      if (r.restored_at) {
+        statusLabel = "RESTITUÉ / CLÔTURÉ";
+      } else if (r.replacement_available_at) {
+        statusLabel = "PIÈCE DISPONIBLE";
+      } else if (r.removed_at) {
+        statusLabel = "EN ATTENTE PIÈCE";
+      }
+
+      const qty = typeof r.quantity === "number" ? r.quantity : (Number(r.quantity) || 1);
+
+      data.push([
+        statusLabel,
+        r.donor_vin || "",
+        r.donor_model || "",
+        r.donor_location || "",
+        r.beneficiary_vin || "",
+        r.beneficiary_model || "",
+        r.beneficiary_or || "",
+        r.part_reference || "",
+        r.part_designation || "",
+        qty,
+        toSafeXlsxDate(r.removed_at),
+        toSafeXlsxDate(r.expected_replacement_date),
+        etaStateText,
+        overdueDaysVal,
+        isReplacementAvailable ? "OUI" : "NON",
+        toSafeXlsxDate(r.replacement_available_at),
+        toSafeXlsxDate(r.restored_at),
+      ]);
+    }
+
+    const ws = xlsxLib.utils.aoa_to_sheet(data, { cellDates: true });
+
+    // Format date cells with dd/mm/yyyy
+    for (const cellRef of Object.keys(ws)) {
+      if (cellRef.startsWith("!")) continue;
+      if (ws[cellRef] && ws[cellRef].t === "d") {
+        ws[cellRef].z = "dd/mm/yyyy";
+      }
+    }
+
+    // Auto-filter
+    const rowCount = data.length;
+    ws["!autofilter"] = { ref: `A1:Q${rowCount}` };
+
+    // Column widths
+    ws["!cols"] = [
+      { wch: 22 }, // Statut
+      { wch: 20 }, // VIN donneur
+      { wch: 18 }, // Modèle donneur
+      { wch: 20 }, // Emplacement donneur
+      { wch: 20 }, // VIN bénéficiaire
+      { wch: 20 }, // Modèle bénéficiaire
+      { wch: 14 }, // N° OR
+      { wch: 18 }, // Référence pièce
+      { wch: 28 }, // Désignation pièce
+      { wch: 10 }, // Quantité
+      { wch: 16 }, // Date prélèvement
+      { wch: 16 }, // ETA remplacement
+      { wch: 22 }, // État ETA
+      { wch: 14 }, // Jours de retard
+      { wch: 30 }, // Pièce de remplacement disponible
+      { wch: 18 }, // Date disponibilité
+      { wch: 16 }, // Date restitution
+    ];
+
+    const wb = xlsxLib.utils.book_new();
+    xlsxLib.utils.book_append_sheet(wb, ws, "Prélèvements");
+    return wb;
+  }
+
+  /**
+   * Export currently visible physical removals to Excel file.
+   */
+  function exportVnPartToExcel({ rows = null, notifyUser = null } = {}) {
+    const notify =
+      typeof notifyUser === "function"
+        ? notifyUser
+        : typeof window !== "undefined" && typeof window.notifyUser === "function"
+        ? window.notifyUser
+        : console.warn;
+
+    const visibleRows =
+      rows !== null
+        ? rows
+        : getVisiblePhysicalRemovalRows({
+            donors: vnPartEphemeralState.donors,
+            removals: vnPartEphemeralState.removals,
+            activeFilter: vnPartEphemeralState.activeFilter,
+            searchQuery: vnPartEphemeralState.searchQuery,
+          });
+
+    if (!visibleRows || !visibleRows.length) {
+      notify("Aucun prélèvement physique visible à exporter.");
+      return {
+        ok: false,
+        code: "EMPTY_EXPORT",
+        message: "Aucun prélèvement physique visible à exporter.",
+      };
+    }
+
+    const xlsxLib = resolveXlsxLibrary();
+    if (!xlsxLib) {
+      notify("Bibliothèque Excel (XLSX) non disponible.");
+      return {
+        ok: false,
+        code: "XLSX_UNAVAILABLE",
+        message: "Bibliothèque Excel non chargée.",
+      };
+    }
+
+    try {
+      const wb = buildVnPartExportWorkbook(visibleRows);
+      const filename = generateVnPartExportFilename();
+      const buffer = xlsxLib.write(wb, { bookType: "xlsx", type: "array" });
+      const blob = new Blob([buffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+
+      if (typeof downloadBlob === "function") {
+        downloadBlob(blob, filename, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      } else if (typeof window !== "undefined" && typeof window.downloadBlob === "function") {
+        window.downloadBlob(blob, filename, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      } else if (typeof document !== "undefined") {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }
+
+      return {
+        ok: true,
+        filename,
+        rowCount: visibleRows.length,
+      };
+    } catch (err) {
+      notify("Erreur lors de la génération du fichier Excel.");
+      return {
+        ok: false,
+        code: "EXPORT_ERROR",
+        message: err?.message || "Erreur export",
+      };
+    }
+  }
+
+  /**
+   * Render delete modal confirmation content displaying exact record details and typed confirmation guard.
+   */
+  function renderDeleteModalContent(removal) {
+    if (!removal) return "";
+    return `
+      <div class="vn-part-delete-modal-content">
+        <div class="vn-part-modal-warning" role="alert" style="background:#fee2e2; border-left:4px solid #ef4444; padding:12px; margin-bottom:16px; border-radius:4px;">
+          <p style="margin:0; color:#991b1b; font-weight:600;">⚠️ ATTENTION : Action irréversible</p>
+          <p style="margin:4px 0 0; color:#b91c1c; font-size:0.9em;">
+            Cette opération supprimera définitivement le dossier de prélèvement physique ainsi que ses approbations associées. Un événement d'audit immuable sera conservé.
+          </p>
+        </div>
+
+        <div class="vn-part-request-details-grid" style="margin-bottom:16px; background:#f9fafb; padding:12px; border-radius:6px;">
+          <div class="vn-part-detail-cell">
+            <span class="cell-label">Véhicule donneur:</span>
+            <strong class="cell-val">${escapeHtml(removal.donor_model || "—")} (${escapeHtml(removal.donor_vin || "—")})</strong>
+          </div>
+          <div class="vn-part-detail-cell">
+            <span class="cell-label">Véhicule bénéficiaire:</span>
+            <strong class="cell-val">${escapeHtml(removal.beneficiary_model || "—")} (${escapeHtml(removal.beneficiary_vin || "—")})</strong>
+          </div>
+          <div class="vn-part-detail-cell">
+            <span class="cell-label">N° OR:</span>
+            <strong class="cell-val">${escapeHtml(removal.beneficiary_or || "Non renseigné")}</strong>
+          </div>
+          <div class="vn-part-detail-cell">
+            <span class="cell-label">Pièce:</span>
+            <strong class="cell-val">${escapeHtml(removal.part_reference || "RÉF. NON RENSEIGNÉE")} — ${escapeHtml(removal.part_designation || "—")}</strong>
+          </div>
+        </div>
+
+        <div class="vn-part-form-row">
+          <label for="vn-action-reason">Motif de la suppression (obligatoire) <span class="required">*</span></label>
+          <textarea id="vn-action-reason" name="reason" rows="2" required placeholder="Précisez le motif de la suppression..."></textarea>
+        </div>
+
+        <div class="vn-part-form-row" style="margin-top:16px;">
+          <label for="vn-delete-confirmation-input" style="font-weight:600; color:#991b1b;">
+            Pour confirmer, veuillez saisir <span style="user-select:none; font-family:monospace; font-weight:bold;">SUPPRIMER</span> ci-dessous :
+          </label>
+          <input
+            type="text"
+            id="vn-delete-confirmation-input"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="SUPPRIMER"
+            style="font-family:monospace; font-weight:bold; letter-spacing:1px;"
+          />
+        </div>
+      </div>
+    `;
+  }
+
+  /**
+   * Validate parameters for DELETE_REMOVAL action.
+   * Requires exact 'SUPPRIMER' token and non-empty reason.
+   */
+  function validateDeleteRemovalPayload({ token = "", reason = "" } = {}) {
+    const normalizedToken = String(token || "").trim();
+    if (normalizedToken !== "SUPPRIMER") {
+      return {
+        ok: false,
+        field: "token",
+        message: "Vous devez saisir exactement SUPPRIMER pour confirmer.",
+      };
+    }
+    const normalizedReason = String(reason || "").trim();
+    if (!normalizedReason) {
+      return {
+        ok: false,
+        field: "reason",
+        message: "Le motif de la suppression est obligatoire.",
+      };
+    }
+    return {
+      ok: true,
+      payload: {
+        reason: normalizedReason,
+      },
+    };
+  }
+
+  /**
    * Filter and search pre-removal workflow requests (Section A).
    * Requests remain in Section A until physical removal (CONFIRM_REMOVAL).
    */
@@ -852,6 +1221,14 @@
       actions.push("CONFIRM_RESTITUTION");
     }
 
+    // DELETE_REMOVAL (VN-PART-006): Canonical role Directeur only, on physical removals
+    if (
+      removal.removed_at &&
+      role === "directeur"
+    ) {
+      actions.push("DELETE_REMOVAL");
+    }
+
     return actions;
   }
 
@@ -929,6 +1306,7 @@
     STORE_ACK: "Prise en compte magasin",
     MARK_REPLACEMENT_AVAILABLE: "Déclarer pièce disponible",
     CONFIRM_RESTITUTION: "Confirmer restitution VN",
+    DELETE_REMOVAL: "Supprimer",
   };
 
   /**
@@ -943,8 +1321,8 @@
       let btnClass = "secondary-button vn-part-action-btn";
       if (action === "APPROVE" || action === "CONFIRM_REMOVAL" || action === "CONFIRM_RESTITUTION" || action === "MARK_REPLACEMENT_AVAILABLE") {
         btnClass = "primary-button vn-part-action-btn";
-      } else if (action === "REFUSE" || action === "CANCEL") {
-        btnClass = "ghost-button vn-part-action-btn text-danger";
+      } else if (action === "REFUSE" || action === "CANCEL" || action === "DELETE_REMOVAL") {
+        btnClass = "ghost-button vn-part-action-btn text-danger vn-part-delete-btn";
       }
 
       buttonsHtml += `
@@ -1548,6 +1926,14 @@
       vnPartEphemeralState.searchQuery
     );
 
+    const visiblePhysicalRows = getVisiblePhysicalRemovalRows({
+      donors: vnPartEphemeralState.donors,
+      removals: vnPartEphemeralState.removals,
+      activeFilter: vnPartEphemeralState.activeFilter,
+      searchQuery: vnPartEphemeralState.searchQuery,
+    });
+    const visibleRemovalIdSet = new Set(visiblePhysicalRows.map((r) => r.id));
+
     const etaTodayIso = getLocalTodayIso();
     const etaAllRows = filterEtaTrackingRows(
       vnPartEphemeralState.removals,
@@ -1656,6 +2042,16 @@
             </h2>
             <p class="vn-part-section-sub">Véhicules neufs donneurs ayant des pièces physiquement prélevées à restituer</p>
           </div>
+          <div class="vn-part-section-actions">
+            <button
+              type="button"
+              class="secondary-button vn-part-export-btn"
+              id="vn-part-export-excel-btn"
+              title="Exporter les prélèvements physiques affichés au format Excel (.xlsx)"
+            >
+              📊 Exporter Excel
+            </button>
+          </div>
         </div>
     `;
 
@@ -1683,7 +2079,7 @@
 
         for (const item of group.items) {
           const donor = item.donor;
-          const donorRemovals = item.removals.filter((r) => Boolean(r.removed_at));
+          const donorRemovals = item.removals.filter((r) => visibleRemovalIdSet.has(r.id));
           const isOverdue = Number(donor.overdue_count || 0) > 0;
           const isReady = Boolean(donor.can_be_restored_today);
           const isFullyRestored = Boolean(donor.is_fully_restored);
@@ -2096,7 +2492,9 @@
 
     let fieldsHtml = "";
 
-    if (action === "REFUSE" || action === "CANCEL") {
+    if (action === "DELETE_REMOVAL") {
+      fieldsHtml = renderDeleteModalContent(removal);
+    } else if (action === "REFUSE" || action === "CANCEL") {
       fieldsHtml = `
         <div class="vn-part-form-row">
           <label for="vn-action-reason">Motif obligatoire <span class="required">*</span></label>
@@ -2217,7 +2615,14 @@
 
             <footer class="vn-part-modal-footer">
               <button type="button" class="ghost-button" id="vn-part-action-cancel">Annuler</button>
-              <button type="submit" class="primary-button" id="vn-part-action-submit">Confirmer l'action</button>
+              <button
+                type="submit"
+                class="${action === 'DELETE_REMOVAL' ? 'ghost-button text-danger vn-part-delete-confirm-btn' : 'primary-button'}"
+                id="vn-part-action-submit"
+                ${action === 'DELETE_REMOVAL' ? 'disabled' : ''}
+              >
+                ${action === 'DELETE_REMOVAL' ? 'Supprimer définitivement' : "Confirmer l'action"}
+              </button>
             </footer>
           </form>
         </div>
@@ -2228,6 +2633,16 @@
     document.getElementById("vn-part-action-cancel")?.addEventListener("click", closeModals);
 
     document.getElementById("vn-part-action-form")?.addEventListener("submit", handleActionFormSubmit);
+
+    if (action === "DELETE_REMOVAL") {
+      const confirmInput = document.getElementById("vn-delete-confirmation-input");
+      const submitBtn = document.getElementById("vn-part-action-submit");
+      confirmInput?.addEventListener("input", (e) => {
+        if (submitBtn) {
+          submitBtn.disabled = e.target.value.trim() !== "SUPPRIMER";
+        }
+      });
+    }
 
     // Live preview for donor VIN collisions & restoration ETA
     const donorVinInput = document.getElementById("vn-action-donor-vin");
@@ -2371,31 +2786,40 @@
   /**
    * Handle submission of the Action form.
    */
-  async function handleActionFormSubmit(e) {
-    e.preventDefault();
-    if (vnPartEphemeralState.mutationInProgress) return;
+  async function handleActionFormSubmit(e, removalIdArg = null, expectedVersionArg = null, actionArg = null) {
+    if (e && typeof e.preventDefault === "function") e.preventDefault();
+    if (vnPartEphemeralState.mutationInProgress) return { ok: false, code: "IN_FLIGHT" };
 
-    const form = e.target;
-    const removalId = form.dataset.removalId;
-    const action = form.dataset.action;
-    const expectedVersion = parseInt(form.dataset.version, 10);
+    const form = e && e.target ? e.target : e;
+    const removalId = removalIdArg || form?.dataset?.removalId;
+    const action = actionArg || form?.dataset?.action;
+    const expectedVersion = expectedVersionArg !== null ? expectedVersionArg : parseInt(form?.dataset?.version, 10);
     const errorEl = document.getElementById("vn-part-action-error");
     const submitBtn = document.getElementById("vn-part-action-submit");
 
     const removal = vnPartEphemeralState.removals.find((r) => r.id === removalId);
     if (!removal) {
       showModalError(errorEl, "Dossier introuvable.");
-      return;
+      return { ok: false, code: "REMOVAL_NOT_FOUND", message: "Dossier introuvable." };
     }
 
     const payload = {};
 
     // 1. Validate reason if required
     const reasonVal = form.reason?.value?.trim();
-    if (action === "REFUSE" || action === "CANCEL") {
+    if (action === "DELETE_REMOVAL") {
+      const confirmInput = form.querySelector ? form.querySelector("#vn-delete-confirmation-input") : null;
+      const tokenVal = confirmInput?.value;
+      const validation = validateDeleteRemovalPayload({ token: tokenVal, reason: reasonVal });
+      if (!validation.ok) {
+        showModalError(errorEl, validation.message);
+        return { ok: false, code: "VALIDATION_FAILED", message: validation.message };
+      }
+      payload.reason = validation.payload.reason;
+    } else if (action === "REFUSE" || action === "CANCEL") {
       if (!reasonVal) {
         showModalError(errorEl, "Le motif est obligatoire pour cette action.");
-        return;
+        return { ok: false, code: "REASON_REQUIRED", message: "Le motif est obligatoire pour cette action." };
       }
       payload.reason = reasonVal;
     } else if (reasonVal) {
@@ -2460,6 +2884,7 @@
     }
 
     const applyFn =
+      (typeof globalThis !== "undefined" && globalThis.applyVnPartAction) ||
       (clientModule && clientModule.applyVnPartAction) ||
       (typeof applyVnPartAction === "function" ? applyVnPartAction : null) ||
       (typeof window !== "undefined" ? window.applyVnPartAction : null);
@@ -2491,12 +2916,16 @@
         submitBtn.disabled = false;
         submitBtn.textContent = "Confirmer l'action";
       }
-      return;
+      return { ok: false, code: res.code || "RPC_ERROR", message: res.message };
     }
 
     closeModals();
     vnPartEphemeralState.conflictMessage = null;
-    await refreshVnPartDashboard();
+    const refreshFn =
+      (typeof globalThis !== "undefined" && globalThis.vnPartUi && globalThis.vnPartUi.refreshVnPartDashboard) ||
+      refreshVnPartDashboard;
+    await refreshFn();
+    return { ok: true, result: res };
   }
 
   /**
@@ -2548,8 +2977,23 @@
       });
     });
 
-    // Global click listener for contextual action buttons and request filter buttons
+    // Global click listener for contextual action buttons, export, and request filter buttons
     document.addEventListener("click", (e) => {
+      const exportBtn = e.target?.closest?.("#vn-part-export-excel-btn");
+      if (exportBtn) {
+        const rows = getVisiblePhysicalRemovalRows({
+          donors: vnPartEphemeralState.donors,
+          removals: vnPartEphemeralState.removals,
+          activeFilter: vnPartEphemeralState.activeFilter,
+          searchQuery: vnPartEphemeralState.searchQuery,
+        });
+        const exportFn =
+          (typeof globalThis !== "undefined" && globalThis.vnPartUi && globalThis.vnPartUi.exportVnPartToExcel) ||
+          exportVnPartToExcel;
+        exportFn({ rows });
+        return;
+      }
+
       const etaBtn = e.target?.closest?.(".vn-part-eta-filter-btn");
       if (etaBtn) {
         const filter = etaBtn.dataset.etaFilter || "all";
@@ -2660,5 +3104,13 @@
     formatPartIdentity,
     renderPartIdentityHtml,
     computeDonorCommitmentSummary,
+    getVisiblePhysicalRemovalRows,
+    generateVnPartExportFilename,
+    buildVnPartExportWorkbook,
+    exportVnPartToExcel,
+    renderDeleteModalContent,
+    validateDeleteRemovalPayload,
+    handleActionFormSubmit,
+    handleActionSubmit: handleActionFormSubmit,
   };
 });

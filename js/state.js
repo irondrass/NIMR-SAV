@@ -2811,6 +2811,8 @@ function getWorkflowActionPermission(action, checked = true) {
   if (action === "claim" || action === "labor" || action === "expertApproved" || action === "clientApproved") return "case.edit";
   if (action === "appointment") return "appointment.schedule";
   if (action === "received") return "vehicle.receive";
+  if (action === "workStarted") return "task.start";
+  if (action === "workCompleted") return "task.complete";
   if (action === "qualityApproved") return checked ? "quality.validate" : "quality.reject";
   if (action === "delivered") return "delivery.complete";
   if (action === "close") return "case.close";

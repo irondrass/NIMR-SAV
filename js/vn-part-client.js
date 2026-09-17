@@ -150,16 +150,17 @@
 
   /**
    * Load VN-PART dashboard data via authenticated SELECT queries.
-   * Executes exactly 4 workshop-scoped queries:
+   * Executes exactly 5 workshop-scoped queries:
    *   1. vn_part_donor_state_v1
    *   2. vn_part_donor_commitment_v1
    *   3. vn_part_removals
    *   4. vn_part_approvals
+   *   5. vn_part_audit_events (STORE_ACK trace)
    *
    * @param {Object} [options]
    * @param {Object} [options.client] - Injected Supabase client (for testing)
    * @param {string} [options.workshopId] - Injected workshop ID (strictly read tests only)
-   * @returns {Promise<{ ok: boolean, workshopId?: string, donors?: Array, donorCommitments?: Array, removals?: Array, approvals?: Array, code?: string, message?: string }>}
+   * @returns {Promise<{ ok: boolean, workshopId?: string, donors?: Array, donorCommitments?: Array, removals?: Array, approvals?: Array, storeAckEvents?: Array, storeAckEventsByRemovalId?: Object, code?: string, message?: string }>}
    */
   async function loadVnPartDashboard(options = {}) {
     const client = options.client || resolveSupabaseClient();
@@ -184,7 +185,7 @@
     }
 
     try {
-      const [donorsRes, donorCommitmentsRes, removalsRes, approvalsRes] = await Promise.all([
+      const [donorsRes, donorCommitmentsRes, removalsRes, approvalsRes, auditEventsRes] = await Promise.all([
         client
           .from("vn_part_donor_state_v1")
           .select("*")
@@ -203,6 +204,12 @@
           .select("*")
           .eq("workshop_id", workshopId)
           .order("decided_at", { ascending: true }),
+        client
+          .from("vn_part_audit_events")
+          .select("removal_id, action, reason, actor_user_id, created_at")
+          .eq("workshop_id", workshopId)
+          .eq("action", "STORE_ACK")
+          .order("created_at", { ascending: true }),
       ]);
 
       if (donorsRes.error) {
@@ -237,6 +244,30 @@
         };
       }
 
+      if (auditEventsRes && auditEventsRes.error) {
+        return {
+          ok: false,
+          code: auditEventsRes.error.code || "QUERY_ERROR",
+          message: auditEventsRes.error.message || "Erreur lors du chargement des événements d'audit magasin VN.",
+        };
+      }
+
+      const rawStoreAckEvents = (auditEventsRes && auditEventsRes.data) || [];
+      const storeAckEventsByRemovalId = {};
+      for (const ev of rawStoreAckEvents) {
+        if (!ev || !ev.removal_id) continue;
+        const prev = storeAckEventsByRemovalId[ev.removal_id];
+        if (!prev) {
+          storeAckEventsByRemovalId[ev.removal_id] = ev;
+        } else {
+          const prevTime = new Date(prev.created_at || 0).getTime();
+          const currTime = new Date(ev.created_at || 0).getTime();
+          if (currTime >= prevTime) {
+            storeAckEventsByRemovalId[ev.removal_id] = ev;
+          }
+        }
+      }
+
       return {
         ok: true,
         workshopId,
@@ -244,6 +275,8 @@
         donorCommitments: (donorCommitmentsRes && donorCommitmentsRes.data) || [],
         removals: removalsRes.data || [],
         approvals: approvalsRes.data || [],
+        storeAckEvents: rawStoreAckEvents,
+        storeAckEventsByRemovalId,
       };
     } catch (err) {
       return {

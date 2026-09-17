@@ -285,12 +285,19 @@ test("Group D: Action 3 REFUSE available to approvers in EN_ATTENTE_VALIDATIONS"
     created_by: "user-creator",
   };
 
-  const approverRoles = ["directeur", "directeur_pieces", "responsable_qualite_parc_vn"];
-  for (const role of approverRoles) {
-    const identity = { ok: true, role, authUserId: "other-user" };
-    const actions = vnPartUi.getAvailableVnPartActions(removal, [], identity);
-    assert.ok(actions.includes("REFUSE"), `Role ${role} must have REFUSE available`);
-  }
+  // Step 1: Directeur SAV can refuse initially without prerequisites
+  const dirId = { ok: true, role: "directeur", authUserId: "other-user" };
+  assert.ok(vnPartUi.getAvailableVnPartActions(removal, [], dirId).includes("REFUSE"), "Directeur must have REFUSE available");
+
+  // Step 2: Direction Pièces can refuse once Step 1 approved
+  const app1 = [{ removal_id: "rem-2", approval_role: "directeur", decision: "APPROVED" }];
+  const dpId = { ok: true, role: "directeur_pieces", authUserId: "other-user" };
+  assert.ok(vnPartUi.getAvailableVnPartActions(removal, app1, dpId).includes("REFUSE"), "Directeur Pièces must have REFUSE available once Step 1 is approved");
+
+  // Step 3: Chef de Parc VN can refuse once Steps 1 & 2 approved
+  const app2 = [...app1, { removal_id: "rem-2", approval_role: "directeur_pieces", decision: "APPROVED" }];
+  const parcId = { ok: true, role: "responsable_qualite_parc_vn", authUserId: "other-user" };
+  assert.ok(vnPartUi.getAvailableVnPartActions(removal, app2, parcId).includes("REFUSE"), "Chef Parc must have REFUSE available once Steps 1 & 2 are approved");
 
   // Not available when already refused or in later status
   const postRemoval = { ...removal, status: "PRELEVE_EN_ATTENTE_PIECE" };
@@ -331,8 +338,8 @@ test("Group E: Action 4 CANCEL available to initiator or director before removal
 // Group F: Action 5 REVISE_ETA
 // ============================================================================
 test("Group F: Action 5 REVISE_ETA restricted to directeur_pieces and non-terminal states", () => {
-  const nonTerminal = { id: "rem-4", version: 1, status: "PRELEVE_EN_ATTENTE_PIECE" };
-  const terminal = { id: "rem-4", version: 2, status: "CLOTURE" };
+  const nonTerminal = { id: "rem-4", version: 1, status: "PRELEVE_EN_ATTENTE_PIECE", expected_replacement_date: "2026-09-20" };
+  const terminal = { id: "rem-4", version: 2, status: "CLOTURE", expected_replacement_date: "2026-09-20" };
 
   const piecesId = { ok: true, role: "directeur_pieces", authUserId: "pieces-user" };
   const otherId = { ok: true, role: "chef_atelier", authUserId: "chef-user" };
@@ -346,8 +353,8 @@ test("Group F: Action 5 REVISE_ETA restricted to directeur_pieces and non-termin
 // Group G: Action 6 REVISE_DONOR
 // ============================================================================
 test("Group G: Action 6 REVISE_DONOR restricted to responsable_qualite_parc_vn pre-removal", () => {
-  const preRemoval = { id: "rem-5", version: 1, status: "AUTORISE_A_PRELEVER" };
-  const postRemoval = { id: "rem-5", version: 2, status: "PRELEVE_EN_ATTENTE_PIECE" };
+  const preRemoval = { id: "rem-5", version: 1, status: "AUTORISE_A_PRELEVER", donor_vin: "VF3XXXXXXXX123456" };
+  const postRemoval = { id: "rem-5", version: 2, status: "PRELEVE_EN_ATTENTE_PIECE", donor_vin: "VF3XXXXXXXX123456" };
 
   const parcId = { ok: true, role: "responsable_qualite_parc_vn", authUserId: "parc-user" };
 
@@ -358,9 +365,10 @@ test("Group G: Action 6 REVISE_DONOR restricted to responsable_qualite_parc_vn p
 // ============================================================================
 // Group H: Action 7 CONFIRM_REMOVAL
 // ============================================================================
-test("Group H: Action 7 CONFIRM_REMOVAL restricted to chef_atelier in AUTORISE_A_PRELEVER", () => {
-  const authorized = { id: "rem-6", version: 1, status: "AUTORISE_A_PRELEVER" };
-  const waiting = { id: "rem-6", version: 1, status: "EN_ATTENTE_VALIDATIONS" };
+test("Group H: Action 7 CONFIRM_REMOVAL restricted to chef_atelier in AUTORISE_A_PRELEVER with store_ack_at", () => {
+  const authorized = { id: "rem-6", version: 1, status: "AUTORISE_A_PRELEVER", store_ack_at: "2026-09-12T13:00:00Z" };
+  const waiting = { id: "rem-6", version: 1, status: "EN_ATTENTE_VALIDATIONS", store_ack_at: "2026-09-12T13:00:00Z" };
+  const unacked = { id: "rem-6", version: 1, status: "AUTORISE_A_PRELEVER", store_ack_at: null };
 
   const chefId = { ok: true, role: "chef_atelier", authUserId: "chef-user" };
   const otherId = { ok: true, role: "directeur", authUserId: "dir-user" };
@@ -368,12 +376,13 @@ test("Group H: Action 7 CONFIRM_REMOVAL restricted to chef_atelier in AUTORISE_A
   assert.ok(vnPartUi.getAvailableVnPartActions(authorized, [], chefId).includes("CONFIRM_REMOVAL"));
   assert.equal(vnPartUi.getAvailableVnPartActions(authorized, [], otherId).includes("CONFIRM_REMOVAL"), false);
   assert.equal(vnPartUi.getAvailableVnPartActions(waiting, [], chefId).includes("CONFIRM_REMOVAL"), false);
+  assert.equal(vnPartUi.getAvailableVnPartActions(unacked, [], chefId).includes("CONFIRM_REMOVAL"), false);
 });
 
 // ============================================================================
 // Group I: Action 8 STORE_ACK (Server Semantics)
 // ============================================================================
-test("Group I: Action 8 STORE_ACK server allows execution in AUTORISE_A_PRELEVER and PRELEVE_EN_ATTENTE_PIECE", () => {
+test("Group I: Action 8 STORE_ACK server allows execution in AUTORISE_A_PRELEVER only", () => {
   const magId = { ok: true, role: "responsable_magasin", authUserId: "mag-user" };
 
   const r1 = { id: "rem-7", status: "AUTORISE_A_PRELEVER", store_ack_at: null };
@@ -381,7 +390,7 @@ test("Group I: Action 8 STORE_ACK server allows execution in AUTORISE_A_PRELEVER
   const r3 = { id: "rem-7", status: "PIECE_DISPONIBLE", store_ack_at: null };
 
   assert.ok(vnPartUi.getAvailableVnPartActions(r1, [], magId).includes("STORE_ACK"));
-  assert.ok(vnPartUi.getAvailableVnPartActions(r2, [], magId).includes("STORE_ACK"));
+  assert.equal(vnPartUi.getAvailableVnPartActions(r2, [], magId).includes("STORE_ACK"), false);
   assert.equal(vnPartUi.getAvailableVnPartActions(r3, [], magId).includes("STORE_ACK"), false);
 });
 
@@ -662,12 +671,12 @@ test("Group N: Mutation fails closed with zero RPC and zero workshop_members que
     clearMockIdentity();
   }
 
-  // Verify dashboard reads: exactly 3 queries, none to workshop_members or audit_events
+  // Verify dashboard reads: exactly 5 queries, none to workshop_members, reads vn_part_audit_events for STORE_ACK trace
   queriedTables.length = 0;
   await vnPartClient.loadVnPartDashboard({ client: mockClient, workshopId: "ws-1" });
-  assert.deepEqual(queriedTables.sort(), ["vn_part_approvals", "vn_part_donor_commitment_v1", "vn_part_donor_state_v1", "vn_part_removals"]);
+  assert.deepEqual(queriedTables.sort(), ["vn_part_approvals", "vn_part_audit_events", "vn_part_donor_commitment_v1", "vn_part_donor_state_v1", "vn_part_removals"]);
   assert.equal(queriedTables.includes("workshop_members"), false, "Dashboard must NOT read workshop_members");
-  assert.equal(queriedTables.includes("vn_part_audit_events"), false, "Dashboard must NOT read vn_part_audit_events");
+  assert.equal(queriedTables.includes("vn_part_audit_events"), true, "Dashboard reads vn_part_audit_events for STORE_ACK trace");
 
   // Static proof: options.workshopId must NOT occur in applyVnPartAction implementation
   const applyFnBody = clientJsContent.slice(clientJsContent.indexOf("async function applyVnPartAction"));
@@ -721,8 +730,8 @@ test("Group O: Approval read model indexes records by removal_id and approval_ro
 test("Group P: UI suppresses STORE_ACK once store_ack_at is non-null", () => {
   const magIdentity = { ok: true, role: "responsable_magasin", authUserId: "mag-user" };
 
-  const unacked = { id: "rem-30", status: "PRELEVE_EN_ATTENTE_PIECE", store_ack_at: null };
-  const acked = { id: "rem-30", status: "PRELEVE_EN_ATTENTE_PIECE", store_ack_at: "2026-09-12T14:30:00Z" };
+  const unacked = { id: "rem-30", status: "AUTORISE_A_PRELEVER", store_ack_at: null };
+  const acked = { id: "rem-30", status: "AUTORISE_A_PRELEVER", store_ack_at: "2026-09-12T14:30:00Z" };
 
   const actionsUnacked = vnPartUi.getAvailableVnPartActions(unacked, [], magIdentity);
   assert.ok(actionsUnacked.includes("STORE_ACK"), "STORE_ACK must be offered when store_ack_at is null");

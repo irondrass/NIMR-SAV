@@ -40,6 +40,9 @@
     donorCommitments: [],
     removals: [],
     approvals: [],
+    storeAckEvents: [],
+    storeAckEventsByRemovalId: {},
+    storeAckLookup: null,
     loading: false,
     error: null,
     conflictMessage: null,
@@ -50,6 +53,19 @@
     lastLoadedAt: null,
     mutationInProgress: false,
   };
+
+  /**
+   * Helper to trigger user-facing toasts safely.
+   */
+  function showToast(message, variant = "info") {
+    const notifyFn =
+      (typeof notifyUser === "function" ? notifyUser : null) ||
+      (typeof window !== "undefined" && typeof window.notifyUser === "function" ? window.notifyUser : null) ||
+      (typeof globalThis !== "undefined" && typeof globalThis.notifyUser === "function" ? globalThis.notifyUser : null);
+    if (notifyFn) {
+      notifyFn(message, variant);
+    }
+  }
 
   /**
    * Escape HTML to prevent XSS injection at rendering sinks.
@@ -137,6 +153,104 @@
       message: "",
     };
   }
+
+  /**
+   * Build a lookup of known donor models by donor VIN for a given workshop.
+   * Scans ephemeral removals and donor views already loaded in memory.
+   *
+   * Business Rules (Lot P6):
+   * 1. Workshop-scoped only: records from other workshops are strictly excluded.
+   * 2. Uses canonical VIN normalization (trimmed uppercase).
+   * 3. Requires valid 17-character VIN; partial VINs yield { status: "none", model: null }.
+   * 4. Empty or whitespace-only model strings are ignored.
+   * 5. If 1 distinct model is found -> { status: "unique", model: string }.
+   * 6. If multiple distinct models are found -> { status: "conflict", model: null }.
+   * 7. If no non-empty model is found -> { status: "none", model: null }.
+   *
+   * @param {Object|Array} arg1 - Either { removals, donors, workshopId } or removals array
+   * @param {Array} [arg2] - donors array (if positional)
+   * @param {string} [arg3] - workshopId (if positional)
+   * @returns {Map<string, { status: 'unique'|'conflict'|'none', model: string|null }> & { get: (vin: string) => { status: string, model: string|null } }}
+   */
+  function buildKnownDonorModelLookup(arg1, arg2, arg3) {
+    let removals = [];
+    let donors = [];
+    let workshopId = null;
+
+    if (arg1 && typeof arg1 === "object" && !Array.isArray(arg1)) {
+      removals = arg1.removals || [];
+      donors = arg1.donors || [];
+      workshopId = arg1.workshopId || null;
+    } else {
+      removals = arg1 || [];
+      donors = arg2 || [];
+      workshopId = arg3 || null;
+    }
+
+    const normWorkshop = workshopId ? String(workshopId).trim() : null;
+    const vinModelsMap = new Map();
+
+    function collect(list) {
+      for (const item of list || []) {
+        if (!item) continue;
+        if (normWorkshop && item.workshop_id && String(item.workshop_id).trim() !== normWorkshop) {
+          continue;
+        }
+        const vinValidation = validateDonorVin(item.donor_vin);
+        if (!vinValidation.ok) {
+          continue;
+        }
+        const normVin = vinValidation.normalizedVin;
+        const rawModel = String(item.donor_model || "").trim();
+        if (!rawModel) continue;
+
+        if (!vinModelsMap.has(normVin)) {
+          vinModelsMap.set(normVin, {
+            modelKeys: new Set(),
+            modelCasing: new Map(),
+          });
+        }
+        const entry = vinModelsMap.get(normVin);
+        const lowerKey = rawModel.toLowerCase();
+        if (!entry.modelCasing.has(lowerKey)) {
+          entry.modelCasing.set(lowerKey, rawModel);
+        }
+        entry.modelKeys.add(lowerKey);
+      }
+    }
+
+    collect(removals);
+    collect(donors);
+
+    const lookup = new Map();
+
+    for (const [vin, entry] of vinModelsMap.entries()) {
+      if (entry.modelKeys.size === 1) {
+        const key = Array.from(entry.modelKeys)[0];
+        lookup.set(vin, {
+          status: "unique",
+          model: entry.modelCasing.get(key),
+        });
+      } else if (entry.modelKeys.size > 1) {
+        lookup.set(vin, {
+          status: "conflict",
+          model: null,
+        });
+      }
+    }
+
+    const originalGet = lookup.get.bind(lookup);
+    lookup.get = function (vin) {
+      const vinValidation = validateDonorVin(vin);
+      if (!vinValidation.ok) {
+        return { status: "none", model: null };
+      }
+      return originalGet(vinValidation.normalizedVin) || { status: "none", model: null };
+    };
+
+    return lookup;
+  }
+
 
   /**
    * Return today's local calendar date as YYYY-MM-DD.
@@ -519,8 +633,8 @@
   /**
    * Exact KPI derivations:
    * 1. VN restant à restituer: Count of donor rows where active_removals_remaining > 0
-   * 2. Pièces non restituées: SUM(quantity) from removals where removed_at IS NOT NULL and restored_at IS NULL
-   * 3. VN prêts à restituer: Count of donor rows where can_be_restored_today = true
+   * 2. Pièces physiques non restituées: SUM(quantity) from removals where removed_at IS NOT NULL and restored_at IS NULL
+   * 3. VN entièrement prêts à restituer: Count of donor rows where can_be_restored_today = true
    * 4. VN en retard: Count of donor rows where overdue_count > 0
    */
   function computeVnPartKpis(donors = [], removals = []) {
@@ -1109,6 +1223,106 @@
   }
 
   /**
+   * Build a lookup Map of removal_id -> latest STORE_ACK audit event.
+   * Deterministic duplicate resolution: selects the event with the latest created_at.
+   */
+  function buildStoreAckLookup(auditEvents = []) {
+    const lookup = new Map();
+    if (Array.isArray(auditEvents)) {
+      for (const ev of auditEvents) {
+        if (!ev || !ev.removal_id) continue;
+        if (ev.action && ev.action !== "STORE_ACK") continue;
+        const existing = lookup.get(ev.removal_id);
+        if (!existing) {
+          lookup.set(ev.removal_id, ev);
+        } else {
+          const prevTime = new Date(existing.created_at || 0).getTime();
+          const currTime = new Date(ev.created_at || 0).getTime();
+          if (currTime >= prevTime) {
+            lookup.set(ev.removal_id, ev);
+          }
+        }
+      }
+    } else if (auditEvents instanceof Map) {
+      return auditEvents;
+    } else if (typeof auditEvents === "object" && auditEvents !== null) {
+      for (const [k, v] of Object.entries(auditEvents)) {
+        lookup.set(k, v);
+      }
+    }
+    return lookup;
+  }
+
+  /**
+   * Resolve STORE_ACK audit event for a given removal row.
+   */
+  function resolveStoreAckEvent(rem, storeAckLookup = null) {
+    if (!rem) return null;
+    if (rem.store_ack_event) return rem.store_ack_event;
+    if (rem.storeAckEvent) return rem.storeAckEvent;
+    if (storeAckLookup) {
+      if (typeof storeAckLookup.get === "function") {
+        const found = storeAckLookup.get(rem.id);
+        if (found) return found;
+      } else if (Array.isArray(storeAckLookup)) {
+        const found = storeAckLookup.find((e) => e && e.removal_id === rem.id);
+        if (found) return found;
+      } else if (typeof storeAckLookup === "object") {
+        if (storeAckLookup[rem.id]) return storeAckLookup[rem.id];
+      }
+    }
+    if (vnPartEphemeralState.storeAckEventsByRemovalId && vnPartEphemeralState.storeAckEventsByRemovalId[rem.id]) {
+      return vnPartEphemeralState.storeAckEventsByRemovalId[rem.id];
+    }
+    if (vnPartEphemeralState.storeAckLookup && typeof vnPartEphemeralState.storeAckLookup.get === "function") {
+      return vnPartEphemeralState.storeAckLookup.get(rem.id);
+    }
+    return null;
+  }
+
+  /**
+   * Render the store acknowledgment trace HTML.
+   * Includes compact badge and optional folded disclosure if a non-empty remark exists.
+   * UUIDs are strictly never exposed.
+   */
+  function renderStoreAckTraceHtml(rem, storeAckEvent = null) {
+    if (!rem || !rem.store_ack_at) return "";
+
+    const timestamp = formatDateTimeFr(rem.store_ack_at);
+    let remarkHtml = "";
+
+    const reason = storeAckEvent && typeof storeAckEvent.reason === "string" ? storeAckEvent.reason.trim() : "";
+    if (reason) {
+      remarkHtml = `
+        <details class="vn-part-store-ack-remark-details">
+          <summary class="vn-part-store-ack-remark-summary" title="Consulter la remarque magasin">💬 Remarque magasin</summary>
+          <div class="vn-part-store-ack-remark-content">${escapeHtml(reason)}</div>
+        </details>
+      `;
+    }
+
+    return `
+      <div class="vn-part-detail-cell vn-part-store-ack-trace">
+        <span class="cell-label">Prise en compte magasin:</span>
+        <span class="cell-val">
+          <span class="vn-part-store-ack-badge">✅ Pris en compte magasin · ${escapeHtml(timestamp)}</span>${remarkHtml}
+        </span>
+      </div>
+    `;
+  }
+
+  /**
+   * Get the pending requests filter button label based on user identity role.
+   * Chef Atelier sees "En cours de validation (N)" while approver roles see "À valider (N)".
+   */
+  function getPendingFilterLabel(identity, countPending = 0) {
+    const isChefAtelier = identity && identity.role === "chef_atelier";
+    return isChefAtelier
+      ? `En cours de validation (${countPending})`
+      : `À valider (${countPending})`;
+  }
+
+  /**
    * Resolve current active identity safely using the client module or global resolver.
    */
   function getCurrentIdentity() {
@@ -1128,7 +1342,7 @@
    * Helper to determine available UI mutation actions for a given removal row and identity.
    * NOTE: This controls UI visibility only. The server remains final authority.
    */
-  function getAvailableVnPartActions(removal, approvals = [], identity = null) {
+  function getAvailableVnPartActions(removal, approvals = [], identity = null, options = {}) {
     if (!removal || !removal.id) return [];
     if (!identity || !identity.ok) return [];
 
@@ -1145,12 +1359,29 @@
 
     const actions = [];
 
+    // Sequential approval prerequisite check (P3)
+    const directorApproval = approvalLookup.get(`${removal.id}:directeur`);
+    const directorApproved = Boolean(directorApproval && directorApproval.decision === "APPROVED");
+
+    const partsDirectorApproval = approvalLookup.get(`${removal.id}:directeur_pieces`);
+    const partsDirectorApproved = Boolean(partsDirectorApproval && partsDirectorApproval.decision === "APPROVED");
+
+    let isSequentialPrerequisiteSatisfied = false;
+    if (role === "directeur") {
+      isSequentialPrerequisiteSatisfied = true;
+    } else if (role === "directeur_pieces") {
+      isSequentialPrerequisiteSatisfied = directorApproved;
+    } else if (role === "responsable_qualite_parc_vn") {
+      isSequentialPrerequisiteSatisfied = directorApproved && partsDirectorApproved;
+    }
+
     // APPROVE
     if (
       status === "EN_ATTENTE_VALIDATIONS" &&
       ["directeur", "directeur_pieces", "responsable_qualite_parc_vn"].includes(role) &&
       !isCreator &&
-      !hasDecided
+      !hasDecided &&
+      isSequentialPrerequisiteSatisfied
     ) {
       actions.push("APPROVE");
     }
@@ -1159,7 +1390,8 @@
     if (
       status === "EN_ATTENTE_VALIDATIONS" &&
       ["directeur", "directeur_pieces", "responsable_qualite_parc_vn"].includes(role) &&
-      !hasDecided
+      !hasDecided &&
+      isSequentialPrerequisiteSatisfied
     ) {
       actions.push("REFUSE");
     }
@@ -1172,35 +1404,38 @@
       actions.push("CANCEL");
     }
 
-    // REVISE_ETA
+    // REVISE_ETA (P3: only visible when expected_replacement_date is present)
     if (
       !["CLOTURE", "ANNULE", "REFUSE"].includes(status) &&
-      role === "directeur_pieces"
+      role === "directeur_pieces" &&
+      Boolean(removal.expected_replacement_date)
     ) {
       actions.push("REVISE_ETA");
     }
 
-    // REVISE_DONOR
+    // REVISE_DONOR (P3: only visible when donor_vin is present)
     if (
       ["EN_ATTENTE_VALIDATIONS", "AUTORISE_A_PRELEVER"].includes(status) &&
-      role === "responsable_qualite_parc_vn"
+      role === "responsable_qualite_parc_vn" &&
+      Boolean(removal.donor_vin)
     ) {
       actions.push("REVISE_DONOR");
     }
 
-    // CONFIRM_REMOVAL
+    // CONFIRM_REMOVAL (requires store_ack_at before removal)
     if (
       status === "AUTORISE_A_PRELEVER" &&
-      role === "chef_atelier"
+      role === "chef_atelier" &&
+      Boolean(removal.store_ack_at)
     ) {
       actions.push("CONFIRM_REMOVAL");
     }
 
-    // STORE_ACK (UI Rule: only offered when store_ack_at is null)
+    // STORE_ACK (UI Rule: only offered in AUTORISE_A_PRELEVER when store_ack_at is null)
     if (
-      ["AUTORISE_A_PRELEVER", "PRELEVE_EN_ATTENTE_PIECE"].includes(status) &&
+      status === "AUTORISE_A_PRELEVER" &&
       role === "responsable_magasin" &&
-      (removal.store_ack_at === null || removal.store_ack_at === undefined)
+      !removal.store_ack_at
     ) {
       actions.push("STORE_ACK");
     }
@@ -1210,7 +1445,11 @@
       status === "PRELEVE_EN_ATTENTE_PIECE" &&
       ["responsable_magasin", "directeur_pieces"].includes(role)
     ) {
-      actions.push("MARK_REPLACEMENT_AVAILABLE");
+      // P6 UX Deduplication: Section C is the primary operational queue for Responsable Magasin.
+      // In Section B (donor detail), Responsable Magasin sees consultation/status only.
+      if (!(options && options.surface === "section_b" && role === "responsable_magasin")) {
+        actions.push("MARK_REPLACEMENT_AVAILABLE");
+      }
     }
 
     // CONFIRM_RESTITUTION
@@ -1240,9 +1479,9 @@
       ? approvalLookup
       : (Array.isArray(approvalLookup) ? buildApprovalLookup(approvalLookup) : new Map());
     const roles = [
-      { roleKey: "directeur", label: "Directeur SAV" },
-      { roleKey: "directeur_pieces", label: "Direction Pièces (ETA)" },
-      { roleKey: "responsable_qualite_parc_vn", label: "Chef de Parc VN (Donneur)" },
+      { roleKey: "directeur", stepNum: 1, label: "Étape 1 — Directeur SAV" },
+      { roleKey: "directeur_pieces", stepNum: 2, label: "Étape 2 — Direction Pièces (ETA)" },
+      { roleKey: "responsable_qualite_parc_vn", stepNum: 3, label: "Étape 3 — Chef de Parc VN (Donneur)" },
     ];
 
     let approvedCount = 0;
@@ -1256,27 +1495,66 @@
       const a = lookup.get(`${removal.id}:${r.roleKey}`);
       let statusClass = "status-pending";
       let statusText = "En attente";
+      let decidedAtHtml = "";
 
       if (a) {
+        // Compute validated decision datetime for traceability (P2 / REVIEW FIX 001)
+        const decidedDateTimeStr = a.decided_at && !isNaN(new Date(a.decided_at).getTime())
+          ? formatDateTimeFr(a.decided_at)
+          : "";
+
         if (a.decision === "APPROVED") {
           statusClass = "status-approved";
           if (r.roleKey === "directeur_pieces" && removal.expected_replacement_date) {
-            statusText = `Validé (ETA: ${formatDateFr(removal.expected_replacement_date)})`;
+            statusText = `Validé · ETA : ${formatDateFr(removal.expected_replacement_date)}`;
           } else if (r.roleKey === "responsable_qualite_parc_vn" && removal.donor_vin) {
-            statusText = `Validé (${escapeHtml(removal.donor_vin)})`;
+            statusText = `Validé · ${escapeHtml(removal.donor_vin)}`;
           } else {
-            statusText = `Validé le ${formatDateFr(a.decided_at)}`;
+            statusText = decidedDateTimeStr ? "Validé le" : "Validé";
           }
         } else if (a.decision === "REFUSED") {
           statusClass = "status-refused";
-          statusText = `Refusé (${escapeHtml(a.reason || "Motif non spécifié")})`;
+          statusText = a.reason && typeof a.reason === "string" && a.reason.trim()
+            ? `Refusé (${escapeHtml(a.reason.trim())})`
+            : "Refusé";
         }
+
+        // Secondary traceability line: decision date+time (only when valid)
+        if (decidedDateTimeStr) {
+          decidedAtHtml = `<span class="pill-decided-at">${escapeHtml(decidedDateTimeStr)}</span>`;
+        }
+      }
+
+      let remarkHtml = "";
+      if (a && a.reason && typeof a.reason === "string" && a.reason.trim()) {
+        remarkHtml = `
+          <details class="vn-part-approval-remark-details">
+            <summary class="vn-part-approval-remark-summary" title="Consulter la remarque">💬 Voir remarque</summary>
+            <div class="vn-part-approval-remark-content">${escapeHtml(a.reason.trim())}</div>
+          </details>
+        `;
       }
 
       pillsHtml += `
         <div class="vn-part-approval-pill ${statusClass}">
           <span class="pill-role">${escapeHtml(r.label)}:</span>
-          <span class="pill-status">${statusText}</span>
+          <span class="pill-status">${statusText}</span>${decidedAtHtml}${remarkHtml}
+        </div>
+      `;
+    }
+
+    if (approvedCount === 3) {
+      return `
+        <div class="vn-part-approvals-strip vn-part-approvals-completed" aria-label="État des validations">
+          <details class="vn-part-approvals-disclosure">
+            <summary class="vn-part-approvals-summary">
+              <span class="vn-part-approvals-badge">✅ Validations terminées 3/3</span>
+              <span class="vn-part-approvals-toggle-label">Voir les détails</span>
+            </summary>
+            <div class="vn-part-approvals-list">
+              ${pillsHtml}
+            </div>
+          </details>
         </div>
       `;
     }
@@ -1291,6 +1569,32 @@
         </div>
       </div>
     `;
+  }
+
+  /**
+   * User-facing status labels mapping (P1).
+   */
+  const VN_PART_STATUS_LABELS = Object.freeze({
+    EN_ATTENTE_VALIDATIONS: "En attente de validation",
+    AUTORISE_A_PRELEVER: "Autorisé à prélever",
+    PRELEVE_EN_ATTENTE_PIECE: "En attente de pièce",
+    PIECE_DISPONIBLE: "Pièce disponible",
+    CLOTURE: "Restitué / Clôturé",
+    REFUSE: "Refusé",
+    ANNULE: "Annulé",
+  });
+
+  /**
+   * Format a backend status code into a user-facing French label.
+   *
+   * @param {string|null} status - Raw backend status code
+   * @returns {string} - Human-readable label or safe fallback
+   */
+  function formatVnPartStatus(status) {
+    if (!status || typeof status !== "string") return "—";
+    const key = status.trim();
+    if (!key) return "—";
+    return VN_PART_STATUS_LABELS[key] || "Statut inconnu";
   }
 
   /**
@@ -1446,7 +1750,8 @@
         const availableActions = getAvailableVnPartActions(
           rem,
           vnPartEphemeralState.approvals,
-          identity
+          identity,
+          { surface: "section_c" }
         ).filter((action) =>
           ["REVISE_ETA", "MARK_REPLACEMENT_AVAILABLE"].includes(action)
         );
@@ -1521,18 +1826,18 @@
   /**
    * Render an individual pre-removal request card for Section A.
    */
-  function renderRequestCard(rem, approvalLookup, identity) {
+  function renderRequestCard(rem, approvalLookup, identity, storeAckLookup = null) {
     let statusBadge = "";
     if (rem.status === "EN_ATTENTE_VALIDATIONS") {
-      statusBadge = `<span class="vn-part-badge badge-waiting">🟠 EN ATTENTE DE VALIDATION</span>`;
+      statusBadge = `<span class="vn-part-badge badge-waiting">🟠 En attente de validation</span>`;
     } else if (rem.status === "AUTORISE_A_PRELEVER") {
-      statusBadge = `<span class="vn-part-badge badge-ready">🔵 AUTORISÉ À PRÉLEVER</span>`;
+      statusBadge = `<span class="vn-part-badge badge-ready">🔵 Autorisé à prélever</span>`;
     } else if (rem.status === "REFUSE") {
-      statusBadge = `<span class="vn-part-badge badge-overdue">🔴 REFUSÉ</span>`;
+      statusBadge = `<span class="vn-part-badge badge-overdue">🔴 Refusé</span>`;
     } else if (rem.status === "ANNULE") {
-      statusBadge = `<span class="vn-part-badge badge-neutral">⚪ ANNULÉ</span>`;
+      statusBadge = `<span class="vn-part-badge badge-neutral">⚪ Annulé</span>`;
     } else {
-      statusBadge = `<span class="vn-part-badge badge-neutral">${escapeHtml(rem.status)}</span>`;
+      statusBadge = `<span class="vn-part-badge badge-neutral">${escapeHtml(formatVnPartStatus(rem.status))}</span>`;
     }
 
     let urgencyBadge = "";
@@ -1543,9 +1848,10 @@
     const approvalStripHtml = renderApprovalStrip(rem, approvalLookup);
     const availableActions = getAvailableVnPartActions(rem, vnPartEphemeralState.approvals, identity);
     const actionsHtml = renderRemovalActionButtons(rem, availableActions, vnPartEphemeralState.mutationInProgress);
+    const storeAckEvent = resolveStoreAckEvent(rem, storeAckLookup);
 
     return `
-      <article class="vn-part-request-card" data-id="${escapeHtml(rem.id)}" data-version="${rem.version}">
+      <article class="vn-part-request-card" data-id="${escapeHtml(rem.id)}" data-status="${escapeHtml(rem.status)}" data-version="${rem.version}">
         <header class="vn-part-request-card-header">
           <div class="vn-part-request-card-title">
             <h3 class="vn-part-request-part-title">${renderPartIdentityHtml(rem.part_reference, rem.part_designation)}</h3>
@@ -1603,6 +1909,7 @@
               <span class="cell-val">${escapeHtml(formatDateFr(rem.expected_replacement_date))}</span>
             </div>
           ` : ""}
+          ${rem.store_ack_at ? renderStoreAckTraceHtml(rem, storeAckEvent) : ""}
           ${rem.removed_at ? `
             <div class="vn-part-detail-cell">
               <span class="cell-label">Date prélèvement:</span>
@@ -1710,14 +2017,14 @@
                   <div class="vn-part-kpi-sub">Véhicules donneurs incomplets</div>
                 </article>
                 <article class="vn-part-kpi-card" id="card-kpi-unreturned">
-                  <div class="vn-part-kpi-label">Pièces non restituées</div>
+                  <div class="vn-part-kpi-label">Pièces physiques non restituées</div>
                   <div class="vn-part-kpi-val" id="vn-part-kpi-unreturned">0</div>
                   <div class="vn-part-kpi-sub">Total pièces physiques prélevées</div>
                 </article>
                 <article class="vn-part-kpi-card is-ready-card" id="card-kpi-ready">
-                  <div class="vn-part-kpi-label">VN prêts à restituer</div>
+                  <div class="vn-part-kpi-label">VN entièrement prêts à restituer</div>
                   <div class="vn-part-kpi-val text-success" id="vn-part-kpi-ready">0</div>
-                  <div class="vn-part-kpi-sub">Pièces reçues disponibles</div>
+                  <div class="vn-part-kpi-sub">Toutes pièces disponibles</div>
                 </article>
                 <article class="vn-part-kpi-card is-overdue-card" id="card-kpi-overdue">
                   <div class="vn-part-kpi-label">VN en retard</div>
@@ -1833,6 +2140,9 @@
       vnPartEphemeralState.donorCommitments = result.donorCommitments || [];
       vnPartEphemeralState.removals = result.removals || [];
       vnPartEphemeralState.approvals = result.approvals || [];
+      vnPartEphemeralState.storeAckEvents = result.storeAckEvents || [];
+      vnPartEphemeralState.storeAckEventsByRemovalId = result.storeAckEventsByRemovalId || {};
+      vnPartEphemeralState.storeAckLookup = buildStoreAckLookup(result.storeAckEvents || []);
       vnPartEphemeralState.lastLoadedAt = new Date().toISOString();
     }
 
@@ -1966,6 +2276,7 @@
     }
 
     const approvalLookup = buildApprovalLookup(vnPartEphemeralState.approvals);
+    const storeAckLookup = buildStoreAckLookup(vnPartEphemeralState.storeAckEvents);
 
     let html = "";
 
@@ -1994,6 +2305,7 @@
       (r) => r.status === "AUTORISE_A_PRELEVER"
     ).length;
     const activeReqFilter = vnPartEphemeralState.activeRequestFilter || "all";
+    const pendingFilterLabel = getPendingFilterLabel(identity, countPending);
 
     html += `
       <section class="vn-part-section vn-part-requests-section" aria-labelledby="vn-part-requests-heading">
@@ -2007,7 +2319,7 @@
           </div>
           <div class="vn-part-req-filters" role="group" aria-label="Filtrer les demandes">
             <button type="button" class="vn-part-req-filter-btn ${activeReqFilter === "all" ? "active" : ""}" data-req-filter="all" aria-pressed="${activeReqFilter === "all"}">Toutes (${countAll})</button>
-            <button type="button" class="vn-part-req-filter-btn ${activeReqFilter === "pending" ? "active" : ""}" data-req-filter="pending" aria-pressed="${activeReqFilter === "pending"}">À valider (${countPending})</button>
+            <button type="button" class="vn-part-req-filter-btn ${activeReqFilter === "pending" ? "active" : ""}" data-req-filter="pending" aria-pressed="${activeReqFilter === "pending"}">${escapeHtml(pendingFilterLabel)}</button>
             <button type="button" class="vn-part-req-filter-btn ${activeReqFilter === "authorized" ? "active" : ""}" data-req-filter="authorized" aria-pressed="${activeReqFilter === "authorized"}">Autorisées (${countAuth})</button>
           </div>
         </div>
@@ -2022,7 +2334,7 @@
     } else {
       html += `<div class="vn-part-requests-list">`;
       for (const req of workflowRequests) {
-        html += renderRequestCard(req, approvalLookup, identity);
+        html += renderRequestCard(req, approvalLookup, identity, storeAckLookup);
       }
       html += `</div>`;
     }
@@ -2083,6 +2395,9 @@
           const isOverdue = Number(donor.overdue_count || 0) > 0;
           const isReady = Boolean(donor.can_be_restored_today);
           const isFullyRestored = Boolean(donor.is_fully_restored);
+          const donorPhysicalPartsCount = (item.removals || [])
+            .filter((r) => r.removed_at !== null && r.removed_at !== undefined && (r.restored_at === null || r.restored_at === undefined))
+            .reduce((sum, r) => sum + (Number(r.quantity) || 1), 0);
 
           const donorSummary = computeDonorCommitmentSummary(
             vnPartEphemeralState.removals,
@@ -2109,16 +2424,20 @@
 
               <div class="vn-part-donor-metrics">
                 <div class="vn-part-metric-chip">
-                  <span>Prélèvements actifs:</span>
+                  <span>Références actives:</span>
                   <strong>${Number(donor.active_removals_remaining || 0)}</strong>
                 </div>
                 <div class="vn-part-metric-chip">
-                  <span>En attente pièce:</span>
+                  <span>Pièces physiques non restituées:</span>
+                  <strong>${donorPhysicalPartsCount}</strong>
+                </div>
+                <div class="vn-part-metric-chip">
+                  <span>Références en attente:</span>
                   <strong>${Number(donor.waiting_replacement_count || 0)}</strong>
                 </div>
                 <div class="vn-part-metric-chip">
-                  <span>Prêts à restituer:</span>
-                  <strong>${Number(donor.available_to_restore_count || 0)}</strong>
+                  <span>Références disponibles pour remontage:</span>
+                  <strong>${Number(donor.available_to_restore_count || 0)} / ${Number(donor.active_removals_remaining || 0)}</strong>
                 </div>
                 ${donor.oldest_opened_at ? `
                   <div class="vn-part-metric-chip">
@@ -2166,21 +2485,21 @@
             for (const rem of donorRemovals) {
               let badgeHtml = "";
               if (rem.restored_at) {
-                badgeHtml = `<span class="vn-part-badge badge-restored">✅ RESTITUÉ / CLÔTURÉ</span>`;
+                badgeHtml = `<span class="vn-part-badge badge-restored">✅ Restitué / Clôturé</span>`;
               } else if (rem.replacement_available_at) {
-                badgeHtml = `<span class="vn-part-badge badge-available">🟢 PIÈCE DISPONIBLE</span>`;
+                badgeHtml = `<span class="vn-part-badge badge-available">🟢 Pièce disponible</span>`;
               } else if (rem.removed_at) {
-                badgeHtml = `<span class="vn-part-badge badge-waiting">🟠 EN ATTENTE PIÈCE</span>`;
+                badgeHtml = `<span class="vn-part-badge badge-waiting">🟠 En attente de pièce</span>`;
               } else {
-                badgeHtml = `<span class="vn-part-badge badge-neutral">${escapeHtml(rem.status)}</span>`;
+                badgeHtml = `<span class="vn-part-badge badge-neutral">${escapeHtml(formatVnPartStatus(rem.status))}</span>`;
               }
 
               const approvalStripHtml = renderApprovalStrip(rem, approvalLookup);
-              const availableActions = getAvailableVnPartActions(rem, vnPartEphemeralState.approvals, identity);
+              const availableActions = getAvailableVnPartActions(rem, vnPartEphemeralState.approvals, identity, { surface: "section_b" });
               const actionsHtml = renderRemovalActionButtons(rem, availableActions, vnPartEphemeralState.mutationInProgress);
 
               html += `
-                <div class="vn-part-removal-item" data-id="${escapeHtml(rem.id)}" data-version="${rem.version}">
+                <div class="vn-part-removal-item" data-id="${escapeHtml(rem.id)}" data-status="${escapeHtml(rem.status)}" data-version="${rem.version}">
                   <div class="vn-part-removal-top">
                     <div class="vn-part-removal-title">
                       <strong>${renderPartIdentityHtml(rem.part_reference, rem.part_designation)}</strong>
@@ -2220,12 +2539,7 @@
                         <span class="cell-val">${escapeHtml(formatDateTimeFr(rem.replacement_available_at))}</span>
                       </div>
                     ` : ""}
-                    ${rem.store_ack_at ? `
-                      <div class="vn-part-detail-cell">
-                        <span class="cell-label">Prise en compte magasin:</span>
-                        <span class="cell-val">${escapeHtml(formatDateTimeFr(rem.store_ack_at))}</span>
-                      </div>
-                    ` : ""}
+                    ${rem.store_ack_at ? renderStoreAckTraceHtml(rem, resolveStoreAckEvent(rem, storeAckLookup)) : ""}
                     ${rem.restored_at ? `
                       <div class="vn-part-detail-cell">
                         <span class="cell-label">Restitué au VN le:</span>
@@ -2280,7 +2594,7 @@
 
             <div class="vn-part-form-row">
               <label for="vn-create-ben-model">Modèle bénéficiaire <span class="required">*</span></label>
-              <input type="text" id="vn-create-ben-model" name="beneficiary_model" required placeholder="Ex: Peugeot Partner">
+              <input type="text" id="vn-create-ben-model" name="beneficiary_model" required placeholder="Saisir le modèle">
             </div>
 
             <div class="vn-part-form-row">
@@ -2517,7 +2831,8 @@
         fieldsHtml = `
           <div class="vn-part-form-row">
             <label for="vn-action-donor-model">Modèle véhicule donneur <span class="required">*</span></label>
-            <input type="text" id="vn-action-donor-model" name="donor_model" required placeholder="Ex: Peugeot 208">
+            <input type="text" id="vn-action-donor-model" name="donor_model" required placeholder="Saisir le modèle">
+            <div id="vn-action-donor-model-hint" class="vn-part-form-hint" style="display:none;"></div>
           </div>
           <div class="vn-part-form-row">
             <label for="vn-action-donor-vin">N° Châssis / VIN véhicule donneur <span class="required">*</span></label>
@@ -2557,6 +2872,7 @@
         <div class="vn-part-form-row">
           <label for="vn-action-donor-model">Modèle véhicule donneur <span class="required">*</span></label>
           <input type="text" id="vn-action-donor-model" name="donor_model" required value="${escapeHtml(removal.donor_model || "")}">
+          <div id="vn-action-donor-model-hint" class="vn-part-form-hint" style="display:none;"></div>
         </div>
         <div class="vn-part-form-row">
           <label for="vn-action-donor-vin">N° Châssis / VIN véhicule donneur <span class="required">*</span></label>
@@ -2606,7 +2922,7 @@
             <div class="vn-part-modal-summary">
               <strong>${renderPartIdentityHtml(removal.part_reference, removal.part_designation)}</strong>
               <span>Bénéficiaire : ${escapeHtml(removal.beneficiary_model || "—")}</span>
-              <span>Statut actuel : ${escapeHtml(removal.status)}</span>
+              <span>Statut actuel : ${escapeHtml(formatVnPartStatus(removal.status))}</span>
             </div>
 
             <div id="vn-part-action-error" class="vn-part-form-error" style="display:none;" role="alert"></div>
@@ -2644,9 +2960,11 @@
       });
     }
 
-    // Live preview for donor VIN collisions & restoration ETA
+    // Live preview for donor VIN collisions & restoration ETA + model suggestion
     const donorVinInput = document.getElementById("vn-action-donor-vin");
+    const donorModelInput = document.getElementById("vn-action-donor-model");
     const previewContainer = document.getElementById("vn-action-donor-preview");
+    const modelHintEl = document.getElementById("vn-action-donor-model-hint");
 
     function updateDonorVinPreview() {
       if (!donorVinInput || !previewContainer) return;
@@ -2655,6 +2973,61 @@
 
       if (donorVinInput.value !== normVin) {
         donorVinInput.value = normVin;
+      }
+
+      // P6: Controlled historical donor model suggestion
+      if (donorModelInput) {
+        // Clear previous auto-fill if the VIN has changed
+        if (
+          donorModelInput.dataset.autoFilledForVin &&
+          donorModelInput.dataset.autoFilledForVin !== normVin
+        ) {
+          if (donorModelInput.value === donorModelInput.dataset.autoFilledValue) {
+            donorModelInput.value = "";
+          }
+          delete donorModelInput.dataset.autoFilledForVin;
+          delete donorModelInput.dataset.autoFilledValue;
+          if (modelHintEl) {
+            modelHintEl.textContent = "";
+            modelHintEl.style.display = "none";
+          }
+        }
+
+        if (normVin && validation.ok) {
+          const modelLookup = buildKnownDonorModelLookup({
+            removals: vnPartEphemeralState.removals,
+            donors: vnPartEphemeralState.donors,
+            workshopId: identity ? identity.workshopId : null,
+          });
+          const match = modelLookup.get(normVin);
+
+          if (match.status === "unique" && match.model) {
+            if (!donorModelInput.value || donorModelInput.dataset.autoFilledForVin) {
+              donorModelInput.value = match.model;
+              donorModelInput.dataset.autoFilledForVin = normVin;
+              donorModelInput.dataset.autoFilledValue = match.model;
+            }
+            if (modelHintEl) {
+              modelHintEl.textContent = "Modèle repris de l'historique de ce VIN (modifiable)";
+              modelHintEl.style.display = "block";
+            }
+          } else if (match.status === "conflict") {
+            if (modelHintEl) {
+              modelHintEl.textContent = "Plusieurs modèles historiques trouvés — vérifier manuellement";
+              modelHintEl.style.display = "block";
+            }
+          } else {
+            if (modelHintEl) {
+              modelHintEl.textContent = "";
+              modelHintEl.style.display = "none";
+            }
+          }
+        } else {
+          if (modelHintEl) {
+            modelHintEl.textContent = "";
+            modelHintEl.style.display = "none";
+          }
+        }
       }
 
       if (!normVin || !validation.ok) {
@@ -2761,6 +3134,17 @@
       }
     }
 
+    if (donorModelInput) {
+      donorModelInput.addEventListener("input", () => {
+        delete donorModelInput.dataset.autoFilledForVin;
+        delete donorModelInput.dataset.autoFilledValue;
+        if (modelHintEl) {
+          modelHintEl.textContent = "";
+          modelHintEl.style.display = "none";
+        }
+      });
+    }
+
     // Auto-focus first input
     const firstInput = document.querySelector("#vn-part-action-form input, #vn-part-action-form textarea");
     firstInput?.focus();
@@ -2779,6 +3163,7 @@
    * Close all active modals.
    */
   function closeModals() {
+    if (typeof document === "undefined") return;
     const host = document.getElementById("vn-part-modals-host");
     if (host) host.innerHTML = "";
   }
@@ -2794,8 +3179,8 @@
     const removalId = removalIdArg || form?.dataset?.removalId;
     const action = actionArg || form?.dataset?.action;
     const expectedVersion = expectedVersionArg !== null ? expectedVersionArg : parseInt(form?.dataset?.version, 10);
-    const errorEl = document.getElementById("vn-part-action-error");
-    const submitBtn = document.getElementById("vn-part-action-submit");
+    const errorEl = typeof document !== "undefined" ? document.getElementById("vn-part-action-error") : null;
+    const submitBtn = typeof document !== "undefined" ? document.getElementById("vn-part-action-submit") : null;
 
     const removal = vnPartEphemeralState.removals.find((r) => r.id === removalId);
     if (!removal) {
@@ -2921,6 +3306,11 @@
 
     closeModals();
     vnPartEphemeralState.conflictMessage = null;
+
+    if (action === "STORE_ACK") {
+      showToast("Prise en compte magasin enregistrée", "success");
+    }
+
     const refreshFn =
       (typeof globalThis !== "undefined" && globalThis.vnPartUi && globalThis.vnPartUi.refreshVnPartDashboard) ||
       refreshVnPartDashboard;
@@ -3079,6 +3469,8 @@
 
   return {
     vnPartEphemeralState,
+    VN_PART_STATUS_LABELS,
+    formatVnPartStatus,
     computeVnPartKpis,
     filterVnPartDonors,
     groupVnPartByModelAndVin,
@@ -3098,6 +3490,7 @@
     renderApprovalStrip,
     normalizeDonorVin,
     validateDonorVin,
+    buildKnownDonorModelLookup,
     classifyEtaTracking,
     computeEtaTrackingSummary,
     filterEtaTrackingRows,
@@ -3112,5 +3505,13 @@
     validateDeleteRemovalPayload,
     handleActionFormSubmit,
     handleActionSubmit: handleActionFormSubmit,
+    buildStoreAckLookup,
+    resolveStoreAckEvent,
+    renderStoreAckTraceHtml,
+    getPendingFilterLabel,
+    showToast,
+    formatDateTimeFr,
+    formatDateFr,
+    escapeHtml,
   };
 });

@@ -796,18 +796,23 @@ test("25. Action authority matrix remains strictly preserved", () => {
     status: "EN_ATTENTE_VALIDATIONS",
     workshop_id: SAMPLE_WORKSHOP_ID,
     created_by: "user-ca",
+    donor_vin: "VF3XXXXXXXX123456",
   };
+  const approvals = [
+    { removal_id: "rem-2501", approval_role: "directeur", decision: "APPROVED" },
+    { removal_id: "rem-2501", approval_role: "directeur_pieces", decision: "APPROVED" },
+  ];
 
   // Chef de parc can approve
   const identityParc = { ok: true, role: "responsable_qualite_parc_vn", authUserId: "user-cp" };
-  const actionsParc = vnPartUi.getAvailableVnPartActions(removalPending, [], identityParc);
+  const actionsParc = vnPartUi.getAvailableVnPartActions(removalPending, approvals, identityParc);
   assert.ok(actionsParc.includes("APPROVE"));
   assert.ok(actionsParc.includes("REFUSE"));
   assert.ok(actionsParc.includes("REVISE_DONOR"));
 
   // Unauthorized role (technicien) has no actions
   const identityTech = { ok: true, role: "technicien", authUserId: "user-tech" };
-  const actionsTech = vnPartUi.getAvailableVnPartActions(removalPending, [], identityTech);
+  const actionsTech = vnPartUi.getAvailableVnPartActions(removalPending, approvals, identityTech);
   assert.equal(actionsTech.length, 0);
 });
 

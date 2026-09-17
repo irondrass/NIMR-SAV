@@ -2379,3 +2379,175 @@ test("P7.6: XSS escaping verification across rendered fields: part_reference, pa
   assert.strictEqual(storeTraceHtml.includes("<script>"), false);
   assert.ok(storeTraceHtml.includes("&lt;script&gt;"));
 });
+
+// ============================================================================
+// REVIEW FIX 001 — Approval decision timestamp traceability
+// ============================================================================
+
+test("REVIEW.1: Directeur SAV APPROVED with decided_at: date + time visible in approval pill", () => {
+  const removal = { id: "rem-rev1", status: "EN_ATTENTE_VALIDATIONS" };
+  const approvals = [
+    {
+      removal_id: "rem-rev1",
+      approval_role: "directeur",
+      decision: "APPROVED",
+      decided_at: "2026-09-17T10:00:00Z",
+      decided_by: "dir-1",
+      reason: "",
+    },
+  ];
+  const html = vnPartUi.renderApprovalStrip(removal, approvals);
+  // Must contain the full datetime (not just date) via formatDateTimeFr
+  // formatDateTimeFr produces DD/MM/YYYY HH:MM
+  assert.ok(html.includes("17/09/2026"), "Decision date must be visible");
+  // Must include the time component — at minimum the hour
+  assert.match(html, /1[0-2][:h]/i, "Decision time (hour) must be visible");
+  // The pill-decided-at span must be present
+  assert.ok(html.includes("pill-decided-at"), "pill-decided-at class must be present");
+});
+
+test("REVIEW.2: Direction Pièces APPROVED: ETA visible AND decision date+time visible simultaneously", () => {
+  const removal = {
+    id: "rem-rev2",
+    status: "EN_ATTENTE_VALIDATIONS",
+    expected_replacement_date: "2026-09-25",
+  };
+  const approvals = [
+    {
+      removal_id: "rem-rev2",
+      approval_role: "directeur",
+      decision: "APPROVED",
+      decided_at: "2026-09-17T09:00:00Z",
+      decided_by: "dir-1",
+      reason: "",
+    },
+    {
+      removal_id: "rem-rev2",
+      approval_role: "directeur_pieces",
+      decision: "APPROVED",
+      decided_at: "2026-09-17T10:30:00Z",
+      decided_by: "dp-1",
+      reason: "",
+    },
+  ];
+  const html = vnPartUi.renderApprovalStrip(removal, approvals);
+  // ETA must still be visible
+  assert.ok(html.includes("25/09/2026"), "ETA date must be visible");
+  // Decision datetime for directeur_pieces must be visible (timezone-safe)
+  const expectedDt = vnPartUi.formatDateTimeFr("2026-09-17T10:30:00Z");
+  assert.ok(html.includes(expectedDt), `Decision datetime '${expectedDt}' for Direction Pièces must be visible`);
+  assert.ok(html.includes("pill-decided-at"), "pill-decided-at class must be present");
+});
+
+test("REVIEW.3: Chef Parc VN APPROVED: donor VIN visible AND decision date+time visible simultaneously", () => {
+  const removal = {
+    id: "rem-rev3",
+    status: "AUTORISE_A_PRELEVER",
+    donor_vin: "VF1234567890ABCDE",
+  };
+  const approvals = [
+    {
+      removal_id: "rem-rev3",
+      approval_role: "directeur",
+      decision: "APPROVED",
+      decided_at: "2026-09-17T09:00:00Z",
+      decided_by: "dir-1",
+      reason: "",
+    },
+    {
+      removal_id: "rem-rev3",
+      approval_role: "directeur_pieces",
+      decision: "APPROVED",
+      decided_at: "2026-09-17T09:30:00Z",
+      decided_by: "dp-1",
+      reason: "",
+    },
+    {
+      removal_id: "rem-rev3",
+      approval_role: "responsable_qualite_parc_vn",
+      decision: "APPROVED",
+      decided_at: "2026-09-17T11:00:00Z",
+      decided_by: "cp-1",
+      reason: "",
+    },
+  ];
+  const html = vnPartUi.renderApprovalStrip(removal, approvals);
+  // Donor VIN must still be visible
+  assert.ok(html.includes("VF1234567890ABCDE"), "Donor VIN must remain visible");
+  // Decision datetime for Chef Parc must be visible (timezone-safe)
+  const expectedDt = vnPartUi.formatDateTimeFr("2026-09-17T11:00:00Z");
+  assert.ok(html.includes(expectedDt), `Decision datetime '${expectedDt}' for Chef Parc VN must be visible`);
+  assert.ok(html.includes("pill-decided-at"), "pill-decided-at class must be present for Chef Parc VN");
+});
+
+test("REVIEW.4: REFUSED: state visible, decision date+time visible, remark present and escaped", () => {
+  const removal = { id: "rem-rev4", status: "REFUSE" };
+  const approvals = [
+    {
+      removal_id: "rem-rev4",
+      approval_role: "directeur",
+      decision: "REFUSED",
+      decided_at: "2026-09-17T10:45:00Z",
+      decided_by: "dir-1",
+      reason: '<b>Motif</b> "refus" & raison',
+    },
+  ];
+  const html = vnPartUi.renderApprovalStrip(removal, approvals);
+  // Refused state must be visible
+  assert.ok(html.includes("Refusé"), "Refused state text must be present");
+  // Decision datetime must be visible (timezone-safe)
+  const expectedDt = vnPartUi.formatDateTimeFr("2026-09-17T10:45:00Z");
+  assert.ok(html.includes(expectedDt), `Decision datetime '${expectedDt}' must be visible for refusal`);
+  assert.ok(html.includes("pill-decided-at"), "pill-decided-at class must be present for refusal");
+  // XSS escaping of reason must work
+  assert.strictEqual(html.includes("<b>"), false, "HTML tags in reason must be escaped");
+  assert.ok(html.includes("&lt;b&gt;"), "Escaped HTML must appear in output");
+});
+
+test("REVIEW.5: decided_at null/undefined/invalid: no 'Invalid Date', no fabricated timestamp", () => {
+  const removal = { id: "rem-rev5", status: "EN_ATTENTE_VALIDATIONS" };
+
+  // Test with null decided_at
+  const approvalsNull = [
+    {
+      removal_id: "rem-rev5",
+      approval_role: "directeur",
+      decision: "APPROVED",
+      decided_at: null,
+      decided_by: "dir-1",
+      reason: "",
+    },
+  ];
+  const htmlNull = vnPartUi.renderApprovalStrip(removal, approvalsNull);
+  assert.strictEqual(htmlNull.includes("Invalid Date"), false, "Must not show 'Invalid Date' for null decided_at");
+  assert.ok(htmlNull.includes("Validé"), "Approved state must still appear for null decided_at");
+
+  // Test with undefined decided_at
+  const approvalsUndef = [
+    {
+      removal_id: "rem-rev5",
+      approval_role: "directeur",
+      decision: "APPROVED",
+      decided_by: "dir-1",
+      reason: "",
+    },
+  ];
+  const htmlUndef = vnPartUi.renderApprovalStrip(removal, approvalsUndef);
+  assert.strictEqual(htmlUndef.includes("Invalid Date"), false, "Must not show 'Invalid Date' for undefined decided_at");
+
+  // Test with invalid string decided_at
+  const approvalsInvalid = [
+    {
+      removal_id: "rem-rev5",
+      approval_role: "directeur",
+      decision: "APPROVED",
+      decided_at: "not-a-date",
+      decided_by: "dir-1",
+      reason: "",
+    },
+  ];
+  const htmlInvalid = vnPartUi.renderApprovalStrip(removal, approvalsInvalid);
+  assert.strictEqual(htmlInvalid.includes("Invalid Date"), false, "Must not show 'Invalid Date' for invalid decided_at string");
+  // Should NOT have pill-decided-at when date is invalid
+  assert.strictEqual(htmlInvalid.includes("pill-decided-at"), false, "pill-decided-at must not appear when decided_at is invalid");
+});

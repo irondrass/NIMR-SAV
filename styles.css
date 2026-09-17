@@ -9903,3 +9903,11 @@ select:focus {
   font-size: 0.72rem;
   color: #64748b;
 }
+
+/* REVIEW FIX 001 — Approval decision timestamp traceability */
+.vn-part-approval-pill .pill-decided-at {
+  display: block;
+  font-size: 0.72rem;
+  color: #64748b;
+  margin-top: 1px;
+}

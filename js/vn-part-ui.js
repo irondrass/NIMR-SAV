@@ -1494,23 +1494,33 @@
       const a = lookup.get(`${removal.id}:${r.roleKey}`);
       let statusClass = "status-pending";
       let statusText = "En attente";
+      let decidedAtHtml = "";
 
       if (a) {
+        // Compute validated decision datetime for traceability (P2 / REVIEW FIX 001)
+        const decidedDateTimeStr = a.decided_at && !isNaN(new Date(a.decided_at).getTime())
+          ? formatDateTimeFr(a.decided_at)
+          : "";
+
         if (a.decision === "APPROVED") {
           statusClass = "status-approved";
-          const decidedDateStr = a.decided_at && !isNaN(new Date(a.decided_at).getTime())
-            ? formatDateFr(a.decided_at)
-            : "";
           if (r.roleKey === "directeur_pieces" && removal.expected_replacement_date) {
-            statusText = `Validé (ETA: ${formatDateFr(removal.expected_replacement_date)})`;
+            statusText = `Validé · ETA : ${formatDateFr(removal.expected_replacement_date)}`;
           } else if (r.roleKey === "responsable_qualite_parc_vn" && removal.donor_vin) {
-            statusText = `Validé (${escapeHtml(removal.donor_vin)})`;
+            statusText = `Validé · ${escapeHtml(removal.donor_vin)}`;
           } else {
-            statusText = decidedDateStr ? `Validé le ${decidedDateStr}` : "Validé";
+            statusText = decidedDateTimeStr ? "Validé le" : "Validé";
           }
         } else if (a.decision === "REFUSED") {
           statusClass = "status-refused";
-          statusText = `Refusé (${escapeHtml(a.reason || "Motif non spécifié")})`;
+          statusText = a.reason && typeof a.reason === "string" && a.reason.trim()
+            ? `Refusé (${escapeHtml(a.reason.trim())})`
+            : "Refusé";
+        }
+
+        // Secondary traceability line: decision date+time (only when valid)
+        if (decidedDateTimeStr) {
+          decidedAtHtml = `<span class="pill-decided-at">${escapeHtml(decidedDateTimeStr)}</span>`;
         }
       }
 
@@ -1527,7 +1537,7 @@
       pillsHtml += `
         <div class="vn-part-approval-pill ${statusClass}">
           <span class="pill-role">${escapeHtml(r.label)}:</span>
-          <span class="pill-status">${statusText}</span>${remarkHtml}
+          <span class="pill-status">${statusText}</span>${decidedAtHtml}${remarkHtml}
         </div>
       `;
     }

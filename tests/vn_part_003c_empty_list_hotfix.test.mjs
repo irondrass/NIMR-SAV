@@ -480,9 +480,19 @@ test("9. Action Authority: Exact matrix preserved, role-specific approval requir
     status: "EN_ATTENTE_VALIDATIONS",
     version: 1,
     removed_at: null,
+    expected_replacement_date: "2026-09-25",
+    donor_vin: "VF3XXXXXXXX123456",
   };
 
-  // 1. Director
+  const step1Approved = [
+    { removal_id: "rem-matrix-01", approval_role: "directeur", decision: "APPROVED" },
+  ];
+  const step1And2Approved = [
+    ...step1Approved,
+    { removal_id: "rem-matrix-01", approval_role: "directeur_pieces", decision: "APPROVED" },
+  ];
+
+  // 1. Director (Step 1, no prerequisites)
   const dirActions = vnPartUi.getAvailableVnPartActions(pendingRemoval, [], {
     ok: true,
     authUserId: "u-dir",
@@ -490,8 +500,15 @@ test("9. Action Authority: Exact matrix preserved, role-specific approval requir
   });
   assert.deepStrictEqual(dirActions.sort(), ["APPROVE", "CANCEL", "REFUSE"].sort());
 
-  // 2. Directeur Pièces
-  const piecesActions = vnPartUi.getAvailableVnPartActions(pendingRemoval, [], {
+  // 2. Directeur Pièces (Step 2, eligible after Step 1)
+  const piecesActionsBefore = vnPartUi.getAvailableVnPartActions(pendingRemoval, [], {
+    ok: true,
+    authUserId: "u-pieces",
+    role: "directeur_pieces",
+  });
+  assert.strictEqual(piecesActionsBefore.includes("APPROVE"), false);
+
+  const piecesActions = vnPartUi.getAvailableVnPartActions(pendingRemoval, step1Approved, {
     ok: true,
     authUserId: "u-pieces",
     role: "directeur_pieces",
@@ -500,8 +517,15 @@ test("9. Action Authority: Exact matrix preserved, role-specific approval requir
   assert.ok(piecesActions.includes("REFUSE"));
   assert.ok(piecesActions.includes("REVISE_ETA"));
 
-  // 3. Responsable Qualité Parc VN
-  const parcActions = vnPartUi.getAvailableVnPartActions(pendingRemoval, [], {
+  // 3. Responsable Qualité Parc VN (Step 3, eligible after Steps 1 & 2)
+  const parcActionsBefore = vnPartUi.getAvailableVnPartActions(pendingRemoval, step1Approved, {
+    ok: true,
+    authUserId: "u-parc",
+    role: "responsable_qualite_parc_vn",
+  });
+  assert.strictEqual(parcActionsBefore.includes("APPROVE"), false);
+
+  const parcActions = vnPartUi.getAvailableVnPartActions(pendingRemoval, step1And2Approved, {
     ok: true,
     authUserId: "u-parc",
     role: "responsable_qualite_parc_vn",

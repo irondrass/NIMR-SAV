@@ -285,12 +285,19 @@ test("Group D: Action 3 REFUSE available to approvers in EN_ATTENTE_VALIDATIONS"
     created_by: "user-creator",
   };
 
-  const approverRoles = ["directeur", "directeur_pieces", "responsable_qualite_parc_vn"];
-  for (const role of approverRoles) {
-    const identity = { ok: true, role, authUserId: "other-user" };
-    const actions = vnPartUi.getAvailableVnPartActions(removal, [], identity);
-    assert.ok(actions.includes("REFUSE"), `Role ${role} must have REFUSE available`);
-  }
+  // Step 1: Directeur SAV can refuse initially without prerequisites
+  const dirId = { ok: true, role: "directeur", authUserId: "other-user" };
+  assert.ok(vnPartUi.getAvailableVnPartActions(removal, [], dirId).includes("REFUSE"), "Directeur must have REFUSE available");
+
+  // Step 2: Direction Pièces can refuse once Step 1 approved
+  const app1 = [{ removal_id: "rem-2", approval_role: "directeur", decision: "APPROVED" }];
+  const dpId = { ok: true, role: "directeur_pieces", authUserId: "other-user" };
+  assert.ok(vnPartUi.getAvailableVnPartActions(removal, app1, dpId).includes("REFUSE"), "Directeur Pièces must have REFUSE available once Step 1 is approved");
+
+  // Step 3: Chef de Parc VN can refuse once Steps 1 & 2 approved
+  const app2 = [...app1, { removal_id: "rem-2", approval_role: "directeur_pieces", decision: "APPROVED" }];
+  const parcId = { ok: true, role: "responsable_qualite_parc_vn", authUserId: "other-user" };
+  assert.ok(vnPartUi.getAvailableVnPartActions(removal, app2, parcId).includes("REFUSE"), "Chef Parc must have REFUSE available once Steps 1 & 2 are approved");
 
   // Not available when already refused or in later status
   const postRemoval = { ...removal, status: "PRELEVE_EN_ATTENTE_PIECE" };
@@ -331,8 +338,8 @@ test("Group E: Action 4 CANCEL available to initiator or director before removal
 // Group F: Action 5 REVISE_ETA
 // ============================================================================
 test("Group F: Action 5 REVISE_ETA restricted to directeur_pieces and non-terminal states", () => {
-  const nonTerminal = { id: "rem-4", version: 1, status: "PRELEVE_EN_ATTENTE_PIECE" };
-  const terminal = { id: "rem-4", version: 2, status: "CLOTURE" };
+  const nonTerminal = { id: "rem-4", version: 1, status: "PRELEVE_EN_ATTENTE_PIECE", expected_replacement_date: "2026-09-20" };
+  const terminal = { id: "rem-4", version: 2, status: "CLOTURE", expected_replacement_date: "2026-09-20" };
 
   const piecesId = { ok: true, role: "directeur_pieces", authUserId: "pieces-user" };
   const otherId = { ok: true, role: "chef_atelier", authUserId: "chef-user" };
@@ -346,8 +353,8 @@ test("Group F: Action 5 REVISE_ETA restricted to directeur_pieces and non-termin
 // Group G: Action 6 REVISE_DONOR
 // ============================================================================
 test("Group G: Action 6 REVISE_DONOR restricted to responsable_qualite_parc_vn pre-removal", () => {
-  const preRemoval = { id: "rem-5", version: 1, status: "AUTORISE_A_PRELEVER" };
-  const postRemoval = { id: "rem-5", version: 2, status: "PRELEVE_EN_ATTENTE_PIECE" };
+  const preRemoval = { id: "rem-5", version: 1, status: "AUTORISE_A_PRELEVER", donor_vin: "VF3XXXXXXXX123456" };
+  const postRemoval = { id: "rem-5", version: 2, status: "PRELEVE_EN_ATTENTE_PIECE", donor_vin: "VF3XXXXXXXX123456" };
 
   const parcId = { ok: true, role: "responsable_qualite_parc_vn", authUserId: "parc-user" };
 

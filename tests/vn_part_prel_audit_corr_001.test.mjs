@@ -241,3 +241,119 @@ test("P2.7: Historical out-of-order data: Faithful display of actual approvals w
   assert.ok(directeurPill[0].includes("En attente"), "Directeur SAV must explicitly show 'En attente'");
   assert.ok(!directeurPill[0].includes("status-approved"), "Directeur SAV must NOT be artificially marked approved");
 });
+
+// ============================================================================
+// Lot P3: Sequential approval eligibility & contextual ETA/donor actions
+// ============================================================================
+
+test("P3.1: Directeur SAV on EN_ATTENTE_VALIDATIONS sees APPROVE and REFUSE without prior prerequisites", () => {
+  const removal = { id: "rem-p3-01", status: "EN_ATTENTE_VALIDATIONS", created_by: "chef-1" };
+  const directorIdentity = { ok: true, role: "directeur", authUserId: "dir-1" };
+
+  const actions = vnPartUi.getAvailableVnPartActions(removal, [], directorIdentity);
+  assert.ok(actions.includes("APPROVE"), "Directeur SAV must have APPROVE action");
+  assert.ok(actions.includes("REFUSE"), "Directeur SAV must have REFUSE action");
+});
+
+test("P3.2: Direction Pièces before Directeur SAV approval sees neither APPROVE nor REFUSE", () => {
+  const removal = { id: "rem-p3-02", status: "EN_ATTENTE_VALIDATIONS", created_by: "chef-1" };
+  const partsIdentity = { ok: true, role: "directeur_pieces", authUserId: "dp-1" };
+
+  const actions = vnPartUi.getAvailableVnPartActions(removal, [], partsIdentity);
+  assert.ok(!actions.includes("APPROVE"), "Direction Pièces must NOT see APPROVE before Directeur SAV approves");
+  assert.ok(!actions.includes("REFUSE"), "Direction Pièces must NOT see REFUSE before Directeur SAV approves");
+});
+
+test("P3.3: Direction Pièces after Directeur SAV approval sees APPROVE and REFUSE", () => {
+  const removal = { id: "rem-p3-03", status: "EN_ATTENTE_VALIDATIONS", created_by: "chef-1" };
+  const approvals = [
+    { removal_id: "rem-p3-03", approval_role: "directeur", decision: "APPROVED", decided_at: "2026-09-17T10:00:00Z" },
+  ];
+  const partsIdentity = { ok: true, role: "directeur_pieces", authUserId: "dp-1" };
+
+  const actions = vnPartUi.getAvailableVnPartActions(removal, approvals, partsIdentity);
+  assert.ok(actions.includes("APPROVE"), "Direction Pièces must see APPROVE once Directeur SAV has approved");
+  assert.ok(actions.includes("REFUSE"), "Direction Pièces must see REFUSE once Directeur SAV has approved");
+});
+
+test("P3.4: Chef de Parc VN before Direction Pièces approval sees neither APPROVE nor REFUSE", () => {
+  const removal = { id: "rem-p3-04", status: "EN_ATTENTE_VALIDATIONS", created_by: "chef-1" };
+  const parcIdentity = { ok: true, role: "responsable_qualite_parc_vn", authUserId: "rq-1" };
+
+  // Case 1: 0/3 approvals
+  const actions0 = vnPartUi.getAvailableVnPartActions(removal, [], parcIdentity);
+  assert.ok(!actions0.includes("APPROVE"), "Chef de Parc must NOT see APPROVE on 0/3");
+  assert.ok(!actions0.includes("REFUSE"), "Chef de Parc must NOT see REFUSE on 0/3");
+
+  // Case 2: Only Directeur SAV approved (1/3), Direction Pièces still pending
+  const approvals1 = [
+    { removal_id: "rem-p3-04", approval_role: "directeur", decision: "APPROVED", decided_at: "2026-09-17T10:00:00Z" },
+  ];
+  const actions1 = vnPartUi.getAvailableVnPartActions(removal, approvals1, parcIdentity);
+  assert.ok(!actions1.includes("APPROVE"), "Chef de Parc must NOT see APPROVE if Direction Pièces is still pending");
+  assert.ok(!actions1.includes("REFUSE"), "Chef de Parc must NOT see REFUSE if Direction Pièces is still pending");
+});
+
+test("P3.5: Chef de Parc VN after both Directeur SAV and Direction Pièces approvals sees APPROVE and REFUSE", () => {
+  const removal = { id: "rem-p3-05", status: "EN_ATTENTE_VALIDATIONS", created_by: "chef-1" };
+  const approvals = [
+    { removal_id: "rem-p3-05", approval_role: "directeur", decision: "APPROVED", decided_at: "2026-09-17T10:00:00Z" },
+    { removal_id: "rem-p3-05", approval_role: "directeur_pieces", decision: "APPROVED", decided_at: "2026-09-17T10:30:00Z" },
+  ];
+  const parcIdentity = { ok: true, role: "responsable_qualite_parc_vn", authUserId: "rq-1" };
+
+  const actions = vnPartUi.getAvailableVnPartActions(removal, approvals, parcIdentity);
+  assert.ok(actions.includes("APPROVE"), "Chef de Parc must see APPROVE once 1 & 2 have approved");
+  assert.ok(actions.includes("REFUSE"), "Chef de Parc must see REFUSE once 1 & 2 have approved");
+});
+
+test("P3.6: REVISE_ETA is NOT offered when expected_replacement_date is absent, and IS offered when present", () => {
+  const partsIdentity = { ok: true, role: "directeur_pieces", authUserId: "dp-1" };
+
+  const remWithoutEta = { id: "rem-p3-06a", status: "EN_ATTENTE_VALIDATIONS", expected_replacement_date: null };
+  const actionsWithout = vnPartUi.getAvailableVnPartActions(remWithoutEta, [], partsIdentity);
+  assert.ok(!actionsWithout.includes("REVISE_ETA"), "REVISE_ETA must NOT be offered if expected_replacement_date is null");
+
+  const remWithEta = { id: "rem-p3-06b", status: "EN_ATTENTE_VALIDATIONS", expected_replacement_date: "2026-09-30" };
+  const actionsWith = vnPartUi.getAvailableVnPartActions(remWithEta, [], partsIdentity);
+  assert.ok(actionsWith.includes("REVISE_ETA"), "REVISE_ETA must be offered when expected_replacement_date is present");
+});
+
+test("P3.7: REVISE_DONOR is NOT offered when donor_vin is absent, and IS offered when present", () => {
+  const parcIdentity = { ok: true, role: "responsable_qualite_parc_vn", authUserId: "rq-1" };
+
+  const remWithoutDonor = { id: "rem-p3-07a", status: "EN_ATTENTE_VALIDATIONS", donor_vin: null };
+  const actionsWithout = vnPartUi.getAvailableVnPartActions(remWithoutDonor, [], parcIdentity);
+  assert.ok(!actionsWithout.includes("REVISE_DONOR"), "REVISE_DONOR must NOT be offered if donor_vin is null");
+
+  const remWithDonor = { id: "rem-p3-07b", status: "EN_ATTENTE_VALIDATIONS", donor_vin: "VF3XXXXXXXX123456" };
+  const actionsWith = vnPartUi.getAvailableVnPartActions(remWithDonor, [], parcIdentity);
+  assert.ok(actionsWith.includes("REVISE_DONOR"), "REVISE_DONOR must be offered when donor_vin is present");
+});
+
+test("P3.8: Historical out-of-order data: Directeur SAV can still approve when Direction Pièces already approved; Chef de Parc unlocked only after Directeur SAV approves", () => {
+  const removal = { id: "rem-p3-08", status: "EN_ATTENTE_VALIDATIONS", created_by: "chef-1" };
+  // Historical anomaly: Direction Pièces approved, but Directeur SAV still pending
+  const historicalApprovals = [
+    { removal_id: "rem-p3-08", approval_role: "directeur_pieces", decision: "APPROVED", decided_at: "2026-09-17T09:00:00Z" },
+  ];
+
+  const directorIdentity = { ok: true, role: "directeur", authUserId: "dir-1" };
+  const parcIdentity = { ok: true, role: "responsable_qualite_parc_vn", authUserId: "rq-1" };
+
+  // Directeur SAV must still be able to approve
+  const directorActions = vnPartUi.getAvailableVnPartActions(removal, historicalApprovals, directorIdentity);
+  assert.ok(directorActions.includes("APPROVE"), "Directeur SAV must be allowed to regularize and approve");
+
+  // Chef de Parc must NOT be allowed to approve yet because Directeur SAV hasn't approved
+  const parcActionsBefore = vnPartUi.getAvailableVnPartActions(removal, historicalApprovals, parcIdentity);
+  assert.ok(!parcActionsBefore.includes("APPROVE"), "Chef de Parc must remain blocked while Directeur SAV is pending");
+
+  // Once Directeur SAV also approves:
+  const regularizedApprovals = [
+    ...historicalApprovals,
+    { removal_id: "rem-p3-08", approval_role: "directeur", decision: "APPROVED", decided_at: "2026-09-17T11:00:00Z" },
+  ];
+  const parcActionsAfter = vnPartUi.getAvailableVnPartActions(removal, regularizedApprovals, parcIdentity);
+  assert.ok(parcActionsAfter.includes("APPROVE"), "Chef de Parc is now unlocked since both 1 and 2 are approved");
+});

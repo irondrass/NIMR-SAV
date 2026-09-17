@@ -1145,12 +1145,29 @@
 
     const actions = [];
 
+    // Sequential approval prerequisite check (P3)
+    const directorApproval = approvalLookup.get(`${removal.id}:directeur`);
+    const directorApproved = Boolean(directorApproval && directorApproval.decision === "APPROVED");
+
+    const partsDirectorApproval = approvalLookup.get(`${removal.id}:directeur_pieces`);
+    const partsDirectorApproved = Boolean(partsDirectorApproval && partsDirectorApproval.decision === "APPROVED");
+
+    let isSequentialPrerequisiteSatisfied = false;
+    if (role === "directeur") {
+      isSequentialPrerequisiteSatisfied = true;
+    } else if (role === "directeur_pieces") {
+      isSequentialPrerequisiteSatisfied = directorApproved;
+    } else if (role === "responsable_qualite_parc_vn") {
+      isSequentialPrerequisiteSatisfied = directorApproved && partsDirectorApproved;
+    }
+
     // APPROVE
     if (
       status === "EN_ATTENTE_VALIDATIONS" &&
       ["directeur", "directeur_pieces", "responsable_qualite_parc_vn"].includes(role) &&
       !isCreator &&
-      !hasDecided
+      !hasDecided &&
+      isSequentialPrerequisiteSatisfied
     ) {
       actions.push("APPROVE");
     }
@@ -1159,7 +1176,8 @@
     if (
       status === "EN_ATTENTE_VALIDATIONS" &&
       ["directeur", "directeur_pieces", "responsable_qualite_parc_vn"].includes(role) &&
-      !hasDecided
+      !hasDecided &&
+      isSequentialPrerequisiteSatisfied
     ) {
       actions.push("REFUSE");
     }
@@ -1172,18 +1190,20 @@
       actions.push("CANCEL");
     }
 
-    // REVISE_ETA
+    // REVISE_ETA (P3: only visible when expected_replacement_date is present)
     if (
       !["CLOTURE", "ANNULE", "REFUSE"].includes(status) &&
-      role === "directeur_pieces"
+      role === "directeur_pieces" &&
+      Boolean(removal.expected_replacement_date)
     ) {
       actions.push("REVISE_ETA");
     }
 
-    // REVISE_DONOR
+    // REVISE_DONOR (P3: only visible when donor_vin is present)
     if (
       ["EN_ATTENTE_VALIDATIONS", "AUTORISE_A_PRELEVER"].includes(status) &&
-      role === "responsable_qualite_parc_vn"
+      role === "responsable_qualite_parc_vn" &&
+      Boolean(removal.donor_vin)
     ) {
       actions.push("REVISE_DONOR");
     }

@@ -1240,9 +1240,9 @@
       ? approvalLookup
       : (Array.isArray(approvalLookup) ? buildApprovalLookup(approvalLookup) : new Map());
     const roles = [
-      { roleKey: "directeur", label: "Directeur SAV" },
-      { roleKey: "directeur_pieces", label: "Direction Pièces (ETA)" },
-      { roleKey: "responsable_qualite_parc_vn", label: "Chef de Parc VN (Donneur)" },
+      { roleKey: "directeur", stepNum: 1, label: "Étape 1 — Directeur SAV" },
+      { roleKey: "directeur_pieces", stepNum: 2, label: "Étape 2 — Direction Pièces (ETA)" },
+      { roleKey: "responsable_qualite_parc_vn", stepNum: 3, label: "Étape 3 — Chef de Parc VN (Donneur)" },
     ];
 
     let approvedCount = 0;
@@ -1260,12 +1260,15 @@
       if (a) {
         if (a.decision === "APPROVED") {
           statusClass = "status-approved";
+          const decidedDateStr = a.decided_at && !isNaN(new Date(a.decided_at).getTime())
+            ? formatDateFr(a.decided_at)
+            : "";
           if (r.roleKey === "directeur_pieces" && removal.expected_replacement_date) {
             statusText = `Validé (ETA: ${formatDateFr(removal.expected_replacement_date)})`;
           } else if (r.roleKey === "responsable_qualite_parc_vn" && removal.donor_vin) {
             statusText = `Validé (${escapeHtml(removal.donor_vin)})`;
           } else {
-            statusText = `Validé le ${formatDateFr(a.decided_at)}`;
+            statusText = decidedDateStr ? `Validé le ${decidedDateStr}` : "Validé";
           }
         } else if (a.decision === "REFUSED") {
           statusClass = "status-refused";
@@ -1273,10 +1276,36 @@
         }
       }
 
+      let remarkHtml = "";
+      if (a && a.reason && typeof a.reason === "string" && a.reason.trim()) {
+        remarkHtml = `
+          <details class="vn-part-approval-remark-details">
+            <summary class="vn-part-approval-remark-summary" title="Consulter la remarque">💬 Voir remarque</summary>
+            <div class="vn-part-approval-remark-content">${escapeHtml(a.reason.trim())}</div>
+          </details>
+        `;
+      }
+
       pillsHtml += `
         <div class="vn-part-approval-pill ${statusClass}">
           <span class="pill-role">${escapeHtml(r.label)}:</span>
-          <span class="pill-status">${statusText}</span>
+          <span class="pill-status">${statusText}</span>${remarkHtml}
+        </div>
+      `;
+    }
+
+    if (approvedCount === 3) {
+      return `
+        <div class="vn-part-approvals-strip vn-part-approvals-completed" aria-label="État des validations">
+          <details class="vn-part-approvals-disclosure">
+            <summary class="vn-part-approvals-summary">
+              <span class="vn-part-approvals-badge">✅ Validations terminées 3/3</span>
+              <span class="vn-part-approvals-toggle-label">Voir les détails</span>
+            </summary>
+            <div class="vn-part-approvals-list">
+              ${pillsHtml}
+            </div>
+          </details>
         </div>
       `;
     }

@@ -1294,6 +1294,32 @@
   }
 
   /**
+   * User-facing status labels mapping (P1).
+   */
+  const VN_PART_STATUS_LABELS = Object.freeze({
+    EN_ATTENTE_VALIDATIONS: "En attente de validation",
+    AUTORISE_A_PRELEVER: "Autorisé à prélever",
+    PRELEVE_EN_ATTENTE_PIECE: "En attente de pièce",
+    PIECE_DISPONIBLE: "Pièce disponible",
+    CLOTURE: "Restitué / Clôturé",
+    REFUSE: "Refusé",
+    ANNULE: "Annulé",
+  });
+
+  /**
+   * Format a backend status code into a user-facing French label.
+   *
+   * @param {string|null} status - Raw backend status code
+   * @returns {string} - Human-readable label or safe fallback
+   */
+  function formatVnPartStatus(status) {
+    if (!status || typeof status !== "string") return "—";
+    const key = status.trim();
+    if (!key) return "—";
+    return VN_PART_STATUS_LABELS[key] || key;
+  }
+
+  /**
    * Action button labels dictionary.
    */
   const ACTION_LABELS = {
@@ -1524,15 +1550,15 @@
   function renderRequestCard(rem, approvalLookup, identity) {
     let statusBadge = "";
     if (rem.status === "EN_ATTENTE_VALIDATIONS") {
-      statusBadge = `<span class="vn-part-badge badge-waiting">🟠 EN ATTENTE DE VALIDATION</span>`;
+      statusBadge = `<span class="vn-part-badge badge-waiting">🟠 En attente de validation</span>`;
     } else if (rem.status === "AUTORISE_A_PRELEVER") {
-      statusBadge = `<span class="vn-part-badge badge-ready">🔵 AUTORISÉ À PRÉLEVER</span>`;
+      statusBadge = `<span class="vn-part-badge badge-ready">🔵 Autorisé à prélever</span>`;
     } else if (rem.status === "REFUSE") {
-      statusBadge = `<span class="vn-part-badge badge-overdue">🔴 REFUSÉ</span>`;
+      statusBadge = `<span class="vn-part-badge badge-overdue">🔴 Refusé</span>`;
     } else if (rem.status === "ANNULE") {
-      statusBadge = `<span class="vn-part-badge badge-neutral">⚪ ANNULÉ</span>`;
+      statusBadge = `<span class="vn-part-badge badge-neutral">⚪ Annulé</span>`;
     } else {
-      statusBadge = `<span class="vn-part-badge badge-neutral">${escapeHtml(rem.status)}</span>`;
+      statusBadge = `<span class="vn-part-badge badge-neutral">${escapeHtml(formatVnPartStatus(rem.status))}</span>`;
     }
 
     let urgencyBadge = "";
@@ -2166,13 +2192,13 @@
             for (const rem of donorRemovals) {
               let badgeHtml = "";
               if (rem.restored_at) {
-                badgeHtml = `<span class="vn-part-badge badge-restored">✅ RESTITUÉ / CLÔTURÉ</span>`;
+                badgeHtml = `<span class="vn-part-badge badge-restored">✅ Restitué / Clôturé</span>`;
               } else if (rem.replacement_available_at) {
-                badgeHtml = `<span class="vn-part-badge badge-available">🟢 PIÈCE DISPONIBLE</span>`;
+                badgeHtml = `<span class="vn-part-badge badge-available">🟢 Pièce disponible</span>`;
               } else if (rem.removed_at) {
-                badgeHtml = `<span class="vn-part-badge badge-waiting">🟠 EN ATTENTE PIÈCE</span>`;
+                badgeHtml = `<span class="vn-part-badge badge-waiting">🟠 En attente de pièce</span>`;
               } else {
-                badgeHtml = `<span class="vn-part-badge badge-neutral">${escapeHtml(rem.status)}</span>`;
+                badgeHtml = `<span class="vn-part-badge badge-neutral">${escapeHtml(formatVnPartStatus(rem.status))}</span>`;
               }
 
               const approvalStripHtml = renderApprovalStrip(rem, approvalLookup);
@@ -2280,7 +2306,7 @@
 
             <div class="vn-part-form-row">
               <label for="vn-create-ben-model">Modèle bénéficiaire <span class="required">*</span></label>
-              <input type="text" id="vn-create-ben-model" name="beneficiary_model" required placeholder="Ex: Peugeot Partner">
+              <input type="text" id="vn-create-ben-model" name="beneficiary_model" required placeholder="Saisir le modèle">
             </div>
 
             <div class="vn-part-form-row">
@@ -2517,7 +2543,7 @@
         fieldsHtml = `
           <div class="vn-part-form-row">
             <label for="vn-action-donor-model">Modèle véhicule donneur <span class="required">*</span></label>
-            <input type="text" id="vn-action-donor-model" name="donor_model" required placeholder="Ex: Peugeot 208">
+            <input type="text" id="vn-action-donor-model" name="donor_model" required placeholder="Saisir le modèle">
           </div>
           <div class="vn-part-form-row">
             <label for="vn-action-donor-vin">N° Châssis / VIN véhicule donneur <span class="required">*</span></label>
@@ -2606,7 +2632,7 @@
             <div class="vn-part-modal-summary">
               <strong>${renderPartIdentityHtml(removal.part_reference, removal.part_designation)}</strong>
               <span>Bénéficiaire : ${escapeHtml(removal.beneficiary_model || "—")}</span>
-              <span>Statut actuel : ${escapeHtml(removal.status)}</span>
+              <span>Statut actuel : ${escapeHtml(formatVnPartStatus(removal.status))}</span>
             </div>
 
             <div id="vn-part-action-error" class="vn-part-form-error" style="display:none;" role="alert"></div>
@@ -3079,6 +3105,8 @@
 
   return {
     vnPartEphemeralState,
+    VN_PART_STATUS_LABELS,
+    formatVnPartStatus,
     computeVnPartKpis,
     filterVnPartDonors,
     groupVnPartByModelAndVin,

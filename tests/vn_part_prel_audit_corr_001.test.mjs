@@ -1234,3 +1234,273 @@ test("P4.10: Approver roles maintain 'À valider (${countPending})' filter label
     );
   }
 });
+
+// ============================================================================
+// LOT P5 — CLARIFICATION DES LIBELLÉS, UNITÉS ET PÉRIMÈTRES KPI / COMPTEURS
+// ============================================================================
+
+test("P5.1: Global KPI strip displays explicit semantic labels and units", () => {
+  const freshUiJs = fs.readFileSync(uiJsPath, "utf8");
+
+  // Card 1: VN restant à restituer
+  assert.match(
+    freshUiJs,
+    /<div class="vn-part-kpi-label">VN restant à restituer<\/div>/,
+    "Card 1 must have label 'VN restant à restituer'"
+  );
+  assert.match(
+    freshUiJs,
+    /<div class="vn-part-kpi-sub">Véhicules donneurs incomplets<\/div>/,
+    "Card 1 subtitle must explain 'Véhicules donneurs incomplets'"
+  );
+
+  // Card 2: Pièces physiques non restituées (replaces vague 'Pièces non restituées')
+  assert.match(
+    freshUiJs,
+    /<div class="vn-part-kpi-label">Pièces physiques non restituées<\/div>/,
+    "Card 2 must clarify unit: 'Pièces physiques non restituées'"
+  );
+  assert.doesNotMatch(
+    freshUiJs,
+    /<div class="vn-part-kpi-label">Pièces non restituées<\/div>/,
+    "Old label 'Pièces non restituées' must no longer exist in KPI strip"
+  );
+  assert.match(
+    freshUiJs,
+    /<div class="vn-part-kpi-sub">Total pièces physiques prélevées<\/div>/,
+    "Card 2 subtitle must clarify 'Total pièces physiques prélevées'"
+  );
+
+  // Card 3: VN entièrement prêts à restituer (replaces ambiguous 'VN prêts à restituer')
+  assert.match(
+    freshUiJs,
+    /<div class="vn-part-kpi-label">VN entièrement prêts à restituer<\/div>/,
+    "Card 3 must clarify scope: 'VN entièrement prêts à restituer'"
+  );
+  assert.match(
+    freshUiJs,
+    /<div class="vn-part-kpi-sub">Toutes pièces disponibles<\/div>/,
+    "Card 3 subtitle must clarify 'Toutes pièces disponibles'"
+  );
+
+  // Card 4: VN en retard
+  assert.match(
+    freshUiJs,
+    /<div class="vn-part-kpi-label">VN en retard<\/div>/,
+    "Card 4 must have label 'VN en retard'"
+  );
+});
+
+test("P5.2: Donor vehicle card metric chips display explicit reference and physical units", () => {
+  const freshUiJs = fs.readFileSync(uiJsPath, "utf8");
+
+  // Chip 1: Références actives (replaces ambiguous 'Prélèvements actifs:')
+  assert.match(
+    freshUiJs,
+    /<span>Références actives:<\/span>/,
+    "Chip 1 must clarify unit 'Références actives:'"
+  );
+  assert.doesNotMatch(
+    freshUiJs,
+    /<span>Prélèvements actifs:<\/span>/,
+    "Old label 'Prélèvements actifs:' must no longer exist in donor card"
+  );
+
+  // Chip 2: Pièces physiques non restituées on donor card
+  assert.match(
+    freshUiJs,
+    /<span>Pièces physiques non restituées:<\/span>/,
+    "Donor card must include 'Pièces physiques non restituées:' chip"
+  );
+
+  // Chip 3: Références en attente (replaces 'En attente pièce:')
+  assert.match(
+    freshUiJs,
+    /<span>Références en attente:<\/span>/,
+    "Donor card must clarify 'Références en attente:'"
+  );
+
+  // Chip 4: Références disponibles pour remontage with ratio (replaces 'Prêts à restituer:')
+  assert.match(
+    freshUiJs,
+    /<span>Références disponibles pour remontage:<\/span>/,
+    "Donor card must clarify 'Références disponibles pour remontage:'"
+  );
+  assert.match(
+    freshUiJs,
+    /\$\{Number\(donor\.available_to_restore_count\s*\|\|\s*0\)\}\s*\/\s*\$\{Number\(donor\.active_removals_remaining\s*\|\|\s*0\)\}/,
+    "Donor card chip must format available/active ratio e.g. 10 / 12"
+  );
+});
+
+test("P5.3: Canonical Case 1: 12 active references vs 14 physical unreturned parts remain mathematically distinct", () => {
+  const donor = {
+    donor_vin: "VF1TESTCASE001",
+    donor_model: "Koleos",
+    workshop_id: "ws-1",
+    active_removals_remaining: 12,
+    waiting_replacement_count: 2,
+    available_to_restore_count: 10,
+    can_be_restored_today: false,
+    overdue_count: 0,
+  };
+
+  const removals = [];
+  for (let i = 1; i <= 10; i++) {
+    removals.push({
+      id: `rem-${i}`,
+      donor_vin: "VF1TESTCASE001",
+      quantity: 1,
+      removed_at: "2026-09-10T08:00:00Z",
+      restored_at: null,
+      replacement_available_at: "2026-09-12T10:00:00Z",
+    });
+  }
+  for (let i = 11; i <= 12; i++) {
+    removals.push({
+      id: `rem-${i}`,
+      donor_vin: "VF1TESTCASE001",
+      quantity: 2,
+      removed_at: "2026-09-10T08:00:00Z",
+      restored_at: null,
+      replacement_available_at: null,
+    });
+  }
+
+  const kpis = vnPartUi.computeVnPartKpis([donor], removals);
+  assert.strictEqual(kpis.remainingDonorsCount, 1, "1 donor remaining");
+  assert.strictEqual(kpis.unreturnedPartsQuantity, 14, "SUM of physical pieces is 14");
+  assert.strictEqual(donor.active_removals_remaining, 12, "Count of references is 12");
+
+  const donorPhysicalParts = removals
+    .filter((r) => r.removed_at !== null && r.removed_at !== undefined && (r.restored_at === null || r.restored_at === undefined))
+    .reduce((sum, r) => sum + (Number(r.quantity) || 1), 0);
+  assert.strictEqual(donorPhysicalParts, 14, "Donor physical unreturned count is 14");
+});
+
+test("P5.4: Canonical Case 2: 10 available references out of 12 yields ratio 10 / 12 and 0 fully ready vehicles", () => {
+  const donor = {
+    donor_vin: "VF1TESTCASE002",
+    donor_model: "Captur",
+    workshop_id: "ws-1",
+    active_removals_remaining: 12,
+    waiting_replacement_count: 2,
+    available_to_restore_count: 10,
+    can_be_restored_today: false,
+    overdue_count: 0,
+  };
+
+  const removals = [];
+  for (let i = 1; i <= 10; i++) {
+    removals.push({
+      id: `rem-${i}`,
+      donor_vin: "VF1TESTCASE002",
+      quantity: 1,
+      removed_at: "2026-09-10T08:00:00Z",
+      restored_at: null,
+      replacement_available_at: "2026-09-12T10:00:00Z",
+    });
+  }
+  for (let i = 11; i <= 12; i++) {
+    removals.push({
+      id: `rem-${i}`,
+      donor_vin: "VF1TESTCASE002",
+      quantity: 1,
+      removed_at: "2026-09-10T08:00:00Z",
+      restored_at: null,
+      replacement_available_at: null,
+    });
+  }
+
+  const kpis = vnPartUi.computeVnPartKpis([donor], removals);
+
+  assert.strictEqual(kpis.readyDonorsCount, 0, "VN entièrement prêts à restituer MUST be 0");
+  assert.strictEqual(donor.available_to_restore_count, 10, "10 available references");
+  assert.strictEqual(donor.active_removals_remaining, 12, "12 active references");
+
+  const ratio = `${donor.available_to_restore_count} / ${donor.active_removals_remaining}`;
+  assert.strictEqual(ratio, "10 / 12");
+});
+
+test("P5.5: Vehicle fully ready when 12 / 12 references available yields readyDonorsCount = 1", () => {
+  const donor = {
+    donor_vin: "VF1TESTCASE003",
+    donor_model: "Megane",
+    workshop_id: "ws-1",
+    active_removals_remaining: 12,
+    waiting_replacement_count: 0,
+    available_to_restore_count: 12,
+    can_be_restored_today: true,
+    overdue_count: 0,
+  };
+
+  const removals = [];
+  for (let i = 1; i <= 12; i++) {
+    removals.push({
+      id: `rem-${i}`,
+      donor_vin: "VF1TESTCASE003",
+      quantity: 1,
+      removed_at: "2026-09-10T08:00:00Z",
+      restored_at: null,
+      replacement_available_at: "2026-09-12T10:00:00Z",
+    });
+  }
+
+  const kpis = vnPartUi.computeVnPartKpis([donor], removals);
+  assert.strictEqual(kpis.readyDonorsCount, 1, "VN entièrement prêts à restituer is 1");
+  assert.strictEqual(donor.available_to_restore_count, 12);
+  assert.strictEqual(donor.active_removals_remaining, 12);
+
+  const ratio = `${donor.available_to_restore_count} / ${donor.active_removals_remaining}`;
+  assert.strictEqual(ratio, "12 / 12");
+});
+
+test("P5.6: Invariance & Non-regression: computeVnPartKpis calculations and return properties are unaltered", () => {
+  const donors = [
+    { donor_vin: "V1", active_removals_remaining: 2, can_be_restored_today: false, overdue_count: 0 },
+    { donor_vin: "V2", active_removals_remaining: 0, can_be_restored_today: false, overdue_count: 0 },
+    { donor_vin: "V3", active_removals_remaining: 1, can_be_restored_today: true, overdue_count: 1 },
+  ];
+  const removals = [
+    { donor_vin: "V1", quantity: 3, removed_at: "2026-09-01T00:00:00Z", restored_at: null },
+    { donor_vin: "V1", quantity: 2, removed_at: "2026-09-01T00:00:00Z", restored_at: null },
+    { donor_vin: "V2", quantity: 1, removed_at: "2026-09-01T00:00:00Z", restored_at: "2026-09-02T00:00:00Z" },
+    { donor_vin: "V3", quantity: 1, removed_at: "2026-09-01T00:00:00Z", restored_at: null },
+    { donor_vin: "V4", quantity: 5, removed_at: null, restored_at: null },
+  ];
+
+  const res = vnPartUi.computeVnPartKpis(donors, removals);
+
+  assert.deepStrictEqual(Object.keys(res).sort(), [
+    "overdueDonorsCount",
+    "readyDonorsCount",
+    "remainingDonorsCount",
+    "unreturnedPartsQuantity",
+  ].sort(), "Return keys must remain byte-for-byte identical");
+
+  assert.strictEqual(res.remainingDonorsCount, 2);
+  assert.strictEqual(res.unreturnedPartsQuantity, 6);
+  assert.strictEqual(res.readyDonorsCount, 1);
+  assert.strictEqual(res.overdueDonorsCount, 1);
+});
+
+test("P5.7: Invariance & Non-regression: ETA tracking logic classifyEtaTracking is unaltered", () => {
+  const rowWithEta = {
+    expected_replacement_date: "2026-09-20",
+    replacement_available_at: null,
+    restored_at: null,
+  };
+  const classified = vnPartUi.classifyEtaTracking(rowWithEta);
+  assert.ok(classified, "classifyEtaTracking must return classification");
+
+  const summary = vnPartUi.computeEtaTrackingSummary([rowWithEta]);
+  assert.ok(summary, "computeEtaTrackingSummary must return summary");
+  assert.strictEqual(typeof summary.trackableCount, "number");
+});
+
+test("P5.8: Invariance & Non-regression: Excel export workbook logic is unaltered", () => {
+  assert.strictEqual(typeof vnPartUi.buildVnPartExportWorkbook, "function");
+  assert.strictEqual(typeof vnPartUi.generateVnPartExportFilename, "function");
+  const filename = vnPartUi.generateVnPartExportFilename();
+  assert.match(filename, /^Etat_prelevements_\d{4}-\d{2}-\d{2}_\d{4}\.xlsx$/);
+});

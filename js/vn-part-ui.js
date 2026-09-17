@@ -535,8 +535,8 @@
   /**
    * Exact KPI derivations:
    * 1. VN restant à restituer: Count of donor rows where active_removals_remaining > 0
-   * 2. Pièces non restituées: SUM(quantity) from removals where removed_at IS NOT NULL and restored_at IS NULL
-   * 3. VN prêts à restituer: Count of donor rows where can_be_restored_today = true
+   * 2. Pièces physiques non restituées: SUM(quantity) from removals where removed_at IS NOT NULL and restored_at IS NULL
+   * 3. VN entièrement prêts à restituer: Count of donor rows where can_be_restored_today = true
    * 4. VN en retard: Count of donor rows where overdue_count > 0
    */
   function computeVnPartKpis(donors = [], removals = []) {
@@ -1903,14 +1903,14 @@
                   <div class="vn-part-kpi-sub">Véhicules donneurs incomplets</div>
                 </article>
                 <article class="vn-part-kpi-card" id="card-kpi-unreturned">
-                  <div class="vn-part-kpi-label">Pièces non restituées</div>
+                  <div class="vn-part-kpi-label">Pièces physiques non restituées</div>
                   <div class="vn-part-kpi-val" id="vn-part-kpi-unreturned">0</div>
                   <div class="vn-part-kpi-sub">Total pièces physiques prélevées</div>
                 </article>
                 <article class="vn-part-kpi-card is-ready-card" id="card-kpi-ready">
-                  <div class="vn-part-kpi-label">VN prêts à restituer</div>
+                  <div class="vn-part-kpi-label">VN entièrement prêts à restituer</div>
                   <div class="vn-part-kpi-val text-success" id="vn-part-kpi-ready">0</div>
-                  <div class="vn-part-kpi-sub">Pièces reçues disponibles</div>
+                  <div class="vn-part-kpi-sub">Toutes pièces disponibles</div>
                 </article>
                 <article class="vn-part-kpi-card is-overdue-card" id="card-kpi-overdue">
                   <div class="vn-part-kpi-label">VN en retard</div>
@@ -2281,6 +2281,9 @@
           const isOverdue = Number(donor.overdue_count || 0) > 0;
           const isReady = Boolean(donor.can_be_restored_today);
           const isFullyRestored = Boolean(donor.is_fully_restored);
+          const donorPhysicalPartsCount = (item.removals || [])
+            .filter((r) => r.removed_at !== null && r.removed_at !== undefined && (r.restored_at === null || r.restored_at === undefined))
+            .reduce((sum, r) => sum + (Number(r.quantity) || 1), 0);
 
           const donorSummary = computeDonorCommitmentSummary(
             vnPartEphemeralState.removals,
@@ -2307,16 +2310,20 @@
 
               <div class="vn-part-donor-metrics">
                 <div class="vn-part-metric-chip">
-                  <span>Prélèvements actifs:</span>
+                  <span>Références actives:</span>
                   <strong>${Number(donor.active_removals_remaining || 0)}</strong>
                 </div>
                 <div class="vn-part-metric-chip">
-                  <span>En attente pièce:</span>
+                  <span>Pièces physiques non restituées:</span>
+                  <strong>${donorPhysicalPartsCount}</strong>
+                </div>
+                <div class="vn-part-metric-chip">
+                  <span>Références en attente:</span>
                   <strong>${Number(donor.waiting_replacement_count || 0)}</strong>
                 </div>
                 <div class="vn-part-metric-chip">
-                  <span>Prêts à restituer:</span>
-                  <strong>${Number(donor.available_to_restore_count || 0)}</strong>
+                  <span>Références disponibles pour remontage:</span>
+                  <strong>${Number(donor.available_to_restore_count || 0)} / ${Number(donor.active_removals_remaining || 0)}</strong>
                 </div>
                 ${donor.oldest_opened_at ? `
                   <div class="vn-part-metric-chip">

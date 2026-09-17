@@ -388,34 +388,57 @@ console.log("--- TEST SUITE: RECEPTION-R1-001 (RBAC Hardening + Role Boundary + 
 }
 
 // -----------------------------------------------------------------------------
-// Test 9: Confirmed reception does not show "Confirmer réception véhicule" as actionable primary button
+// Test 9: Confirmed reception does not show duplicate receive button & preserves baseline appointment workflow
 // -----------------------------------------------------------------------------
 {
   setupScenario("reception");
   assert.equal(app(`state.cases[0].flags.received`), true);
-  const nextAction = app(`getCaseNextAction(state.cases[0])`);
-  assert.notEqual(
-    nextAction.code,
-    "receive_vehicle",
-    "Test 9 FAIL: Un dossier déjà reçu ne doit pas avoir 'receive_vehicle' comme prochaine action"
-  );
-  assert.notEqual(
-    nextAction.label,
-    "Confirmer la réception véhicule",
-    "Test 9 FAIL: Un dossier déjà reçu ne doit pas afficher 'Confirmer la réception véhicule'"
+
+  // 1. Confirmed reception hides duplicate receive button in action availability
+  app(`
+    testRoot = document.createElement("div");
+    receiveBtn = document.createElement("button");
+    receiveBtn.dataset = { actionFlag: "received" };
+    testRoot.querySelectorAll = function(sel) {
+      if (sel === "[data-action-flag]") return [receiveBtn];
+      return [];
+    };
+    refreshCaseActionAvailability(testRoot, state.cases[0]);
+  `);
+  assert.equal(
+    app(`receiveBtn.hidden`),
+    true,
+    "Test 9 FAIL: Le bouton de confirmation de réception doit être masqué si flags.received est déjà vrai"
   );
 
-  const nextWorkflow = app(`getNextWorkflowAction(state.cases[0])`);
+  // 2. Preserves canonical v23.3.51 workflow: appointment is not bypassed
+  app(`state.cases[0].appointment = null;`);
+  const nextWorkflowWithoutRdv = app(`getNextWorkflowAction(state.cases[0])`);
+  assert.equal(
+    nextWorkflowWithoutRdv,
+    "appointment",
+    "Test 9 FAIL: getNextWorkflowAction doit exiger un RDV si manquant même si flags.received=true (préservation baseline v23.3.51)"
+  );
+
+  // When appointment is present, workflow proceeds normally past appointment
+  app(`state.cases[0].appointment = { start: "2026-09-20T08:00:00.000Z", delivery: "2026-09-21T17:00:00.000Z" };`);
+  const nextWorkflowWithRdv = app(`getNextWorkflowAction(state.cases[0])`);
   assert.notEqual(
-    nextWorkflow,
+    nextWorkflowWithRdv,
     "received",
     "Test 9 FAIL: getNextWorkflowAction ne doit pas retourner 'received' si déjà reçu"
   );
-  console.log("✓ Test 9: Confirmed reception does not show Confirmer réception véhicule as actionable");
+  assert.equal(
+    nextWorkflowWithRdv,
+    "clientApproved",
+    "Test 9 FAIL: getNextWorkflowAction doit progresser vers clientApproved selon le workflow canonique"
+  );
+
+  console.log("✓ Test 9: Confirmed reception suppresses duplicate action & preserves baseline appointment workflow");
 }
 
 // -----------------------------------------------------------------------------
-// Test 10: Confirmed reception displays "Données véhicule à compléter" without reverting confirmation state
+// Test 10: Confirmed reception displays "Données véhicule à compléter" & preserves baseline authorization precedence
 // -----------------------------------------------------------------------------
 {
   setupScenario("reception");
@@ -423,25 +446,63 @@ console.log("--- TEST SUITE: RECEPTION-R1-001 (RBAC Hardening + Role Boundary + 
     state.cases[0].flags.received = true;
     state.cases[0].plate = "";
     state.cases[0].vin = "";
-    state.cases[0].vehicle = "Véhicule à compléter";
+    state.cases[0].vehicle = "DongFeng Rich 6";
+
+    cardRoot = document.createElement("div");
+    cardRoot.innerHTML = '<div class="reception-intro"><p></p></div><div data-field="vehicle-identity"></div>';
+    cardRoot.querySelector = function(sel) {
+      if (sel === "[data-field='vehicle-identity']") return this;
+      if (sel === ".reception-intro p") return this;
+      return document.createElement("div");
+    };
+    renderVehicleIdentityCard(cardRoot, state.cases[0]);
   `);
-  const nextActionIncomplete = app(`getCaseNextAction(state.cases[0])`);
+
+  // 1. "Données véhicule à compléter" badge is rendered alongside "Réception confirmée"
+  const cardHtml = app(`cardRoot.innerHTML`);
+  assert.equal(
+    cardHtml.includes("Données véhicule à compléter"),
+    true,
+    "Test 10 FAIL: renderVehicleIdentityCard doit afficher 'Données véhicule à compléter' si plate/vin absent"
+  );
+  assert.equal(
+    cardHtml.includes("Réception confirmée"),
+    true,
+    "Test 10 FAIL: renderVehicleIdentityCard doit préserver le tag 'Réception confirmée'"
+  );
   assert.equal(
     app(`state.cases[0].flags.received`),
     true,
     "Test 10 FAIL: Le statut reçu physique doit rester true même si les données véhicule sont incomplètes"
   );
+
+  // 2. Canonical v23.3.51 precedence in getCaseNextAction:
+  // When work authorization is pending, authorize_work has precedence over complete_vehicle_identity
+  const nextActionWithPendingAuth = app(`getCaseNextAction(state.cases[0])`);
   assert.equal(
-    nextActionIncomplete.code,
+    nextActionWithPendingAuth.code,
+    "authorize_work",
+    "Test 10 FAIL: getCaseNextAction doit préserver la priorité canonique de confirmation d'accord travaux"
+  );
+
+  // Once work authorization is confirmed, incomplete identity is returned
+  app(`
+    state.cases[0].claims[0].authorizationReference = "ACCORD-DF-001";
+    state.cases[0].claims[0].authorizationAt = "2026-09-17T12:00:00.000Z";
+  `);
+  const nextActionWithAuthConfirmed = app(`getCaseNextAction(state.cases[0])`);
+  assert.equal(
+    nextActionWithAuthConfirmed.code,
     "complete_vehicle_identity",
-    "Test 10 FAIL: L'action doit cibler la complétion des données véhicule"
+    "Test 10 FAIL: getCaseNextAction doit cibler complete_vehicle_identity une fois les travaux autorisés"
   );
   assert.equal(
-    nextActionIncomplete.label,
-    "Données véhicule à compléter",
-    "Test 10 FAIL: Le libellé doit afficher 'Données véhicule à compléter'"
+    nextActionWithAuthConfirmed.label,
+    "Compléter l'identité véhicule",
+    "Test 10 FAIL: getCaseNextAction doit utiliser le libellé canonique 'Compléter l\\'identité véhicule'"
   );
-  console.log("✓ Test 10: Confirmed reception displays Données véhicule à compléter without reverting confirmation");
+
+  console.log("✓ Test 10: Confirmed reception displays identity badge & preserves baseline authorization precedence");
 }
 
 // -----------------------------------------------------------------------------

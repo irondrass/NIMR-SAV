@@ -1603,17 +1603,17 @@ function getCaseNextAction(item) {
       reason: "Le devis PDF et les tâches générées attendent la validation du Chef Atelier.",
     };
   }
-  if (!hasVehicleIdentity(item)) {
-    return {
-      code: "complete_vehicle_identity",
-      label: "Données véhicule à compléter",
-      priority: "attention",
-      reason: "Ajoutez une immatriculation ou un VIN avant de poursuivre.",
-    };
-  }
   const workflowClaims = getWorkflowClaims(item);
   if (item.flags?.received && getWorkAuthorizationIssues(item).length) {
     return { code: "authorize_work", label: "Confirmer l'accord travaux", priority: "attention", reason: "L'import ou la validation technique ne vaut pas accord client / interne." };
+  }
+  if (!hasVehicleIdentity(item)) {
+    return {
+      code: "complete_vehicle_identity",
+      label: "Compléter l'identité véhicule",
+      priority: "attention",
+      reason: "Ajoutez une immatriculation ou un VIN avant de poursuivre.",
+    };
   }
   if (!workflowClaims.length || workflowClaims.some((claim) => !claimHasLaborEstimate(claim)) || !hasKnownLabor(item)) {
     return {
@@ -5964,7 +5964,7 @@ function getNextWorkflowAction(item) {
   const claimsToCheck = getWorkflowClaims(item);
   if (!claimsToCheck.length) return "claim";
   if (claimsToCheck.some((claim) => !claimHasLaborEstimate(claim))) return "labor";
-  if (!item.flags.received && (!item.appointment || appointmentNeedsReschedule(item))) return "appointment";
+  if (!item.appointment || appointmentNeedsReschedule(item)) return "appointment";
   if (!item.flags.received) return "received";
   if (!item.flags.workStarted && getWorkAuthorizationIssues(item).length) return "clientApproved";
   if (!item.flags.workStarted) return "workStarted";

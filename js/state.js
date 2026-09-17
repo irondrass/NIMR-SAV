@@ -21,7 +21,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v23.3.51";
+const APP_VERSION = "v23.3.52";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const CURRENT_DATA_SCHEMA_VERSION = 2;
@@ -2811,6 +2811,8 @@ function getWorkflowActionPermission(action, checked = true) {
   if (action === "claim" || action === "labor" || action === "expertApproved" || action === "clientApproved") return "case.edit";
   if (action === "appointment") return "appointment.schedule";
   if (action === "received") return "vehicle.receive";
+  if (action === "workStarted") return "task.start";
+  if (action === "workCompleted") return "task.complete";
   if (action === "qualityApproved") return checked ? "quality.validate" : "quality.reject";
   if (action === "delivered") return "delivery.complete";
   if (action === "close") return "case.close";

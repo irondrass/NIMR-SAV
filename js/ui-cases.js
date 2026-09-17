@@ -3201,6 +3201,7 @@ function renderTechnicianTaskActions(row) {
 
 function renderPermissionAwareButton(permission, label, action, dataset, className, booking) {
   const permissionAllowed = canRenderAction(permission, { booking });
+  if (!permissionAllowed) return "";
   const technicianId = getCurrentUser()?.resourceId || getBookingHumanResourceIds(booking || {})[0];
   const startIssues = action === "start" && booking ? getTechnicianTaskStartIssues(getIndexedCaseById(booking.caseId), booking, technicianId) : [];
   const allowed = permissionAllowed && !startIssues.length;
@@ -5456,13 +5457,23 @@ function renderVehicleIdentityCard(root, item) {
     ["Assurance", item.insurance],
     ["Réf. OR", item.orNavNumber],
   ];
+  const hasIdentity = typeof hasVehicleIdentity === "function" ? hasVehicleIdentity(item) : Boolean(item.plate || item.vin);
+  const introP = root.querySelector(".reception-intro p");
+  if (introP) {
+    introP.textContent = item.flags?.received
+      ? "Réception véhicule déjà confirmée à l’atelier."
+      : "Vérifiez les informations puis confirmez la réception à l’atelier.";
+  }
   target.innerHTML = `
     <div class="vehicle-identity-head">
       <div>
         <strong>Véhicule du dossier</strong>
         <p class="muted">Ce véhicule est déjà associé au dossier.</p>
       </div>
-      <span class="tag ${item.flags.received ? "ok" : "warn"}">${item.flags.received ? "Réception confirmée" : "En attente réception"}</span>
+      <div style="display:flex;gap:8px;align-items:center;">
+        ${!hasIdentity ? '<span class="tag warn">Données véhicule à compléter</span>' : ""}
+        <span class="tag ${item.flags.received ? "ok" : "warn"}">${item.flags.received ? "Réception confirmée" : "En attente réception"}</span>
+      </div>
     </div>
     <dl class="identity-grid">
       ${fields
@@ -5778,9 +5789,21 @@ function refreshCaseActionAvailability(root, item) {
     const completed = isWorkflowActionCompleted(item, flag);
     const issues = completed ? [] : getBusinessRuleIssues(item, flag);
     const permissionGuard = guardWorkflowAction(flag, item, true, { notify: false });
-    button.disabled = completed || issues.length > 0 || !permissionGuard.ok;
+    if (!permissionGuard.ok) {
+      button.hidden = true;
+      button.disabled = true;
+      button.title = permissionGuard.message;
+      return;
+    }
+    if (flag === "received" && completed) {
+      button.hidden = true;
+      button.disabled = true;
+      return;
+    }
+    button.hidden = false;
+    button.disabled = completed || issues.length > 0;
     button.classList.toggle("validated", completed);
-    button.title = issues.length ? issues.join("\n") : permissionGuard.message;
+    button.title = issues.length ? issues.join("\n") : "";
   });
 
   $$("[data-toggle]", root).forEach((input) => {
@@ -6670,8 +6693,8 @@ function renderValidatedAppointmentPlan(root, item) {
 
 function renderBookingTaskActionButton(row, permission, action, label, className) {
   const allowed = canRenderAction(permission, { booking: row });
-  const title = allowed ? "" : getPermissionDeniedMessage(permission, { booking: row });
-  return `<button type="button" class="${className}" data-allow-production-action data-booking-action="${escapeAttr(action)}" data-booking-id="${escapeAttr(row.id)}" ${allowed ? "" : `disabled title="${escapeAttr(title)}" aria-label="${escapeAttr(`${label} indisponible : ${title}`)}"`}>${escapeHtml(label)}</button>`;
+  if (!allowed) return "";
+  return `<button type="button" class="${className}" data-allow-production-action data-booking-action="${escapeAttr(action)}" data-booking-id="${escapeAttr(row.id)}">${escapeHtml(label)}</button>`;
 }
 
 function renderBookingTaskActions(row) {
@@ -6679,15 +6702,17 @@ function renderBookingTaskActions(row) {
   if (row.status === "completed") return '<span class="muted">Clôturée</span>';
   if (row.status === "paused") return '<span class="muted">Reliquat planifié</span>';
   if (row.status === "started") {
-    return `
-      ${renderBookingTaskActionButton(row, "task.pause", "pause", "Pause", "ghost-button tiny-button")}
-      ${renderBookingTaskActionButton(row, "task.complete", "complete", "Terminer", "primary-button tiny-button")}
-    `;
+    const actions = [
+      renderBookingTaskActionButton(row, "task.pause", "pause", "Pause", "ghost-button tiny-button"),
+      renderBookingTaskActionButton(row, "task.complete", "complete", "Terminer", "primary-button tiny-button"),
+    ].filter(Boolean).join(" ");
+    return actions || '<span class="muted">En cours</span>';
   }
-  return `
-    ${renderBookingTaskActionButton(row, "planning.edit", "reschedule", "Replanifier", "ghost-button tiny-button")}
-    ${renderBookingTaskActionButton(row, "task.start", "start", "Démarrer", "primary-button tiny-button")}
-  `;
+  const actions = [
+    renderBookingTaskActionButton(row, "planning.edit", "reschedule", "Replanifier", "ghost-button tiny-button"),
+    renderBookingTaskActionButton(row, "task.start", "start", "Démarrer", "primary-button tiny-button"),
+  ].filter(Boolean).join(" ");
+  return actions || '<span class="muted">Planifiée</span>';
 }
 
 function formatDateTimeLocalInputValue(value) {
@@ -7101,6 +7126,10 @@ function renderDurations(root, item) {
       ? ""
       : !isActive
       ? ""
+      : !canEditPlanning
+      ? preferredTechnicianId
+        ? `<div class="service-locked-note">Technicien : <strong>${escapeHtml(getResource(preferredTechnicianId)?.name || preferredTechnicianId)}</strong></div>`
+        : `<div class="service-locked-note">Technicien : <strong>Auto - meilleur disponible</strong></div>`
       : technicianOptions.length
         ? `<label class="technician-override-field"><span>Technicien à réserver</span><small>${canEditPlanning ? "Choisissez avant de calculer le RDV. Vérifiez aussi l'état des pièces ci-dessus : neuve/remplacée ou réparée." : planningEditTitle}</small><select data-preferred-technician="${key}" ${canEditPlanning ? "" : `disabled title="${escapeAttr(planningEditTitle)}"`}><option value="">Auto - meilleur disponible</option>${technicianOptions.map((resource) => {
             const alternative = alternativesByResourceId.get(resource.id);
@@ -7110,6 +7139,8 @@ function renderDurations(root, item) {
         : `<div class="service-inactive-note">Aucun technicien actif disponible pour ce métier.</div>`;
     const serviceControl = !isActive
       ? `<div class="service-inactive-note">Ajoutez un temps atelier pour activer cette étape.</div>`
+      : !canEditPlanning
+      ? `<div class="service-locked-note">Service : <strong>${effectiveHelp}</strong></div>`
       : canChangeType
         ? `<label class="service-override-field"><span>Service à réserver dans le planning</span><small>${canEditPlanning ? "Gardez Auto sauf si cette opération doit changer de métier." : planningEditTitle}</small><select data-service-type="${key}" ${canEditPlanning ? "" : `disabled title="${escapeAttr(planningEditTitle)}"`}>${SERVICE_TYPE_OPTIONS.map(([type, text]) => {
             const helper = type === "auto" ? `Auto recommandé - ${autoHelp}` : `${text} - ${getServiceResourceHelp(type)}`;
@@ -7118,6 +7149,8 @@ function renderDurations(root, item) {
         : `<div class="service-locked-note">Service fixe : <strong>${effectiveHelp}</strong></div>`;
     const executionControl = !isActive
       ? ""
+      : !canEditPlanning
+      ? `<div class="service-locked-note">Exécution : <strong>${executionMode === "external" ? "Sous-traitant externe" : "Interne atelier"}</strong></div>`
       : `<div class="execution-mode-fields">
           <label class="service-override-field"><span>Exécution</span><select data-execution-mode="${key}" ${canEditPlanning ? "" : `disabled title="${escapeAttr(planningEditTitle)}"`}>
             <option value="internal" ${executionMode === "internal" ? "selected" : ""}>Interne atelier</option>

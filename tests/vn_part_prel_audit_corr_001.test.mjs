@@ -395,6 +395,7 @@ function simulateRpcAction({
   callerId = "user-1",
   removal,
   approvals = [],
+  auditEvents = [],
   payload = {},
 }) {
   // Simulates the authoritative checks performed by nimr_apply_vn_part_action_v1
@@ -404,19 +405,19 @@ function simulateRpcAction({
 
   const validApproverRoles = ["directeur", "directeur_pieces", "responsable_qualite_parc_vn"];
   if (!validApproverRoles.includes(callerRole)) {
-    return { ok: false, success: false, code: "FORBIDDEN_APPROVER_ROLE" };
+    return { ok: false, success: false, code: "FORBIDDEN_APPROVER_ROLE", removal, approvals, auditEvents };
   }
 
   if (removal.status !== "EN_ATTENTE_VALIDATIONS") {
-    return { ok: false, success: false, code: action === "APPROVE" ? "INVALID_STATUS_FOR_APPROVAL" : "INVALID_STATUS_FOR_REFUSAL" };
+    return { ok: false, success: false, code: action === "APPROVE" ? "INVALID_STATUS_FOR_APPROVAL" : "INVALID_STATUS_FOR_REFUSAL", removal, approvals, auditEvents };
   }
 
   if (action === "APPROVE" && removal.created_by === callerId) {
-    return { ok: false, success: false, code: "CANNOT_APPROVE_OWN_REQUEST" };
+    return { ok: false, success: false, code: "CANNOT_APPROVE_OWN_REQUEST", removal, approvals, auditEvents };
   }
 
   if (approvals.some(a => a.removal_id === removal.id && a.approval_role === callerRole)) {
-    return { ok: false, success: false, code: "ALREADY_DECIDED" };
+    return { ok: false, success: false, code: "ALREADY_DECIDED", removal, approvals, auditEvents };
   }
 
   // Sequential enforcement
@@ -430,6 +431,9 @@ function simulateRpcAction({
         success: false,
         code: "APPROVAL_SEQUENCE_VIOLATION",
         message: "L'approbation par le Directeur SAV est requise avant la décision de la Direction Pièces.",
+        removal,
+        approvals,
+        auditEvents,
       };
     }
   } else if (callerRole === "responsable_qualite_parc_vn") {
@@ -445,6 +449,9 @@ function simulateRpcAction({
         success: false,
         code: "APPROVAL_SEQUENCE_VIOLATION",
         message: "Les approbations du Directeur SAV et de la Direction Pièces sont requises avant la décision du Chef de Parc VN.",
+        removal,
+        approvals,
+        auditEvents,
       };
     }
   }
@@ -452,42 +459,108 @@ function simulateRpcAction({
   // Payload validations
   if (action === "APPROVE") {
     if (callerRole === "directeur_pieces" && !payload.expected_replacement_date) {
-      return { ok: false, success: false, code: "ETA_REQUIRED" };
+      return { ok: false, success: false, code: "ETA_REQUIRED", removal, approvals, auditEvents };
     }
     if (callerRole === "responsable_qualite_parc_vn" && (!payload.donor_model || !payload.donor_vin)) {
-      return { ok: false, success: false, code: "DONOR_DATA_REQUIRED" };
+      return { ok: false, success: false, code: "DONOR_DATA_REQUIRED", removal, approvals, auditEvents };
     }
 
     const newApprovals = [
       ...approvals,
-      { removal_id: removal.id, approval_role: callerRole, decision: "APPROVED", decided_by: callerId },
+      {
+        removal_id: removal.id,
+        approval_role: callerRole,
+        decision: "APPROVED",
+        decided_by: callerId,
+        decided_at: new Date().toISOString(),
+        payload,
+      },
     ];
     const approvedCount = newApprovals.filter(a => a.removal_id === removal.id && a.decision === "APPROVED").length;
     const newStatus = approvedCount === 3 ? "AUTORISE_A_PRELEVER" : removal.status;
+    const newVersion = (removal.version || 1) + 1;
+    const updatedRemoval = {
+      ...removal,
+      status: newStatus,
+      version: newVersion,
+      ...(callerRole === "directeur_pieces" ? { expected_replacement_date: payload.expected_replacement_date } : {}),
+      ...(callerRole === "responsable_qualite_parc_vn" ? { donor_model: payload.donor_model, donor_vin: payload.donor_vin } : {}),
+    };
+
+    const newAuditEvents = [
+      ...auditEvents,
+      {
+        removal_id: removal.id,
+        action: "APPROVE",
+        actor_role: callerRole,
+        actor_user_id: callerId,
+        old_status: removal.status,
+        new_status: removal.status,
+      },
+      ...(approvedCount === 3 ? [{
+        removal_id: removal.id,
+        action: "AUTHORIZE",
+        actor_role: callerRole,
+        actor_user_id: callerId,
+        old_status: "EN_ATTENTE_VALIDATIONS",
+        new_status: "AUTORISE_A_PRELEVER",
+      }] : []),
+    ];
 
     return {
       ok: true,
       success: true,
       action: "APPROVE",
       status: newStatus,
+      version: newVersion,
+      removal: updatedRemoval,
       approvals: newApprovals,
+      auditEvents: newAuditEvents,
     };
   }
 
   if (action === "REFUSE") {
     if (!payload.reason || !payload.reason.trim()) {
-      return { ok: false, success: false, code: "REASON_REQUIRED" };
+      return { ok: false, success: false, code: "REASON_REQUIRED", removal, approvals, auditEvents };
     }
     const newApprovals = [
       ...approvals,
-      { removal_id: removal.id, approval_role: callerRole, decision: "REFUSED", decided_by: callerId, reason: payload.reason },
+      {
+        removal_id: removal.id,
+        approval_role: callerRole,
+        decision: "REFUSED",
+        decided_by: callerId,
+        decided_at: new Date().toISOString(),
+        reason: payload.reason,
+      },
+    ];
+    const newVersion = (removal.version || 1) + 1;
+    const updatedRemoval = {
+      ...removal,
+      status: "REFUSE",
+      version: newVersion,
+    };
+    const newAuditEvents = [
+      ...auditEvents,
+      {
+        removal_id: removal.id,
+        action: "REFUSE",
+        actor_role: callerRole,
+        actor_user_id: callerId,
+        old_status: removal.status,
+        new_status: "REFUSE",
+        reason: payload.reason,
+      },
     ];
     return {
       ok: true,
       success: true,
       action: "REFUSE",
       status: "REFUSE",
+      version: newVersion,
+      removal: updatedRemoval,
       approvals: newApprovals,
+      auditEvents: newAuditEvents,
     };
   }
 }
@@ -630,4 +703,148 @@ test("S8: Données historiques : Directeur valide après coup (Approvals: [direc
   assert.equal(res.status, "EN_ATTENTE_VALIDATIONS");
   assert.equal(res.approvals.length, 2);
   assert.equal(res.approvals[1].approval_role, "directeur");
+});
+
+test("S9: Chef de Parc REFUSE sans prérequis (Approvals: []) -> Rejet APPROVAL_SEQUENCE_VIOLATION, zero mutation", () => {
+  const removal = { id: "rem-s9", status: "EN_ATTENTE_VALIDATIONS", version: 1, created_by: "creator-1" };
+  const approvals = [];
+  const auditEvents = [];
+
+  const res = simulateRpcAction({
+    action: "REFUSE",
+    callerRole: "responsable_qualite_parc_vn",
+    callerId: "rq-1",
+    removal,
+    approvals,
+    auditEvents,
+    payload: { reason: "Refus sans validations préalables" },
+  });
+
+  assert.equal(res.ok, false);
+  assert.equal(res.code, "APPROVAL_SEQUENCE_VIOLATION");
+  assert.equal(res.approvals.length, 0, "Aucune approval ne doit être insérée");
+  assert.equal(res.auditEvents.length, 0, "Aucun audit event ne doit être inséré");
+  assert.equal(res.removal.version, 1, "La version du removal doit rester inchangée");
+  assert.equal(res.removal.status, "EN_ATTENTE_VALIDATIONS", "Le statut doit rester inchangé");
+});
+
+test("S9b: Chef de Parc REFUSE avec Directeur seul (Approvals: [directeur]) -> Rejet APPROVAL_SEQUENCE_VIOLATION, zero mutation", () => {
+  const removal = { id: "rem-s9b", status: "EN_ATTENTE_VALIDATIONS", version: 2, created_by: "creator-1" };
+  const approvals = [
+    { removal_id: "rem-s9b", approval_role: "directeur", decision: "APPROVED", decided_by: "dir-1" },
+  ];
+  const auditEvents = [{ action: "CREATE_REQUEST" }, { action: "APPROVE", actor_role: "directeur" }];
+
+  const res = simulateRpcAction({
+    action: "REFUSE",
+    callerRole: "responsable_qualite_parc_vn",
+    callerId: "rq-1",
+    removal,
+    approvals,
+    auditEvents,
+    payload: { reason: "Refus avant Direction Pièces" },
+  });
+
+  assert.equal(res.ok, false);
+  assert.equal(res.code, "APPROVAL_SEQUENCE_VIOLATION");
+  assert.equal(res.approvals.length, 1, "Approvals inchangées");
+  assert.equal(res.auditEvents.length, 2, "Audit events inchangés");
+  assert.equal(res.removal.version, 2, "Version inchangée");
+});
+
+test("S10: Scénario complet compatibilité historique : Pièces pré-approuvé -> Directeur régularise -> Chef de Parc approuve -> AUTORISE_A_PRELEVER", () => {
+  // État initial historique
+  const initialRemoval = { id: "rem-s10", status: "EN_ATTENTE_VALIDATIONS", version: 1, created_by: "creator-1" };
+  const historicalTimestamp = "2026-09-10T10:00:00.000Z";
+  const historicalApprovals = [
+    {
+      removal_id: "rem-s10",
+      approval_role: "directeur_pieces",
+      decision: "APPROVED",
+      decided_by: "dp-1",
+      decided_at: historicalTimestamp,
+      payload: { expected_replacement_date: "2026-10-01" },
+    },
+  ];
+
+  // Étape A: Directeur SAV effectue APPROVE
+  const stepA = simulateRpcAction({
+    action: "APPROVE",
+    callerRole: "directeur",
+    callerId: "dir-1",
+    removal: initialRemoval,
+    approvals: historicalApprovals,
+  });
+
+  assert.equal(stepA.ok, true, "Directeur SAV doit réussir l'approbation");
+  assert.equal(stepA.status, "EN_ATTENTE_VALIDATIONS", "Statut reste EN_ATTENTE_VALIDATIONS");
+  assert.equal(stepA.approvals.length, 2, "Deux approbations présentes");
+
+  // Vérification intégrité de l'approbation historique Pièces
+  const partsApproval = stepA.approvals.find(a => a.approval_role === "directeur_pieces");
+  assert.ok(partsApproval, "L'approbation Pièces historique doit subsister");
+  assert.equal(partsApproval.decided_at, historicalTimestamp, "decided_at historique préservé");
+  assert.equal(partsApproval.decided_by, "dp-1", "decided_by historique préservé");
+  assert.equal(stepA.approvals.filter(a => a.approval_role === "directeur_pieces").length, 1, "Zéro duplication");
+
+  // Étape B: Chef Parc effectue ensuite APPROVE
+  const stepB = simulateRpcAction({
+    action: "APPROVE",
+    callerRole: "responsable_qualite_parc_vn",
+    callerId: "rq-1",
+    removal: stepA.removal,
+    approvals: stepA.approvals,
+    payload: { donor_model: "DongFeng Rich 6", donor_vin: "VF3XXXXXXXX999999" },
+  });
+
+  assert.equal(stepB.ok, true, "Chef de Parc doit réussir l'approbation");
+  assert.equal(stepB.status, "AUTORISE_A_PRELEVER", "Statut devient AUTORISE_A_PRELEVER");
+  assert.equal(stepB.approvals.length, 3, "Exactement 3 validations présentes");
+  assert.ok(stepB.approvals.some(a => a.approval_role === "directeur"));
+  assert.ok(stepB.approvals.some(a => a.approval_role === "directeur_pieces"));
+  assert.ok(stepB.approvals.some(a => a.approval_role === "responsable_qualite_parc_vn"));
+});
+
+test("S11: Atomicité garantie : Pièces APPROVE hors ordre produit ZERO business mutation", () => {
+  const removalBefore = Object.freeze({ id: "rem-s11", status: "EN_ATTENTE_VALIDATIONS", version: 1, created_by: "creator-1" });
+  const approvalsBefore = Object.freeze([]);
+  const auditEventsBefore = Object.freeze([]);
+
+  const res = simulateRpcAction({
+    action: "APPROVE",
+    callerRole: "directeur_pieces",
+    callerId: "dp-1",
+    removal: { ...removalBefore },
+    approvals: [...approvalsBefore],
+    auditEvents: [...auditEventsBefore],
+    payload: { expected_replacement_date: "2026-10-15" },
+  });
+
+  assert.equal(res.ok, false);
+  assert.equal(res.code, "APPROVAL_SEQUENCE_VIOLATION");
+  assert.deepEqual(res.removal, removalBefore, "Removals strictement identique (zero mutation)");
+  assert.deepEqual(res.approvals, approvalsBefore, "Approvals strictement identique (zero mutation)");
+  assert.deepEqual(res.auditEvents, auditEventsBefore, "Audit events strictement identique (zero mutation)");
+});
+
+test("S12: Atomicité garantie : Chef de Parc REFUSE hors ordre produit ZERO business mutation", () => {
+  const removalBefore = Object.freeze({ id: "rem-s12", status: "EN_ATTENTE_VALIDATIONS", version: 1, created_by: "creator-1" });
+  const approvalsBefore = Object.freeze([]);
+  const auditEventsBefore = Object.freeze([]);
+
+  const res = simulateRpcAction({
+    action: "REFUSE",
+    callerRole: "responsable_qualite_parc_vn",
+    callerId: "rq-1",
+    removal: { ...removalBefore },
+    approvals: [...approvalsBefore],
+    auditEvents: [...auditEventsBefore],
+    payload: { reason: "Tentative de refus illégale" },
+  });
+
+  assert.equal(res.ok, false);
+  assert.equal(res.code, "APPROVAL_SEQUENCE_VIOLATION");
+  assert.deepEqual(res.removal, removalBefore, "Removals strictement identique (zero mutation)");
+  assert.deepEqual(res.approvals, approvalsBefore, "Approvals strictement identique (zero mutation)");
+  assert.deepEqual(res.auditEvents, auditEventsBefore, "Audit events strictement identique (zero mutation)");
 });

@@ -40,7 +40,8 @@ test("P1.2: formatVnPartStatus provides safe, readable fallbacks for missing or 
   assert.equal(vnPartUi.formatVnPartStatus(null), "—");
   assert.equal(vnPartUi.formatVnPartStatus(undefined), "—");
   assert.equal(vnPartUi.formatVnPartStatus(""), "—");
-  assert.equal(vnPartUi.formatVnPartStatus("INCONNU_STATUS"), "INCONNU_STATUS");
+  assert.equal(vnPartUi.formatVnPartStatus("NOUVEAU_STATUT_BACKEND"), "Statut inconnu");
+  assert.equal(vnPartUi.formatVnPartStatus("INCONNU_STATUS"), "Statut inconnu");
 });
 
 test("P1.3: Static check: No raw technical status rendered in modal summary", () => {

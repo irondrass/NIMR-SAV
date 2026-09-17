@@ -1316,7 +1316,7 @@
     if (!status || typeof status !== "string") return "—";
     const key = status.trim();
     if (!key) return "—";
-    return VN_PART_STATUS_LABELS[key] || key;
+    return VN_PART_STATUS_LABELS[key] || "Statut inconnu";
   }
 
   /**
@@ -1571,7 +1571,7 @@
     const actionsHtml = renderRemovalActionButtons(rem, availableActions, vnPartEphemeralState.mutationInProgress);
 
     return `
-      <article class="vn-part-request-card" data-id="${escapeHtml(rem.id)}" data-version="${rem.version}">
+      <article class="vn-part-request-card" data-id="${escapeHtml(rem.id)}" data-status="${escapeHtml(rem.status)}" data-version="${rem.version}">
         <header class="vn-part-request-card-header">
           <div class="vn-part-request-card-title">
             <h3 class="vn-part-request-part-title">${renderPartIdentityHtml(rem.part_reference, rem.part_designation)}</h3>
@@ -2206,7 +2206,7 @@
               const actionsHtml = renderRemovalActionButtons(rem, availableActions, vnPartEphemeralState.mutationInProgress);
 
               html += `
-                <div class="vn-part-removal-item" data-id="${escapeHtml(rem.id)}" data-version="${rem.version}">
+                <div class="vn-part-removal-item" data-id="${escapeHtml(rem.id)}" data-status="${escapeHtml(rem.status)}" data-version="${rem.version}">
                   <div class="vn-part-removal-top">
                     <div class="vn-part-removal-title">
                       <strong>${renderPartIdentityHtml(rem.part_reference, rem.part_designation)}</strong>

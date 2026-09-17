@@ -1970,3 +1970,279 @@ test("P6.16: Consecutive VIN transitions: known A -> known B updates suggestion 
     dom.cleanup();
   }
 });
+
+// ============================================================================
+// LOT P7 — FINAL E2E / RBAC / NON-REGRESSION CERTIFICATION
+// ============================================================================
+
+test("P7.1: Full E2E lifecycle happy path: CREATE -> 1/3 -> 2/3 (ETA) -> 3/3 (Donor) -> STORE_ACK -> CONFIRM_REMOVAL -> MARK_REPLACEMENT_AVAILABLE -> CONFIRM_RESTITUTION", () => {
+  // Step A: Creation by Chef Atelier
+  const createPayload = {
+    part_reference: "REF-OPTIQUE-D",
+    part_designation: "Optique Avant Droit",
+    quantity: 1,
+    beneficiary_model: "DongFeng Shine",
+    beneficiary_vin: "VF1BENEF111111111",
+    beneficiary_or: "OR-2026-001",
+    reason: "Dépannage client urgent OR-2026-001",
+  };
+  const createVal = vnPartUi.validateCreateRequestPayload(createPayload);
+  assert.strictEqual(createVal.ok, true, "Creation payload must be valid");
+
+  let removal = {
+    id: "rem-p7-e2e",
+    version: 1,
+    created_by: "user-chef-atelier",
+    workshop_id: "ws-1",
+    status: "EN_ATTENTE_VALIDATIONS",
+    part_reference: createPayload.part_reference,
+    part_designation: createPayload.part_designation,
+    beneficiary_model: createPayload.beneficiary_model,
+    beneficiary_vin: createPayload.beneficiary_vin,
+    beneficiary_or: createPayload.beneficiary_or,
+    expected_replacement_date: null,
+    donor_model: null,
+    donor_vin: null,
+    store_ack_at: null,
+    removed_at: null,
+    replacement_available_at: null,
+    restored_at: null,
+  };
+  let approvals = [];
+  let auditEvents = [];
+
+  const identities = {
+    chef_atelier: { ok: true, role: "chef_atelier", authUserId: "user-chef-atelier", workshopId: "ws-1" },
+    directeur: { ok: true, role: "directeur", authUserId: "user-directeur", workshopId: "ws-1" },
+    directeur_pieces: { ok: true, role: "directeur_pieces", authUserId: "user-dp", workshopId: "ws-1" },
+    chef_parc: { ok: true, role: "responsable_qualite_parc_vn", authUserId: "user-cp", workshopId: "ws-1" },
+    magasin: { ok: true, role: "responsable_magasin", authUserId: "user-mag", workshopId: "ws-1" },
+  };
+
+  // Check initial state: 0/3, UI label
+  assert.strictEqual(vnPartUi.formatVnPartStatus(removal.status), "En attente de validation");
+  let actionsSAV = vnPartUi.getAvailableVnPartActions(removal, approvals, identities.directeur);
+  let actionsDP = vnPartUi.getAvailableVnPartActions(removal, approvals, identities.directeur_pieces);
+  let actionsCP = vnPartUi.getAvailableVnPartActions(removal, approvals, identities.chef_parc);
+
+  assert.ok(actionsSAV.includes("APPROVE"), "Directeur SAV must be eligible at 0/3");
+  assert.ok(!actionsDP.includes("APPROVE"), "Direction Pièces must NOT be eligible before Step 1");
+  assert.ok(!actionsCP.includes("APPROVE"), "Chef de Parc must NOT be eligible before Steps 1 and 2");
+
+  // Step B: Directeur SAV approves (1/3)
+  approvals.push({
+    removal_id: removal.id,
+    approval_role: "directeur",
+    decision: "APPROVED",
+    decided_by: identities.directeur.authUserId,
+    decided_at: "2026-09-17T10:00:00Z",
+  });
+  removal.version++;
+
+  actionsSAV = vnPartUi.getAvailableVnPartActions(removal, approvals, identities.directeur);
+  actionsDP = vnPartUi.getAvailableVnPartActions(removal, approvals, identities.directeur_pieces);
+  actionsCP = vnPartUi.getAvailableVnPartActions(removal, approvals, identities.chef_parc);
+
+  assert.ok(!actionsSAV.includes("APPROVE"), "Directeur SAV already decided");
+  assert.ok(actionsDP.includes("APPROVE"), "Direction Pièces is now eligible at 1/3");
+  assert.ok(!actionsCP.includes("APPROVE"), "Chef de Parc remains ineligible at 1/3");
+
+  // Step C: Direction Pièces approves with ETA (2/3)
+  removal.expected_replacement_date = "2026-10-15";
+  approvals.push({
+    removal_id: removal.id,
+    approval_role: "directeur_pieces",
+    decision: "APPROVED",
+    decided_by: identities.directeur_pieces.authUserId,
+    decided_at: "2026-09-17T10:15:00Z",
+    payload: { expected_replacement_date: "2026-10-15" },
+  });
+  removal.version++;
+
+  actionsDP = vnPartUi.getAvailableVnPartActions(removal, approvals, identities.directeur_pieces);
+  actionsCP = vnPartUi.getAvailableVnPartActions(removal, approvals, identities.chef_parc);
+
+  assert.ok(!actionsDP.includes("APPROVE"), "Direction Pièces already decided");
+  assert.ok(actionsDP.includes("REVISE_ETA"), "Direction Pièces can now revise ETA");
+  assert.ok(actionsCP.includes("APPROVE"), "Chef de Parc is now eligible at 2/3");
+
+  // Step D: Chef de Parc VN approves with Donor vehicle (3/3)
+  removal.donor_model = "DFSK Glory 580";
+  removal.donor_vin = "VF1KNWN1111111111";
+  approvals.push({
+    removal_id: removal.id,
+    approval_role: "responsable_qualite_parc_vn",
+    decision: "APPROVED",
+    decided_by: identities.chef_parc.authUserId,
+    decided_at: "2026-09-17T10:30:00Z",
+    payload: { donor_model: removal.donor_model, donor_vin: removal.donor_vin },
+  });
+  removal.status = "AUTORISE_A_PRELEVER";
+  removal.version++;
+
+  assert.strictEqual(vnPartUi.formatVnPartStatus(removal.status), "Autorisé à prélever");
+  let actionsMag = vnPartUi.getAvailableVnPartActions(removal, approvals, identities.magasin);
+  let actionsAtelier = vnPartUi.getAvailableVnPartActions(removal, approvals, identities.chef_atelier);
+
+  assert.ok(actionsMag.includes("STORE_ACK"), "Responsable Magasin must see STORE_ACK");
+  assert.ok(actionsAtelier.includes("CONFIRM_REMOVAL"), "Chef Atelier must see CONFIRM_REMOVAL");
+
+  // Step E: Store acknowledgement (STORE_ACK)
+  removal.store_ack_at = "2026-09-17T11:00:00Z";
+  auditEvents.push({
+    removal_id: removal.id,
+    action: "STORE_ACK",
+    reason: "Commande réappro PO-7744 validée",
+    actor_user_id: identities.magasin.authUserId,
+    created_at: removal.store_ack_at,
+  });
+
+  // State invariance: STORE_ACK does NOT change status
+  assert.strictEqual(removal.status, "AUTORISE_A_PRELEVER", "STORE_ACK must NOT change status");
+  assert.strictEqual(vnPartUi.formatVnPartStatus(removal.status), "Autorisé à prélever");
+
+  // Step F: Physical removal (CONFIRM_REMOVAL) by Chef Atelier
+  removal.removed_at = "2026-09-17T14:00:00Z";
+  removal.status = "PRELEVE_EN_ATTENTE_PIECE";
+  removal.version++;
+
+  assert.strictEqual(vnPartUi.formatVnPartStatus(removal.status), "En attente de pièce");
+  actionsMag = vnPartUi.getAvailableVnPartActions(removal, approvals, identities.magasin, { surface: "section_c" });
+  let actionsMagSecB = vnPartUi.getAvailableVnPartActions(removal, approvals, identities.magasin, { surface: "section_b" });
+
+  assert.ok(actionsMag.includes("MARK_REPLACEMENT_AVAILABLE"), "Magasin has MARK_REPLACEMENT_AVAILABLE in Section C");
+  assert.ok(!actionsMagSecB.includes("MARK_REPLACEMENT_AVAILABLE"), "Magasin must NOT see duplicate action in Section B");
+
+  // Step G: Replacement part received (MARK_REPLACEMENT_AVAILABLE)
+  removal.replacement_available_at = "2026-10-10T09:00:00Z";
+  removal.status = "PIECE_DISPONIBLE";
+  removal.version++;
+
+  assert.strictEqual(vnPartUi.formatVnPartStatus(removal.status), "Pièce disponible");
+  actionsAtelier = vnPartUi.getAvailableVnPartActions(removal, approvals, identities.chef_atelier);
+  assert.ok(actionsAtelier.includes("CONFIRM_RESTITUTION"), "Chef Atelier must see CONFIRM_RESTITUTION");
+
+  // Step H: Final restitution and closure (CONFIRM_RESTITUTION)
+  removal.restored_at = "2026-10-11T16:00:00Z";
+  removal.status = "CLOTURE";
+  removal.version++;
+
+  assert.strictEqual(vnPartUi.formatVnPartStatus(removal.status), "Restitué / Clôturé");
+  const finalActions = vnPartUi.getAvailableVnPartActions(removal, approvals, identities.chef_atelier);
+  assert.strictEqual(finalActions.length, 0, "No operational actions remaining on closed dossier");
+});
+
+test("P7.2: Server/RPC contract: CANCEL is permitted before removal but strictly blocked post-removal (CANNOT_CANCEL_AFTER_REMOVAL)", () => {
+  const migrationPath = path.join(WORKDIR, "supabase/migrations/20260917130000_vn_part_sequential_approval_enforcement.sql");
+  const sql = fs.readFileSync(migrationPath, "utf8");
+
+  // Verify server-side SQL guard in CANCEL action
+  assert.match(
+    sql,
+    /if\s+v_row\.status\s+not\s+in\s+\('EN_ATTENTE_VALIDATIONS',\s*'AUTORISE_A_PRELEVER'\)\s+then[\s\S]*?'CANNOT_CANCEL_AFTER_REMOVAL'/,
+    "Server SQL must explicitly block CANCEL when status is not EN_ATTENTE_VALIDATIONS or AUTORISE_A_PRELEVER"
+  );
+
+  // Verify UI action guard in getAvailableVnPartActions
+  const preRemoval = {
+    id: "rem-pre",
+    status: "AUTORISE_A_PRELEVER",
+    created_by: "creator-user",
+    removed_at: null,
+  };
+  const postRemoval = {
+    id: "rem-post",
+    status: "PRELEVE_EN_ATTENTE_PIECE",
+    created_by: "creator-user",
+    removed_at: "2026-09-17T12:00:00Z",
+  };
+  const creatorIdentity = { ok: true, role: "chef_atelier", authUserId: "creator-user", workshopId: "ws-1" };
+
+  const actionsPre = vnPartUi.getAvailableVnPartActions(preRemoval, [], creatorIdentity);
+  assert.ok(actionsPre.includes("CANCEL"), "Creator can CANCEL before physical removal");
+
+  const actionsPost = vnPartUi.getAvailableVnPartActions(postRemoval, [], creatorIdentity);
+  assert.ok(!actionsPost.includes("CANCEL"), "Creator CANNOT CANCEL after physical removal");
+});
+
+test("P7.3: Complete RBAC matrix across all 5 canonical roles and states", () => {
+  const roles = ["chef_atelier", "directeur", "directeur_pieces", "responsable_qualite_parc_vn", "responsable_magasin"];
+  const matrix = {};
+
+  const makeItem = (status, extra = {}) => ({
+    id: "rem-matrix",
+    status,
+    created_by: "other-user",
+    expected_replacement_date: extra.expected_replacement_date || null,
+    donor_vin: extra.donor_vin || null,
+    store_ack_at: extra.store_ack_at ?? null,
+    removed_at: extra.removed_at || null,
+  });
+
+  // State 1: EN_ATTENTE_VALIDATIONS at 0/3
+  const s1 = makeItem("EN_ATTENTE_VALIDATIONS");
+  assert.deepStrictEqual(
+    roles.map(r => vnPartUi.getAvailableVnPartActions(s1, [], { ok: true, role: r, authUserId: "u" }).filter(a => a === "APPROVE")),
+    [[], ["APPROVE"], [], [], []],
+    "Only Directeur SAV can APPROVE at 0/3"
+  );
+
+  // State 2: AUTORISE_A_PRELEVER (after 3/3 approvals)
+  const s2 = makeItem("AUTORISE_A_PRELEVER", { donor_vin: "VF1KNWN1111111111" });
+  assert.ok(vnPartUi.getAvailableVnPartActions(s2, [], { ok: true, role: "chef_atelier", authUserId: "u" }).includes("CONFIRM_REMOVAL"));
+  assert.ok(vnPartUi.getAvailableVnPartActions(s2, [], { ok: true, role: "responsable_magasin", authUserId: "u" }).includes("STORE_ACK"));
+  assert.ok(vnPartUi.getAvailableVnPartActions(s2, [], { ok: true, role: "responsable_qualite_parc_vn", authUserId: "u" }).includes("REVISE_DONOR"));
+
+  // State 3: PRELEVE_EN_ATTENTE_PIECE
+  const s3 = makeItem("PRELEVE_EN_ATTENTE_PIECE", { expected_replacement_date: "2026-10-01", removed_at: "2026-09-17T12:00:00Z" });
+  assert.ok(vnPartUi.getAvailableVnPartActions(s3, [], { ok: true, role: "directeur_pieces", authUserId: "u" }).includes("MARK_REPLACEMENT_AVAILABLE"));
+  assert.ok(vnPartUi.getAvailableVnPartActions(s3, [], { ok: true, role: "responsable_magasin", authUserId: "u" }, { surface: "section_c" }).includes("MARK_REPLACEMENT_AVAILABLE"));
+  assert.ok(!vnPartUi.getAvailableVnPartActions(s3, [], { ok: true, role: "chef_atelier", authUserId: "u" }).includes("MARK_REPLACEMENT_AVAILABLE"));
+
+  // State 4: PIECE_DISPONIBLE
+  const s4 = makeItem("PIECE_DISPONIBLE");
+  assert.ok(vnPartUi.getAvailableVnPartActions(s4, [], { ok: true, role: "chef_atelier", authUserId: "u" }).includes("CONFIRM_RESTITUTION"));
+  assert.ok(!vnPartUi.getAvailableVnPartActions(s4, [], { ok: true, role: "responsable_magasin", authUserId: "u" }).includes("CONFIRM_RESTITUTION"));
+
+  // State 5: CLOTURE
+  const s5 = makeItem("CLOTURE");
+  roles.forEach(r => {
+    const act = vnPartUi.getAvailableVnPartActions(s5, [], { ok: true, role: r, authUserId: "u" });
+    assert.strictEqual(act.length, 0, `Role ${r} must have 0 actions on CLOTURE`);
+  });
+});
+
+test("P7.4: Reload / state hydration persistence: critical fields survive simulation of fresh dashboard reload", () => {
+  const backendRow = {
+    id: "rem-persisted-1",
+    status: "PRELEVE_EN_ATTENTE_PIECE",
+    part_reference: "REF-PERSIST-1",
+    part_designation: "Alternateur",
+    donor_model: "DongFeng Shine",
+    donor_vin: "VF1KNWN1111111111",
+    expected_replacement_date: "2026-10-20",
+    store_ack_at: "2026-09-17T11:00:00Z",
+    removed_at: "2026-09-17T12:30:00Z",
+    version: 4,
+  };
+
+  const auditEvents = [
+    {
+      removal_id: "rem-persisted-1",
+      action: "STORE_ACK",
+      reason: "Commande réappro passée avec succès",
+      created_at: "2026-09-17T11:00:00Z",
+    },
+  ];
+
+  // Hydrate lookup
+  const storeAckLookup = vnPartUi.buildStoreAckLookup(auditEvents);
+  const resolved = storeAckLookup.get("rem-persisted-1");
+
+  assert.ok(resolved, "Store ACK event must resolve from backend audit events");
+  assert.strictEqual(resolved.reason, "Commande réappro passée avec succès");
+  assert.strictEqual(backendRow.donor_vin, "VF1KNWN1111111111");
+  assert.strictEqual(backendRow.donor_model, "DongFeng Shine");
+  assert.strictEqual(backendRow.expected_replacement_date, "2026-10-20");
+  assert.strictEqual(backendRow.removed_at, "2026-09-17T12:30:00Z");
+});

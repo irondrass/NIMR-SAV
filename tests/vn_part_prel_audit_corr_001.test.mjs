@@ -357,3 +357,277 @@ test("P3.8: Historical out-of-order data: Directeur SAV can still approve when D
   const parcActionsAfter = vnPartUi.getAvailableVnPartActions(removal, regularizedApprovals, parcIdentity);
   assert.ok(parcActionsAfter.includes("APPROVE"), "Chef de Parc is now unlocked since both 1 and 2 are approved");
 });
+
+// --- Server-Side RPC Migration Verification (Commit B) ---
+
+const migrationPath = path.join(WORKDIR, "supabase/migrations/20260917130000_vn_part_sequential_approval_enforcement.sql");
+
+test("P3 Server: Migration file exists and has correct timestamp and naming", () => {
+  assert.ok(fs.existsSync(migrationPath), "Migration 20260917130000_vn_part_sequential_approval_enforcement.sql must exist");
+});
+
+test("P3 Server: Migration replaces nimr_internal.nimr_apply_vn_part_action_v1 and enforces sequential gates", () => {
+  const sql = fs.readFileSync(migrationPath, "utf8");
+
+  // Must replace internal function and re-declare wrapper
+  assert.match(sql, /create\s+or\s+replace\s+function\s+nimr_internal\.nimr_apply_vn_part_action_v1/i);
+  assert.match(sql, /create\s+or\s+replace\s+function\s+public\.nimr_apply_vn_part_action_v1/i);
+
+  // Must contain APPROVAL_SEQUENCE_VIOLATION error code
+  assert.match(sql, /'APPROVAL_SEQUENCE_VIOLATION'/);
+
+  // Must enforce Directeur SAV before Direction Pièces in APPROVE
+  assert.match(sql, /v_caller_role\s*=\s*'directeur_pieces'[\s\S]*?approval_role\s*=\s*'directeur'[\s\S]*?APPROVAL_SEQUENCE_VIOLATION/);
+
+  // Must enforce Directeur SAV and Direction Pièces before Chef de Parc VN in APPROVE
+  assert.match(sql, /v_caller_role\s*=\s*'responsable_qualite_parc_vn'[\s\S]*?approval_role\s*=\s*'directeur'[\s\S]*?approval_role\s*=\s*'directeur_pieces'[\s\S]*?APPROVAL_SEQUENCE_VIOLATION/);
+
+  // Must apply identical sequential enforcement in REFUSE
+  assert.match(sql, /v_action\s*=\s*'REFUSE'[\s\S]*?v_caller_role\s*=\s*'directeur_pieces'[\s\S]*?approval_role\s*=\s*'directeur'[\s\S]*?APPROVAL_SEQUENCE_VIOLATION/);
+  assert.match(sql, /v_action\s*=\s*'REFUSE'[\s\S]*?v_caller_role\s*=\s*'responsable_qualite_parc_vn'[\s\S]*?approval_role\s*=\s*'directeur'[\s\S]*?approval_role\s*=\s*'directeur_pieces'[\s\S]*?APPROVAL_SEQUENCE_VIOLATION/);
+});
+
+// S1 - S8 Contract Cases Execution
+
+function simulateRpcAction({
+  action,
+  callerRole,
+  callerId = "user-1",
+  removal,
+  approvals = [],
+  payload = {},
+}) {
+  // Simulates the authoritative checks performed by nimr_apply_vn_part_action_v1
+  if (!["APPROVE", "REFUSE"].includes(action)) {
+    throw new Error(`Unsupported action in simulator: ${action}`);
+  }
+
+  const validApproverRoles = ["directeur", "directeur_pieces", "responsable_qualite_parc_vn"];
+  if (!validApproverRoles.includes(callerRole)) {
+    return { ok: false, success: false, code: "FORBIDDEN_APPROVER_ROLE" };
+  }
+
+  if (removal.status !== "EN_ATTENTE_VALIDATIONS") {
+    return { ok: false, success: false, code: action === "APPROVE" ? "INVALID_STATUS_FOR_APPROVAL" : "INVALID_STATUS_FOR_REFUSAL" };
+  }
+
+  if (action === "APPROVE" && removal.created_by === callerId) {
+    return { ok: false, success: false, code: "CANNOT_APPROVE_OWN_REQUEST" };
+  }
+
+  if (approvals.some(a => a.removal_id === removal.id && a.approval_role === callerRole)) {
+    return { ok: false, success: false, code: "ALREADY_DECIDED" };
+  }
+
+  // Sequential enforcement
+  if (callerRole === "directeur_pieces") {
+    const hasDirectorApproved = approvals.some(
+      a => a.removal_id === removal.id && a.approval_role === "directeur" && a.decision === "APPROVED"
+    );
+    if (!hasDirectorApproved) {
+      return {
+        ok: false,
+        success: false,
+        code: "APPROVAL_SEQUENCE_VIOLATION",
+        message: "L'approbation par le Directeur SAV est requise avant la décision de la Direction Pièces.",
+      };
+    }
+  } else if (callerRole === "responsable_qualite_parc_vn") {
+    const hasDirectorApproved = approvals.some(
+      a => a.removal_id === removal.id && a.approval_role === "directeur" && a.decision === "APPROVED"
+    );
+    const hasPartsDirectorApproved = approvals.some(
+      a => a.removal_id === removal.id && a.approval_role === "directeur_pieces" && a.decision === "APPROVED"
+    );
+    if (!hasDirectorApproved || !hasPartsDirectorApproved) {
+      return {
+        ok: false,
+        success: false,
+        code: "APPROVAL_SEQUENCE_VIOLATION",
+        message: "Les approbations du Directeur SAV et de la Direction Pièces sont requises avant la décision du Chef de Parc VN.",
+      };
+    }
+  }
+
+  // Payload validations
+  if (action === "APPROVE") {
+    if (callerRole === "directeur_pieces" && !payload.expected_replacement_date) {
+      return { ok: false, success: false, code: "ETA_REQUIRED" };
+    }
+    if (callerRole === "responsable_qualite_parc_vn" && (!payload.donor_model || !payload.donor_vin)) {
+      return { ok: false, success: false, code: "DONOR_DATA_REQUIRED" };
+    }
+
+    const newApprovals = [
+      ...approvals,
+      { removal_id: removal.id, approval_role: callerRole, decision: "APPROVED", decided_by: callerId },
+    ];
+    const approvedCount = newApprovals.filter(a => a.removal_id === removal.id && a.decision === "APPROVED").length;
+    const newStatus = approvedCount === 3 ? "AUTORISE_A_PRELEVER" : removal.status;
+
+    return {
+      ok: true,
+      success: true,
+      action: "APPROVE",
+      status: newStatus,
+      approvals: newApprovals,
+    };
+  }
+
+  if (action === "REFUSE") {
+    if (!payload.reason || !payload.reason.trim()) {
+      return { ok: false, success: false, code: "REASON_REQUIRED" };
+    }
+    const newApprovals = [
+      ...approvals,
+      { removal_id: removal.id, approval_role: callerRole, decision: "REFUSED", decided_by: callerId, reason: payload.reason },
+    ];
+    return {
+      ok: true,
+      success: true,
+      action: "REFUSE",
+      status: "REFUSE",
+      approvals: newApprovals,
+    };
+  }
+}
+
+test("S1: Directeur SAV valide en premier (Approvals: []) -> Succès, approval enregistrée", () => {
+  const removal = { id: "rem-s1", status: "EN_ATTENTE_VALIDATIONS", created_by: "creator-1" };
+  const res = simulateRpcAction({
+    action: "APPROVE",
+    callerRole: "directeur",
+    callerId: "dir-1",
+    removal,
+    approvals: [],
+  });
+
+  assert.equal(res.ok, true);
+  assert.equal(res.status, "EN_ATTENTE_VALIDATIONS");
+  assert.equal(res.approvals.length, 1);
+  assert.equal(res.approvals[0].approval_role, "directeur");
+  assert.equal(res.approvals[0].decision, "APPROVED");
+});
+
+test("S2: Pièces tente de valider sans Directeur (Approvals: []) -> Rejet APPROVAL_SEQUENCE_VIOLATION", () => {
+  const removal = { id: "rem-s2", status: "EN_ATTENTE_VALIDATIONS", created_by: "creator-1" };
+  const res = simulateRpcAction({
+    action: "APPROVE",
+    callerRole: "directeur_pieces",
+    callerId: "dp-1",
+    removal,
+    approvals: [],
+    payload: { expected_replacement_date: "2026-09-30" },
+  });
+
+  assert.equal(res.ok, false);
+  assert.equal(res.code, "APPROVAL_SEQUENCE_VIOLATION");
+});
+
+test("S3: Pièces valide après Directeur (Approvals: [directeur]) -> Succès, approval enregistrée", () => {
+  const removal = { id: "rem-s3", status: "EN_ATTENTE_VALIDATIONS", created_by: "creator-1" };
+  const approvals = [
+    { removal_id: "rem-s3", approval_role: "directeur", decision: "APPROVED", decided_by: "dir-1" },
+  ];
+  const res = simulateRpcAction({
+    action: "APPROVE",
+    callerRole: "directeur_pieces",
+    callerId: "dp-1",
+    removal,
+    approvals,
+    payload: { expected_replacement_date: "2026-09-30" },
+  });
+
+  assert.equal(res.ok, true);
+  assert.equal(res.status, "EN_ATTENTE_VALIDATIONS");
+  assert.equal(res.approvals.length, 2);
+  assert.equal(res.approvals[1].approval_role, "directeur_pieces");
+});
+
+test("S4: Parc VN tente sans Pièces (Approvals: [directeur]) -> Rejet APPROVAL_SEQUENCE_VIOLATION", () => {
+  const removal = { id: "rem-s4", status: "EN_ATTENTE_VALIDATIONS", created_by: "creator-1" };
+  const approvals = [
+    { removal_id: "rem-s4", approval_role: "directeur", decision: "APPROVED", decided_by: "dir-1" },
+  ];
+  const res = simulateRpcAction({
+    action: "APPROVE",
+    callerRole: "responsable_qualite_parc_vn",
+    callerId: "rq-1",
+    removal,
+    approvals,
+    payload: { donor_model: "DongFeng Rich 6", donor_vin: "VF3XXXXXXXX123456" },
+  });
+
+  assert.equal(res.ok, false);
+  assert.equal(res.code, "APPROVAL_SEQUENCE_VIOLATION");
+});
+
+test("S5: Parc VN tente sans personne (Approvals: []) -> Rejet APPROVAL_SEQUENCE_VIOLATION", () => {
+  const removal = { id: "rem-s5", status: "EN_ATTENTE_VALIDATIONS", created_by: "creator-1" };
+  const res = simulateRpcAction({
+    action: "APPROVE",
+    callerRole: "responsable_qualite_parc_vn",
+    callerId: "rq-1",
+    removal,
+    approvals: [],
+    payload: { donor_model: "DongFeng Rich 6", donor_vin: "VF3XXXXXXXX123456" },
+  });
+
+  assert.equal(res.ok, false);
+  assert.equal(res.code, "APPROVAL_SEQUENCE_VIOLATION");
+});
+
+test("S6: Parc VN valide après les 2 autres (Approvals: [directeur, directeur_pieces]) -> Succès, statut -> AUTORISE_A_PRELEVER", () => {
+  const removal = { id: "rem-s6", status: "EN_ATTENTE_VALIDATIONS", created_by: "creator-1" };
+  const approvals = [
+    { removal_id: "rem-s6", approval_role: "directeur", decision: "APPROVED", decided_by: "dir-1" },
+    { removal_id: "rem-s6", approval_role: "directeur_pieces", decision: "APPROVED", decided_by: "dp-1" },
+  ];
+  const res = simulateRpcAction({
+    action: "APPROVE",
+    callerRole: "responsable_qualite_parc_vn",
+    callerId: "rq-1",
+    removal,
+    approvals,
+    payload: { donor_model: "DongFeng Rich 6", donor_vin: "VF3XXXXXXXX123456" },
+  });
+
+  assert.equal(res.ok, true);
+  assert.equal(res.status, "AUTORISE_A_PRELEVER");
+  assert.equal(res.approvals.length, 3);
+  assert.equal(res.approvals[2].approval_role, "responsable_qualite_parc_vn");
+});
+
+test("S7: Refus hors séquence rejeté (Approvals: [], caller: directeur_pieces) -> Rejet APPROVAL_SEQUENCE_VIOLATION", () => {
+  const removal = { id: "rem-s7", status: "EN_ATTENTE_VALIDATIONS", created_by: "creator-1" };
+  const res = simulateRpcAction({
+    action: "REFUSE",
+    callerRole: "directeur_pieces",
+    callerId: "dp-1",
+    removal,
+    approvals: [],
+    payload: { reason: "Refus hors séquence" },
+  });
+
+  assert.equal(res.ok, false);
+  assert.equal(res.code, "APPROVAL_SEQUENCE_VIOLATION");
+});
+
+test("S8: Données historiques : Directeur valide après coup (Approvals: [directeur_pieces]) -> Succès, approval enregistrée", () => {
+  const removal = { id: "rem-s8", status: "EN_ATTENTE_VALIDATIONS", created_by: "creator-1" };
+  const approvals = [
+    { removal_id: "rem-s8", approval_role: "directeur_pieces", decision: "APPROVED", decided_by: "dp-1" },
+  ];
+  const res = simulateRpcAction({
+    action: "APPROVE",
+    callerRole: "directeur",
+    callerId: "dir-1",
+    removal,
+    approvals,
+  });
+
+  assert.equal(res.ok, true);
+  assert.equal(res.status, "EN_ATTENTE_VALIDATIONS");
+  assert.equal(res.approvals.length, 2);
+  assert.equal(res.approvals[1].approval_role, "directeur");
+});

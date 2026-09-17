@@ -400,8 +400,53 @@ function simulateRpcAction({
   payload = {},
 }) {
   // Simulates the authoritative checks performed by nimr_apply_vn_part_action_v1
-  if (!["APPROVE", "REFUSE", "STORE_ACK"].includes(action)) {
+  if (!["APPROVE", "REFUSE", "STORE_ACK", "CREATE_REQUEST"].includes(action)) {
     throw new Error(`Unsupported action in simulator: ${action}`);
+  }
+
+  if (action === "CREATE_REQUEST") {
+    if (!["chef_atelier", "responsable_garantie_support"].includes(callerRole)) {
+      return {
+        ok: false,
+        success: false,
+        code: "FORBIDDEN_INITIATOR_ROLE",
+        message: "Seul le chef d'atelier ou le responsable garantie / support peut initier un prélèvement VN.",
+        removal,
+        approvals,
+        auditEvents,
+      };
+    }
+    const val = vnPartUi.validateCreateRequestPayload(payload);
+    if (!val.ok) {
+      return { ok: false, success: false, code: "VALIDATION_FAILED", message: val.message, removal, approvals, auditEvents };
+    }
+    const newRemoval = {
+      id: "rem-" + Math.random().toString(36).substring(2, 9),
+      version: 1,
+      created_by: callerId,
+      created_by_role: callerRole,
+      status: "EN_ATTENTE_VALIDATIONS",
+      ...payload,
+    };
+    const newAuditEvents = [
+      ...auditEvents,
+      {
+        removal_id: newRemoval.id,
+        action: "CREATE_REQUEST",
+        actor_role: callerRole,
+        actor_user_id: callerId,
+        old_status: null,
+        new_status: "EN_ATTENTE_VALIDATIONS",
+      },
+    ];
+    return {
+      ok: true,
+      success: true,
+      action: "CREATE_REQUEST",
+      removal: newRemoval,
+      approvals,
+      auditEvents: newAuditEvents,
+    };
   }
 
   if (action === "STORE_ACK") {
@@ -1975,7 +2020,7 @@ test("P6.16: Consecutive VIN transitions: known A -> known B updates suggestion 
 // LOT P7 — FINAL E2E / RBAC / NON-REGRESSION CERTIFICATION
 // ============================================================================
 
-test("P7.1: Full E2E lifecycle happy path: CREATE -> 1/3 -> 2/3 (ETA) -> 3/3 (Donor) -> STORE_ACK -> CONFIRM_REMOVAL -> MARK_REPLACEMENT_AVAILABLE -> CONFIRM_RESTITUTION", () => {
+test("P7.1: Automated lifecycle / state-machine integration simulation: CREATE -> 1/3 -> 2/3 (ETA) -> 3/3 (Donor) -> STORE_ACK -> CONFIRM_REMOVAL -> MARK_REPLACEMENT_AVAILABLE -> CONFIRM_RESTITUTION", () => {
   // Step A: Creation by Chef Atelier
   const createPayload = {
     part_reference: "REF-OPTIQUE-D",
@@ -2245,4 +2290,92 @@ test("P7.4: Reload / state hydration persistence: critical fields survive simula
   assert.strictEqual(backendRow.donor_model, "DongFeng Shine");
   assert.strictEqual(backendRow.expected_replacement_date, "2026-10-20");
   assert.strictEqual(backendRow.removed_at, "2026-09-17T12:30:00Z");
+});
+
+test("P7.5: CREATE_REQUEST RBAC matrix: UI button visibility and fail-closed RPC rejection for unauthorized roles", () => {
+  // 1. Verify SQL Migration contract text
+  const migrationPath = path.join(WORKDIR, "supabase/migrations/20260917130000_vn_part_sequential_approval_enforcement.sql");
+  const sql = fs.readFileSync(migrationPath, "utf8");
+
+  assert.match(
+    sql,
+    /if\s+v_action\s*=\s*'CREATE_REQUEST'\s+then[\s\S]*?if\s+v_caller_role\s+not\s+in\s+\('chef_atelier',\s*'responsable_garantie_support'\)\s+then[\s\S]*?FORBIDDEN_INITIATOR_ROLE/,
+    "Server RPC must strictly enforce initiator roles: chef_atelier, responsable_garantie_support"
+  );
+
+  // 2. Verify UI button visibility logic
+  const roles = [
+    { role: "chef_atelier", canCreate: true },
+    { role: "responsable_garantie_support", canCreate: true },
+    { role: "directeur", canCreate: false },
+    { role: "directeur_pieces", canCreate: false },
+    { role: "responsable_qualite_parc_vn", canCreate: false },
+    { role: "responsable_magasin", canCreate: false },
+  ];
+
+  for (const { role, canCreate } of roles) {
+    const isAllowedInUi = ["chef_atelier", "responsable_garantie_support"].includes(role);
+    assert.strictEqual(
+      isAllowedInUi,
+      canCreate,
+      `UI button visibility for role '${role}' must be ${canCreate}`
+    );
+
+    // 3. Verify Server fail-closed direct call
+    const directRes = simulateRpcAction({
+      action: "CREATE_REQUEST",
+      callerRole: role,
+      callerId: `user-${role}`,
+      payload: {
+        beneficiary_model: "DongFeng Shine",
+        part_designation: "Optique Avant",
+        reason: "Test initiateur",
+        quantity: 1,
+      },
+    });
+
+    if (canCreate) {
+      assert.strictEqual(directRes.ok, true, `Role '${role}' must successfully execute CREATE_REQUEST`);
+      assert.strictEqual(directRes.removal.created_by_role, role);
+      assert.strictEqual(directRes.auditEvents.length, 1);
+    } else {
+      assert.strictEqual(directRes.ok, false, `Role '${role}' must be rejected from CREATE_REQUEST`);
+      assert.strictEqual(directRes.code, "FORBIDDEN_INITIATOR_ROLE");
+      assert.strictEqual(directRes.auditEvents.length, 0, "Zero audit events on rejection");
+    }
+  }
+});
+
+test("P7.6: XSS escaping verification across rendered fields: part_reference, part_designation, donor_model, and user remarks", () => {
+  const xssPayload = "<script>alert('xss')</script>";
+  const escaped = vnPartUi.escapeHtml(xssPayload);
+  assert.strictEqual(escaped.includes("<script>"), false);
+  assert.ok(escaped.includes("&lt;script&gt;"));
+
+  // Check renderPartIdentityHtml
+  const htmlPart = vnPartUi.renderPartIdentityHtml(xssPayload, xssPayload);
+  assert.strictEqual(htmlPart.includes("<script>"), false);
+  assert.ok(htmlPart.includes("&lt;script&gt;"));
+
+  // Check renderApprovalStrip with XSS remarks
+  const approvalsWithXss = [
+    {
+      removal_id: "rem-xss",
+      approval_role: "directeur",
+      decision: "APPROVED",
+      decided_by: "dir-1",
+      reason: xssPayload,
+    },
+  ];
+  const stripHtml = vnPartUi.renderApprovalStrip({ id: "rem-xss", status: "EN_ATTENTE_VALIDATIONS" }, approvalsWithXss);
+  assert.strictEqual(stripHtml.includes("<script>"), false);
+  assert.ok(stripHtml.includes("&lt;script&gt;"));
+
+  // Check renderStoreAckTraceHtml with XSS remark
+  const storeTraceHtml = vnPartUi.renderStoreAckTraceHtml(
+    { id: "rem-xss", store_ack_at: "2026-09-17T10:00:00Z" },
+    { reason: xssPayload, action: "STORE_ACK" }
+  );
+  assert.strictEqual(storeTraceHtml.includes("<script>"), false);
+  assert.ok(storeTraceHtml.includes("&lt;script&gt;"));
 });

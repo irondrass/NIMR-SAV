@@ -220,7 +220,7 @@ test("4. Client Queries: SELECT from vn_part_donor_state_v1, vn_part_donor_commi
 
   assert.strictEqual(res.ok, true, "Client load must succeed");
   assert.strictEqual(res.workshopId, testWorkshopId);
-  assert.strictEqual(recordedCalls.length, 4, "Must execute exactly 4 queries");
+  assert.strictEqual(recordedCalls.length, 5, "Must execute exactly 5 queries");
 
   const donorCommitmentQuery = recordedCalls.find((c) => c.table === "vn_part_donor_commitment_v1");
   assert.ok(donorCommitmentQuery, "Must query vn_part_donor_commitment_v1");
@@ -231,10 +231,12 @@ test("4. Client Queries: SELECT from vn_part_donor_state_v1, vn_part_donor_commi
   const donorQuery = recordedCalls.find((c) => c.table === "vn_part_donor_state_v1");
   const removalQuery = recordedCalls.find((c) => c.table === "vn_part_removals");
   const approvalQuery = recordedCalls.find((c) => c.table === "vn_part_approvals");
+  const auditQuery = recordedCalls.find((c) => c.table === "vn_part_audit_events");
 
   assert.ok(donorQuery, "Must query vn_part_donor_state_v1");
   assert.ok(removalQuery, "Must query vn_part_removals");
   assert.ok(approvalQuery, "Must query vn_part_approvals");
+  assert.ok(auditQuery, "Must query vn_part_audit_events");
 
   // Workshop scoping check
   const donorWorkshopFilter = donorQuery.filters.find((f) => f.col === "workshop_id");
@@ -248,6 +250,10 @@ test("4. Client Queries: SELECT from vn_part_donor_state_v1, vn_part_donor_commi
   const approvalWorkshopFilter = approvalQuery.filters.find((f) => f.col === "workshop_id");
   assert.ok(approvalWorkshopFilter, "Approval query must filter by workshop_id");
   assert.strictEqual(approvalWorkshopFilter.val, testWorkshopId);
+
+  const auditWorkshopFilter = auditQuery.filters.find((f) => f.col === "workshop_id");
+  assert.ok(auditWorkshopFilter, "Audit query must filter by workshop_id");
+  assert.strictEqual(auditWorkshopFilter.val, testWorkshopId);
 
   // Helper for mock Supabase client
   function createMockSupabaseClient() {
@@ -337,17 +343,19 @@ test("4. Client Queries: SELECT from vn_part_donor_state_v1, vn_part_donor_commi
     const resC = await vnPartClient.loadVnPartDashboard({ client: clientC });
     assert.strictEqual(resC.ok, true);
     assert.strictEqual(resC.workshopId, authWorkshopId);
-    assert.strictEqual(clientC.calls.length, 4, "Scenario C: exactly 4 queries executed");
+    assert.strictEqual(clientC.calls.length, 5, "Scenario C: exactly 5 queries executed");
     const donorCommitmentQueryC = clientC.calls.find((c) => c.table === "vn_part_donor_commitment_v1");
     assert.ok(donorCommitmentQueryC);
     assert.strictEqual(donorCommitmentQueryC.filters[0].val, authWorkshopId);
     const donorQueryC = clientC.calls.find((c) => c.table === "vn_part_donor_state_v1");
     const removalQueryC = clientC.calls.find((c) => c.table === "vn_part_removals");
     const approvalQueryC = clientC.calls.find((c) => c.table === "vn_part_approvals");
-    assert.ok(donorQueryC && removalQueryC && approvalQueryC);
+    const auditQueryC = clientC.calls.find((c) => c.table === "vn_part_audit_events");
+    assert.ok(donorQueryC && removalQueryC && approvalQueryC && auditQueryC);
     assert.strictEqual(donorQueryC.filters[0].val, authWorkshopId);
     assert.strictEqual(removalQueryC.filters[0].val, authWorkshopId);
     assert.strictEqual(approvalQueryC.filters[0].val, authWorkshopId);
+    assert.strictEqual(auditQueryC.filters[0].val, authWorkshopId);
   } finally {
     // Restore global state
     if (prevGetWorkshopId !== undefined) {
@@ -741,7 +749,7 @@ test("13. Startup identity: loaded VN-PART scripts issue zero SELECTs until memb
   for (const readyState of ["loading", "interactive"]) {
     const { context, getElement, listeners } = createVnPartBrowserHarness(readyState);
     const workshopId = "11111111-2222-3333-4444-555555555555";
-    const counts = { vn_part_donor_state_v1: 0, vn_part_donor_commitment_v1: 0, vn_part_removals: 0, vn_part_approvals: 0 };
+    const counts = { vn_part_donor_state_v1: 0, vn_part_donor_commitment_v1: 0, vn_part_removals: 0, vn_part_approvals: 0, vn_part_audit_events: 0 };
     const queries = [];
     let releaseSession, releaseMembership, sessionStarted = false, membershipStarted = false, renders = 0;
     const sessionPending = new Promise((resolve) => { releaseSession = resolve; });
@@ -756,7 +764,15 @@ test("13. Startup identity: loaded VN-PART scripts issue zero SELECTs until memb
         const query = { table, filters: [] };
         queries.push(query);
         return {
-          select(fields) { counts[table] += 1; assert.equal(fields, "*"); return this; },
+          select(fields) {
+            counts[table] += 1;
+            if (table === "vn_part_audit_events") {
+              assert.equal(fields, "removal_id, action, reason, actor_user_id, created_at");
+            } else {
+              assert.equal(fields, "*");
+            }
+            return this;
+          },
           eq(column, value) { query.filters.push([column, value]); return this; },
           order() { return this; },
           then(resolve) { resolve({ data: [], error: null }); },
@@ -768,7 +784,7 @@ test("13. Startup identity: loaded VN-PART scripts issue zero SELECTs until memb
     for (const file of ["js/utils.js", "js/state.js", "js/vn-part-client.js", "js/vn-part-ui.js"]) {
       vm.runInContext(fs.readFileSync(path.join(WORKDIR, file), "utf8"), context, { filename: file });
     }
-    assert.deepStrictEqual(counts, { vn_part_donor_state_v1: 0, vn_part_donor_commitment_v1: 0, vn_part_removals: 0, vn_part_approvals: 0 }, "Script loading must not query");
+    assert.deepStrictEqual(counts, { vn_part_donor_state_v1: 0, vn_part_donor_commitment_v1: 0, vn_part_removals: 0, vn_part_approvals: 0, vn_part_audit_events: 0 }, "Script loading must not query");
     const onVnPartDomReady = listeners.get("DOMContentLoaded");
     const appSource = fs.readFileSync(path.join(WORKDIR, "app.js"), "utf8");
     vm.runInContext(appSource.replace("initApp();", "/* initApp invoked below after transport stubs */"), context);
@@ -797,7 +813,7 @@ test("13. Startup identity: loaded VN-PART scripts issue zero SELECTs until memb
       assert.equal(getElement("app-shell").attributes.has("inert"), true, phase);
       assert.equal(context.__nimrAppReady, false, phase);
       assert.equal(renders, 0, phase);
-      assert.deepStrictEqual(counts, { vn_part_donor_state_v1: 0, vn_part_donor_commitment_v1: 0, vn_part_removals: 0, vn_part_approvals: 0 }, phase);
+      assert.deepStrictEqual(counts, { vn_part_donor_state_v1: 0, vn_part_donor_commitment_v1: 0, vn_part_removals: 0, vn_part_approvals: 0, vn_part_audit_events: 0 }, phase);
       t.diagnostic(`${readyState} ${phase}: donor SELECT=0; removals SELECT=0; approvals SELECT=0; shell inert=true`);
     };
     for (let i = 0; i < 30 && !sessionStarted; i += 1) await Promise.resolve();
@@ -814,14 +830,17 @@ test("13. Startup identity: loaded VN-PART scripts issue zero SELECTs until memb
     assert.equal(getElement("app-shell").attributes.has("inert"), false);
     assert.equal(renders, 1);
     assert.equal(context.canAccessTab("vn-part"), true);
-    assert.deepStrictEqual(counts, { vn_part_donor_state_v1: 0, vn_part_donor_commitment_v1: 0, vn_part_removals: 0, vn_part_approvals: 0 }, "Authorization alone must not query the dashboard");
+    assert.deepStrictEqual(counts, { vn_part_donor_state_v1: 0, vn_part_donor_commitment_v1: 0, vn_part_removals: 0, vn_part_approvals: 0, vn_part_audit_events: 0 }, "Authorization alone must not query the dashboard");
     context.setActiveTab("vn-part");
     for (let i = 0; i < 30 && context.vnPartEphemeralState.loading; i += 1) await Promise.resolve();
     assert.equal(context.document.body.dataset.activeTab, "vn-part");
     assert.equal(context.vnPartEphemeralState.loading, false);
     assert.equal(context.vnPartEphemeralState.error, null);
-    assert.deepStrictEqual(counts, { vn_part_donor_state_v1: 1, vn_part_donor_commitment_v1: 1, vn_part_removals: 1, vn_part_approvals: 1 });
-    for (const query of queries) assert.deepStrictEqual(query.filters, [["workshop_id", workshopId]]);
+    assert.deepStrictEqual(counts, { vn_part_donor_state_v1: 1, vn_part_donor_commitment_v1: 1, vn_part_removals: 1, vn_part_approvals: 1, vn_part_audit_events: 1 });
+    for (const query of queries) {
+      const wsFilter = query.filters.find(([col]) => col === "workshop_id");
+      assert.deepStrictEqual(wsFilter, ["workshop_id", workshopId]);
+    }
     t.diagnostic(`${readyState} authorized before access: donor SELECT=0; removals SELECT=0; approvals SELECT=0; after vn-part access: donor SELECT=1; removals SELECT=1; approvals SELECT=1`);
   }
 });

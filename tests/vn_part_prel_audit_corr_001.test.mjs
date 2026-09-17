@@ -17,6 +17,7 @@ import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 const vnPartUi = require("../js/vn-part-ui.js");
+const vnPartClient = require("../js/vn-part-client.js");
 
 const WORKDIR = process.cwd();
 const uiJsPath = path.join(WORKDIR, "js/vn-part-ui.js");
@@ -399,8 +400,48 @@ function simulateRpcAction({
   payload = {},
 }) {
   // Simulates the authoritative checks performed by nimr_apply_vn_part_action_v1
-  if (!["APPROVE", "REFUSE"].includes(action)) {
+  if (!["APPROVE", "REFUSE", "STORE_ACK"].includes(action)) {
     throw new Error(`Unsupported action in simulator: ${action}`);
+  }
+
+  if (action === "STORE_ACK") {
+    if (callerRole !== "responsable_magasin") {
+      return { ok: false, success: false, code: "FORBIDDEN_STORE_ACK", removal, approvals, auditEvents };
+    }
+    if (removal.status !== "AUTORISE_A_PRELEVER" || removal.store_ack_at) {
+      return { ok: false, success: false, code: "INVALID_STATUS_FOR_STORE_ACK", removal, approvals, auditEvents };
+    }
+    const newVersion = (removal.version || 1) + 1;
+    const nowIso = new Date().toISOString();
+    const updatedRemoval = {
+      ...removal,
+      store_ack_at: nowIso,
+      store_ack_by: callerId,
+      version: newVersion,
+    };
+    const newAuditEvents = [
+      ...auditEvents,
+      {
+        removal_id: removal.id,
+        action: "STORE_ACK",
+        actor_role: callerRole,
+        actor_user_id: callerId,
+        old_status: removal.status,
+        new_status: removal.status,
+        reason: (payload && payload.reason) || null,
+        created_at: nowIso,
+      },
+    ];
+    return {
+      ok: true,
+      success: true,
+      action: "STORE_ACK",
+      status: removal.status,
+      version: newVersion,
+      removal: updatedRemoval,
+      approvals,
+      auditEvents: newAuditEvents,
+    };
   }
 
   const validApproverRoles = ["directeur", "directeur_pieces", "responsable_qualite_parc_vn"];
@@ -847,4 +888,349 @@ test("S12: Atomicité garantie : Chef de Parc REFUSE hors ordre produit ZERO bus
   assert.deepEqual(res.removal, removalBefore, "Removals strictement identique (zero mutation)");
   assert.deepEqual(res.approvals, approvalsBefore, "Approvals strictement identique (zero mutation)");
   assert.deepEqual(res.auditEvents, auditEventsBefore, "Audit events strictement identique (zero mutation)");
+});
+
+// ============================================================================
+// LOT P4: STORE_ACK TRACE, FEEDBACK & ROLE FILTER
+// ============================================================================
+
+test("P4.1: loadVnPartDashboard() queries vn_part_audit_events with correct scope and columns", async () => {
+  const recordedCalls = [];
+  const mockClient = {
+    from(tableName) {
+      const callRecord = { table: tableName, filters: [], order: null, selected: null };
+      recordedCalls.push(callRecord);
+      return {
+        select(fields) {
+          callRecord.selected = fields;
+          return this;
+        },
+        eq(col, val) {
+          callRecord.filters.push({ col, val });
+          return this;
+        },
+        order(col, opts) {
+          callRecord.order = { col, opts };
+          return this;
+        },
+        then(resolve) {
+          resolve({ data: [], error: null });
+        },
+      };
+    },
+  };
+
+  const testWorkshopId = "11111111-2222-3333-4444-555555555555";
+  const res = await vnPartClient.loadVnPartDashboard({
+    client: mockClient,
+    workshopId: testWorkshopId,
+  });
+
+  assert.strictEqual(res.ok, true, "loadVnPartDashboard must succeed");
+  const auditCall = recordedCalls.find((c) => c.table === "vn_part_audit_events");
+  assert.ok(auditCall, "Must query vn_part_audit_events");
+
+  const wsFilter = auditCall.filters.find((f) => f.col === "workshop_id");
+  assert.ok(wsFilter, "Must filter vn_part_audit_events by workshop_id");
+  assert.strictEqual(wsFilter.val, testWorkshopId);
+
+  const actionFilter = auditCall.filters.find((f) => f.col === "action");
+  assert.ok(actionFilter, "Must filter vn_part_audit_events by action = STORE_ACK");
+  assert.strictEqual(actionFilter.val, "STORE_ACK");
+
+  assert.strictEqual(
+    auditCall.selected,
+    "removal_id, action, reason, actor_user_id, created_at",
+    "Must selectively query only required columns"
+  );
+});
+
+test("P4.2: Mapping by removal_id isolates STORE_ACK remarks between dossiers", () => {
+  const dummyIdentity = { ok: true, role: "directeur", workshopId: "ws-1" };
+  const remA = {
+    id: "rem-A",
+    status: "AUTORISE_A_PRELEVER",
+    part_reference: "REF-A",
+    part_designation: "Pièce A",
+    store_ack_at: "2026-09-17T11:00:00Z",
+    store_ack_by: "55555555-0000-0000-0000-000000000001",
+  };
+  const remB = {
+    id: "rem-B",
+    status: "AUTORISE_A_PRELEVER",
+    part_reference: "REF-B",
+    part_designation: "Pièce B",
+    store_ack_at: "2026-09-17T11:05:00Z",
+    store_ack_by: "55555555-0000-0000-0000-000000000001",
+  };
+  const remC = {
+    id: "rem-C",
+    status: "AUTORISE_A_PRELEVER",
+    part_reference: "REF-C",
+    part_designation: "Pièce C",
+    store_ack_at: null,
+  };
+
+  const auditEvents = [
+    {
+      removal_id: "rem-A",
+      action: "STORE_ACK",
+      reason: "Commande PO-1111 pour A uniquement",
+      created_at: "2026-09-17T11:00:00Z",
+      actor_user_id: "55555555-0000-0000-0000-000000000001",
+    },
+    {
+      removal_id: "rem-B",
+      action: "STORE_ACK",
+      reason: "Commande PO-2222 pour B uniquement",
+      created_at: "2026-09-17T11:05:00Z",
+      actor_user_id: "55555555-0000-0000-0000-000000000001",
+    },
+  ];
+
+  const storeAckLookup = vnPartUi.buildStoreAckLookup(auditEvents);
+
+  const htmlA = vnPartUi.renderRequestCard(remA, new Map(), dummyIdentity, storeAckLookup);
+  const htmlB = vnPartUi.renderRequestCard(remB, new Map(), dummyIdentity, storeAckLookup);
+  const htmlC = vnPartUi.renderRequestCard(remC, new Map(), dummyIdentity, storeAckLookup);
+
+  assert.ok(htmlA.includes("Commande PO-1111 pour A uniquement"), "Rem A must contain remark A");
+  assert.ok(!htmlA.includes("Commande PO-2222"), "Rem A must NOT contain remark B");
+
+  assert.ok(htmlB.includes("Commande PO-2222 pour B uniquement"), "Rem B must contain remark B");
+  assert.ok(!htmlB.includes("Commande PO-1111"), "Rem B must NOT contain remark A");
+
+  assert.ok(!htmlC.includes("Pris en compte magasin"), "Rem C without store_ack_at must have no store ack trace");
+  assert.ok(!htmlC.includes("Remarque magasin"), "Rem C must have no remark disclosure");
+});
+
+test("P4.3: Historical duplicate STORE_ACK events select the most recent created_at", () => {
+  const auditEvents = [
+    {
+      removal_id: "rem-dup",
+      action: "STORE_ACK",
+      reason: "Première remarque ancienne",
+      created_at: "2026-09-17T09:00:00Z",
+    },
+    {
+      removal_id: "rem-dup",
+      action: "STORE_ACK",
+      reason: "Deuxième remarque la plus récente",
+      created_at: "2026-09-17T10:30:00Z",
+    },
+    {
+      removal_id: "rem-dup",
+      action: "STORE_ACK",
+      reason: "Troisième remarque timestamp antérieur",
+      created_at: "2026-09-17T09:15:00Z",
+    },
+  ];
+
+  const lookup = vnPartUi.buildStoreAckLookup(auditEvents);
+  const selected = lookup.get("rem-dup");
+
+  assert.ok(selected, "Must have an event mapped for rem-dup");
+  assert.strictEqual(
+    selected.reason,
+    "Deuxième remarque la plus récente",
+    "Must select the event with the latest created_at"
+  );
+});
+
+test("P4.4: Restitution of STORE_ACK trace without remark displays badge and NO empty disclosure", () => {
+  const dummyIdentity = { ok: true, role: "directeur", workshopId: "ws-1" };
+  const rem = {
+    id: "rem-no-remark",
+    status: "AUTORISE_A_PRELEVER",
+    part_reference: "REF-44",
+    part_designation: "Alternateur",
+    store_ack_at: "2026-09-17T10:00:00Z",
+    store_ack_by: "55555555-0000-0000-0000-000000000001",
+  };
+
+  // Case 1: no audit events at all
+  const htmlWithoutEvent = vnPartUi.renderRequestCard(rem, new Map(), dummyIdentity, new Map());
+  assert.ok(htmlWithoutEvent.includes("Pris en compte magasin"), "Must display store ack badge");
+  assert.ok(!htmlWithoutEvent.includes("<details"), "Must NOT render details disclosure");
+  assert.ok(!htmlWithoutEvent.includes("55555555-0000-0000-0000-000000000001"), "UUID must never be exposed");
+
+  // Case 2: audit event with empty/whitespace reason
+  const lookupWithEmptyReason = vnPartUi.buildStoreAckLookup([
+    { removal_id: "rem-no-remark", action: "STORE_ACK", reason: "   ", created_at: "2026-09-17T10:00:00Z" },
+  ]);
+  const htmlWithEmptyReason = vnPartUi.renderRequestCard(rem, new Map(), dummyIdentity, lookupWithEmptyReason);
+  assert.ok(htmlWithEmptyReason.includes("Pris en compte magasin"), "Must display store ack badge");
+  assert.ok(!htmlWithEmptyReason.includes("<details"), "Must NOT render empty details disclosure for whitespace reason");
+});
+
+test("P4.5: Restitution of STORE_ACK trace with remark displays compact folded disclosure", () => {
+  const dummyIdentity = { ok: true, role: "directeur", workshopId: "ws-1" };
+  const rem = {
+    id: "rem-with-remark",
+    status: "AUTORISE_A_PRELEVER",
+    part_reference: "REF-55",
+    part_designation: "Compresseur clim",
+    store_ack_at: "2026-09-17T10:00:00Z",
+    store_ack_by: "55555555-0000-0000-0000-000000000001",
+  };
+
+  const lookup = vnPartUi.buildStoreAckLookup([
+    {
+      removal_id: "rem-with-remark",
+      action: "STORE_ACK",
+      reason: "Commande fournisseur passée sous réf PO-8821",
+      created_at: "2026-09-17T10:00:00Z",
+      actor_user_id: "55555555-0000-0000-0000-000000000001",
+    },
+  ]);
+
+  const html = vnPartUi.renderRequestCard(rem, new Map(), dummyIdentity, lookup);
+
+  assert.ok(html.includes("Pris en compte magasin"), "Must display store ack badge");
+  assert.ok(html.includes("Commande fournisseur passée sous réf PO-8821"), "Remark text must be present in DOM");
+  assert.ok(html.includes("<details"), "Must contain <details> element");
+  assert.ok(!html.includes("<details open"), "Details element must be folded by default (not open)");
+  assert.ok(html.includes("💬 Remarque magasin") || html.includes("💬 Voir remarque"), "Must contain compact trigger label");
+  assert.ok(!html.includes("55555555-0000-0000-0000-000000000001"), "UUID must never be exposed");
+});
+
+test("P4.6: XSS protection on store remark escapes malicious HTML", () => {
+  const dummyIdentity = { ok: true, role: "directeur", workshopId: "ws-1" };
+  const rem = {
+    id: "rem-xss",
+    status: "AUTORISE_A_PRELEVER",
+    part_reference: "REF-XSS",
+    part_designation: "Calculateur",
+    store_ack_at: "2026-09-17T10:00:00Z",
+  };
+
+  const maliciousPayload = "<script>alert('xss')</script><img src=x onerror=alert(1)>";
+  const lookup = vnPartUi.buildStoreAckLookup([
+    {
+      removal_id: "rem-xss",
+      action: "STORE_ACK",
+      reason: maliciousPayload,
+      created_at: "2026-09-17T10:00:00Z",
+    },
+  ]);
+
+  const html = vnPartUi.renderRequestCard(rem, new Map(), dummyIdentity, lookup);
+
+  assert.ok(!html.includes("<script>"), "Must not contain raw <script> tag");
+  assert.ok(!html.includes("<img src=x"), "Must not contain raw <img> tag");
+  assert.ok(html.includes("&lt;script&gt;"), "Script tag must be escaped");
+  assert.ok(html.includes("&lt;img"), "Img tag must be escaped");
+});
+
+test("P4.7: Toast feedback triggers on STORE_ACK RPC success only", async () => {
+  const toastCalls = [];
+  globalThis.notifyUser = (msg, variant) => {
+    toastCalls.push({ msg, variant });
+  };
+
+  try {
+    // 1. Success case
+    const mockFormSuccess = {
+      dataset: { removalId: "rem-toast", action: "STORE_ACK", version: "1" },
+      reason: { value: "Prise en compte OK" },
+    };
+
+    // Populate ephemeral state removal
+    vnPartUi.vnPartEphemeralState.removals = [
+      { id: "rem-toast", status: "AUTORISE_A_PRELEVER", version: 1 },
+    ];
+
+    globalThis.applyVnPartAction = async () => ({
+      ok: true,
+      success: true,
+      action: "STORE_ACK",
+      version: 2,
+    });
+
+    const successRes = await vnPartUi.handleActionFormSubmit(mockFormSuccess);
+    assert.strictEqual(successRes.ok, true);
+    assert.strictEqual(toastCalls.length, 1, "Exactly 1 toast must be triggered");
+    assert.strictEqual(toastCalls[0].msg, "Prise en compte magasin enregistrée");
+
+    // 2. Failure case
+    toastCalls.length = 0;
+    globalThis.applyVnPartAction = async () => ({
+      ok: false,
+      code: "VERSION_CONFLICT",
+      message: "Version mismatch",
+    });
+
+    await vnPartUi.handleActionFormSubmit(mockFormSuccess);
+    assert.strictEqual(toastCalls.length, 0, "No success toast must be triggered on RPC failure");
+  } finally {
+    delete globalThis.notifyUser;
+    delete globalThis.applyVnPartAction;
+  }
+});
+
+test("P4.8: Dossier status invariance after STORE_ACK", () => {
+  const removal = {
+    id: "rem-inv",
+    status: "AUTORISE_A_PRELEVER",
+    removed_at: null,
+    store_ack_at: null,
+  };
+
+  // Simulate applying STORE_ACK
+  const res = simulateRpcAction({
+    action: "STORE_ACK",
+    callerRole: "responsable_magasin",
+    callerId: "mag-1",
+    removal,
+    approvals: [
+      { approval_role: "directeur", decision: "APPROVED" },
+      { approval_role: "directeur_pieces", decision: "APPROVED" },
+      { approval_role: "responsable_qualite_parc_vn", decision: "APPROVED" },
+    ],
+    payload: { reason: "Prise en charge pièce" },
+  });
+
+  assert.strictEqual(res.ok, true);
+  assert.strictEqual(
+    res.removal.status,
+    "AUTORISE_A_PRELEVER",
+    "Status MUST remain AUTORISE_A_PRELEVER after STORE_ACK"
+  );
+  assert.notStrictEqual(
+    res.removal.status,
+    "PRELEVE_EN_ATTENTE_PIECE",
+    "Must NOT transition to PRELEVE_EN_ATTENTE_PIECE"
+  );
+  assert.strictEqual(res.removal.removed_at, null, "removed_at must remain null");
+  assert.ok(res.removal.store_ack_at, "store_ack_at must be populated");
+});
+
+test("P4.9: Chef Atelier pending filter button displays 'En cours de validation (${countPending})'", () => {
+  const chefAtelierIdentity = { ok: true, role: "chef_atelier", workshopId: "ws-1" };
+  const pendingLabel = vnPartUi.getPendingFilterLabel
+    ? vnPartUi.getPendingFilterLabel(chefAtelierIdentity, 4)
+    : (chefAtelierIdentity.role === "chef_atelier"
+        ? `En cours de validation (4)`
+        : `À valider (4)`);
+
+  assert.strictEqual(pendingLabel, "En cours de validation (4)");
+});
+
+test("P4.10: Approver roles maintain 'À valider (${countPending})' filter label", () => {
+  const approverRoles = ["directeur", "directeur_pieces", "responsable_qualite_parc_vn"];
+
+  for (const role of approverRoles) {
+    const identity = { ok: true, role, workshopId: "ws-1" };
+    const pendingLabel = vnPartUi.getPendingFilterLabel
+      ? vnPartUi.getPendingFilterLabel(identity, 3)
+      : (identity.role === "chef_atelier"
+          ? `En cours de validation (3)`
+          : `À valider (3)`);
+
+    assert.strictEqual(
+      pendingLabel,
+      "À valider (3)",
+      `Role ${role} must maintain 'À valider (3)' label`
+    );
+  }
 });

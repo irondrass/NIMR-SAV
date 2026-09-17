@@ -9276,6 +9276,70 @@ select:focus {
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
 }
 
+/* Store Acknowledgment Badge & Remark (P4) */
+.vn-part-store-ack-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 500;
+  font-size: 0.85rem;
+  color: #1e3a8a;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.vn-part-store-ack-remark-details {
+  display: inline-block;
+  margin-left: 6px;
+  position: relative;
+  vertical-align: middle;
+}
+
+.vn-part-store-ack-remark-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: 550;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.05);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  color: #334155;
+  list-style: none;
+  user-select: none;
+}
+
+.vn-part-store-ack-remark-summary::-webkit-details-marker {
+  display: none;
+}
+
+.vn-part-store-ack-remark-summary:hover {
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.vn-part-store-ack-remark-summary:focus-visible {
+  outline: 2px solid var(--primary, #004085);
+  outline-offset: 1px;
+}
+
+.vn-part-store-ack-remark-content {
+  margin-top: 4px;
+  padding: 6px 8px;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  font-size: 0.78rem;
+  color: #334155;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-width: 280px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+}
+
 
 /* Removal Card Actions */
 .vn-part-card-actions {

@@ -40,6 +40,9 @@
     donorCommitments: [],
     removals: [],
     approvals: [],
+    storeAckEvents: [],
+    storeAckEventsByRemovalId: {},
+    storeAckLookup: null,
     loading: false,
     error: null,
     conflictMessage: null,
@@ -50,6 +53,19 @@
     lastLoadedAt: null,
     mutationInProgress: false,
   };
+
+  /**
+   * Helper to trigger user-facing toasts safely.
+   */
+  function showToast(message, variant = "info") {
+    const notifyFn =
+      (typeof notifyUser === "function" ? notifyUser : null) ||
+      (typeof window !== "undefined" && typeof window.notifyUser === "function" ? window.notifyUser : null) ||
+      (typeof globalThis !== "undefined" && typeof globalThis.notifyUser === "function" ? globalThis.notifyUser : null);
+    if (notifyFn) {
+      notifyFn(message, variant);
+    }
+  }
 
   /**
    * Escape HTML to prevent XSS injection at rendering sinks.
@@ -1109,6 +1125,106 @@
   }
 
   /**
+   * Build a lookup Map of removal_id -> latest STORE_ACK audit event.
+   * Deterministic duplicate resolution: selects the event with the latest created_at.
+   */
+  function buildStoreAckLookup(auditEvents = []) {
+    const lookup = new Map();
+    if (Array.isArray(auditEvents)) {
+      for (const ev of auditEvents) {
+        if (!ev || !ev.removal_id) continue;
+        if (ev.action && ev.action !== "STORE_ACK") continue;
+        const existing = lookup.get(ev.removal_id);
+        if (!existing) {
+          lookup.set(ev.removal_id, ev);
+        } else {
+          const prevTime = new Date(existing.created_at || 0).getTime();
+          const currTime = new Date(ev.created_at || 0).getTime();
+          if (currTime >= prevTime) {
+            lookup.set(ev.removal_id, ev);
+          }
+        }
+      }
+    } else if (auditEvents instanceof Map) {
+      return auditEvents;
+    } else if (typeof auditEvents === "object" && auditEvents !== null) {
+      for (const [k, v] of Object.entries(auditEvents)) {
+        lookup.set(k, v);
+      }
+    }
+    return lookup;
+  }
+
+  /**
+   * Resolve STORE_ACK audit event for a given removal row.
+   */
+  function resolveStoreAckEvent(rem, storeAckLookup = null) {
+    if (!rem) return null;
+    if (rem.store_ack_event) return rem.store_ack_event;
+    if (rem.storeAckEvent) return rem.storeAckEvent;
+    if (storeAckLookup) {
+      if (typeof storeAckLookup.get === "function") {
+        const found = storeAckLookup.get(rem.id);
+        if (found) return found;
+      } else if (Array.isArray(storeAckLookup)) {
+        const found = storeAckLookup.find((e) => e && e.removal_id === rem.id);
+        if (found) return found;
+      } else if (typeof storeAckLookup === "object") {
+        if (storeAckLookup[rem.id]) return storeAckLookup[rem.id];
+      }
+    }
+    if (vnPartEphemeralState.storeAckEventsByRemovalId && vnPartEphemeralState.storeAckEventsByRemovalId[rem.id]) {
+      return vnPartEphemeralState.storeAckEventsByRemovalId[rem.id];
+    }
+    if (vnPartEphemeralState.storeAckLookup && typeof vnPartEphemeralState.storeAckLookup.get === "function") {
+      return vnPartEphemeralState.storeAckLookup.get(rem.id);
+    }
+    return null;
+  }
+
+  /**
+   * Render the store acknowledgment trace HTML.
+   * Includes compact badge and optional folded disclosure if a non-empty remark exists.
+   * UUIDs are strictly never exposed.
+   */
+  function renderStoreAckTraceHtml(rem, storeAckEvent = null) {
+    if (!rem || !rem.store_ack_at) return "";
+
+    const timestamp = formatDateTimeFr(rem.store_ack_at);
+    let remarkHtml = "";
+
+    const reason = storeAckEvent && typeof storeAckEvent.reason === "string" ? storeAckEvent.reason.trim() : "";
+    if (reason) {
+      remarkHtml = `
+        <details class="vn-part-store-ack-remark-details">
+          <summary class="vn-part-store-ack-remark-summary" title="Consulter la remarque magasin">💬 Remarque magasin</summary>
+          <div class="vn-part-store-ack-remark-content">${escapeHtml(reason)}</div>
+        </details>
+      `;
+    }
+
+    return `
+      <div class="vn-part-detail-cell vn-part-store-ack-trace">
+        <span class="cell-label">Prise en compte magasin:</span>
+        <span class="cell-val">
+          <span class="vn-part-store-ack-badge">✅ Pris en compte magasin · ${escapeHtml(timestamp)}</span>${remarkHtml}
+        </span>
+      </div>
+    `;
+  }
+
+  /**
+   * Get the pending requests filter button label based on user identity role.
+   * Chef Atelier sees "En cours de validation (N)" while approver roles see "À valider (N)".
+   */
+  function getPendingFilterLabel(identity, countPending = 0) {
+    const isChefAtelier = identity && identity.role === "chef_atelier";
+    return isChefAtelier
+      ? `En cours de validation (${countPending})`
+      : `À valider (${countPending})`;
+  }
+
+  /**
    * Resolve current active identity safely using the client module or global resolver.
    */
   function getCurrentIdentity() {
@@ -1596,7 +1712,7 @@
   /**
    * Render an individual pre-removal request card for Section A.
    */
-  function renderRequestCard(rem, approvalLookup, identity) {
+  function renderRequestCard(rem, approvalLookup, identity, storeAckLookup = null) {
     let statusBadge = "";
     if (rem.status === "EN_ATTENTE_VALIDATIONS") {
       statusBadge = `<span class="vn-part-badge badge-waiting">🟠 En attente de validation</span>`;
@@ -1618,6 +1734,7 @@
     const approvalStripHtml = renderApprovalStrip(rem, approvalLookup);
     const availableActions = getAvailableVnPartActions(rem, vnPartEphemeralState.approvals, identity);
     const actionsHtml = renderRemovalActionButtons(rem, availableActions, vnPartEphemeralState.mutationInProgress);
+    const storeAckEvent = resolveStoreAckEvent(rem, storeAckLookup);
 
     return `
       <article class="vn-part-request-card" data-id="${escapeHtml(rem.id)}" data-status="${escapeHtml(rem.status)}" data-version="${rem.version}">
@@ -1678,6 +1795,7 @@
               <span class="cell-val">${escapeHtml(formatDateFr(rem.expected_replacement_date))}</span>
             </div>
           ` : ""}
+          ${rem.store_ack_at ? renderStoreAckTraceHtml(rem, storeAckEvent) : ""}
           ${rem.removed_at ? `
             <div class="vn-part-detail-cell">
               <span class="cell-label">Date prélèvement:</span>
@@ -1908,6 +2026,9 @@
       vnPartEphemeralState.donorCommitments = result.donorCommitments || [];
       vnPartEphemeralState.removals = result.removals || [];
       vnPartEphemeralState.approvals = result.approvals || [];
+      vnPartEphemeralState.storeAckEvents = result.storeAckEvents || [];
+      vnPartEphemeralState.storeAckEventsByRemovalId = result.storeAckEventsByRemovalId || {};
+      vnPartEphemeralState.storeAckLookup = buildStoreAckLookup(result.storeAckEvents || []);
       vnPartEphemeralState.lastLoadedAt = new Date().toISOString();
     }
 
@@ -2041,6 +2162,7 @@
     }
 
     const approvalLookup = buildApprovalLookup(vnPartEphemeralState.approvals);
+    const storeAckLookup = buildStoreAckLookup(vnPartEphemeralState.storeAckEvents);
 
     let html = "";
 
@@ -2069,6 +2191,7 @@
       (r) => r.status === "AUTORISE_A_PRELEVER"
     ).length;
     const activeReqFilter = vnPartEphemeralState.activeRequestFilter || "all";
+    const pendingFilterLabel = getPendingFilterLabel(identity, countPending);
 
     html += `
       <section class="vn-part-section vn-part-requests-section" aria-labelledby="vn-part-requests-heading">
@@ -2082,7 +2205,7 @@
           </div>
           <div class="vn-part-req-filters" role="group" aria-label="Filtrer les demandes">
             <button type="button" class="vn-part-req-filter-btn ${activeReqFilter === "all" ? "active" : ""}" data-req-filter="all" aria-pressed="${activeReqFilter === "all"}">Toutes (${countAll})</button>
-            <button type="button" class="vn-part-req-filter-btn ${activeReqFilter === "pending" ? "active" : ""}" data-req-filter="pending" aria-pressed="${activeReqFilter === "pending"}">À valider (${countPending})</button>
+            <button type="button" class="vn-part-req-filter-btn ${activeReqFilter === "pending" ? "active" : ""}" data-req-filter="pending" aria-pressed="${activeReqFilter === "pending"}">${escapeHtml(pendingFilterLabel)}</button>
             <button type="button" class="vn-part-req-filter-btn ${activeReqFilter === "authorized" ? "active" : ""}" data-req-filter="authorized" aria-pressed="${activeReqFilter === "authorized"}">Autorisées (${countAuth})</button>
           </div>
         </div>
@@ -2097,7 +2220,7 @@
     } else {
       html += `<div class="vn-part-requests-list">`;
       for (const req of workflowRequests) {
-        html += renderRequestCard(req, approvalLookup, identity);
+        html += renderRequestCard(req, approvalLookup, identity, storeAckLookup);
       }
       html += `</div>`;
     }
@@ -2295,12 +2418,7 @@
                         <span class="cell-val">${escapeHtml(formatDateTimeFr(rem.replacement_available_at))}</span>
                       </div>
                     ` : ""}
-                    ${rem.store_ack_at ? `
-                      <div class="vn-part-detail-cell">
-                        <span class="cell-label">Prise en compte magasin:</span>
-                        <span class="cell-val">${escapeHtml(formatDateTimeFr(rem.store_ack_at))}</span>
-                      </div>
-                    ` : ""}
+                    ${rem.store_ack_at ? renderStoreAckTraceHtml(rem, resolveStoreAckEvent(rem, storeAckLookup)) : ""}
                     ${rem.restored_at ? `
                       <div class="vn-part-detail-cell">
                         <span class="cell-label">Restitué au VN le:</span>
@@ -2854,6 +2972,7 @@
    * Close all active modals.
    */
   function closeModals() {
+    if (typeof document === "undefined") return;
     const host = document.getElementById("vn-part-modals-host");
     if (host) host.innerHTML = "";
   }
@@ -2869,8 +2988,8 @@
     const removalId = removalIdArg || form?.dataset?.removalId;
     const action = actionArg || form?.dataset?.action;
     const expectedVersion = expectedVersionArg !== null ? expectedVersionArg : parseInt(form?.dataset?.version, 10);
-    const errorEl = document.getElementById("vn-part-action-error");
-    const submitBtn = document.getElementById("vn-part-action-submit");
+    const errorEl = typeof document !== "undefined" ? document.getElementById("vn-part-action-error") : null;
+    const submitBtn = typeof document !== "undefined" ? document.getElementById("vn-part-action-submit") : null;
 
     const removal = vnPartEphemeralState.removals.find((r) => r.id === removalId);
     if (!removal) {
@@ -2996,6 +3115,11 @@
 
     closeModals();
     vnPartEphemeralState.conflictMessage = null;
+
+    if (action === "STORE_ACK") {
+      showToast("Prise en compte magasin enregistrée", "success");
+    }
+
     const refreshFn =
       (typeof globalThis !== "undefined" && globalThis.vnPartUi && globalThis.vnPartUi.refreshVnPartDashboard) ||
       refreshVnPartDashboard;
@@ -3189,5 +3313,13 @@
     validateDeleteRemovalPayload,
     handleActionFormSubmit,
     handleActionSubmit: handleActionFormSubmit,
+    buildStoreAckLookup,
+    resolveStoreAckEvent,
+    renderStoreAckTraceHtml,
+    getPendingFilterLabel,
+    showToast,
+    formatDateTimeFr,
+    formatDateFr,
+    escapeHtml,
   };
 });

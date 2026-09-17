@@ -669,12 +669,12 @@ test("Group N: Mutation fails closed with zero RPC and zero workshop_members que
     clearMockIdentity();
   }
 
-  // Verify dashboard reads: exactly 3 queries, none to workshop_members or audit_events
+  // Verify dashboard reads: exactly 5 queries, none to workshop_members, reads vn_part_audit_events for STORE_ACK trace
   queriedTables.length = 0;
   await vnPartClient.loadVnPartDashboard({ client: mockClient, workshopId: "ws-1" });
-  assert.deepEqual(queriedTables.sort(), ["vn_part_approvals", "vn_part_donor_commitment_v1", "vn_part_donor_state_v1", "vn_part_removals"]);
+  assert.deepEqual(queriedTables.sort(), ["vn_part_approvals", "vn_part_audit_events", "vn_part_donor_commitment_v1", "vn_part_donor_state_v1", "vn_part_removals"]);
   assert.equal(queriedTables.includes("workshop_members"), false, "Dashboard must NOT read workshop_members");
-  assert.equal(queriedTables.includes("vn_part_audit_events"), false, "Dashboard must NOT read vn_part_audit_events");
+  assert.equal(queriedTables.includes("vn_part_audit_events"), true, "Dashboard reads vn_part_audit_events for STORE_ACK trace");
 
   // Static proof: options.workshopId must NOT occur in applyVnPartAction implementation
   const applyFnBody = clientJsContent.slice(clientJsContent.indexOf("async function applyVnPartAction"));

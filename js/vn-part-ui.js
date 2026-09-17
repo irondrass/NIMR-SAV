@@ -1422,19 +1422,20 @@
       actions.push("REVISE_DONOR");
     }
 
-    // CONFIRM_REMOVAL
+    // CONFIRM_REMOVAL (requires store_ack_at before removal)
     if (
       status === "AUTORISE_A_PRELEVER" &&
-      role === "chef_atelier"
+      role === "chef_atelier" &&
+      Boolean(removal.store_ack_at)
     ) {
       actions.push("CONFIRM_REMOVAL");
     }
 
-    // STORE_ACK (UI Rule: only offered when store_ack_at is null)
+    // STORE_ACK (UI Rule: only offered in AUTORISE_A_PRELEVER when store_ack_at is null)
     if (
-      ["AUTORISE_A_PRELEVER", "PRELEVE_EN_ATTENTE_PIECE"].includes(status) &&
+      status === "AUTORISE_A_PRELEVER" &&
       role === "responsable_magasin" &&
-      (removal.store_ack_at === null || removal.store_ack_at === undefined)
+      !removal.store_ack_at
     ) {
       actions.push("STORE_ACK");
     }

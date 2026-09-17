@@ -655,6 +655,15 @@ begin
       return jsonb_build_object('success', false, 'ok', false, 'code', 'INVALID_STATUS_FOR_REMOVAL', 'message', 'Le prélèvement physique nécessite le statut AUTORISE_A_PRELEVER.');
     end if;
 
+    if v_row.store_ack_at is null then
+      return jsonb_build_object(
+        'success', false,
+        'ok', false,
+        'code', 'STORE_ACK_REQUIRED_BEFORE_REMOVAL',
+        'message', 'La prise en compte magasin est requise avant de confirmer le prélèvement physique.'
+      );
+    end if;
+
     update public.vn_part_removals set
       status = 'PRELEVE_EN_ATTENTE_PIECE',
       removed_at = clock_timestamp(),
@@ -706,8 +715,17 @@ begin
       return jsonb_build_object('success', false, 'ok', false, 'code', 'FORBIDDEN_STORE_ACK', 'message', 'Seul le responsable magasin peut enregistrer la prise en compte magasin.');
     end if;
 
-    if v_row.status not in ('PRELEVE_EN_ATTENTE_PIECE', 'AUTORISE_A_PRELEVER') then
-      return jsonb_build_object('success', false, 'ok', false, 'code', 'INVALID_STATUS_FOR_STORE_ACK', 'message', 'La prise en compte magasin est invalide dans l''état actuel du dossier.');
+    if v_row.status <> 'AUTORISE_A_PRELEVER' then
+      return jsonb_build_object('success', false, 'ok', false, 'code', 'INVALID_STATUS_FOR_STORE_ACK', 'message', 'La prise en compte magasin nécessite le statut AUTORISE_A_PRELEVER.');
+    end if;
+
+    if v_row.store_ack_at is not null then
+      return jsonb_build_object(
+        'success', false,
+        'ok', false,
+        'code', 'STORE_ACK_ALREADY_RECORDED',
+        'message', 'La prise en compte magasin a déjà été enregistrée pour ce prélèvement.'
+      );
     end if;
 
     update public.vn_part_removals set

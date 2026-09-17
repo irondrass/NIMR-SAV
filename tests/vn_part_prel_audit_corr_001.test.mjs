@@ -400,7 +400,7 @@ function simulateRpcAction({
   payload = {},
 }) {
   // Simulates the authoritative checks performed by nimr_apply_vn_part_action_v1
-  if (!["APPROVE", "REFUSE", "STORE_ACK", "CREATE_REQUEST"].includes(action)) {
+  if (!["APPROVE", "REFUSE", "STORE_ACK", "CREATE_REQUEST", "CONFIRM_REMOVAL"].includes(action)) {
     throw new Error(`Unsupported action in simulator: ${action}`);
   }
 
@@ -453,8 +453,19 @@ function simulateRpcAction({
     if (callerRole !== "responsable_magasin") {
       return { ok: false, success: false, code: "FORBIDDEN_STORE_ACK", removal, approvals, auditEvents };
     }
-    if (removal.status !== "AUTORISE_A_PRELEVER" || removal.store_ack_at) {
+    if (removal.status !== "AUTORISE_A_PRELEVER") {
       return { ok: false, success: false, code: "INVALID_STATUS_FOR_STORE_ACK", removal, approvals, auditEvents };
+    }
+    if (removal.store_ack_at) {
+      return {
+        ok: false,
+        success: false,
+        code: "STORE_ACK_ALREADY_RECORDED",
+        message: "La prise en compte magasin a déjà été enregistrée pour ce prélèvement.",
+        removal,
+        approvals,
+        auditEvents,
+      };
     }
     const newVersion = (removal.version || 1) + 1;
     const nowIso = new Date().toISOString();
@@ -482,6 +493,58 @@ function simulateRpcAction({
       success: true,
       action: "STORE_ACK",
       status: removal.status,
+      version: newVersion,
+      removal: updatedRemoval,
+      approvals,
+      auditEvents: newAuditEvents,
+    };
+  }
+
+  if (action === "CONFIRM_REMOVAL") {
+    if (callerRole !== "chef_atelier") {
+      return { ok: false, success: false, code: "FORBIDDEN_REMOVAL_CONFIRMATION", removal, approvals, auditEvents };
+    }
+    if (removal.status !== "AUTORISE_A_PRELEVER") {
+      return { ok: false, success: false, code: "INVALID_STATUS_FOR_REMOVAL", removal, approvals, auditEvents };
+    }
+    if (!removal.store_ack_at) {
+      return {
+        ok: false,
+        success: false,
+        code: "STORE_ACK_REQUIRED_BEFORE_REMOVAL",
+        message: "La prise en compte magasin est requise avant de confirmer le prélèvement physique.",
+        removal,
+        approvals,
+        auditEvents,
+      };
+    }
+    const newVersion = (removal.version || 1) + 1;
+    const nowIso = new Date().toISOString();
+    const updatedRemoval = {
+      ...removal,
+      status: "PRELEVE_EN_ATTENTE_PIECE",
+      removed_at: nowIso,
+      removed_by: callerId,
+      version: newVersion,
+    };
+    const newAuditEvents = [
+      ...auditEvents,
+      {
+        removal_id: removal.id,
+        action: "CONFIRM_REMOVAL",
+        actor_role: callerRole,
+        actor_user_id: callerId,
+        old_status: removal.status,
+        new_status: "PRELEVE_EN_ATTENTE_PIECE",
+        reason: (payload && payload.reason) || null,
+        created_at: nowIso,
+      },
+    ];
+    return {
+      ok: true,
+      success: true,
+      action: "CONFIRM_REMOVAL",
+      status: "PRELEVE_EN_ATTENTE_PIECE",
       version: newVersion,
       removal: updatedRemoval,
       approvals,
@@ -2130,7 +2193,7 @@ test("P7.1: Automated lifecycle / state-machine integration simulation: CREATE -
   let actionsAtelier = vnPartUi.getAvailableVnPartActions(removal, approvals, identities.chef_atelier);
 
   assert.ok(actionsMag.includes("STORE_ACK"), "Responsable Magasin must see STORE_ACK");
-  assert.ok(actionsAtelier.includes("CONFIRM_REMOVAL"), "Chef Atelier must see CONFIRM_REMOVAL");
+  assert.strictEqual(actionsAtelier.includes("CONFIRM_REMOVAL"), false, "Chef Atelier cannot CONFIRM_REMOVAL before STORE_ACK");
 
   // Step E: Store acknowledgement (STORE_ACK)
   removal.store_ack_at = "2026-09-17T11:00:00Z";
@@ -2145,6 +2208,10 @@ test("P7.1: Automated lifecycle / state-machine integration simulation: CREATE -
   // State invariance: STORE_ACK does NOT change status
   assert.strictEqual(removal.status, "AUTORISE_A_PRELEVER", "STORE_ACK must NOT change status");
   assert.strictEqual(vnPartUi.formatVnPartStatus(removal.status), "Autorisé à prélever");
+
+  // Chef Atelier can now CONFIRM_REMOVAL after STORE_ACK
+  actionsAtelier = vnPartUi.getAvailableVnPartActions(removal, approvals, identities.chef_atelier);
+  assert.ok(actionsAtelier.includes("CONFIRM_REMOVAL"), "Chef Atelier can now see CONFIRM_REMOVAL after STORE_ACK");
 
   // Step F: Physical removal (CONFIRM_REMOVAL) by Chef Atelier
   removal.removed_at = "2026-09-17T14:00:00Z";
@@ -2234,9 +2301,13 @@ test("P7.3: Complete RBAC matrix across all 5 canonical roles and states", () =>
 
   // State 2: AUTORISE_A_PRELEVER (after 3/3 approvals)
   const s2 = makeItem("AUTORISE_A_PRELEVER", { donor_vin: "VF1KNWN1111111111" });
-  assert.ok(vnPartUi.getAvailableVnPartActions(s2, [], { ok: true, role: "chef_atelier", authUserId: "u" }).includes("CONFIRM_REMOVAL"));
+  assert.strictEqual(vnPartUi.getAvailableVnPartActions(s2, [], { ok: true, role: "chef_atelier", authUserId: "u" }).includes("CONFIRM_REMOVAL"), false, "No CONFIRM_REMOVAL before STORE_ACK");
   assert.ok(vnPartUi.getAvailableVnPartActions(s2, [], { ok: true, role: "responsable_magasin", authUserId: "u" }).includes("STORE_ACK"));
   assert.ok(vnPartUi.getAvailableVnPartActions(s2, [], { ok: true, role: "responsable_qualite_parc_vn", authUserId: "u" }).includes("REVISE_DONOR"));
+
+  const s2_acked = makeItem("AUTORISE_A_PRELEVER", { donor_vin: "VF1KNWN1111111111", store_ack_at: "2026-09-17T10:00:00Z" });
+  assert.ok(vnPartUi.getAvailableVnPartActions(s2_acked, [], { ok: true, role: "chef_atelier", authUserId: "u" }).includes("CONFIRM_REMOVAL"), "CONFIRM_REMOVAL enabled after STORE_ACK");
+  assert.strictEqual(vnPartUi.getAvailableVnPartActions(s2_acked, [], { ok: true, role: "responsable_magasin", authUserId: "u" }).includes("STORE_ACK"), false, "STORE_ACK disabled after store_ack_at");
 
   // State 3: PRELEVE_EN_ATTENTE_PIECE
   const s3 = makeItem("PRELEVE_EN_ATTENTE_PIECE", { expected_replacement_date: "2026-10-01", removed_at: "2026-09-17T12:00:00Z" });
@@ -2550,4 +2621,206 @@ test("REVIEW.5: decided_at null/undefined/invalid: no 'Invalid Date', no fabrica
   assert.strictEqual(htmlInvalid.includes("Invalid Date"), false, "Must not show 'Invalid Date' for invalid decided_at string");
   // Should NOT have pill-decided-at when date is invalid
   assert.strictEqual(htmlInvalid.includes("pill-decided-at"), false, "pill-decided-at must not appear when decided_at is invalid");
+});
+
+// ============================================================================
+// REVIEW FIX 002 — STORE_ACK required before CONFIRM_REMOVAL workflow order
+// ============================================================================
+
+test("REVIEW2.1: AUTORISE_A_PRELEVER without store_ack_at: Chef Atelier CANNOT see CONFIRM_REMOVAL", () => {
+  const removal = { id: "rem-r2-1", status: "AUTORISE_A_PRELEVER", store_ack_at: null };
+  const identity = { ok: true, role: "chef_atelier", authUserId: "chef-1" };
+  const actions = vnPartUi.getAvailableVnPartActions(removal, [], identity);
+  assert.strictEqual(actions.includes("CONFIRM_REMOVAL"), false, "CONFIRM_REMOVAL must be ABSENT when store_ack_at is null");
+});
+
+test("REVIEW2.2: AUTORISE_A_PRELEVER with store_ack_at populated: Chef Atelier CAN see CONFIRM_REMOVAL", () => {
+  const removal = { id: "rem-r2-2", status: "AUTORISE_A_PRELEVER", store_ack_at: "2026-09-17T11:00:00Z" };
+  const identity = { ok: true, role: "chef_atelier", authUserId: "chef-1" };
+  const actions = vnPartUi.getAvailableVnPartActions(removal, [], identity);
+  assert.ok(actions.includes("CONFIRM_REMOVAL"), "CONFIRM_REMOVAL must be PRESENT when store_ack_at is populated");
+});
+
+test("REVIEW2.3: Responsable Magasin on AUTORISE_A_PRELEVER without ack: STORE_ACK is PRESENT", () => {
+  const removal = { id: "rem-r2-3", status: "AUTORISE_A_PRELEVER", store_ack_at: null };
+  const identity = { ok: true, role: "responsable_magasin", authUserId: "mag-1" };
+  const actions = vnPartUi.getAvailableVnPartActions(removal, [], identity);
+  assert.ok(actions.includes("STORE_ACK"), "STORE_ACK must be PRESENT on AUTORISE_A_PRELEVER without store_ack_at");
+});
+
+test("REVIEW2.4: Responsable Magasin on AUTORISE_A_PRELEVER already acked: STORE_ACK is ABSENT", () => {
+  const removal = { id: "rem-r2-4", status: "AUTORISE_A_PRELEVER", store_ack_at: "2026-09-17T11:00:00Z" };
+  const identity = { ok: true, role: "responsable_magasin", authUserId: "mag-1" };
+  const actions = vnPartUi.getAvailableVnPartActions(removal, [], identity);
+  assert.strictEqual(actions.includes("STORE_ACK"), false, "STORE_ACK must be ABSENT on AUTORISE_A_PRELEVER once already acked");
+});
+
+test("REVIEW2.5: Responsable Magasin on PRELEVE_EN_ATTENTE_PIECE: STORE_ACK is strictly ABSENT", () => {
+  const removalUnacked = { id: "rem-r2-5a", status: "PRELEVE_EN_ATTENTE_PIECE", store_ack_at: null };
+  const removalAcked = { id: "rem-r2-5b", status: "PRELEVE_EN_ATTENTE_PIECE", store_ack_at: "2026-09-17T11:00:00Z" };
+  const identity = { ok: true, role: "responsable_magasin", authUserId: "mag-1" };
+
+  const actionsUnacked = vnPartUi.getAvailableVnPartActions(removalUnacked, [], identity);
+  const actionsAcked = vnPartUi.getAvailableVnPartActions(removalAcked, [], identity);
+
+  assert.strictEqual(actionsUnacked.includes("STORE_ACK"), false, "No late STORE_ACK permitted in PRELEVE_EN_ATTENTE_PIECE (unacked)");
+  assert.strictEqual(actionsAcked.includes("STORE_ACK"), false, "No STORE_ACK permitted in PRELEVE_EN_ATTENTE_PIECE (acked)");
+});
+
+test("REVIEW2.S1: Server RPC: CONFIRM_REMOVAL without STORE_ACK is rejected with STORE_ACK_REQUIRED_BEFORE_REMOVAL (zero mutation)", () => {
+  const initialRemoval = {
+    id: "rem-s1",
+    status: "AUTORISE_A_PRELEVER",
+    version: 3,
+    store_ack_at: null,
+    removed_at: null,
+  };
+  const initialAuditEvents = [{ id: "ev-1", action: "APPROVE" }];
+
+  const res = simulateRpcAction({
+    action: "CONFIRM_REMOVAL",
+    callerRole: "chef_atelier",
+    callerId: "chef-1",
+    removal: { ...initialRemoval },
+    approvals: [],
+    auditEvents: [...initialAuditEvents],
+  });
+
+  assert.strictEqual(res.ok, false);
+  assert.strictEqual(res.success, false);
+  assert.strictEqual(res.code, "STORE_ACK_REQUIRED_BEFORE_REMOVAL");
+
+  // Zero mutation proof
+  assert.strictEqual(res.removal.status, initialRemoval.status, "Status must remain AUTORISE_A_PRELEVER");
+  assert.strictEqual(res.removal.version, initialRemoval.version, "Version must remain unchanged");
+  assert.strictEqual(res.removal.store_ack_at, null, "store_ack_at must remain null");
+  assert.strictEqual(res.removal.removed_at, null, "removed_at must remain null");
+  assert.strictEqual(res.auditEvents.length, initialAuditEvents.length, "Audit events count must remain unchanged");
+});
+
+test("REVIEW2.S2: Server RPC: Valid STORE_ACK in AUTORISE_A_PRELEVER succeeds and status remains AUTORISE_A_PRELEVER", () => {
+  const initialRemoval = {
+    id: "rem-s2",
+    status: "AUTORISE_A_PRELEVER",
+    version: 3,
+    store_ack_at: null,
+  };
+  const initialAuditEvents = [];
+
+  const res = simulateRpcAction({
+    action: "STORE_ACK",
+    callerRole: "responsable_magasin",
+    callerId: "mag-1",
+    removal: { ...initialRemoval },
+    approvals: [],
+    auditEvents: [...initialAuditEvents],
+    payload: { reason: "Prise en charge magasin confirmée" },
+  });
+
+  assert.strictEqual(res.ok, true);
+  assert.strictEqual(res.success, true);
+  assert.strictEqual(res.removal.status, "AUTORISE_A_PRELEVER", "Status must remain AUTORISE_A_PRELEVER after STORE_ACK");
+  assert.ok(res.removal.store_ack_at, "store_ack_at must be populated");
+  assert.strictEqual(res.removal.version, 4, "Version must be incremented by 1");
+  assert.strictEqual(res.auditEvents.length, 1, "Exactly one STORE_ACK audit event must be added");
+  assert.strictEqual(res.auditEvents[0].action, "STORE_ACK");
+  assert.strictEqual(res.auditEvents[0].reason, "Prise en charge magasin confirmée");
+});
+
+test("REVIEW2.S3: Server RPC: Duplicate STORE_ACK is rejected with STORE_ACK_ALREADY_RECORDED (zero mutation)", () => {
+  const ackTimestamp = "2026-09-17T10:00:00Z";
+  const initialRemoval = {
+    id: "rem-s3",
+    status: "AUTORISE_A_PRELEVER",
+    version: 4,
+    store_ack_at: ackTimestamp,
+    store_ack_by: "mag-1",
+    removed_at: null,
+  };
+  const initialAuditEvents = [{ id: "ev-ack-1", action: "STORE_ACK", created_at: ackTimestamp }];
+
+  const res = simulateRpcAction({
+    action: "STORE_ACK",
+    callerRole: "responsable_magasin",
+    callerId: "mag-2",
+    removal: { ...initialRemoval },
+    approvals: [],
+    auditEvents: [...initialAuditEvents],
+    payload: { reason: "Second ack attempt" },
+  });
+
+  assert.strictEqual(res.ok, false);
+  assert.strictEqual(res.success, false);
+  assert.strictEqual(res.code, "STORE_ACK_ALREADY_RECORDED");
+
+  // Zero mutation proof
+  assert.strictEqual(res.removal.status, initialRemoval.status, "Status must remain AUTORISE_A_PRELEVER");
+  assert.strictEqual(res.removal.version, initialRemoval.version, "Version must remain unchanged");
+  assert.strictEqual(res.removal.store_ack_at, ackTimestamp, "store_ack_at must remain original timestamp");
+  assert.strictEqual(res.removal.store_ack_by, "mag-1", "store_ack_by must remain original actor");
+  assert.strictEqual(res.removal.removed_at, null, "removed_at must remain null");
+  assert.strictEqual(res.auditEvents.length, initialAuditEvents.length, "No duplicate audit event created");
+});
+
+test("REVIEW2.S4: Server RPC: STORE_ACK on PRELEVE_EN_ATTENTE_PIECE is rejected with INVALID_STATUS_FOR_STORE_ACK", () => {
+  const initialRemoval = {
+    id: "rem-s4",
+    status: "PRELEVE_EN_ATTENTE_PIECE",
+    version: 5,
+    store_ack_at: null,
+  };
+  const res = simulateRpcAction({
+    action: "STORE_ACK",
+    callerRole: "responsable_magasin",
+    callerId: "mag-1",
+    removal: { ...initialRemoval },
+    approvals: [],
+    auditEvents: [],
+  });
+
+  assert.strictEqual(res.ok, false);
+  assert.strictEqual(res.success, false);
+  assert.strictEqual(res.code, "INVALID_STATUS_FOR_STORE_ACK");
+});
+
+test("REVIEW2.S5: Server RPC: STORE_ACK valid then CONFIRM_REMOVAL succeeds and transitions to PRELEVE_EN_ATTENTE_PIECE", () => {
+  const initialRemoval = {
+    id: "rem-s5",
+    status: "AUTORISE_A_PRELEVER",
+    version: 3,
+    store_ack_at: null,
+    removed_at: null,
+  };
+
+  // 1. STORE_ACK
+  const ackRes = simulateRpcAction({
+    action: "STORE_ACK",
+    callerRole: "responsable_magasin",
+    callerId: "mag-1",
+    removal: { ...initialRemoval },
+    approvals: [],
+    auditEvents: [],
+  });
+  assert.strictEqual(ackRes.ok, true);
+  assert.strictEqual(ackRes.removal.status, "AUTORISE_A_PRELEVER");
+  assert.ok(ackRes.removal.store_ack_at);
+
+  // 2. CONFIRM_REMOVAL
+  const removalRes = simulateRpcAction({
+    action: "CONFIRM_REMOVAL",
+    callerRole: "chef_atelier",
+    callerId: "chef-1",
+    removal: ackRes.removal,
+    approvals: [],
+    auditEvents: ackRes.auditEvents,
+    payload: { reason: "Pièce prélevée sur véhicule donneur" },
+  });
+  assert.strictEqual(removalRes.ok, true);
+  assert.strictEqual(removalRes.success, true);
+  assert.strictEqual(removalRes.removal.status, "PRELEVE_EN_ATTENTE_PIECE");
+  assert.ok(removalRes.removal.removed_at);
+  assert.strictEqual(removalRes.removal.version, 5);
+  assert.strictEqual(removalRes.auditEvents.length, 2);
+  assert.strictEqual(removalRes.auditEvents[1].action, "CONFIRM_REMOVAL");
+  assert.strictEqual(removalRes.auditEvents[1].new_status, "PRELEVE_EN_ATTENTE_PIECE");
 });

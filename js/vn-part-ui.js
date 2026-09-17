@@ -196,10 +196,11 @@
         if (normWorkshop && item.workshop_id && String(item.workshop_id).trim() !== normWorkshop) {
           continue;
         }
-        const normVin = normalizeDonorVin(item.donor_vin);
-        if (!normVin || !/^[A-HJ-NPR-Z0-9]{17}$/.test(normVin)) {
+        const vinValidation = validateDonorVin(item.donor_vin);
+        if (!vinValidation.ok) {
           continue;
         }
+        const normVin = vinValidation.normalizedVin;
         const rawModel = String(item.donor_model || "").trim();
         if (!rawModel) continue;
 
@@ -240,11 +241,11 @@
 
     const originalGet = lookup.get.bind(lookup);
     lookup.get = function (vin) {
-      const normVin = normalizeDonorVin(vin);
-      if (!normVin || !/^[A-HJ-NPR-Z0-9]{17}$/.test(normVin)) {
+      const vinValidation = validateDonorVin(vin);
+      if (!vinValidation.ok) {
         return { status: "none", model: null };
       }
-      return originalGet(normVin) || { status: "none", model: null };
+      return originalGet(vinValidation.normalizedVin) || { status: "none", model: null };
     };
 
     return lookup;

@@ -1698,3 +1698,275 @@ test("P6.12: Workshop scoping: Models from another workshop are strictly exclude
     "Cross-workshop VIN model suggestion must be strictly blocked"
   );
 });
+
+// ============================================================================
+// LOT P6.1 — PARITÉ VIN, MANUAL OVERRIDE & SÉCURITÉ DE SUGGESTION
+// ============================================================================
+
+test("P6.13: VIN validation and lookup parity across raw, lowercase, whitespace, invalid chars, length", () => {
+  const testVin = "VF1KNWN1111111111";
+  const lookup = vnPartUi.buildKnownDonorModelLookup({
+    removals: [
+      { donor_vin: testVin, donor_model: "DFSK Glory 580", workshop_id: "ws-1" },
+    ],
+    donors: [],
+    workshopId: "ws-1",
+  });
+
+  const cases = [
+    { vin: "VF1KNWN1111111111", valid: true, desc: "Standard valid VIN" },
+    { vin: "  vf1knwn1111111111  ", valid: true, desc: "Valid VIN lowercase with whitespace" },
+    { vin: "VF1SHORT12345", valid: false, desc: "VIN < 17 characters" },
+    { vin: "VF1LONG1234567890123", valid: false, desc: "VIN > 17 characters" },
+    { vin: "VF1WITHI111111111", valid: false, desc: "VIN containing forbidden letter I" },
+    { vin: "VF1WITHO111111111", valid: false, desc: "VIN containing forbidden letter O" },
+    { vin: "VF1WITHQ111111111", valid: false, desc: "VIN containing forbidden letter Q" },
+    { vin: "VF1INVALID!!!1111", valid: false, desc: "VIN containing special characters" },
+    { vin: "", valid: false, desc: "Empty string" },
+    { vin: "   ", valid: false, desc: "Whitespace only" },
+    { vin: null, valid: false, desc: "null" },
+    { vin: undefined, valid: false, desc: "undefined" },
+  ];
+
+  for (const c of cases) {
+    const vinValidation = vnPartUi.validateDonorVin(c.vin);
+    const lookupRes = lookup.get(c.vin);
+
+    if (c.valid) {
+      assert.strictEqual(vinValidation.ok, true, `validateDonorVin must accept: ${c.desc}`);
+      assert.strictEqual(lookupRes.status, "unique", `lookup.get must recognize: ${c.desc}`);
+      assert.strictEqual(lookupRes.model, "DFSK Glory 580");
+    } else {
+      assert.strictEqual(vinValidation.ok, false, `validateDonorVin must reject: ${c.desc}`);
+      assert.strictEqual(lookupRes.status, "none", `lookup.get must return none for: ${c.desc}`);
+      assert.strictEqual(lookupRes.model, null);
+    }
+  }
+});
+
+function createMockDomEnvironment() {
+  const elements = new Map();
+  function getOrCreate(id, tag = "div") {
+    if (!elements.has(id)) {
+      const el = {
+        id,
+        tagName: tag.toUpperCase(),
+        value: "",
+        textContent: "",
+        innerHTML: "",
+        style: {},
+        dataset: {},
+        _listeners: {},
+        addEventListener(event, fn) {
+          if (!this._listeners[event]) this._listeners[event] = [];
+          this._listeners[event].push(fn);
+        },
+        dispatchEvent(event) {
+          const type = typeof event === "string" ? event : event.type;
+          for (const fn of this._listeners[type] || []) fn(event);
+        },
+        querySelector: () => null,
+        querySelectorAll: () => [],
+        focus: () => {},
+      };
+      elements.set(id, el);
+    }
+    return elements.get(id);
+  }
+
+  const host = getOrCreate("vn-part-modals-host");
+  const donorVinInput = getOrCreate("vn-action-donor-vin", "input");
+  const donorModelInput = getOrCreate("vn-action-donor-model", "input");
+  const previewContainer = getOrCreate("vn-action-donor-preview", "div");
+  const modelHintEl = getOrCreate("vn-action-donor-model-hint", "div");
+  const errorEl = getOrCreate("vn-part-action-error", "div");
+  const submitBtn = getOrCreate("vn-part-action-submit", "button");
+  const formEl = getOrCreate("vn-part-action-form", "form");
+
+  formEl.donor_model = donorModelInput;
+  formEl.donor_vin = donorVinInput;
+
+  const originalDoc = globalThis.document;
+  const originalIdentity = globalThis.resolveVnPartMutationIdentity;
+  const originalApply = globalThis.applyVnPartAction;
+  const originalClientResolver = vnPartClient.resolveVnPartMutationIdentity;
+
+  vnPartClient.resolveVnPartMutationIdentity = () => ({
+    ok: true,
+    role: "responsable_qualite_parc_vn",
+    workshopId: "ws-1",
+    authUserId: "user-test",
+  });
+
+  globalThis.document = {
+    getElementById: (id) => getOrCreate(id),
+    querySelector: () => null,
+    querySelectorAll: () => [],
+  };
+
+  return {
+    host,
+    donorVinInput,
+    donorModelInput,
+    previewContainer,
+    modelHintEl,
+    errorEl,
+    submitBtn,
+    formEl,
+    cleanup: () => {
+      globalThis.document = originalDoc;
+      globalThis.resolveVnPartMutationIdentity = originalIdentity;
+      globalThis.applyVnPartAction = originalApply;
+      vnPartClient.resolveVnPartMutationIdentity = originalClientResolver;
+    },
+  };
+}
+
+test("P6.14: Manual override: user correction 'Modèle corrigé' overrides auto-fill and is submitted in payload", async () => {
+  const dom = createMockDomEnvironment();
+  try {
+    const removal = {
+      id: "rem-test-p6-14",
+      version: 1,
+      beneficiary_vin: "VF1BENEF111111111",
+      donor_vin: "",
+      donor_model: "",
+    };
+
+    vnPartUi.vnPartEphemeralState.removals = [
+      removal,
+      {
+        id: "rem-hist-1",
+        donor_vin: "VF1KNWN1111111111",
+        donor_model: "DFSK Glory 580",
+        workshop_id: "ws-1",
+      },
+    ];
+
+    vnPartUi.openActionModal(removal.id, "REVISE_DONOR");
+
+    // 1. Enter known VIN -> auto-fills DFSK Glory 580
+    dom.donorVinInput.value = "VF1KNWN1111111111";
+    dom.donorVinInput.dispatchEvent("input");
+    assert.strictEqual(dom.donorModelInput.value, "DFSK Glory 580");
+    assert.strictEqual(dom.donorModelInput.dataset.autoFilledForVin, "VF1KNWN1111111111");
+
+    // 2. User replaces model with "Modèle corrigé"
+    dom.donorModelInput.value = "Modèle corrigé";
+    dom.donorModelInput.dispatchEvent("input");
+    assert.strictEqual(dom.donorModelInput.value, "Modèle corrigé");
+    assert.strictEqual(dom.donorModelInput.dataset.autoFilledForVin, undefined);
+    assert.strictEqual(dom.modelHintEl.textContent, "");
+
+    // 3. Submit form -> verify payload contains user correction
+    let capturedPayload = null;
+    globalThis.applyVnPartAction = async (id, ver, act, payload) => {
+      capturedPayload = payload;
+      return { ok: true };
+    };
+
+    dom.formEl.dataset.removalId = removal.id;
+    dom.formEl.dataset.action = "REVISE_DONOR";
+    dom.formEl.dataset.version = "1";
+
+    const submitRes = await vnPartUi.handleActionSubmit(dom.formEl);
+    assert.strictEqual(submitRes.ok, true, "Form submission must succeed");
+    assert.ok(capturedPayload, "applyVnPartAction must have been invoked with payload");
+    assert.strictEqual(capturedPayload.donor_model, "Modèle corrigé", "Submitted payload must contain user's manual correction");
+    assert.strictEqual(capturedPayload.donor_vin, "VF1KNWN1111111111");
+  } finally {
+    dom.cleanup();
+  }
+});
+
+test("P6.15: Stale suggestion: changing VIN from known to unknown clears auto-filled model and hint", () => {
+  const dom = createMockDomEnvironment();
+  try {
+    const removal = {
+      id: "rem-test-p6-15",
+      version: 1,
+      beneficiary_vin: "VF1BENEF111111111",
+    };
+
+    vnPartUi.vnPartEphemeralState.removals = [
+      removal,
+      {
+        id: "rem-hist-1",
+        donor_vin: "VF1KNWN1111111111",
+        donor_model: "DFSK Glory 580",
+        workshop_id: "ws-1",
+      },
+    ];
+
+    vnPartUi.openActionModal(removal.id, "REVISE_DONOR");
+
+    // 1. Enter known VIN -> auto-fills DFSK Glory 580
+    dom.donorVinInput.value = "VF1KNWN1111111111";
+    dom.donorVinInput.dispatchEvent("input");
+    assert.strictEqual(dom.donorModelInput.value, "DFSK Glory 580");
+    assert.match(dom.modelHintEl.textContent, /Modèle repris de l'historique/);
+
+    // 2. Replace known VIN with unknown VIN
+    dom.donorVinInput.value = "VF1UNKNWN22222222";
+    dom.donorVinInput.dispatchEvent("input");
+
+    // 3. Verify auto-fill is cleared and form reverts to clean manual state
+    assert.strictEqual(dom.donorModelInput.value, "", "Model field must be cleared when VIN changes to unknown");
+    assert.strictEqual(dom.donorModelInput.dataset.autoFilledForVin, undefined, "Auto-filled state must be cleared");
+    assert.strictEqual(dom.modelHintEl.textContent, "", "Model hint must be cleared");
+    assert.strictEqual(dom.modelHintEl.style.display, "none", "Model hint must be hidden");
+  } finally {
+    dom.cleanup();
+  }
+});
+
+test("P6.16: Consecutive VIN transitions: known A -> known B updates suggestion unless user manually edited field", () => {
+  const dom = createMockDomEnvironment();
+  try {
+    const removal = {
+      id: "rem-test-p6-16",
+      version: 1,
+      beneficiary_vin: "VF1BENEF111111111",
+    };
+
+    vnPartUi.vnPartEphemeralState.removals = [
+      removal,
+      {
+        id: "rem-hist-A",
+        donor_vin: "VF1KNWNA111111111",
+        donor_model: "DFSK Glory 580",
+        workshop_id: "ws-1",
+      },
+      {
+        id: "rem-hist-B",
+        donor_vin: "VF1KNWNB222222222",
+        donor_model: "DongFeng Shine",
+        workshop_id: "ws-1",
+      },
+    ];
+
+    vnPartUi.openActionModal(removal.id, "REVISE_DONOR");
+
+    // 1. Enter VIN A -> suggestion Modèle A
+    dom.donorVinInput.value = "VF1KNWNA111111111";
+    dom.donorVinInput.dispatchEvent("input");
+    assert.strictEqual(dom.donorModelInput.value, "DFSK Glory 580");
+
+    // 2. Change directly to VIN B -> suggestion updates automatically to Modèle B
+    dom.donorVinInput.value = "VF1KNWNB222222222";
+    dom.donorVinInput.dispatchEvent("input");
+    assert.strictEqual(dom.donorModelInput.value, "DongFeng Shine");
+    assert.strictEqual(dom.donorModelInput.dataset.autoFilledForVin, "VF1KNWNB222222222");
+
+    // 3. User manually types custom model
+    dom.donorModelInput.value = "Modèle Personnalisé Client";
+    dom.donorModelInput.dispatchEvent("input");
+
+    // 4. Change VIN back to VIN A -> user manual input must NOT be overwritten!
+    dom.donorVinInput.value = "VF1KNWNA111111111";
+    dom.donorVinInput.dispatchEvent("input");
+    assert.strictEqual(dom.donorModelInput.value, "Modèle Personnalisé Client", "Manual user edit must never be overridden by subsequent VIN changes");
+  } finally {
+    dom.cleanup();
+  }
+});

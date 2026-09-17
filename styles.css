@@ -9498,6 +9498,13 @@ select:focus {
   font-weight: 550;
 }
 
+.vn-part-form-hint {
+  font-size: 0.78rem;
+  color: var(--muted, #64748b);
+  margin-top: 2px;
+}
+
+
 .vn-part-action-prompt {
   font-size: 0.92rem;
   color: var(--ink, #1e293b);

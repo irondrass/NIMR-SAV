@@ -155,6 +155,103 @@
   }
 
   /**
+   * Build a lookup of known donor models by donor VIN for a given workshop.
+   * Scans ephemeral removals and donor views already loaded in memory.
+   *
+   * Business Rules (Lot P6):
+   * 1. Workshop-scoped only: records from other workshops are strictly excluded.
+   * 2. Uses canonical VIN normalization (trimmed uppercase).
+   * 3. Requires valid 17-character VIN; partial VINs yield { status: "none", model: null }.
+   * 4. Empty or whitespace-only model strings are ignored.
+   * 5. If 1 distinct model is found -> { status: "unique", model: string }.
+   * 6. If multiple distinct models are found -> { status: "conflict", model: null }.
+   * 7. If no non-empty model is found -> { status: "none", model: null }.
+   *
+   * @param {Object|Array} arg1 - Either { removals, donors, workshopId } or removals array
+   * @param {Array} [arg2] - donors array (if positional)
+   * @param {string} [arg3] - workshopId (if positional)
+   * @returns {Map<string, { status: 'unique'|'conflict'|'none', model: string|null }> & { get: (vin: string) => { status: string, model: string|null } }}
+   */
+  function buildKnownDonorModelLookup(arg1, arg2, arg3) {
+    let removals = [];
+    let donors = [];
+    let workshopId = null;
+
+    if (arg1 && typeof arg1 === "object" && !Array.isArray(arg1)) {
+      removals = arg1.removals || [];
+      donors = arg1.donors || [];
+      workshopId = arg1.workshopId || null;
+    } else {
+      removals = arg1 || [];
+      donors = arg2 || [];
+      workshopId = arg3 || null;
+    }
+
+    const normWorkshop = workshopId ? String(workshopId).trim() : null;
+    const vinModelsMap = new Map();
+
+    function collect(list) {
+      for (const item of list || []) {
+        if (!item) continue;
+        if (normWorkshop && item.workshop_id && String(item.workshop_id).trim() !== normWorkshop) {
+          continue;
+        }
+        const normVin = normalizeDonorVin(item.donor_vin);
+        if (!normVin || !/^[A-HJ-NPR-Z0-9]{17}$/.test(normVin)) {
+          continue;
+        }
+        const rawModel = String(item.donor_model || "").trim();
+        if (!rawModel) continue;
+
+        if (!vinModelsMap.has(normVin)) {
+          vinModelsMap.set(normVin, {
+            modelKeys: new Set(),
+            modelCasing: new Map(),
+          });
+        }
+        const entry = vinModelsMap.get(normVin);
+        const lowerKey = rawModel.toLowerCase();
+        if (!entry.modelCasing.has(lowerKey)) {
+          entry.modelCasing.set(lowerKey, rawModel);
+        }
+        entry.modelKeys.add(lowerKey);
+      }
+    }
+
+    collect(removals);
+    collect(donors);
+
+    const lookup = new Map();
+
+    for (const [vin, entry] of vinModelsMap.entries()) {
+      if (entry.modelKeys.size === 1) {
+        const key = Array.from(entry.modelKeys)[0];
+        lookup.set(vin, {
+          status: "unique",
+          model: entry.modelCasing.get(key),
+        });
+      } else if (entry.modelKeys.size > 1) {
+        lookup.set(vin, {
+          status: "conflict",
+          model: null,
+        });
+      }
+    }
+
+    const originalGet = lookup.get.bind(lookup);
+    lookup.get = function (vin) {
+      const normVin = normalizeDonorVin(vin);
+      if (!normVin || !/^[A-HJ-NPR-Z0-9]{17}$/.test(normVin)) {
+        return { status: "none", model: null };
+      }
+      return originalGet(normVin) || { status: "none", model: null };
+    };
+
+    return lookup;
+  }
+
+
+  /**
    * Return today's local calendar date as YYYY-MM-DD.
    * Calendar calculations are then performed in UTC to avoid DST/timezone drift.
    */
@@ -1244,7 +1341,7 @@
    * Helper to determine available UI mutation actions for a given removal row and identity.
    * NOTE: This controls UI visibility only. The server remains final authority.
    */
-  function getAvailableVnPartActions(removal, approvals = [], identity = null) {
+  function getAvailableVnPartActions(removal, approvals = [], identity = null, options = {}) {
     if (!removal || !removal.id) return [];
     if (!identity || !identity.ok) return [];
 
@@ -1346,7 +1443,11 @@
       status === "PRELEVE_EN_ATTENTE_PIECE" &&
       ["responsable_magasin", "directeur_pieces"].includes(role)
     ) {
-      actions.push("MARK_REPLACEMENT_AVAILABLE");
+      // P6 UX Deduplication: Section C is the primary operational queue for Responsable Magasin.
+      // In Section B (donor detail), Responsable Magasin sees consultation/status only.
+      if (!(options && options.surface === "section_b" && role === "responsable_magasin")) {
+        actions.push("MARK_REPLACEMENT_AVAILABLE");
+      }
     }
 
     // CONFIRM_RESTITUTION
@@ -1637,7 +1738,8 @@
         const availableActions = getAvailableVnPartActions(
           rem,
           vnPartEphemeralState.approvals,
-          identity
+          identity,
+          { surface: "section_c" }
         ).filter((action) =>
           ["REVISE_ETA", "MARK_REPLACEMENT_AVAILABLE"].includes(action)
         );
@@ -2381,7 +2483,7 @@
               }
 
               const approvalStripHtml = renderApprovalStrip(rem, approvalLookup);
-              const availableActions = getAvailableVnPartActions(rem, vnPartEphemeralState.approvals, identity);
+              const availableActions = getAvailableVnPartActions(rem, vnPartEphemeralState.approvals, identity, { surface: "section_b" });
               const actionsHtml = renderRemovalActionButtons(rem, availableActions, vnPartEphemeralState.mutationInProgress);
 
               html += `
@@ -2718,6 +2820,7 @@
           <div class="vn-part-form-row">
             <label for="vn-action-donor-model">Modèle véhicule donneur <span class="required">*</span></label>
             <input type="text" id="vn-action-donor-model" name="donor_model" required placeholder="Saisir le modèle">
+            <div id="vn-action-donor-model-hint" class="vn-part-form-hint" style="display:none;"></div>
           </div>
           <div class="vn-part-form-row">
             <label for="vn-action-donor-vin">N° Châssis / VIN véhicule donneur <span class="required">*</span></label>
@@ -2757,6 +2860,7 @@
         <div class="vn-part-form-row">
           <label for="vn-action-donor-model">Modèle véhicule donneur <span class="required">*</span></label>
           <input type="text" id="vn-action-donor-model" name="donor_model" required value="${escapeHtml(removal.donor_model || "")}">
+          <div id="vn-action-donor-model-hint" class="vn-part-form-hint" style="display:none;"></div>
         </div>
         <div class="vn-part-form-row">
           <label for="vn-action-donor-vin">N° Châssis / VIN véhicule donneur <span class="required">*</span></label>
@@ -2844,9 +2948,11 @@
       });
     }
 
-    // Live preview for donor VIN collisions & restoration ETA
+    // Live preview for donor VIN collisions & restoration ETA + model suggestion
     const donorVinInput = document.getElementById("vn-action-donor-vin");
+    const donorModelInput = document.getElementById("vn-action-donor-model");
     const previewContainer = document.getElementById("vn-action-donor-preview");
+    const modelHintEl = document.getElementById("vn-action-donor-model-hint");
 
     function updateDonorVinPreview() {
       if (!donorVinInput || !previewContainer) return;
@@ -2855,6 +2961,61 @@
 
       if (donorVinInput.value !== normVin) {
         donorVinInput.value = normVin;
+      }
+
+      // P6: Controlled historical donor model suggestion
+      if (donorModelInput) {
+        // Clear previous auto-fill if the VIN has changed
+        if (
+          donorModelInput.dataset.autoFilledForVin &&
+          donorModelInput.dataset.autoFilledForVin !== normVin
+        ) {
+          if (donorModelInput.value === donorModelInput.dataset.autoFilledValue) {
+            donorModelInput.value = "";
+          }
+          delete donorModelInput.dataset.autoFilledForVin;
+          delete donorModelInput.dataset.autoFilledValue;
+          if (modelHintEl) {
+            modelHintEl.textContent = "";
+            modelHintEl.style.display = "none";
+          }
+        }
+
+        if (normVin && validation.ok) {
+          const modelLookup = buildKnownDonorModelLookup({
+            removals: vnPartEphemeralState.removals,
+            donors: vnPartEphemeralState.donors,
+            workshopId: identity ? identity.workshopId : null,
+          });
+          const match = modelLookup.get(normVin);
+
+          if (match.status === "unique" && match.model) {
+            if (!donorModelInput.value || donorModelInput.dataset.autoFilledForVin) {
+              donorModelInput.value = match.model;
+              donorModelInput.dataset.autoFilledForVin = normVin;
+              donorModelInput.dataset.autoFilledValue = match.model;
+            }
+            if (modelHintEl) {
+              modelHintEl.textContent = "Modèle repris de l'historique de ce VIN (modifiable)";
+              modelHintEl.style.display = "block";
+            }
+          } else if (match.status === "conflict") {
+            if (modelHintEl) {
+              modelHintEl.textContent = "Plusieurs modèles historiques trouvés — vérifier manuellement";
+              modelHintEl.style.display = "block";
+            }
+          } else {
+            if (modelHintEl) {
+              modelHintEl.textContent = "";
+              modelHintEl.style.display = "none";
+            }
+          }
+        } else {
+          if (modelHintEl) {
+            modelHintEl.textContent = "";
+            modelHintEl.style.display = "none";
+          }
+        }
       }
 
       if (!normVin || !validation.ok) {
@@ -2959,6 +3120,17 @@
       if (donorVinInput.value) {
         updateDonorVinPreview();
       }
+    }
+
+    if (donorModelInput) {
+      donorModelInput.addEventListener("input", () => {
+        delete donorModelInput.dataset.autoFilledForVin;
+        delete donorModelInput.dataset.autoFilledValue;
+        if (modelHintEl) {
+          modelHintEl.textContent = "";
+          modelHintEl.style.display = "none";
+        }
+      });
     }
 
     // Auto-focus first input
@@ -3306,6 +3478,7 @@
     renderApprovalStrip,
     normalizeDonorVin,
     validateDonorVin,
+    buildKnownDonorModelLookup,
     classifyEtaTracking,
     computeEtaTrackingSummary,
     filterEtaTrackingRows,

@@ -1504,3 +1504,197 @@ test("P5.8: Invariance & Non-regression: Excel export workbook logic is unaltere
   const filename = vnPartUi.generateVnPartExportFilename();
   assert.match(filename, /^Etat_prelevements_\d{4}-\d{2}-\d{2}_\d{4}\.xlsx$/);
 });
+
+// ============================================================================
+// LOT P6 — ASSISTANCE VIN DONNEUR & DÉDUPLICATION UX ACTION DISPONIBILITÉ
+// ============================================================================
+
+test("P6.1: buildKnownDonorModelLookup with unknown VIN yields { status: 'none', model: null }", () => {
+  assert.strictEqual(typeof vnPartUi.buildKnownDonorModelLookup, "function");
+  const lookup = vnPartUi.buildKnownDonorModelLookup({
+    removals: [{ donor_vin: "VF1KNWN1111111111", donor_model: "DFSK Glory 580", workshop_id: "ws-1" }],
+    donors: [],
+    workshopId: "ws-1",
+  });
+  const res = lookup.get("VF1UNKNWN22222222");
+  assert.deepStrictEqual(res, { status: "none", model: null });
+});
+
+test("P6.2: buildKnownDonorModelLookup with exact known VIN + unique model yields { status: 'unique', model }", () => {
+  const lookup = vnPartUi.buildKnownDonorModelLookup({
+    removals: [
+      { donor_vin: "VF1KNWN1111111111", donor_model: "DFSK Glory 580", workshop_id: "ws-1" },
+    ],
+    donors: [
+      { donor_vin: "VF1KNWN1111111111", donor_model: "DFSK Glory 580", workshop_id: "ws-1" },
+    ],
+    workshopId: "ws-1",
+  });
+  const res = lookup.get("VF1KNWN1111111111");
+  assert.strictEqual(res.status, "unique");
+  assert.strictEqual(res.model, "DFSK Glory 580");
+});
+
+test("P6.3: Pre-filled model remains fully editable and never readonly", () => {
+  const freshUiJs = fs.readFileSync(uiJsPath, "utf8");
+  assert.match(
+    freshUiJs,
+    /<input type="text" id="vn-action-donor-model" name="donor_model" required placeholder="Saisir le modèle">/
+  );
+  assert.doesNotMatch(
+    freshUiJs,
+    /<input[^>]*id="vn-action-donor-model"[^>]*readonly/i
+  );
+});
+
+test("P6.4: Historical records with empty or whitespace model yield { status: 'none', model: null }", () => {
+  const lookup = vnPartUi.buildKnownDonorModelLookup({
+    removals: [
+      { donor_vin: "VF1EMPTY111111111", donor_model: "", workshop_id: "ws-1" },
+      { donor_vin: "VF1EMPTY111111111", donor_model: "   ", workshop_id: "ws-1" },
+      { donor_vin: "VF1EMPTY111111111", donor_model: null, workshop_id: "ws-1" },
+    ],
+    donors: [],
+    workshopId: "ws-1",
+  });
+  const res = lookup.get("VF1EMPTY111111111");
+  assert.deepStrictEqual(res, { status: "none", model: null });
+});
+
+test("P6.5: Multiple historical occurrences of identical model yield consistent unique suggestion", () => {
+  const lookup = vnPartUi.buildKnownDonorModelLookup({
+    removals: [
+      { donor_vin: "VF1MULTX111111111", donor_model: "DongFeng Shine", workshop_id: "ws-1" },
+      { donor_vin: "VF1MULTX111111111", donor_model: " DongFeng Shine ", workshop_id: "ws-1" },
+      { donor_vin: "VF1MULTX111111111", donor_model: "dongfeng shine", workshop_id: "ws-1" },
+    ],
+    donors: [
+      { donor_vin: "VF1MULTX111111111", donor_model: "DongFeng Shine", workshop_id: "ws-1" },
+    ],
+    workshopId: "ws-1",
+  });
+  const res = lookup.get("VF1MULTX111111111");
+  assert.strictEqual(res.status, "unique");
+  assert.match(res.model.toLowerCase(), /dongfeng shine/);
+});
+
+test("P6.6: Contradictory historical models for same VIN yield { status: 'conflict', model: null } without arbitrary choice", () => {
+  const lookup = vnPartUi.buildKnownDonorModelLookup({
+    removals: [
+      { donor_vin: "VF1CNFLCT11111111", donor_model: "DFSK Glory 580", workshop_id: "ws-1" },
+      { donor_vin: "VF1CNFLCT11111111", donor_model: "DongFeng Shine", workshop_id: "ws-1" },
+    ],
+    donors: [],
+    workshopId: "ws-1",
+  });
+  const res = lookup.get("VF1CNFLCT11111111");
+  assert.deepStrictEqual(res, { status: "conflict", model: null });
+});
+
+test("P6.7: Partial or invalid VIN never triggers model suggestion", () => {
+  const lookup = vnPartUi.buildKnownDonorModelLookup({
+    removals: [
+      { donor_vin: "VF1KNWN1111111111", donor_model: "DFSK Glory 580", workshop_id: "ws-1" },
+    ],
+    donors: [],
+    workshopId: "ws-1",
+  });
+  assert.deepStrictEqual(lookup.get("1111"), { status: "none", model: null });
+  assert.deepStrictEqual(lookup.get("VF1KNWN1111111"), { status: "none", model: null });
+  assert.deepStrictEqual(lookup.get(""), { status: "none", model: null });
+  assert.deepStrictEqual(lookup.get(null), { status: "none", model: null });
+});
+
+test("P6.8: Existing donor warning alert 'VIN DONNEUR DÉJÀ ENGAGÉ' remains independent and operational", () => {
+  const freshUiJs = fs.readFileSync(uiJsPath, "utf8");
+  assert.match(
+    freshUiJs,
+    /<strong>⚠️ VIN DONNEUR DÉJÀ ENGAGÉ<\/strong>/,
+    "Alert header must be preserved"
+  );
+  assert.match(
+    freshUiJs,
+    /computeDonorCommitmentSummary\(/,
+    "computeDonorCommitmentSummary must continue to drive collision preview"
+  );
+});
+
+test("P6.9: Responsable Magasin: MARK_REPLACEMENT_AVAILABLE is NOT offered in Section B (détail VN)", () => {
+  const removal = {
+    id: "rem-test-mag",
+    status: "PRELEVE_EN_ATTENTE_PIECE",
+    removed_at: "2026-09-10T10:00:00Z",
+    restored_at: null,
+    replacement_available_at: null,
+  };
+  const magIdentity = { ok: true, role: "responsable_magasin", workshopId: "ws-1" };
+
+  const actionsSectionB = vnPartUi.getAvailableVnPartActions(removal, [], magIdentity, { surface: "section_b" });
+  assert.strictEqual(
+    actionsSectionB.includes("MARK_REPLACEMENT_AVAILABLE"),
+    false,
+    "Responsable Magasin must NOT see MARK_REPLACEMENT_AVAILABLE in Section B (détail)"
+  );
+});
+
+test("P6.10: Responsable Magasin: MARK_REPLACEMENT_AVAILABLE remains primary operational action in Section C (Échéances)", () => {
+  const removal = {
+    id: "rem-test-mag",
+    status: "PRELEVE_EN_ATTENTE_PIECE",
+    removed_at: "2026-09-10T10:00:00Z",
+    restored_at: null,
+    replacement_available_at: null,
+  };
+  const magIdentity = { ok: true, role: "responsable_magasin", workshopId: "ws-1" };
+
+  const actionsSectionC = vnPartUi.getAvailableVnPartActions(removal, [], magIdentity, { surface: "section_c" });
+  assert.ok(
+    actionsSectionC.includes("MARK_REPLACEMENT_AVAILABLE"),
+    "Responsable Magasin MUST have MARK_REPLACEMENT_AVAILABLE in Section C (Échéances)"
+  );
+
+  const defaultActions = vnPartUi.getAvailableVnPartActions(removal, [], magIdentity);
+  assert.ok(
+    defaultActions.includes("MARK_REPLACEMENT_AVAILABLE"),
+    "Default RBAC query must retain MARK_REPLACEMENT_AVAILABLE"
+  );
+});
+
+test("P6.11: Direction Pièces retains valid operational pathway to MARK_REPLACEMENT_AVAILABLE", () => {
+  const removal = {
+    id: "rem-test-pieces",
+    status: "PRELEVE_EN_ATTENTE_PIECE",
+    removed_at: "2026-09-10T10:00:00Z",
+    restored_at: null,
+    replacement_available_at: null,
+  };
+  const dpIdentity = { ok: true, role: "directeur_pieces", workshopId: "ws-1" };
+
+  const actionsB = vnPartUi.getAvailableVnPartActions(removal, [], dpIdentity, { surface: "section_b" });
+  assert.ok(
+    actionsB.includes("MARK_REPLACEMENT_AVAILABLE"),
+    "Direction Pièces must retain MARK_REPLACEMENT_AVAILABLE in Section B"
+  );
+
+  const actionsC = vnPartUi.getAvailableVnPartActions(removal, [], dpIdentity, { surface: "section_c" });
+  assert.ok(
+    actionsC.includes("MARK_REPLACEMENT_AVAILABLE"),
+    "Direction Pièces must retain MARK_REPLACEMENT_AVAILABLE in Section C"
+  );
+});
+
+test("P6.12: Workshop scoping: Models from another workshop are strictly excluded from suggestion", () => {
+  const lookup = vnPartUi.buildKnownDonorModelLookup({
+    removals: [
+      { donor_vin: "VF1AUTR1111111111", donor_model: "DFSK Glory 580", workshop_id: "other-workshop" },
+    ],
+    donors: [],
+    workshopId: "current-workshop",
+  });
+  const res = lookup.get("VF1AUTR1111111111");
+  assert.deepStrictEqual(
+    res,
+    { status: "none", model: null },
+    "Cross-workshop VIN model suggestion must be strictly blocked"
+  );
+});

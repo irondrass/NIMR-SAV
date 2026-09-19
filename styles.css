@@ -8468,6 +8468,130 @@ select:focus {
 .customer-request-panel [data-request-feedback] { grid-column: 1 / -1; padding: 10px; border-left: 3px solid #a12a25; color: #8f201c; background: #fff3f1; }
 
 /* ==========================================================================
+   RECEPTION R2 — Client Cockpit, Phone Links & Operational Modal Hierarchy
+   ========================================================================== */
+.client-phone-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #0284c7;
+  text-decoration: none;
+  font-weight: 600;
+  border-radius: 4px;
+  min-height: 24px;
+}
+
+.client-phone-link:hover {
+  text-decoration: underline;
+  color: #0369a1;
+}
+
+.client-phone-link:focus-visible {
+  outline: 2px solid #0284c7;
+  outline-offset: 2px;
+}
+
+.client-phone-empty {
+  font-style: italic;
+  font-size: 0.85rem;
+}
+
+.cockpit-client-name {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.cockpit-client-phone {
+  margin-top: 2px;
+}
+
+.cockpit-vehicle-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.client-vehicle-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  padding: 14px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+
+.client-info-block, .vehicle-info-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.client-info-block .info-label, .vehicle-info-block .info-label {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #64748b;
+}
+
+.client-info-block .info-value, .vehicle-info-block .info-value {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.vehicle-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.client-situation-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 0.82rem;
+  color: #334155;
+  margin-top: 4px;
+}
+
+.client-situation-badges span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #f1f5f9;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid #e2e8f0;
+}
+
+.operational-case-section {
+  margin-bottom: 14px;
+}
+
+.operational-case-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid #e2e8f0;
+}
+
+@media (max-width: 640px) {
+  .client-vehicle-summary-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+}
+
+/* ==========================================================================
    VN-PART 003B — Read-Only Operational Dashboard
    ========================================================================== */
 .vn-part-shell {

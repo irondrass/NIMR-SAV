@@ -2568,16 +2568,99 @@ function getPrimaryOperationalException(exceptions, role = getCurrentUser()?.rol
   return exceptions[0];
 }
 
+function normalizeTelHref(phone) {
+  if (!phone || typeof phone !== "string") return "";
+  const trimmed = phone.trim();
+  const hasPlus = trimmed.startsWith("+");
+  const digits = trimmed.replace(/\D/g, "");
+  if (!digits || digits.length < 3) return "";
+  return `tel:${hasPlus ? "+" : ""}${digits}`;
+}
+
+function renderCustomerPhoneLink(phone, className = "client-phone-link") {
+  const telHref = normalizeTelHref(phone);
+  const rawText = typeof phone === "string" ? phone.trim() : "";
+  if (!rawText || !telHref) {
+    return `<span class="client-phone-empty muted">Téléphone non renseigné</span>`;
+  }
+  return `<a href="${escapeAttr(telHref)}" class="${escapeAttr(className)}" aria-label="Appeler ${escapeAttr(rawText)}"><span aria-hidden="true">📞 </span>${escapeHtml(rawText)}</a>`;
+}
+
+function getUserPresentationLabel(user) {
+  if (!user) return "";
+  const name = (typeof user === "object" ? (user.name || user.displayName || user.fullName || user.email || user.id) : String(user)).trim();
+  const rawRole = typeof user === "object" ? user.role : "";
+  let roleLabel = "";
+  if (rawRole) {
+    const canonicalRole = typeof normalizeUserRole === "function" ? normalizeUserRole(rawRole) : rawRole;
+    roleLabel = (typeof CANONICAL_USER_ROLES !== "undefined" && (CANONICAL_USER_ROLES[canonicalRole] || CANONICAL_USER_ROLES[rawRole]))
+      || (typeof USER_ROLES !== "undefined" && USER_ROLES[rawRole])
+      || (typeof ROLE_LABELS !== "undefined" && ROLE_LABELS[rawRole])
+      || rawRole;
+  }
+  return roleLabel ? `${name} — ${roleLabel}` : name;
+}
+
+const clientFollowupDraftsByCaseId = new Map();
+
+function captureClientFollowupDraft(caseId, draft) {
+  if (!caseId || !draft) return;
+  const existing = clientFollowupDraftsByCaseId.get(String(caseId)) || {};
+  const normalized = {
+    ...existing,
+    ...draft,
+    clientCommitment: {
+      ...(existing.clientCommitment || {}),
+      ...(draft.clientCommitment || {}),
+      ...(draft.promisedAt !== undefined ? { promisedAt: draft.promisedAt } : {}),
+      ...(draft.nextContactAt !== undefined ? { nextContactAt: draft.nextContactAt } : {}),
+      ...(draft.note !== undefined ? { note: draft.note } : {}),
+    },
+    exceptionFollowup: {
+      ...(existing.exceptionFollowup || {}),
+      ...(draft.exceptionFollowup || {}),
+      ...(draft.ownerId !== undefined ? { ownerId: draft.ownerId } : {}),
+      ...(draft.dueAt !== undefined ? { dueAt: draft.dueAt } : {}),
+      ...(draft.note !== undefined ? { note: draft.note } : {}),
+    },
+    contacted: draft.contacted !== undefined ? draft.contacted : existing.contacted,
+  };
+  clientFollowupDraftsByCaseId.set(String(caseId), normalized);
+}
+
+function getClientFollowupDraft(caseId) {
+  return clientFollowupDraftsByCaseId.get(String(caseId)) || null;
+}
+
+function clearClientFollowupDraft(caseId) {
+  clientFollowupDraftsByCaseId.delete(String(caseId));
+}
+
+if (typeof window !== "undefined") {
+  window.normalizeTelHref = normalizeTelHref;
+  window.renderCustomerPhoneLink = renderCustomerPhoneLink;
+  window.getUserPresentationLabel = getUserPresentationLabel;
+  window.captureClientFollowupDraft = captureClientFollowupDraft;
+  window.getClientFollowupDraft = getClientFollowupDraft;
+  window.clearClientFollowupDraft = clearClientFollowupDraft;
+}
+
 function renderClientSituation(item) {
+  if (!item) return "";
   const commitment = item.clientCommitment || {};
-  const eta = getWorkshopProgressEta(item);
-  return `<dl class="client-situation">
-    <div><dt>Motif</dt><dd>${escapeHtml(item.visitReason || item.arrivalNotes || item.claims?.[0]?.title || "À préciser")}</dd></div>
-    <div><dt>Disponibilité estimée</dt><dd>${eta ? escapeHtml(formatDateTime(eta)) : "À confirmer"}</dd></div>
-    <div><dt>Promesse client</dt><dd>${commitment.promisedAt ? escapeHtml(formatDateTime(commitment.promisedAt)) : "Aucune heure promise enregistrée"}</dd></div>
-    <div><dt>Prochain contact</dt><dd>${commitment.nextContactAt ? escapeHtml(formatDateTime(commitment.nextContactAt)) : "Non fixé"}</dd></div>
-    ${commitment.note ? `<div><dt>Dernier échange</dt><dd>${escapeHtml(commitment.note)}</dd></div>` : ""}
-  </dl>`;
+  const exception = item.exceptionFollowup || {};
+  const parts = [];
+  if (commitment.promisedAt) {
+    parts.push(`<span>Promis : <strong>${formatDateTime(commitment.promisedAt)}</strong></span>`);
+  }
+  if (commitment.nextContactAt) {
+    parts.push(`<span>Prochain contact : <strong>${formatDateTime(commitment.nextContactAt)}</strong></span>`);
+  }
+  if (exception.ownerId) {
+    const owner = (state.users || []).find(u => u.id === exception.ownerId);
+    parts.push(`<span>Décision attendue : <strong>${escapeHtml(getUserPresentationLabel(owner || { id: exception.ownerId }))}</strong>${exception.dueAt ? ` pour le ${formatDateTime(exception.dueAt)}` : ""}</span>`);
+  }
+  return parts.length ? `<div class="client-situation-badges">${parts.join(" · ")}</div>` : "";
 }
 
 function toLocalInputDate(value) {
@@ -2609,23 +2692,89 @@ function openOperationalCasePanel(caseId) {
   const dialog = document.createElement("dialog"); dialog.id = "operational-case-dialog"; dialog.className = "operational-case-dialog";
   dialog.setAttribute("aria-labelledby", "operational-case-title");
   const editable = canRenderAction("case.edit", { item }) && !item.flags?.delivered;
-  const c = item.clientCommitment || {};
-  const f = item.exceptionFollowup || {};
-  dialog.innerHTML = `<header><h2 id="operational-case-title">${escapeHtml(item.plate || item.vin || item.vehicle)} · ${escapeHtml(item.clientName)}</h2><button type="button" data-close>Fermer</button></header>
-    <div data-context-decisions></div>${toRuntimeUserRole(getCurrentUser()?.role) === "controle_qualite" ? `<p>${escapeHtml(item.visitReason || item.arrivalNotes || item.claims?.[0]?.title || "Contrôler les travaux réalisés")}</p>` : renderClientSituation(item)}
-    ${editable ? `<details class="operational-parts-details"><summary>Pièces et blocage</summary><div data-field="case-blocker-controls"></div></details>` : ""}
-    ${editable ? `<details><summary>Engagement, contact et décision attendue</summary><form data-client-followup class="form-grid">
-      <label>Heure promise au client<input type="datetime-local" name="promisedAt" value="${escapeAttr(toLocalInputDate(c.promisedAt))}" /></label>
-      <label>Prochain contact<input type="datetime-local" name="nextContactAt" value="${escapeAttr(toLocalInputDate(c.nextContactAt))}" /></label>
-      <label>Compte rendu de l’échange<textarea name="note">${escapeHtml(c.note || "")}</textarea></label>
-      <label><input type="checkbox" name="contacted" /> Client informé maintenant</label>
-      <label>Responsable de la décision atelier<select name="ownerId"><option value="">Responsable métier habituel</option>${(state.users || []).filter(u => u.active !== false && ["admin", "chef_atelier", "reception", "directeur_sav"].includes(toRuntimeUserRole(u.role))).map(u => `<option value="${escapeAttr(u.id)}" ${u.id === f.ownerId ? "selected" : ""}>${escapeHtml(u.name || u.id)}</option>`).join("")}</select></label>
-      <label>Échéance de la décision atelier<input type="datetime-local" name="dueAt" value="${escapeAttr(toLocalInputDate(f.dueAt))}" /></label>
-      <button class="primary-button" type="submit">Enregistrer le suivi</button>
-    </form></details>` : ""}
-    ${canRenderAction("planning.edit", { item }) ? `<button type="button" data-open-planning class="secondary-button">Préparer / ajuster le planning</button>` : ""}
+  const draft = getClientFollowupDraft(item.id) || {};
+  const c = {
+    ...(item.clientCommitment || {}),
+    ...(draft.clientCommitment || {}),
+    ...(draft.promisedAt !== undefined ? { promisedAt: draft.promisedAt } : {}),
+    ...(draft.nextContactAt !== undefined ? { nextContactAt: draft.nextContactAt } : {}),
+    ...(draft.note !== undefined ? { note: draft.note } : {}),
+  };
+  const f = {
+    ...(item.exceptionFollowup || {}),
+    ...(draft.exceptionFollowup || {}),
+    ...(draft.ownerId !== undefined ? { ownerId: draft.ownerId } : {}),
+    ...(draft.dueAt !== undefined ? { dueAt: draft.dueAt } : {}),
+    ...(draft.note !== undefined ? { note: draft.note } : {}),
+  };
+  const phase = getCaseOperationalPhase(item);
+  const vinSnippet = item.vin && item.vin !== item.plate ? `<span class="tag identity-vin">VIN: ${escapeHtml(item.vin)}</span>` : "";
+
+  dialog.innerHTML = `<header class="operational-case-header">
+    <div>
+      <h2 id="operational-case-title">${escapeHtml(item.clientName)}</h2>
+      <p class="operational-case-subtitle">${escapeHtml(item.vehicle || "Véhicule non précisé")} · ${escapeHtml(item.plate || item.vin || "Sans immatriculation")}</p>
+    </div>
+    <button type="button" class="ghost-button" data-close aria-label="Fermer la fenêtre">Fermer</button>
+  </header>
+
+  <!-- SECTION 1 — CLIENT & VEHICLE -->
+  <section class="operational-case-section section-client-vehicle" aria-label="Client et véhicule">
+    <div class="client-vehicle-summary-grid">
+      <div class="client-info-block">
+        <span class="info-label">Client</span>
+        <strong class="info-value">${escapeHtml(item.clientName)}</strong>
+        <div class="info-phone">${renderCustomerPhoneLink(item.phone)}</div>
+      </div>
+      <div class="vehicle-info-block">
+        <span class="info-label">Véhicule</span>
+        <strong class="info-value">${escapeHtml(item.vehicle || "Non renseigné")}</strong>
+        <div class="vehicle-tags">
+          <span class="tag">${escapeHtml(item.plate || "Sans immat.")}</span>
+          ${vinSnippet}
+          <span class="tag status-tag">${escapeHtml(phase.label)}</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SECTION 2 — ACTION RECEPTION -->
+  <section class="operational-case-section section-action-reception" aria-label="Action réception">
+    <div data-context-decisions></div>
+  </section>
+
+  <!-- SECTION 3 — ENGAGEMENT & CONTACT -->
+  ${editable ? `<section class="operational-case-section section-followup" aria-label="Engagement et contact client">
+    <details open class="operational-followup-details">
+      <summary>Engagement, contact et décision attendue</summary>
+      <form data-client-followup class="form-grid">
+        <label>Heure promise au client<input type="datetime-local" name="promisedAt" value="${escapeAttr(toLocalInputDate(c.promisedAt))}" /></label>
+        <label>Prochain contact<input type="datetime-local" name="nextContactAt" value="${escapeAttr(toLocalInputDate(c.nextContactAt))}" /></label>
+        <label class="wide">Compte rendu de l’échange<textarea name="note" placeholder="Note d'échange client ou point d'accord">${escapeHtml(c.note || "")}</textarea></label>
+        <label class="checkbox-label"><input type="checkbox" name="contacted" ${draft.contacted ? "checked" : ""} /> Client informé maintenant</label>
+        <label>Responsable de la décision atelier<select name="ownerId"><option value="">Responsable métier habituel</option>${(state.users || []).filter(u => u.active !== false && ["admin", "chef_atelier", "reception", "directeur_sav"].includes(toRuntimeUserRole(u.role))).map(u => `<option value="${escapeAttr(u.id)}" ${u.id === (f.ownerId || "") ? "selected" : ""}>${escapeHtml(getUserPresentationLabel(u))}</option>`).join("")}</select></label>
+        <label>Échéance de la décision atelier<input type="datetime-local" name="dueAt" value="${escapeAttr(toLocalInputDate(f.dueAt))}" /></label>
+        <button class="primary-button" type="submit">Enregistrer le suivi</button>
+      </form>
+    </details>
+  </section>` : ""}
+
+  <!-- SECTION 4 — PIÈCES / BLOCAGE -->
+  ${editable ? `<section class="operational-case-section section-parts-blocker" aria-label="Pièces et blocage">
+    <details class="operational-parts-details"><summary>Pièces et blocage</summary><div data-field="case-blocker-controls"></div></details>
+  </section>` : ""}
+
+  <!-- SECTION 5 — RÉCLAMATIONS / DEMANDES -->
+  <section class="operational-case-section section-customer-claims" aria-label="Réclamations et demandes client">
     <div data-customer-requests></div>
-    <button type="button" data-open-full class="secondary-button">Dossier complet</button>`;
+  </section>
+
+  <!-- SECTION 6 — DOSSIER COMPLET & PLANNING -->
+  <footer class="operational-case-footer">
+    ${canRenderAction("planning.edit", { item }) ? `<button type="button" data-open-planning class="secondary-button">Préparer / ajuster le planning</button>` : ""}
+    <button type="button" data-open-full class="secondary-button">Dossier complet</button>
+  </footer>`;
+
   document.body.append(dialog);
   const contextRoot = dialog.querySelector("[data-context-decisions]");
   renderOperationalDecisions(contextRoot, item);
@@ -2643,20 +2792,45 @@ function openOperationalCasePanel(caseId) {
     dialog.close(); activeCaseId = item.id; activeCaseDetailTab = "planning";
     setActiveTab("dossiers"); renderCases(); renderCaseDetail();
   });
-  dialog.querySelector("[data-client-followup]")?.addEventListener("submit", async event => {
-    event.preventDefault(); const form = event.currentTarget; if (!form.reportValidity()) return;
-    if (!guardVisibleCaseRevision(item, visibleRevision).ok) return;
-    const data = new FormData(form);
-    const dateValue = key => data.get(key) ? new Date(data.get(key)).toISOString() : "";
-    const changes = { promisedAt: dateValue("promisedAt"), nextContactAt: dateValue("nextContactAt"), note: data.get("note") };
-    if (data.get("contacted")) { changes.lastContactAt = new Date().toISOString(); if (changes.nextContactAt && new Date(changes.nextContactAt) <= new Date()) changes.nextContactAt = ""; }
-    const result = recordClientCommitment(item, changes);
-    if (!result.ok) { notifyUser(result.message, "error"); return; }
-    item.exceptionFollowup = { ownerId: String(data.get("ownerId") || ""), dueAt: dateValue("dueAt"), note: changes.note };
-    const saved = await saveState({ changedCase: item, flushCloud: true, cloudReason: "client-followup" });
-    if (!saved) { notifyUser("Le suivi reste ouvert sur ce poste, mais la sauvegarde n’a pas été confirmée. Vérifiez le stockage avant de fermer l’application.", "warn"); return; }
-    dialog.close(); render(); openOperationalCasePanel(item.id);
-  });
+
+  const followupForm = dialog.querySelector("[data-client-followup]");
+  if (followupForm) {
+    const syncDraft = () => {
+      const data = new FormData(followupForm);
+      const dateValue = key => data.get(key) ? new Date(data.get(key)).toISOString() : "";
+      captureClientFollowupDraft(item.id, {
+        clientCommitment: {
+          promisedAt: dateValue("promisedAt"),
+          nextContactAt: dateValue("nextContactAt"),
+          note: data.get("note") || "",
+        },
+        exceptionFollowup: {
+          ownerId: String(data.get("ownerId") || ""),
+          dueAt: dateValue("dueAt"),
+          note: data.get("note") || "",
+        },
+        contacted: Boolean(followupForm.elements?.contacted?.checked),
+      });
+    };
+    followupForm.addEventListener("input", syncDraft);
+    followupForm.addEventListener("change", syncDraft);
+
+    followupForm.addEventListener("submit", async event => {
+      event.preventDefault(); const form = event.currentTarget; if (!form.reportValidity()) return;
+      if (!guardVisibleCaseRevision(item, visibleRevision).ok) return;
+      const data = new FormData(form);
+      const dateValue = key => data.get(key) ? new Date(data.get(key)).toISOString() : "";
+      const changes = { promisedAt: dateValue("promisedAt"), nextContactAt: dateValue("nextContactAt"), note: data.get("note") };
+      if (data.get("contacted")) { changes.lastContactAt = new Date().toISOString(); if (changes.nextContactAt && new Date(changes.nextContactAt) <= new Date()) changes.nextContactAt = ""; }
+      const result = recordClientCommitment(item, changes);
+      if (!result.ok) { notifyUser(result.message, "error"); return; }
+      item.exceptionFollowup = { ownerId: String(data.get("ownerId") || ""), dueAt: dateValue("dueAt"), note: changes.note };
+      const saved = await saveState({ changedCase: item, flushCloud: true, cloudReason: "client-followup" });
+      if (!saved) { notifyUser("Le suivi reste ouvert sur ce poste, mais la sauvegarde n’a pas été confirmée. Vérifiez le stockage avant de fermer l’application.", "warn"); return; }
+      clearClientFollowupDraft(item.id);
+      dialog.close(); render(); openOperationalCasePanel(item.id);
+    });
+  }
   dialog.showModal();
 }
 
@@ -2668,12 +2842,58 @@ function renderWorkshopProgressRow(row) {
   const item = row.item;
   const tower = row.controlTower || {};
   const phase = getCaseOperationalPhase(item);
-  const reception = toRuntimeUserRole(getCurrentUser()?.role) === "reception";
+  const role = toRuntimeUserRole(getCurrentUser()?.role);
+  const reception = role === "reception";
   const exception = getPrimaryOperationalException(row.exceptions || []);
   const current = tower.currentOperation || (item.flags?.workCompleted ? "Travaux terminés" : "Aucune opération démarrée");
   const next = tower.nextOperation || (phase.key === "ready" ? "Remise du véhicule" : phase.key === "finalizing" ? "Contrôle / préparation" : row.nextAction?.label || "À définir");
+
+  if (reception) {
+    const authIssues = typeof getWorkAuthorizationIssues === "function" ? getWorkAuthorizationIssues(item) : [];
+    const authLabel = authIssues.length ? "Accord travaux à obtenir" : (item.flags?.clientApproved ? "Accord travaux validé" : "Accord travaux validé");
+    const promiseText = item.clientCommitment?.promisedAt ? escapeHtml(formatDateTime(item.clientCommitment.promisedAt)) : "non renseignée";
+    const contactText = item.clientCommitment?.nextContactAt ? escapeHtml(formatDateTime(item.clientCommitment.nextContactAt)) : "non fixé";
+    const informedText = item.clientCommitment?.lastContactAt ? `<small class="text-success">Client informé</small>` : "";
+    const blockerText = typeof isCaseBlocked === "function" && isCaseBlocked(item) ? `<span class="tag danger">${escapeHtml(getCaseBlockerLabel(item) || "Bloqué")}</span>` : "";
+
+    return `<button class="workshop-progress-row operational-vehicle-card reception-cockpit-card priority-level-${row.priority}" type="button" data-workshop-progress-case="${escapeAttr(item.id)}" aria-label="Consulter et agir : ${escapeAttr(item.plate || item.vin || item.clientName)}">
+      <span class="operational-vehicle-identity reception-primary-zone">
+        <strong>${escapeHtml(item.clientName)}</strong>
+        <span>${escapeHtml(item.plate || item.vin || "Identité à compléter")}${item.vehicle ? ` · ${escapeHtml(item.vehicle)}` : ""}</span>
+        <span class="reception-phone-line">${renderCustomerPhoneLink(item.phone)}</span>
+        <b>${escapeHtml(phase.label)}</b>
+      </span>
+      <span class="reception-action-zone operational-vehicle-decision ${exception ? escapeAttr(exception.severity) : ""}">
+        <small class="workshop-progress-cell-label">Action réception</small>
+        <strong>${escapeHtml(exception?.label || row.nextAction?.label || "Consulter")}</strong>
+        ${exception ? `<small>${escapeHtml(exception.owner)}${exception.dueAt ? ` · ${escapeHtml(formatDateTime(exception.dueAt))}` : ""}</small>` : ""}
+        ${row.exceptions?.length > 1 ? `<small>+ ${row.exceptions.length - 1} autre(s) point(s) à traiter</small>` : ""}
+        <small class="action-cta">Consulter / agir</small>
+      </span>
+      <span class="reception-followup-zone">
+        <small class="workshop-progress-cell-label">Suivi client</small>
+        <strong>${escapeHtml(authLabel)}</strong>
+        <small>Promesse : ${promiseText}</small>
+        <small>Contact : ${contactText}</small>
+        ${informedText}
+        ${blockerText}
+      </span>
+      <span class="reception-workshop-summary">
+        <small class="workshop-progress-cell-label">Synthèse atelier</small>
+        <span><small>Maintenant : </small><strong>${escapeHtml(current)}</strong></span>
+        <small>Ensuite : ${escapeHtml(next)}</small>
+        <small>Disponibilité estimée : ${row.eta ? escapeHtml(formatDateTime(row.eta)) : "À confirmer"}</small>
+      </span>
+    </button>`;
+  }
+
   return `<button class="workshop-progress-row operational-vehicle-card priority-level-${row.priority}" type="button" data-workshop-progress-case="${escapeAttr(item.id)}" aria-label="Consulter et agir : ${escapeAttr(item.plate || item.vin || item.clientName)}">
-    <span class="operational-vehicle-identity"><strong>${escapeHtml(item.plate || item.vin || "Identité à compléter")}</strong><span>${escapeHtml(item.vehicle)} · ${escapeHtml(item.clientName)}</span><b>${escapeHtml(phase.label)}</b></span>
+    <span class="operational-vehicle-identity">
+      <strong>${escapeHtml(item.plate || item.vin || "Identité à compléter")}</strong>
+      <span>${escapeHtml(item.vehicle)} · ${escapeHtml(item.clientName)}</span>
+      <span class="phone-snippet">${renderCustomerPhoneLink(item.phone)}</span>
+      <b>${escapeHtml(phase.label)}</b>
+    </span>
     <span><small>Motif</small><strong>${escapeHtml(item.visitReason || item.arrivalNotes || item.claims?.[0]?.title || "À préciser")}</strong></span>
     <span><small>Maintenant</small><strong>${escapeHtml(current)}</strong>${tower.current && !reception ? `<span>${escapeHtml(tower.currentTechnician)}</span>` : ""}<small>Ensuite : ${escapeHtml(next)}${!reception && tower.next && tower.nextTechnician ? ` · ${escapeHtml(tower.nextTechnician)}` : ""}</small></span>
     <span><small>Disponibilité estimée</small><strong>${row.eta ? escapeHtml(formatDateTime(row.eta)) : "À confirmer"}</strong><small>Promesse : ${item.clientCommitment?.promisedAt ? escapeHtml(formatDateTime(item.clientCommitment.promisedAt)) : "non renseignée"}</small>${reception ? `<small>Contact : ${item.clientCommitment?.nextContactAt ? escapeHtml(formatDateTime(item.clientCommitment.nextContactAt)) : "non fixé"}</small>` : ""}</span>
@@ -3989,7 +4209,7 @@ function renderCustomerRequests(target, item, feedback = "") {
     <label>Type<select name="type"><option value="claim" ${request.type !== 'request' ? 'selected' : ''}>Réclamation</option><option value="request" ${request.type === 'request' ? 'selected' : ''}>Demande / diagnostic</option></select></label>
     <label>Symptôme / demande du client<input name="title" required maxlength="300" value="${escapeAttr(request.title || request.text || '')}" /></label>
     <label>État<select name="status">${Object.entries(CUSTOMER_REQUEST_STATES).map(([value, label]) => `<option value="${value}" ${(request.status === 'explained_to_customer' ? 'resolved' : request.status || 'open') === value ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
-    <label>Responsable<select name="responsibleUserId"><option value="">À choisir</option>${users.map(user => `<option value="${escapeAttr(user.id)}" ${user.id === (request.responsibleUserId || getCurrentUser()?.id) ? 'selected' : ''}>${escapeHtml(user.name)}</option>`).join('')}</select></label>
+    <label>Responsable<select name="responsibleUserId"><option value="">À choisir</option>${users.map(user => `<option value="${escapeAttr(user.id)}" ${user.id === (request.responsibleUserId || getCurrentUser()?.id) ? 'selected' : ''}>${escapeHtml(getUserPresentationLabel(user))}</option>`).join('')}</select></label>
     <label data-request-open-field>Prochaine action<input name="nextAction" value="${escapeAttr(request.nextAction || '')}" placeholder="Ex. Reproduire le bruit à froid" /></label>
     <label data-request-open-field>Prochaine revue<input name="reviewAt" type="datetime-local" value="${escapeAttr(toLocalInputDate(request.reviewAt))}" /></label>
     <label>Opération concernée<select name="linkedBookingId"><option value="">Pas encore planifiée</option>${bookings.filter(booking => !booking.deletedAt).map(booking => `<option value="${escapeAttr(booking.id)}" ${request.linkedBookingId === booking.id ? 'selected' : ''}>${escapeHtml(getPlanningOperationTitle(booking))}</option>`).join('')}</select></label>

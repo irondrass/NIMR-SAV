@@ -392,15 +392,62 @@ test("TEST R2-12: Customer-follow-up draft survives relevant rerender", () => {
   assert.match(rerenderedHtml, /2026-09-22T14:00/, "Unsaved promise date must survive modal rerender");
 });
 
-test("TEST R2-13: Aujourd'hui card still uses existing next-action result without changing business priority", () => {
-  setupScenario("u-rec-1");
-  const html = app(`
+test("TEST R2-13: Aujourd'hui card renders exact canonical next-action and respects exception precedence", () => {
+  // Part 1: Canonical nextAction rendered when no operational exceptions are active
+  setupScenario("u-rec-1", {
+    flags: { received: false, workStarted: false, workCompleted: false, delivered: false, clientApproved: true, expertApproved: true },
+    clientCommitment: {},
+    receptionWorkflow: { rdvConfirmedAt: "2026-09-18T10:00:00.000Z" },
+    appointment: { start: "2026-09-22T08:00:00.000Z", delivery: "2026-09-23T17:00:00.000Z", end: "2026-09-22T12:00:00.000Z" }
+  });
+  const noExceptionData = app(`
     (() => {
+      state.bookings = [];
       const row = buildWorkshopProgressRow(state.cases[0], new Date("2026-09-19T08:00:00Z"));
-      return renderWorkshopProgressRow(row);
+      const html = renderWorkshopProgressRow(row);
+      return {
+        nextAction: row.nextAction,
+        exceptions: row.exceptions,
+        html
+      };
     })()
   `);
-  assert.ok(html.includes("Consulter") || html.includes("action"), "Should retain canonical next-action presentation");
+  assert.ok(noExceptionData.nextAction && noExceptionData.nextAction.label, "Row must have a canonical nextAction");
+  assert.equal(noExceptionData.exceptions.length, 0, "Fixture must produce zero operational exceptions");
+  const expectedNextAction = noExceptionData.nextAction.label;
+  assert.doesNotMatch(expectedNextAction, /^(Consulter|action)$/i, "Canonical action must not be static placeholder");
+
+  const actionZoneMatch = noExceptionData.html.match(/<span class="reception-action-zone[^>]*>([\s\S]*?)<\/span>/);
+  assert.ok(actionZoneMatch, "Reception action zone must be present in card");
+  assert.match(
+    actionZoneMatch[1],
+    new RegExp(`<strong>${expectedNextAction.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}</strong>`),
+    `Reception action area must render exact canonical nextAction label "${expectedNextAction}"`
+  );
+
+  // Part 2: Exception precedence — when an operational exception exists, it takes precedence over nextAction
+  setupScenario("u-rec-1"); // default case-r2-01 produces promise_risk exception
+  const exceptionData = app(`
+    (() => {
+      const row = buildWorkshopProgressRow(state.cases[0], new Date("2026-09-19T08:00:00Z"));
+      const primaryException = getPrimaryOperationalException(row.exceptions || []);
+      const html = renderWorkshopProgressRow(row);
+      return {
+        nextAction: row.nextAction,
+        primaryException,
+        html
+      };
+    })()
+  `);
+  assert.ok(exceptionData.primaryException && exceptionData.primaryException.label, "Fixture must produce an active primary exception");
+  const expectedExceptionLabel = exceptionData.primaryException.label;
+  const excActionZoneMatch = exceptionData.html.match(/<span class="reception-action-zone[^>]*>([\s\S]*?)<\/span>/);
+  assert.ok(excActionZoneMatch, "Reception action zone must be present in card");
+  assert.match(
+    excActionZoneMatch[1],
+    new RegExp(`<strong>${expectedExceptionLabel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}</strong>`),
+    `Reception action area must render exact primary exception label "${expectedExceptionLabel}"`
+  );
 });
 
 test("TEST R2-14: R1 unauthorized workshop actions remain absent for Reception", () => {

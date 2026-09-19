@@ -25,8 +25,8 @@ const {result,errors} = await runMobileCdpTest({name:'audit-completion',cdpPort:
   await evaluate(`document.querySelector('#operational-case-dialog details:has([data-client-followup])').open=true;`);
   await evaluate(`(() => { const f=document.querySelector('[data-client-followup]'); f.elements.promisedAt.value='2026-09-08T16:00'; f.elements.nextContactAt.value='2026-09-07T10:00'; f.elements.note.value='Promesse confirmée par téléphone'; f.requestSubmit(); })()`);
   await waitFor(`state.cases.some(c=>c.clientCommitment?.note==='Promesse confirmée par téléphone')`,'followup persisted');
-  await waitFor(`document.querySelector('#operational-case-dialog')?.open && document.querySelector('#operational-case-dialog .client-situation')?.textContent.includes('Promesse confirmée par téléphone')`,'updated panel after durable save');
-  assert.match(await evaluate(`document.querySelector('#operational-case-dialog').textContent`),/Promesse confirmée par téléphone/);
+  await waitFor(`document.querySelector('#operational-case-dialog')?.open && document.querySelector('#operational-case-dialog [data-client-followup] textarea[name="note"]')?.value === 'Promesse confirmée par téléphone'`, 'updated R2 follow-up panel after durable save');
+  assert.equal(await evaluate(`document.querySelector('#operational-case-dialog [data-client-followup] textarea[name="note"]')?.value`), 'Promesse confirmée par téléphone', 'durably saved note must be rehydrated into the R2 follow-up form');
   await click('#operational-case-dialog [data-close]');
   await evaluate(`state.cases[0].flags.workCompleted=true; state.bookings[0].status='completed'; state.bookings[0].remainingMinutes=0; state.currentUserId=state.users[0].id; state.users[0].role='controle_qualite'; invalidateUiRuntimeIndexes(); setActiveTab('today'); render();`);
   assert.equal(await evaluate(`document.querySelectorAll('#workshop-progress-board [data-workshop-progress-case]').length`),1,'CQ only sees its finalization queue');

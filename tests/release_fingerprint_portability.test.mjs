@@ -168,6 +168,7 @@ test("H. Scheme versioning: legacy releases are worktree-raw-v1 and current is c
   assert.equal(FINGERPRINT_SCHEMES["v23.3.51"], "canonical-lf-v2");
   assert.equal(FINGERPRINT_SCHEMES["v23.3.52"], "canonical-lf-v2");
   assert.equal(FINGERPRINT_SCHEMES["v23.3.53"], "canonical-lf-v2");
+  assert.equal(FINGERPRINT_SCHEMES["v23.3.54"], "canonical-lf-v2");
   assert.equal(CURRENT_FINGERPRINT_SCHEME, "canonical-lf-v2");
 });
 
@@ -234,9 +235,9 @@ test("J. Cross-EOL proof: normal worktree files vs in-memory CRLF version yield 
 // -------------------------------------------------------------
 // K. XLSX VENDOR ASSET SENSITIVITY & SEALED MATCH
 // -------------------------------------------------------------
-test("K. XLSX vendor asset sensitivity & sealed v23.3.53 match: mutating 1 byte in vendor/xlsx.mini.min.js changes fingerprint; canonical matches sealed", () => {
+test("K. XLSX vendor asset sensitivity & sealed v23.3.54 match: mutating 1 byte in vendor/xlsx.mini.min.js changes fingerprint; canonical matches sealed", () => {
   const normalHash = computeReleaseFingerprint(repositoryRoot, RELEASE_OWNED_RUNTIME_FILES);
-  assert.equal(normalHash, SEALED_RELEASE_FINGERPRINTS["v23.3.53"], "Canonical release fingerprint must match sealed v23.3.53");
+  assert.equal(normalHash, SEALED_RELEASE_FINGERPRINTS["v23.3.54"], "Canonical release fingerprint must match sealed v23.3.54");
 
   const originalXlsx = fs.readFileSync(path.join(repositoryRoot, "vendor/xlsx.mini.min.js"));
   const mutatedXlsx = Buffer.from(originalXlsx);

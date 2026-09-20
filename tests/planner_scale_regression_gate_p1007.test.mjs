@@ -395,7 +395,7 @@ check("K graph continuity remains soft and ancestor-derived at scale", () => {
   assert.deepEqual(byTask["finish-target"].dependencies, ["paint-target"]);
 });
 
-check("L independent parallel graph branches remain parallel at scale", () => {
+check("L independent same-specialty branches preserve graph independence but share one technician", () => {
   const tasks = [
     canonicalTask("parallel-body", "body", [], { preferredResourceId: "body-1", parallelizable: true, vehicleExclusive: false }),
     canonicalTask("parallel-reassembly", "reassembly", [], { parallelizable: true, vehicleExclusive: false }),
@@ -408,7 +408,12 @@ check("L independent parallel graph branches remain parallel at scale", () => {
   assert.equal(byTask["parallel-reassembly"].parallelizable, true);
   assert.equal(byTask["parallel-body"].vehicleExclusive, false);
   assert.equal(byTask["parallel-reassembly"].vehicleExclusive, false);
-  assert.equal(byTask["parallel-body"].start, byTask["parallel-reassembly"].start);
+  assert.equal(byTask["parallel-body"].primaryResourceId, "body-1");
+  assert.equal(byTask["parallel-reassembly"].primaryResourceId, "body-1");
+  const stepA = byTask["parallel-body"];
+  const stepB = byTask["parallel-reassembly"];
+  const overlaps = new Date(stepA.start) < new Date(stepB.end) && new Date(stepA.end) > new Date(stepB.start);
+  assert.equal(overlaps, false, "Same technician tasks must serialize without overlapping in time");
 });
 
 check("M candidate evaluations scale with compatible resource count only", () => {
@@ -451,10 +456,10 @@ check("O forty-task canonical graph preserves every node and edge", () => {
   const chainCount = 4;
   const tasksPerChain = 10;
   const resources = [resource("history-resource", "history")];
+  const resourceId = "graph-body-0";
+  resources.push(resource(resourceId, "tolier"));
   const tasks = [];
   for (let chain = 0; chain < chainCount; chain += 1) {
-    const resourceId = `graph-body-${chain}`;
-    resources.push(resource(resourceId, "tolier"));
     for (let index = 0; index < tasksPerChain; index += 1) {
       const taskId = `chain-${chain}-task-${index}`;
       tasks.push(canonicalTask(taskId, "body", index ? [`chain-${chain}-task-${index - 1}`] : [], {
@@ -473,7 +478,22 @@ check("O forty-task canonical graph preserves every node and edge", () => {
     const step = result.proposal.steps.find((entry) => entry.taskId === task.taskId);
     assert.equal(step.businessTaskId, task.taskId);
     assert.deepEqual(step.dependencies, task.dependencies);
+    assert.equal(step.primaryResourceId, resourceId);
   }
+});
+
+check("O-conflict conflicting direct resourceIds across same-specialty tasks fail closed at scale", () => {
+  const resources = [
+    resource("history-resource", "history"),
+    resource("graph-body-0", "tolier"),
+    resource("graph-body-1", "tolier"),
+  ];
+  const tasks = [
+    canonicalTask("task-body-0", "body", [], { resourceIds: ["graph-body-0"] }),
+    canonicalTask("task-body-1", "body", ["task-body-0"], { resourceIds: ["graph-body-1"] }),
+  ];
+  const conflict = captureError(() => generate({ id: "scale-conflict", planningTasks: tasks }, { resources, bookings: unrelatedBookings(10000) }));
+  assert.equal(conflict?.code, "assignment_specialty_continuity_conflict");
 });
 
 check("P representative 10000-history workload is byte-deterministic", () => {

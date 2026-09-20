@@ -524,7 +524,8 @@ function scheduleSequentialPipeline(item, startAfter, bookings) {
   let totalMinutes = 0;
   const tempBookings = ensureIndexedPlannerBookingView(bookings);
   const fastJob = isFastLaneJob(item);
-  const assignment = createPlanningAssignmentContext();
+  const historyBookings = getContinuityHistorySource(bookings, item);
+  const assignment = createPlanningAssignmentContext(item, historyBookings);
   STEP_TEMPLATES.forEach((baseTemplate) => {
     const template = getPlanningTemplateForItem(item, baseTemplate);
     const hours = Number(item.durations[template.key] || 0);
@@ -548,11 +549,88 @@ function schedulePipelineWithAnticipatedNewParts(item, startAfter, bookings, spl
   return scheduleSequentialPipeline(item, startAfter, bookings);
 }
 
-function createPlanningAssignmentContext() {
-  return { tolierId: null, painterId: null, equipmentByRole: {} };
+function getContinuityHistorySource(bookings, item) {
+  if (!item || !item.id) return [];
+  const caseId = String(item.id);
+  if (isIndexedPlannerBookingView(bookings)) {
+    const base = bookings.baseBookings || state.bookings || [];
+    return base.filter((booking) => String(booking?.caseId || "") === caseId && booking?.type !== "leave" && booking?.temporary !== true);
+  }
+  if (Array.isArray(bookings)) {
+    const caseBookings = bookings.filter((booking) => String(booking?.caseId || "") === caseId && booking?.type !== "leave" && booking?.temporary !== true);
+    if (caseBookings.length) return caseBookings;
+  }
+  return (state.bookings || []).filter((booking) => String(booking?.caseId || "") === caseId && booking?.type !== "leave" && booking?.temporary !== true);
+}
+
+function seedSpecialtyContinuityFromHistory(context, item, historyBookings = []) {
+  if (!context || !item || !Array.isArray(historyBookings) || !historyBookings.length) return;
+  const caseId = String(item.id);
+  const bookingsBySpecialty = new Map();
+
+  historyBookings.forEach((booking) => {
+    if (booking?.type === "leave" || booking?.temporary === true) return;
+    if (String(booking?.caseId || "") !== caseId) return;
+    const primaryId = getBookingPrimaryTechnicianId(booking) || booking?.primaryResourceId || (booking?.resourceIds || [])[0];
+    const resource = getResource(primaryId);
+    if (!isInternalHumanPlanningResource(resource)) return;
+    const specialtyKey = normalizePlanningRole(booking?.requiredRole || booking?.role || getBookingTemplate(booking)?.role || resource.role || "");
+    if (!TECHNICIAN_HUMAN_ROLES.has(specialtyKey)) return;
+    if (!bookingsBySpecialty.has(specialtyKey)) bookingsBySpecialty.set(specialtyKey, []);
+    bookingsBySpecialty.get(specialtyKey).push({ booking, resourceId: resource.id });
+  });
+
+  for (const [specialtyKey, entries] of bookingsBySpecialty.entries()) {
+    const productiveEntries = entries.filter(({ booking }) => (
+      ["started", "paused", "completed"].includes(getBookingOperationalStatus(booking))
+      || Boolean(booking?.actualStart || booking?.actualStartedAt)
+      || Number(booking?.actualWorkedMinutes || 0) > 0
+    ));
+    if (productiveEntries.length) {
+      const distinctTechs = [...new Set(productiveEntries.map((e) => e.resourceId))];
+      if (distinctTechs.length > 1) {
+        const error = new Error(`Conflit historique productif pour le dossier ${item.id} sur le métier ${specialtyKey} : plusieurs techniciens identifiés (${distinctTechs.join(", ")}).`);
+        error.code = "assignment_specialty_continuity_conflict";
+        error.conflictType = "historical_productive_split";
+        error.caseId = item.id;
+        error.specialty = specialtyKey;
+        error.technicians = distinctTechs;
+        throw error;
+      }
+      context.primaryResourceBySpecialty[specialtyKey] = distinctTechs[0];
+      if (specialtyKey === "tolier") context.tolierId = distinctTechs[0];
+      if (specialtyKey === "peintre") context.painterId = distinctTechs[0];
+    } else {
+      const distinctTechs = [...new Set(entries.map((e) => e.resourceId))];
+      if (distinctTechs.length === 1) {
+        context.primaryResourceBySpecialty[specialtyKey] = distinctTechs[0];
+        if (specialtyKey === "tolier") context.tolierId = distinctTechs[0];
+        if (specialtyKey === "peintre") context.painterId = distinctTechs[0];
+      }
+    }
+  }
+}
+
+function createPlanningAssignmentContext(item = null, historyBookings = null) {
+  const context = {
+    primaryResourceBySpecialty: {},
+    tolierId: null,
+    painterId: null,
+    equipmentByRole: {},
+  };
+  if (item && item.id) {
+    const history = historyBookings !== null ? historyBookings : getContinuityHistorySource(state.bookings, item);
+    seedSpecialtyContinuityFromHistory(context, item, history);
+  }
+  return context;
 }
 
 function getAutomaticContinuityPrimaryResourceId(template, assignment) {
+  if (!template || !assignment) return null;
+  const specialtyKey = normalizePlanningRole(template.role || "");
+  if (specialtyKey && assignment.primaryResourceBySpecialty?.[specialtyKey]) {
+    return assignment.primaryResourceBySpecialty[specialtyKey];
+  }
   if (template.key === "reassembly") return assignment.tolierId;
   if (["paint", "finish"].includes(template.key)) return assignment.painterId;
   return null;
@@ -570,11 +648,26 @@ function getPlanningResourceConstraint(template, assignment, item = null, option
       ? (options.continuityPrimaryResourceId || "")
       : (getAutomaticContinuityPrimaryResourceId(template, assignment) || ""),
   ).trim();
+
+  const specialtyKey = normalizePlanningRole(template?.role || "");
+  if (lockedPrimaryResourceId && continuityPrimaryResourceId && lockedPrimaryResourceId !== continuityPrimaryResourceId) {
+    const error = new Error(`Conflit de continuité métier pour ${template?.title || template?.key || "tâche"} : ressource verrouillée (${lockedPrimaryResourceId}) distincte du spécialiste déjà affecté (${continuityPrimaryResourceId}) pour le métier ${specialtyKey || "inconnu"}.`);
+    error.code = "assignment_specialty_continuity_conflict";
+    error.caseId = item?.id || "";
+    error.stepKey = template?.key || "";
+    error.taskId = options.taskId || template?.taskId || template?.key || "";
+    error.specialty = specialtyKey;
+    error.continuityResourceId = continuityPrimaryResourceId;
+    error.lockedResourceId = lockedPrimaryResourceId;
+    throw error;
+  }
+
+  const effectiveLockedPrimaryResourceId = lockedPrimaryResourceId || continuityPrimaryResourceId || "";
   return {
-    lockedPrimaryResourceId,
+    lockedPrimaryResourceId: effectiveLockedPrimaryResourceId,
     preferredPrimaryResourceId,
     continuityPrimaryResourceId,
-    effectivePreferredPrimaryResourceId: preferredPrimaryResourceId || continuityPrimaryResourceId || null,
+    effectivePreferredPrimaryResourceId: effectiveLockedPrimaryResourceId || preferredPrimaryResourceId || null,
   };
 }
 
@@ -621,10 +714,19 @@ function getPreferredEquipmentResourceId(template, assignment) {
 }
 
 function rememberPlanningAssignment(template, assignment, primaryResourceId, equipmentResourceId = null) {
-  if (!primaryResourceId) return;
-  if (template.key === "body") assignment.tolierId = primaryResourceId;
-  if (["prep", "paint"].includes(template.key) && !assignment.painterId) assignment.painterId = primaryResourceId;
-  if (template.equipmentRole && equipmentResourceId) assignment.equipmentByRole[template.equipmentRole] = equipmentResourceId;
+  if (!primaryResourceId || !assignment) return;
+  const primary = getResource(primaryResourceId);
+  if (isInternalHumanPlanningResource(primary)) {
+    const specialtyKey = normalizePlanningRole(template?.role || primary.role || "");
+    if (specialtyKey && !assignment.primaryResourceBySpecialty[specialtyKey]) {
+      assignment.primaryResourceBySpecialty[specialtyKey] = primaryResourceId;
+      if (specialtyKey === "tolier") assignment.tolierId = primaryResourceId;
+      if (specialtyKey === "peintre") assignment.painterId = primaryResourceId;
+    }
+  }
+  if (template?.key === "body" && !assignment.tolierId) assignment.tolierId = primaryResourceId;
+  if (["prep", "paint"].includes(template?.key) && !assignment.painterId) assignment.painterId = primaryResourceId;
+  if (template?.equipmentRole && equipmentResourceId) assignment.equipmentByRole[template.equipmentRole] = equipmentResourceId;
 }
 
 function buildResourceSlotCandidate({
@@ -728,8 +830,9 @@ function getResourceAssignmentAlternatives(item, stepKey, startAfter = new Date(
   if (!duration) return [];
   const fastJob = isFastLaneJob(item);
   const bookings = createIndexedPlannerBookingView(state.bookings, { excludedCaseId: item.id });
-  bookings.addOverlays(getPendingProposalBookings(item.id, bookings));
-  const constraint = getPlanningResourceConstraint(template, createPlanningAssignmentContext(), item);
+  const historyBookings = getContinuityHistorySource(bookings, item);
+  const assignment = createPlanningAssignmentContext(item, historyBookings);
+  const constraint = getPlanningResourceConstraint(template, assignment, item);
   const planningOptions = {
     item,
     caseId: item.id,
@@ -1683,6 +1786,17 @@ const TECHNICIAN_PAUSE_REASONS = [
 
 function isTechnicianResource(resource) {
   return Boolean(resource && resource.active !== false && TECHNICIAN_HUMAN_ROLES.has(resource.role));
+}
+
+function isInternalHumanPlanningResource(resource) {
+  return Boolean(
+    resource
+    && isTechnicianResource(resource)
+    && getResourcePlanningSite(resource) === "internal"
+    && resource.external !== true
+    && resource.type !== "equipment"
+    && resource.kind !== "equipment"
+  );
 }
 
 function getBookingHumanResourceIds(booking) {
@@ -2854,7 +2968,8 @@ function schedulePlannedCasesInterleaved(plannedCases, earliestByCase, baseBooki
 
   queues.forEach((job) => {
     proposalsByCase.set(job.item.id, { steps: [], marginMinutes: 0 });
-    assignmentsByCase.set(job.item.id, createPlanningAssignmentContext());
+    const historyBookings = getContinuityHistorySource(baseBookings, job.item);
+    assignmentsByCase.set(job.item.id, createPlanningAssignmentContext(job.item, historyBookings));
   });
 
   while (queues.length) {
@@ -2870,7 +2985,7 @@ function schedulePlannedCasesInterleaved(plannedCases, earliestByCase, baseBooki
     const template = getPlanningTemplateForItem(job.item, baseTemplate);
     const hours = Number(job.item.durations?.[template.key] || 0);
     const duration = Math.max(15, Math.round(hours * 60));
-    const assignment = assignmentsByCase.get(job.item.id) || createPlanningAssignmentContext();
+    const assignment = assignmentsByCase.get(job.item.id) || createPlanningAssignmentContext(job.item, getContinuityHistorySource(baseBookings, job.item));
     const constraint = getPlanningResourceConstraint(template, assignment, job.item);
     const match = findBestResourceSlot(
       template,
@@ -3941,12 +4056,16 @@ function buildGraphTaskAncestorIndex(graph) {
   return memo;
 }
 
-function getGraphContinuityPrimaryResourceId(task, scheduledTasks, ancestorIndex) {
+function getGraphContinuityPrimaryResourceId(task, scheduledTasks, ancestorIndex, assignment = null) {
+  const specialtyKey = normalizePlanningRole(task?.requiredRole || "");
+  if (specialtyKey && assignment?.primaryResourceBySpecialty?.[specialtyKey]) {
+    return assignment.primaryResourceBySpecialty[specialtyKey];
+  }
   const sourceKeys = task.key === "reassembly"
     ? ["body"]
     : (task.key === "paint" ? ["prep"] : (task.key === "finish" ? ["paint", "prep"] : []));
   if (!sourceKeys.length) return null;
-  const ancestors = ancestorIndex.get(task.id) || new Set();
+  const ancestors = ancestorIndex?.get ? (ancestorIndex.get(task.id) || new Set()) : new Set();
   for (const sourceKey of sourceKeys) {
     const candidates = [...scheduledTasks.values()]
       .filter((entry) => ancestors.has(entry.task.id) && entry.task.key === sourceKey)
@@ -3958,7 +4077,8 @@ function getGraphContinuityPrimaryResourceId(task, scheduledTasks, ancestorIndex
   return null;
 }
 
-function buildInternalTaskStep(item, task, startAfter, bookings, assignment = createPlanningAssignmentContext(), schedulingOptions = {}) {
+function buildInternalTaskStep(item, task, startAfter, bookings, assignment = null, schedulingOptions = {}) {
+  const effectiveAssignment = assignment || createPlanningAssignmentContext(item, getContinuityHistorySource(bookings, item));
   const baseTemplate = STEP_TEMPLATES.find((template) => template.key === task.key) || {};
   const template = {
     ...baseTemplate,
@@ -3985,15 +4105,33 @@ function buildInternalTaskStep(item, task, startAfter, bookings, assignment = cr
   let match = null;
   const requestedResourceIds = [...new Set((task.resourceIds || []).filter(Boolean))];
   if (requestedResourceIds.length) {
+    const primaryId = requestedResourceIds[0];
+    const primary = state.resources.find((resource) => resource.id === primaryId);
+    if (isInternalHumanPlanningResource(primary)) {
+      const specialtyKey = normalizePlanningRole(template.role || task.requiredRole || primary.role || "");
+      const ownerId = effectiveAssignment.primaryResourceBySpecialty[specialtyKey];
+      if (ownerId && ownerId !== primaryId) {
+        const error = new Error(`Conflit d'affectation directe pour ${task.title} : ressource demandée (${primaryId}) distincte du spécialiste déjà affecté (${ownerId}) pour le métier ${specialtyKey}.`);
+        error.code = "assignment_specialty_continuity_conflict";
+        error.caseId = item.id;
+        error.stepKey = template.key;
+        error.taskId = task.taskId || task.id;
+        error.specialty = specialtyKey;
+        error.continuityResourceId = ownerId;
+        error.lockedResourceId = primaryId;
+        error.source = "task.resourceIds";
+        throw error;
+      }
+    }
     const requiredRolesByResource = {};
     requiredRolesByResource[requestedResourceIds[0]] = template.role;
     if (template.equipmentRole && requestedResourceIds[1]) requiredRolesByResource[requestedResourceIds[1]] = template.equipmentRole;
     const slot = findEarliestSlot(requestedResourceIds, startAfter, task.durationMinutes, bookings, { ...options, requiredRolesByResource });
-    const primary = state.resources.find((resource) => resource.id === requestedResourceIds[0]);
     const equipment = requestedResourceIds[1] ? state.resources.find((resource) => resource.id === requestedResourceIds[1]) : null;
     if (slot && primary) match = { slot, resourceIds: requestedResourceIds, primary, equipment };
   } else {
-    const constraint = getPlanningResourceConstraint(template, assignment, item, {
+    const constraint = getPlanningResourceConstraint(template, effectiveAssignment, item, {
+      taskId: task.taskId || task.id,
       preferredPrimaryResourceId: task.preferredResourceId || "",
       continuityPrimaryResourceId: schedulingOptions.continuityPrimaryResourceId || "",
     });
@@ -4014,7 +4152,7 @@ function buildInternalTaskStep(item, task, startAfter, bookings, assignment = cr
     );
   }
   if (!match) throw new Error(`Aucune combinaison de ressources compatible pour ${task.title}.`);
-  rememberPlanningAssignment(template, assignment, match.primary.id, match.equipment?.id || null);
+  rememberPlanningAssignment(template, effectiveAssignment, match.primary.id, match.equipment?.id || null);
   return makePlanningStep(item, template, match, {
     taskId: task.taskId,
     businessTaskId: task.taskId,
@@ -4047,7 +4185,8 @@ function scheduleTaskGraph(item, tasks, startAfter, bookings = state.bookings) {
   const scheduled = new Map();
   const tempBookings = ensureIndexedPlannerBookingView(bookings);
   const steps = [];
-  const assignment = createPlanningAssignmentContext();
+  const historyBookings = getContinuityHistorySource(bookings, item);
+  const assignment = createPlanningAssignmentContext(item, historyBookings);
   const ancestorIndex = buildGraphTaskAncestorIndex(graph);
   let guard = 0;
 
@@ -4070,7 +4209,7 @@ function scheduleTaskGraph(item, tasks, startAfter, bookings = state.bookings) {
         taskSteps = plan.steps;
       } else {
         taskSteps = [buildInternalTaskStep(item, task, earliest, tempBookings, assignment, {
-          continuityPrimaryResourceId: getGraphContinuityPrimaryResourceId(task, scheduled, ancestorIndex),
+          continuityPrimaryResourceId: getGraphContinuityPrimaryResourceId(task, scheduled, ancestorIndex, assignment),
         })];
       }
       taskSteps.forEach((step) => {

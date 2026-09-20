@@ -180,13 +180,14 @@ check("E soft continuity falls back when continuity resource has no horizon slot
   assert.equal(result.primaryResourceId, "body-2");
 });
 
-check("F manual preference overrides automatic continuity", () => {
+check("F manual preference cannot override established specialty continuity", () => {
   const tasks = [
     canonicalTask("body-source", "body", [], { preferredResourceId: "body-1" }),
     canonicalTask("reassembly-target", "reassembly", ["body-source"], { preferredResourceId: "body-2" }),
   ];
   const proposal = scheduleGraph({ id: "manual-over-continuity", durations: {}, planningTasks: tasks }, tasks);
-  assert.equal(step(proposal, "reassembly").primaryResourceId, "body-2");
+  assert.equal(step(proposal, "body").primaryResourceId, "body-1");
+  assert.equal(step(proposal, "reassembly").primaryResourceId, "body-1");
 });
 
 check("G hard lock overrides preference", () => {
@@ -199,10 +200,12 @@ check("G hard lock overrides preference", () => {
   assert.equal(step(proposal, "body").primaryResourceId, "body-2");
 });
 
-check("H hard lock overrides graph continuity", () => {
+check("H conflicting hard lock against established continuity fails closed", () => {
   const tasks = [canonicalTask("body-source", "body", [], { preferredResourceId: "body-1" }), canonicalTask("reassembly-target", "reassembly", ["body-source"])];
-  const proposal = scheduleGraph({ id: "lock-over-continuity", durations: {}, planningTasks: tasks, stepAssignmentLocks: { reassembly: { resourceId: "body-2" } } }, tasks);
-  assert.equal(step(proposal, "reassembly").primaryResourceId, "body-2");
+  expectPlanningError(
+    () => scheduleGraph({ id: "lock-over-continuity", durations: {}, planningTasks: tasks, stepAssignmentLocks: { reassembly: { resourceId: "body-2" } } }, tasks),
+    "assignment_specialty_continuity_conflict"
+  );
 });
 
 check("I locked resource unavailable is explicit and never falls back", () => {
@@ -260,15 +263,19 @@ check("Q explicit equipment unavailable never substitutes another equipment", ()
   assert.throws(() => run("buildInternalTaskStep(__p1006Item, __p1006Task, new Date('2026-09-07T07:00:00.000Z'), [])"), /combinaison|ressource/i);
 });
 
-check("R independent parallel graph tasks receive no hidden continuity dependency", () => {
+check("R parallelizable same-specialty tasks serialize on same technician and never allocate two people", () => {
   const tasks = [
     canonicalTask("a-body", "body", [], { preferredResourceId: "body-1", parallelizable: true }),
     canonicalTask("z-reassembly", "reassembly", [], { parallelizable: true }),
   ];
   const proposal = scheduleGraph({ id: "parallel", durations: {}, planningTasks: tasks }, tasks);
-  assert.deepEqual(step(proposal, "reassembly").dependencies, []);
-  assert.equal(step(proposal, "reassembly").primaryResourceId, "body-2");
-  assert.equal(step(proposal, "body").start, step(proposal, "reassembly").start);
+  const aStep = step(proposal, "body");
+  const zStep = step(proposal, "reassembly");
+  assert.deepEqual(zStep.dependencies, []);
+  assert.equal(aStep.primaryResourceId, "body-1");
+  assert.equal(zStep.primaryResourceId, "body-1");
+  const overlaps = new Date(aStep.start) < new Date(zStep.end) && new Date(aStep.end) > new Date(zStep.start);
+  assert.equal(overlaps, false, "Same technician tasks must serialize without overlapping in time");
 });
 
 check("S locked long-work remains one 600-minute booking on one resource", () => {

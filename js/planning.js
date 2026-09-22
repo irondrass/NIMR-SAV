@@ -454,6 +454,7 @@ function scheduleSingleStep(item, template, cursor, duration, tempBookings, assi
       resourceUnits: planningOptions.resourceUnits || {},
       item,
       lockedPrimaryResourceId: constraint.lockedPrimaryResourceId,
+      lockedEquipmentResourceId: preferredEquipmentId || "",
     },
   );
   if (!match) {
@@ -611,6 +612,100 @@ function seedSpecialtyContinuityFromHistory(context, item, historyBookings = [])
   }
 }
 
+function seedEquipmentContinuityFromHistory(context, item, historyBookings = []) {
+  if (!context || !item || !Array.isArray(historyBookings) || !historyBookings.length) return;
+
+  const caseId = String(item.id);
+  const bookingsByEquipmentRole = new Map();
+
+  historyBookings.forEach((booking) => {
+    if (booking?.type === "leave" || booking?.temporary === true) return;
+    if (String(booking?.caseId || "") !== caseId) return;
+
+    const template = getBookingTemplate(booking);
+    const equipmentRole = String(
+      template?.equipmentRole
+      || booking?.equipmentRole
+      || booking?.requiredEquipmentRole
+      || ""
+    ).trim();
+
+    if (!equipmentRole) return;
+
+    const declaredEquipmentIds = [
+      ...(Array.isArray(booking?.equipmentResourceIds) ? booking.equipmentResourceIds : []),
+      ...(booking?.equipmentResourceId ? [booking.equipmentResourceId] : []),
+    ].filter(Boolean);
+
+    const fallbackResourceIds = Array.isArray(booking?.resourceIds)
+      ? booking.resourceIds.slice(1)
+      : [];
+
+    const candidateIds = [...new Set([
+      ...declaredEquipmentIds,
+      ...fallbackResourceIds,
+    ].map((id) => String(id || "").trim()).filter(Boolean))];
+
+    const matchingEquipmentIds = candidateIds.filter((resourceId) => {
+      if (declaredEquipmentIds.map(String).includes(resourceId)) return true;
+
+      const resource = getResource(resourceId);
+      if (!resource) return false;
+
+      return String(resource.role || resource.category || "").trim() === equipmentRole;
+    });
+
+    matchingEquipmentIds.forEach((resourceId) => {
+      if (!bookingsByEquipmentRole.has(equipmentRole)) {
+        bookingsByEquipmentRole.set(equipmentRole, []);
+      }
+
+      bookingsByEquipmentRole.get(equipmentRole).push({
+        booking,
+        resourceId,
+      });
+    });
+  });
+
+  for (const [equipmentRole, entries] of bookingsByEquipmentRole.entries()) {
+    const productiveEntries = entries.filter(({ booking }) => (
+      ["started", "paused", "completed"].includes(getBookingOperationalStatus(booking))
+      || Boolean(booking?.actualStart || booking?.actualStartedAt)
+      || Number(booking?.actualWorkedMinutes || 0) > 0
+    ));
+
+    if (productiveEntries.length) {
+      const distinctEquipmentIds = [
+        ...new Set(productiveEntries.map((entry) => entry.resourceId)),
+      ];
+
+      if (distinctEquipmentIds.length > 1) {
+        const error = new Error(
+          `Conflit historique productif pour le dossier ${item.id} sur le rôle équipement ${equipmentRole} : plusieurs équipements identifiés (${distinctEquipmentIds.join(", ")}).`
+        );
+
+        error.code = "assignment_equipment_continuity_conflict";
+        error.conflictType = "historical_productive_equipment_split";
+        error.caseId = item.id;
+        error.equipmentRole = equipmentRole;
+        error.equipmentResourceIds = distinctEquipmentIds;
+
+        throw error;
+      }
+
+      context.equipmentByRole[equipmentRole] = distinctEquipmentIds[0];
+      continue;
+    }
+
+    const distinctEquipmentIds = [
+      ...new Set(entries.map((entry) => entry.resourceId)),
+    ];
+
+    if (distinctEquipmentIds.length === 1) {
+      context.equipmentByRole[equipmentRole] = distinctEquipmentIds[0];
+    }
+  }
+}
 function createPlanningAssignmentContext(item = null, historyBookings = null) {
   const context = {
     primaryResourceBySpecialty: {},
@@ -621,6 +716,7 @@ function createPlanningAssignmentContext(item = null, historyBookings = null) {
   if (item && item.id) {
     const history = historyBookings !== null ? historyBookings : getContinuityHistorySource(state.bookings, item);
     seedSpecialtyContinuityFromHistory(context, item, history);
+    seedEquipmentContinuityFromHistory(context, item, history);
   }
   return context;
 }
@@ -726,7 +822,9 @@ function rememberPlanningAssignment(template, assignment, primaryResourceId, equ
   }
   if (template?.key === "body" && !assignment.tolierId) assignment.tolierId = primaryResourceId;
   if (["prep", "paint"].includes(template?.key) && !assignment.painterId) assignment.painterId = primaryResourceId;
-  if (template?.equipmentRole && equipmentResourceId) assignment.equipmentByRole[template.equipmentRole] = equipmentResourceId;
+  if (template?.equipmentRole && equipmentResourceId && !assignment.equipmentByRole[template.equipmentRole]) {
+    assignment.equipmentByRole[template.equipmentRole] = equipmentResourceId;
+  }
 }
 
 function buildResourceSlotCandidate({
@@ -786,9 +884,13 @@ function findBestResourceSlot(template, startAfter, duration, bookings, fastJob,
     // n'a pas à porter également la catégorie « peintre »).
     ? getAssignableResources(template.equipmentRole, fastJob, { ...planningOptions, requiredCategory: "" })
     : [null];
+  const lockedEquipmentResourceId = String(planningOptions.lockedEquipmentResourceId || "").trim();
+  const constrainedEquipmentResources = template.equipmentRole && lockedEquipmentResourceId
+    ? equipmentResources.filter((equipment) => equipment.id === lockedEquipmentResourceId)
+    : equipmentResources;
   let best = null;
   primaryResources.forEach((primary, primaryIndex) => {
-    equipmentResources.forEach((equipment, equipmentIndex) => {
+    constrainedEquipmentResources.forEach((equipment, equipmentIndex) => {
       const candidate = buildResourceSlotCandidate({
         primary,
         equipment,
@@ -4103,6 +4205,7 @@ function buildInternalTaskStep(item, task, startAfter, bookings, assignment = nu
     resourceUnits: task.resourceUnits || {},
   };
   let match = null;
+  const continuityEquipmentId = getPreferredEquipmentResourceId(template, effectiveAssignment);
   const requestedResourceIds = [...new Set((task.resourceIds || []).filter(Boolean))];
   if (requestedResourceIds.length) {
     const primaryId = requestedResourceIds[0];
@@ -4123,6 +4226,19 @@ function buildInternalTaskStep(item, task, startAfter, bookings, assignment = nu
         throw error;
       }
     }
+    const requestedEquipmentId = template.equipmentRole ? (requestedResourceIds[1] || "") : "";
+    if (requestedEquipmentId && continuityEquipmentId && requestedEquipmentId !== continuityEquipmentId) {
+      const error = new Error(`Conflit de continuité équipement pour ${task.title} : ressource demandée (${requestedEquipmentId}) distincte de l'équipement déjà affecté (${continuityEquipmentId}) pour le rôle ${template.equipmentRole}.`);
+      error.code = "assignment_equipment_continuity_conflict";
+      error.caseId = item.id;
+      error.stepKey = template.key;
+      error.taskId = task.taskId || task.id;
+      error.equipmentRole = template.equipmentRole;
+      error.continuityResourceId = continuityEquipmentId;
+      error.requestedResourceId = requestedEquipmentId;
+      error.source = "task.resourceIds";
+      throw error;
+    }
     const requiredRolesByResource = {};
     requiredRolesByResource[requestedResourceIds[0]] = template.role;
     if (template.equipmentRole && requestedResourceIds[1]) requiredRolesByResource[requestedResourceIds[1]] = template.equipmentRole;
@@ -4142,16 +4258,29 @@ function buildInternalTaskStep(item, task, startAfter, bookings, assignment = nu
       bookings,
       isFastLaneJob(item),
       constraint.effectivePreferredPrimaryResourceId,
-      task.preferredEquipmentId || null,
+      continuityEquipmentId || task.preferredEquipmentId || null,
       `${item.id}:${task.id}`,
       {
         ...options,
         item,
         lockedPrimaryResourceId: constraint.lockedPrimaryResourceId,
+        lockedEquipmentResourceId: continuityEquipmentId || "",
       },
     );
   }
-  if (!match) throw new Error(`Aucune combinaison de ressources compatible pour ${task.title}.`);
+  if (!match) {
+    if (continuityEquipmentId && template.equipmentRole) {
+      const error = new Error(`Aucun créneau disponible avec l'équipement déjà affecté (${continuityEquipmentId}) pour le rôle ${template.equipmentRole}.`);
+      error.code = "assignment_equipment_continuity_unavailable";
+      error.caseId = item.id;
+      error.stepKey = template.key;
+      error.taskId = task.taskId || task.id;
+      error.equipmentRole = template.equipmentRole;
+      error.continuityResourceId = continuityEquipmentId;
+      throw error;
+    }
+    throw new Error(`Aucune combinaison de ressources compatible pour ${task.title}.`);
+  }
   rememberPlanningAssignment(template, effectiveAssignment, match.primary.id, match.equipment?.id || null);
   return makePlanningStep(item, template, match, {
     taskId: task.taskId,

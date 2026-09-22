@@ -161,6 +161,34 @@ function getPlanningBusinessDisplayKey(booking) {
   return String(booking?.businessTaskId || booking?.parentBookingId || booking?.id || "");
 }
 
+function getPlanningBusinessTaskNumberKey(booking) {
+  const caseId = String(booking?.caseId || "");
+  const businessId = String(getPlanningBusinessDisplayKey(booking) || booking?.id || "");
+  return `business::${caseId}::${businessId}`;
+}
+
+function getPlanningTaskNumberFromMap(taskNumberMap, booking, segment = null) {
+  if (!taskNumberMap || !booking) return "";
+
+  const getValue = (key) => (
+    typeof taskNumberMap.get === "function"
+      ? taskNumberMap.get(key)
+      : taskNumberMap[key]
+  );
+
+  if (segment) {
+    const directNumber = getValue(getPlanningTaskNumberKey(booking, segment));
+    if (directNumber) return directNumber;
+  }
+
+  for (const candidateSegment of (booking.segments || [])) {
+    const candidateNumber = getValue(getPlanningTaskNumberKey(booking, candidateSegment));
+    if (candidateNumber) return candidateNumber;
+  }
+
+  return "";
+}
+
 function getBookingLaborOperations(caseItem, key) {
   const lines = [];
   (caseItem?.claims || []).forEach((claim) => {
@@ -196,8 +224,16 @@ function renderDailyLaborSummary(date, taskNumberMap, filters = null) {
     seenBusinessTasks.add(businessKey);
     const ops = getBookingLaborOperations(caseItem, booking.key);
     const identity = getPlanningBookingDisplayIdentity(booking);
-    rows.push({ booking, caseItem, ops, identity });
+    const taskNumber = getPlanningTaskNumberFromMap(taskNumberMap, booking);
+    rows.push({ booking, caseItem, ops, identity, taskNumber });
   });
+  rows.sort((a, b) => {
+    const aNumber = Number(a.taskNumber || Number.MAX_SAFE_INTEGER);
+    const bNumber = Number(b.taskNumber || Number.MAX_SAFE_INTEGER);
+    if (aNumber !== bNumber) return aNumber - bNumber;
+    return String(a.booking?.id || "").localeCompare(String(b.booking?.id || ""));
+  });
+
   if (!rows.length) {
     const isFiltered = filters && (filters.search || filters.resourceId !== "all");
     target.innerHTML = isFiltered
@@ -208,9 +244,9 @@ function renderDailyLaborSummary(date, taskNumberMap, filters = null) {
   target.innerHTML = `
     <div class="daily-labor-head"><strong>Détail main-d’œuvre du jour</strong><span>Chaque étape affiche les lignes devis incluses, plus rappel pièces/finition/contrôle.</span></div>
     <div class="daily-labor-list">
-      ${rows.map(({ booking, caseItem, ops, identity }, index) => `
+      ${rows.map(({ booking, caseItem, ops, identity, taskNumber }) => `
         <article class="daily-labor-card">
-          <strong>${index + 1}. ${escapeHtml(identity.operation)}</strong>
+          <strong>${taskNumber ? `${escapeHtml(String(taskNumber))}. ` : ""}${escapeHtml(identity.operation)}</strong>
           <small>${escapeHtml(caseItem.clientName || 'Client')} · ${escapeHtml(caseItem.vehicle || '')}${caseItem.plate ? ` · ${escapeHtml(caseItem.plate)}` : ''}${identity.canonical && identity.phase !== identity.operation ? ` · Phase: ${escapeHtml(identity.phase)}` : ''}</small>
           ${ops.length ? `<ul>${ops.map((op) => `<li>${escapeHtml(op)}</li>`).join('')}</ul>` : '<p class="muted">Aucune ligne MO détaillée rattachée à cette opération.</p>'}
         </article>
@@ -264,7 +300,7 @@ function renderMobilePlanningList(date, resources, taskNumberMap, filters = null
     </div>
     ${rows
       .map(({ booking, segment, caseItem, resource, start, end, status }) => {
-        const taskNumber = taskNumberMap?.get(getPlanningTaskNumberKey(booking, segment)) || "";
+        const taskNumber = getPlanningTaskNumberFromMap(taskNumberMap, booking, segment);
         const identity = getPlanningBookingDisplayIdentity(booking);
         const stage = identity.operation;
         const phase = identity.phase;
@@ -366,7 +402,7 @@ function renderResourceBookings(resource, date, dayStart, dayEnd, total, dailyCo
       const phase = identity.phase;
       const timeLine = `${formatTime(clippedStart)}-${formatTime(clippedEnd)}`;
       const equipmentPrefix = isEquipmentResource(resource) ? `${ROLE_LABELS[resource.role] || "Équipement"} · ` : "";
-      const taskNumber = taskNumberMap?.get(getPlanningTaskNumberKey(booking, segment)) || "";
+      const taskNumber = getPlanningTaskNumberFromMap(taskNumberMap, booking, segment);
       const shortPhase = phase.replace("Tôlerie + démontage", "Tôlerie").replace("Peinture + vernis", "Peinture").replace("Contrôle qualité", "Contrôle");
       const secondaryLine = isLeave ? stage : `${vehicleLine}${identity.canonical && phase !== stage ? ` · ${phase}` : ""}`;
       const compactSecondaryLine = isLeave ? stage : `${vehicleLine}${identity.canonical && shortPhase !== stage ? ` · ${shortPhase}` : ""}`;
@@ -417,8 +453,24 @@ function buildDailyPlanningTaskNumberMap(date, resources) {
     });
   });
   rows.sort((a, b) => a.start - b.start || a.end - b.end || String(a.resourceName).localeCompare(String(b.resourceName)) || String(a.booking.title || "").localeCompare(String(b.booking.title || "")));
+
   const map = new Map();
-  rows.forEach((row, index) => map.set(getPlanningTaskNumberKey(row.booking, row.segment), index + 1));
+  const numberByBusinessTask = new Map();
+  let nextNumber = 1;
+
+  rows.forEach((row) => {
+    const businessKey = getPlanningBusinessTaskNumberKey(row.booking);
+
+    if (!numberByBusinessTask.has(businessKey)) {
+      numberByBusinessTask.set(businessKey, nextNumber);
+      nextNumber += 1;
+    }
+
+    const taskNumber = numberByBusinessTask.get(businessKey);
+
+    map.set(getPlanningTaskNumberKey(row.booking, row.segment), taskNumber);
+  });
+
   return map;
 }
 

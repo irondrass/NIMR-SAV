@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import { currentBuild } from "./helpers/build_version.mjs";
 import {
   RELEASE_OWNED_RUNTIME_FILES,
   normalizeBytesCRLF,
@@ -235,9 +236,9 @@ test("J. Cross-EOL proof: normal worktree files vs in-memory CRLF version yield 
 // -------------------------------------------------------------
 // K. XLSX VENDOR ASSET SENSITIVITY & SEALED MATCH
 // -------------------------------------------------------------
-test("K. XLSX vendor asset sensitivity & sealed v23.3.55 match: mutating 1 byte in vendor/xlsx.mini.min.js changes fingerprint; canonical matches sealed", () => {
+test(`K. XLSX vendor asset sensitivity & sealed ${currentBuild.appVersion} match: mutating 1 byte in vendor/xlsx.mini.min.js changes fingerprint; canonical matches sealed`, () => {
   const normalHash = computeReleaseFingerprint(repositoryRoot, RELEASE_OWNED_RUNTIME_FILES);
-  assert.equal(normalHash, SEALED_RELEASE_FINGERPRINTS["v23.3.55"], "Canonical release fingerprint must match sealed v23.3.55");
+  assert.equal(normalHash, SEALED_RELEASE_FINGERPRINTS[currentBuild.appVersion], `Canonical release fingerprint must match sealed ${currentBuild.appVersion}`);
 
   const originalXlsx = fs.readFileSync(path.join(repositoryRoot, "vendor/xlsx.mini.min.js"));
   const mutatedXlsx = Buffer.from(originalXlsx);

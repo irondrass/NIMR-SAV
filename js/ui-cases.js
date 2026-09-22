@@ -6178,7 +6178,7 @@ function renderHistory(root, item) {
 
 function getNextWorkflowAction(item) {
   if (isCaseReadonlyArchive(item)) return null;
-  if (item.flags.delivered) return null;
+  if (item.flags.delivered && item.flags.workCompleted) return null;
   if (item.flags.workCompleted) return isCaseQualityValidated(item) ? "delivered" : "qualityApproved";
   if (!hasRepairClaims(item)) return "claim";
   const claimsToCheck = getWorkflowClaims(item);
@@ -6920,6 +6920,15 @@ function renderBookingTaskActionButton(row, permission, action, label, className
 function renderBookingTaskActions(row) {
   if (row.archived) return '<span class="muted">Archive</span>';
   if (row.status === "completed") return '<span class="muted">Clôturée</span>';
+  if (row.needsScheduling) {
+    return renderBookingTaskActionButton(
+      row,
+      "planning.edit",
+      "reschedule",
+      row.remainingEstimateRequired ? "Estimer & planifier" : "Planifier",
+      "primary-button tiny-button"
+    ) || '<span class="muted">À planifier</span>';
+  }
   if (row.status === "paused") return '<span class="muted">Reliquat planifié</span>';
   if (row.status === "started") {
     const actions = [

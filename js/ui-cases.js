@@ -5886,7 +5886,7 @@ function renderCaseBlockerControls(root, item) {
   target.innerHTML = `
     <div class="blocker-head">
       <strong>Pièces / blocage</strong>
-      <span class="tag ${blocked ? "warn" : "ok"}">${blocked ? "Bloqué" : "Suivi OK"}</span>
+      <span class="tag ${blocked ? "warn" : "ok"}">${blocked ? "Bloqué" : "Aucun blocage"}</span>
     </div>
     <div class="blocker-grid">
       <label>Statut pièces

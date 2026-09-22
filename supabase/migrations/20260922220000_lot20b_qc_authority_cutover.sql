@@ -10,8 +10,36 @@ declare
   old_payload jsonb := case when tg_op='UPDATE' then coalesce(old.payload,'{}'::jsonb) else '{}'::jsonb end;
   new_payload jsonb := coalesce(new.payload,'{}'::jsonb);
   qc_changed boolean := false;
+  insert_quality_status text := lower(trim(coalesce(new_payload #>> '{receptionWorkflow,qualityStatus}','not_started')));
+  insert_history jsonb := case
+    when jsonb_typeof(new_payload #> '{receptionWorkflow,qualityReviewHistory}')='array'
+      then new_payload #> '{receptionWorkflow,qualityReviewHistory}'
+    else '[]'::jsonb
+  end;
 begin
   if auth.uid() is null or new.entity_type <> 'case' then
+    return new;
+  end if;
+
+  if tg_op='INSERT' then
+    if coalesce(new_payload #>> '{flags,qualityApproved}','false')='true'
+       or insert_quality_status not in ('','not_started')
+       or jsonb_array_length(insert_history) > 0
+       or nullif(trim(coalesce(new_payload #>> '{receptionWorkflow,qualityReviewedAt}','')),'') is not null
+       or nullif(trim(coalesce(new_payload #>> '{receptionWorkflow,readyForDeliveryAt}','')),'') is not null
+       or nullif(trim(coalesce(new_payload #>> '{receptionWorkflow,qualityRevalidatedAt}','')),'') is not null
+       or nullif(trim(coalesce(new_payload #>> '{receptionWorkflow,qualityReturnRequestedAt}','')),'') is not null
+       or nullif(trim(coalesce(new_payload #>> '{receptionWorkflow,qualityReturnReason}','')),'') is not null
+       or nullif(trim(coalesce(new_payload #>> '{receptionWorkflow,qualityReworkRequestedAt}','')),'') is not null
+       or nullif(trim(coalesce(new_payload #>> '{receptionWorkflow,qualityReworkBookingId}','')),'') is not null
+       or nullif(trim(coalesce(new_payload #>> '{receptionWorkflow,qualityReworkStepKey}','')),'') is not null
+       or coalesce(new_payload #>> '{receptionWorkflow,qualityReworkCycle}','') not in ('','0')
+       or nullif(trim(coalesce(new_payload #>> '{receptionWorkflow,qualityReworkCompletedAt}','')),'') is not null
+    then
+      raise exception 'new case cannot contain completed quality decision state'
+        using errcode='42501';
+    end if;
+
     return new;
   end if;
 

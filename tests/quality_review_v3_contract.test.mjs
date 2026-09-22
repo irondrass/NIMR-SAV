@@ -12,6 +12,11 @@ const migrationSource = fs.readFileSync(
   "utf8",
 );
 
+const cutoverSource = fs.readFileSync(
+  new URL("../supabase/migrations/20260922220000_lot20b_qc_authority_cutover.sql", import.meta.url),
+  "utf8",
+);
+
 test("QC client sends the version actually observed by the UI", () => {
   const start = clientSource.indexOf("async function submitSupabaseQualityReview");
   const end = clientSource.indexOf("window.submitSupabaseQualityReview", start);
@@ -41,5 +46,29 @@ test("QC v3 server blocks invalid timing and hidden status transitions", () => {
   assert.match(
     migrationSource,
     /flags->>'workCompleted'[\s\S]*?Terminer les travaux avant le contrôle qualité/,
+  );
+});
+
+
+test("CUTOVER preserves neutral case creation while blocking prevalidated inserts", () => {
+  assert.match(
+    cutoverSource,
+    /if tg_op='INSERT' then/,
+    "CUTOVER must treat initial case creation separately from QC updates",
+  );
+  assert.match(
+    cutoverSource,
+    /insert_quality_status not in \('','not_started'\)/,
+    "A new case may only start with a neutral QC status",
+  );
+  assert.match(
+    cutoverSource,
+    /new case cannot contain completed quality decision state/,
+    "A new case must not be insertable as already quality-approved/rejected",
+  );
+  assert.match(
+    cutoverSource,
+    /quality domain changes must use nimr_apply_quality_review_v3/,
+    "QC updates must still be restricted to the dedicated QC RPC",
   );
 });

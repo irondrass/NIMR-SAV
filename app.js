@@ -131,7 +131,7 @@ function bindSyncConflictUsability() {
 
 function configurePdfWorker() {
   if (window.pdfjsLib?.GlobalWorkerOptions) {
-    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.56";
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.57";
   }
 }
 
@@ -1537,7 +1537,7 @@ function registerServiceWorker() {
   });
   const registerCurrentServiceWorker = async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=23.3.56", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=23.3.57", { updateViaCache: "none" });
       const refreshRegistration = async () => {
         try {
           await registration.update?.();
@@ -2607,6 +2607,47 @@ async function triggerLogout() {
   return { ok: true };
 }
 
+function closeSidebarUserMenu({ restoreFocus = false } = {}) {
+  const menu = document.getElementById("sidebar-user-menu");
+  const trigger = document.getElementById("sidebar-user-menu-trigger");
+
+  if (menu) menu.hidden = true;
+
+  if (trigger) {
+    trigger.setAttribute("aria-expanded", "false");
+    if (restoreFocus && typeof trigger.focus === "function") trigger.focus();
+  }
+}
+
+function canOpenSidebarUserManagement() {
+  const currentUser = state.currentUserId && typeof getUserById === "function"
+    ? getUserById(state.currentUserId)
+    : null;
+
+  const localAuthority = Boolean(
+    currentUser
+    && typeof hasPermission === "function"
+    && hasPermission("users.manage", { user: currentUser })
+  );
+
+  if (localAuthority) return true;
+
+  const snapshot = typeof getAccountAccessSnapshot === "function"
+    ? getAccountAccessSnapshot()
+    : null;
+
+  const validatedServerAuthority = typeof hasValidatedOnlineServerAuthority === "function"
+    && hasValidatedOnlineServerAuthority();
+
+  return Boolean(
+    validatedServerAuthority
+    && snapshot?.online !== false
+    && snapshot?.membershipStatus === "active"
+    && snapshot?.overallStatus === "active"
+    && ["admin_technique", "directeur"].includes(snapshot?.serverRole)
+  );
+}
+
 function renderCurrentSessionIndicator() {
   const currentUser = state.currentUserId && typeof getUserById === "function" ? getUserById(state.currentUserId) : null;
   const sidebarUserName = document.getElementById("sidebar-user-name");
@@ -2618,11 +2659,36 @@ function renderCurrentSessionIndicator() {
     sidebarUserName.textContent = currentUser ? `${currentUser.name} (${roleLabel})` : "Atelier";
   }
 
-  const changeBtn = document.getElementById("sidebar-change-user-btn");
-  if (changeBtn) {
-    changeBtn.textContent = "Déconnexion";
-    changeBtn.title = "Se déconnecter de la session atelier";
-    changeBtn.setAttribute("aria-label", "Se déconnecter");
+  const menuTrigger = document.getElementById("sidebar-user-menu-trigger");
+  const menu = document.getElementById("sidebar-user-menu");
+  const manageUsersBtn = document.getElementById("sidebar-user-manage-users");
+  const logoutBtn = document.getElementById("sidebar-user-logout");
+
+  if (menuTrigger) {
+    menuTrigger.disabled = !currentUser;
+    menuTrigger.textContent = "Compte";
+    menuTrigger.title = currentUser
+      ? "Ouvrir le menu du compte"
+      : "Aucune session utilisateur active";
+    menuTrigger.setAttribute(
+      "aria-label",
+      currentUser
+        ? `Ouvrir le menu du compte de ${currentUser.name || "l’utilisateur"}`
+        : "Aucune session utilisateur active"
+    );
+    menuTrigger.setAttribute("aria-expanded", "false");
+  }
+
+  if (manageUsersBtn) {
+    manageUsersBtn.hidden = !canOpenSidebarUserManagement();
+  }
+
+  if (logoutBtn) {
+    logoutBtn.disabled = !currentUser;
+  }
+
+  if (menu) {
+    menu.hidden = true;
   }
 
   const settingsChangeBtn = document.getElementById("change-user-settings-btn");
@@ -2863,10 +2929,67 @@ function bindUserSessionActions() {
     quietNotify("Paramètre de session mis à jour.", "success");
   });
 
-  // v23.2.5 — Bouton sidebar : "Changer" pour admin, "Déconnexion" pour les autres rôles.
-  // triggerUserChangeScreen() gère lui-même le garde via guardUserSwitch().
-  document.getElementById("sidebar-change-user-btn")?.addEventListener("click", () => {
+  const sidebarUserMenuTrigger = document.getElementById("sidebar-user-menu-trigger");
+  const sidebarUserMenu = document.getElementById("sidebar-user-menu");
+  const sidebarUserManageUsers = document.getElementById("sidebar-user-manage-users");
+  const sidebarUserLogout = document.getElementById("sidebar-user-logout");
+
+  sidebarUserMenuTrigger?.addEventListener("click", (event) => {
+    event.stopPropagation();
+
+    if (!sidebarUserMenu) return;
+
+    const willOpen = sidebarUserMenu.hidden === true;
+    sidebarUserMenu.hidden = !willOpen;
+    sidebarUserMenuTrigger.setAttribute("aria-expanded", willOpen ? "true" : "false");
+
+    if (willOpen) {
+      const firstItem = sidebarUserMenu.querySelector(
+        '[role="menuitem"]:not([hidden]):not(:disabled)'
+      );
+      firstItem?.focus();
+    }
+  });
+
+  sidebarUserManageUsers?.addEventListener("click", () => {
+    closeSidebarUserMenu();
+
+    if (!canOpenSidebarUserManagement()) {
+      notifyUser("Gestion des comptes non autorisée pour cette identité.", "error");
+      return;
+    }
+
+    setActiveTab("atelier");
+    setSettingsWorkspace("administration");
+
+    if (typeof renderUsersAndRoles === "function") {
+      renderUsersAndRoles();
+    }
+
+    document.getElementById("account-access-foundation")
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+
+  sidebarUserLogout?.addEventListener("click", () => {
+    closeSidebarUserMenu();
     triggerUserChangeScreen();
+  });
+
+  document.addEventListener("click", (event) => {
+    const userStatus = document.getElementById("sidebar-user-status");
+
+    if (
+      sidebarUserMenu?.hidden === false
+      && !userStatus?.contains(event.target)
+    ) {
+      closeSidebarUserMenu();
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && sidebarUserMenu?.hidden === false) {
+      closeSidebarUserMenu({ restoreFocus: true });
+    }
   });
   document.getElementById("change-user-settings-btn")?.addEventListener("click", () => {
     triggerUserChangeScreen();

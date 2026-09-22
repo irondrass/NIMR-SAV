@@ -20,8 +20,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <script src="js/version.js?v=23.3.56"></script>
-    <link rel="stylesheet" href="styles.css?v=23.3.56" />
+    <script src="js/version.js?v=23.3.57"></script>
+    <link rel="stylesheet" href="styles.css?v=23.3.57" />
   </head>
   <body data-active-tab="today">
     <button id="mobile-menu-toggle" class="mobile-menu-btn" type="button" aria-label="Ouvrir la navigation principale" aria-expanded="false" aria-controls="primary-sidebar" hidden>
@@ -39,7 +39,31 @@
             <span>Planning atelier global</span>
             <div id="sidebar-user-status" class="sidebar-user-status">
               <span id="sidebar-user-name">...</span>
-              <button class="link-button sidebar-change-user-button" id="sidebar-change-user-btn" type="button">Changer</button>
+              <div class="sidebar-user-account">
+                <button
+                  class="link-button sidebar-user-menu-trigger"
+                  id="sidebar-user-menu-trigger"
+                  type="button"
+                  aria-haspopup="menu"
+                  aria-expanded="false"
+                  aria-controls="sidebar-user-menu"
+                >Compte</button>
+                <div class="sidebar-user-menu" id="sidebar-user-menu" role="menu" hidden>
+                  <button
+                    class="sidebar-user-menu-item"
+                    id="sidebar-user-manage-users"
+                    type="button"
+                    role="menuitem"
+                    hidden
+                  >Gérer les utilisateurs</button>
+                  <button
+                    class="sidebar-user-menu-item sidebar-user-menu-danger"
+                    id="sidebar-user-logout"
+                    type="button"
+                    role="menuitem"
+                  >Déconnexion</button>
+                </div>
+              </div>
             </div>
           </div>
           <span class="save-status-indicator status-saved" id="save-status-indicator" aria-live="polite">Sauvegardé</span>
@@ -767,8 +791,17 @@
                       </button>
                     </div>
                   </form>
-                  <div id="users-duplicates-alert" hidden></div>
-                  <div class="resource-list" id="users-list"></div>
+                  </section>
+
+                  <section class="managed-user-accounts" id="managed-user-accounts" aria-labelledby="managed-user-accounts-title">
+                    <div class="section-heading compact-heading">
+                      <div>
+                        <h2 id="managed-user-accounts-title">Comptes atelier</h2>
+                        <span>Comptes visibles selon l’autorité locale ou l’autorité serveur validée.</span>
+                      </div>
+                    </div>
+                    <div id="users-duplicates-alert" hidden></div>
+                    <div class="resource-list" id="users-list"></div>
                   </section>
 
                   <div class="section-heading compact-heading">
@@ -1487,25 +1520,25 @@
       </div>
     </div>
 
-    <script src="vendor/pdf.min.js?v=23.3.56" defer></script>
-    <script src="js/utils.js?v=23.3.56" defer></script>
-    <script src="js/state.js?v=23.3.56" defer></script>
-    <script src="js/ui-cases.js?v=23.3.56" defer></script>
-    <script src="js/estimate-import.js?v=23.3.56" defer></script>
-    <script src="js/ui-planning.js?v=23.3.56" defer></script>
-    <script src="js/photos.js?v=23.3.56" defer></script>
-    <script src="js/storage.js?v=23.3.56" defer></script>
-    <script src="js/work-hours-sync.js?v=23.3.56" defer></script>
-    <script src="js/planning.js?v=23.3.56" defer></script>
-    <script src="js/exports.js?v=23.3.56" defer></script>
-    <script src="js/business-rules-v2187.js?v=23.3.56" defer></script>
+    <script src="vendor/pdf.min.js?v=23.3.57" defer></script>
+    <script src="js/utils.js?v=23.3.57" defer></script>
+    <script src="js/state.js?v=23.3.57" defer></script>
+    <script src="js/ui-cases.js?v=23.3.57" defer></script>
+    <script src="js/estimate-import.js?v=23.3.57" defer></script>
+    <script src="js/ui-planning.js?v=23.3.57" defer></script>
+    <script src="js/photos.js?v=23.3.57" defer></script>
+    <script src="js/storage.js?v=23.3.57" defer></script>
+    <script src="js/work-hours-sync.js?v=23.3.57" defer></script>
+    <script src="js/planning.js?v=23.3.57" defer></script>
+    <script src="js/exports.js?v=23.3.57" defer></script>
+    <script src="js/business-rules-v2187.js?v=23.3.57" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.111.0" defer></script>
-    <script src="js/supabase-config.js?v=23.3.56" defer></script>
-    <script src="js/supabase-client.js?v=23.3.56" defer></script>
-    <script src="js/supabase-sync.js?v=23.3.56" defer></script>
-    <script src="js/vn-part-client.js?v=23.3.56" defer></script>
-    <script src="vendor/xlsx.mini.min.js?v=23.3.56" defer></script>
-    <script src="js/vn-part-ui.js?v=23.3.56" defer></script>
-    <script src="app.js?v=23.3.56" defer></script>
+    <script src="js/supabase-config.js?v=23.3.57" defer></script>
+    <script src="js/supabase-client.js?v=23.3.57" defer></script>
+    <script src="js/supabase-sync.js?v=23.3.57" defer></script>
+    <script src="js/vn-part-client.js?v=23.3.57" defer></script>
+    <script src="vendor/xlsx.mini.min.js?v=23.3.57" defer></script>
+    <script src="js/vn-part-ui.js?v=23.3.57" defer></script>
+    <script src="app.js?v=23.3.57" defer></script>
   </body>
 </html>

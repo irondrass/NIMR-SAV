@@ -460,8 +460,13 @@ async function main() {
       returnByValue: true,
       expression: `(async () => {
         // Se déconnecter puis réauthentifier explicitement l'admin dans le cloud.
-        const changeBtn = document.getElementById("sidebar-change-user-btn");
-        changeBtn.click();
+        const menuTrigger = document.getElementById("sidebar-user-menu-trigger");
+        const logoutBtn = document.getElementById("sidebar-user-logout");
+        if (!menuTrigger || !logoutBtn) {
+          return { ok: false, error: "Menu compte sidebar indisponible" };
+        }
+        menuTrigger.click();
+        logoutBtn.click();
         for (let attempt = 0; attempt < 40 && document.getElementById("first-access-overlay").hidden; attempt += 1) {
           await new Promise(r => setTimeout(r, 100));
         }

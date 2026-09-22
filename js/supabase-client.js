@@ -972,7 +972,14 @@ function bindSupabaseConfigForm() {
   return refreshSupabaseConfigPermissionState();
 }
 
-async function submitSupabaseQualityReview({ caseId, status, reason = "", operationId = null } = {}) {
+async function submitSupabaseQualityReview({
+  caseId,
+  status,
+  reason = "",
+  checklist = {},
+  reworkStepKey = "",
+  operationId = null,
+} = {}) {
   if (typeof navigator !== "undefined" && navigator.onLine === false) {
     return {
       ok: false,
@@ -1011,15 +1018,42 @@ async function submitSupabaseQualityReview({ caseId, status, reason = "", operat
     if (!opId) {
       return { ok: false, code: "OPERATION_ID_REQUIRED", message: "Identifiant d'opération qualité requis." };
     }
-    const { data, error } = await client.rpc("nimr_apply_quality_review_v1", {
+    const { data: versionRow, error: versionError } = await client
+      .from("sync_entities")
+      .select("entity_version")
+      .eq("workshop_id", workshopId)
+      .eq("entity_type", "case")
+      .eq("entity_id", String(caseId || ""))
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (versionError) {
+      return { ok: false, code: versionError.code || "VERSION_READ_ERROR", message: versionError.message || "Version serveur du dossier indisponible." };
+    }
+    if (versionRow?.entity_version == null) {
+      return { ok: false, code: "CASE_NOT_FOUND", message: "Dossier introuvable ou supprimé sur le serveur." };
+    }
+
+    const { data, error } = await client.rpc("nimr_apply_quality_review_v3", {
       p_workshop_id: workshopId,
       p_case_id: String(caseId || ""),
       p_quality_status: String(status || ""),
       p_reason: String(reason || ""),
       p_operation_id: opId,
+      p_checklist: checklist && typeof checklist === "object" ? checklist : {},
+      p_rework_step_key: String(reworkStepKey || "").trim() || null,
+      p_base_version: Number(versionRow.entity_version),
     });
     if (error) {
       return { ok: false, code: error.code || "RPC_ERROR", message: error.message || "Erreur de validation qualité." };
+    }
+    const outcome = Array.isArray(data) ? data[0] : data;
+    if (outcome?.conflict || outcome?.accepted === false) {
+      return {
+        ok: false,
+        code: "CONFLICT",
+        message: "Le dossier a été modifié sur un autre poste. Actualisez puis recommencez le contrôle qualité.",
+        data: outcome,
+      };
     }
     return { ok: true, data };
   } catch (err) {

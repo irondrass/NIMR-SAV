@@ -845,19 +845,53 @@ function renderStep10_QualityCheck(item) {
   const rw = ensureReceptionWorkflow(item);
   const f = item.flags;
   const openClaims = (item.customerClaims || []).filter((c) => ["open", "in_progress", "unresolved"].includes(c.status));
-  const qsLabels = { not_started: "Non commencé", in_progress: "En cours", validated: "Validé ✓", rejected: "Refusé / reprise nécessaire", rework: "Retour atelier / retravail" };
-  const qsClass = { not_started: "", in_progress: "tag-info", validated: "priority-low", rejected: "priority-urgent", rework: "priority-high" };
+  const qsLabels = {
+    not_started: "Non commencé",
+    in_progress: "En cours",
+    validated: "Validé ✓",
+    rejected: "Non conforme",
+    rework: "Retouche atelier",
+  };
+  const qsClass = {
+    not_started: "",
+    in_progress: "tag-info",
+    validated: "priority-low",
+    rejected: "priority-urgent",
+    rework: "priority-high",
+  };
   const canEditQuality = typeof canRenderAction === "function"
     && ["quality.validate", "quality.reject", "quality.revalidate"].some((permission) => canRenderAction(permission, { item }));
-  const qualityDeniedTitle = canEditQuality ? "" : (typeof getPermissionDeniedMessage === "function" ? getPermissionDeniedMessage("quality.validate", { item }) : "Action qualité non autorisée.");
+  const workReady = f.workCompleted === true;
+  const canSubmitQuality = canEditQuality && workReady;
+  const qualityDeniedTitle = !canEditQuality
+    ? (typeof getPermissionDeniedMessage === "function"
+      ? getPermissionDeniedMessage("quality.validate", { item })
+      : "Action qualité non autorisée.")
+    : (!workReady ? "Terminez les travaux / la retouche avant le contrôle qualité." : "");
+
+  const checks = [
+    ["Alignement carrosserie", "Alignement carrosserie"],
+    ["Teinte et vernis", "Teinte et vernis"],
+    ["Remontage accessoires", "Remontage accessoires"],
+    ["Nettoyage intérieur/extérieur", "Nettoyage intérieur / extérieur"],
+    ["Essai final et validation client", "Essai final / fonctionnement"],
+  ];
+  const checklist = item.qualityChecklist || {};
+  const normalizeChecklistState = (value) => {
+    if (value === true) return "ok";
+    if (value === false || value == null) return "";
+    const normalized = String(value).trim().toLowerCase();
+    return ["ok", "na", "nok"].includes(normalized) ? normalized : "";
+  };
+  const reworkPending = rw.qualityStatus === "rework";
 
   return `
     <div class="step-card step-card-active">
       <div class="step-card-header">
         <span class="step-number-badge">10</span>
         <div>
-          <h2 class="step-title">Suivi du contrôle qualité</h2>
-          <p class="step-desc">Vérifiez que le véhicule est prêt pour la livraison.</p>
+          <h2 class="step-title">Contrôle final</h2>
+          <p class="step-desc">Décision simple : conforme ou non conforme. Toute non-conformité crée automatiquement une retouche atelier à planifier.</p>
         </div>
       </div>
 
@@ -866,6 +900,20 @@ function renderStep10_QualityCheck(item) {
           <span>Statut QC :</span>
           <span class="tag ${qsClass[rw.qualityStatus] || ""}" style="font-size:1rem;padding:6px 14px;">${qsLabels[rw.qualityStatus] || rw.qualityStatus}</span>
         </div>
+
+        ${reworkPending ? `
+          <div style="margin-top:10px;padding:8px;background:rgba(230,126,34,0.08);border-radius:6px;border:1px solid rgba(230,126,34,0.35);">
+            <strong>Retouche atelier en cours / à planifier.</strong>
+            ${rw.qualityReturnReason ? `<div style="margin-top:4px;">${escapeHtml(rw.qualityReturnReason)}</div>` : ""}
+          </div>
+        ` : ""}
+
+        ${!workReady ? `
+          <div style="margin-top:10px;padding:8px;background:rgba(231,76,60,0.08);border-radius:6px;border:1px solid rgba(231,76,60,0.3);">
+            <strong>Contrôle bloqué :</strong> terminer les travaux ou la retouche avant de rendre une nouvelle décision QC.
+          </div>
+        ` : ""}
+
         ${openClaims.length > 0 ? `
           <div style="margin-top:10px;padding:8px;background:rgba(231,76,60,0.08);border-radius:6px;border:1px solid rgba(231,76,60,0.3);">
             <strong>⚠️ ${openClaims.length} réclamation(s) client non résolue(s) :</strong>
@@ -875,33 +923,71 @@ function renderStep10_QualityCheck(item) {
       </div>
 
       <form id="reception-quality-form" class="step-form" data-case-id="${item.id}">
+        <div class="step-field">
+          <span>Checklist contrôle final</span>
+          <div style="display:grid;gap:8px;margin-top:6px;">
+            ${checks.map(([key, label]) => {
+              const value = normalizeChecklistState(checklist[key]);
+              return `
+                <label style="display:grid;grid-template-columns:minmax(180px,1fr) minmax(120px,180px);align-items:center;gap:10px;">
+                  <span>${escapeHtml(label)}</span>
+                  <select
+                    name="qualityCheck"
+                    data-quality-key="${escapeAttr(key)}"
+                    ${canSubmitQuality ? "" : `disabled title="${escapeAttr(qualityDeniedTitle)}"`}
+                  >
+                    <option value="" ${value === "" ? "selected" : ""}>À contrôler</option>
+                    <option value="ok" ${value === "ok" ? "selected" : ""}>OK</option>
+                    <option value="na" ${value === "na" ? "selected" : ""}>N/A</option>
+                    <option value="nok" ${value === "nok" ? "selected" : ""}>NOK</option>
+                  </select>
+                </label>
+              `;
+            }).join("")}
+          </div>
+        </div>
+
         <label class="step-field">
-          <span>Mettre à jour le statut qualité</span>
-          <select name="qualityStatus" ${canEditQuality ? "" : `disabled title="${escapeAttr(qualityDeniedTitle)}"`}>
-            <option value="not_started" ${rw.qualityStatus === "not_started" ? "selected" : ""}>Non commencé</option>
-            <option value="in_progress" ${rw.qualityStatus === "in_progress" ? "selected" : ""}>En cours</option>
-            <option value="rejected" ${rw.qualityStatus === "rejected" ? "selected" : ""}>Refusé — reprise nécessaire</option>
-            <option value="rework" ${rw.qualityStatus === "rework" ? "selected" : ""}>Retour atelier / retravail</option>
-            <option value="validated" ${rw.qualityStatus === "validated" ? "selected" : ""}>Validé — prêt pour livraison</option>
+          <span>Décision</span>
+          <select name="qualityStatus" ${canSubmitQuality ? "" : `disabled title="${escapeAttr(qualityDeniedTitle)}"`}>
+            <option value="">Choisir...</option>
+            <option value="validated">Conforme — valider le contrôle final</option>
+            <option value="rejected">Non conforme — créer une retouche atelier</option>
           </select>
         </label>
+
         <label class="step-field">
-          <span>Motif (si refus ou reprise)</span>
-          <textarea name="qualityReason" rows="2" placeholder="Détails de la non-conformité..." ${canEditQuality ? "" : `disabled title="${escapeAttr(qualityDeniedTitle)}"`}>${escapeHtml(rw.qualityReturnReason || "")}</textarea>
+          <span>Type de retouche (obligatoire si non conforme)</span>
+          <select name="qualityReworkStepKey" ${canSubmitQuality ? "" : `disabled title="${escapeAttr(qualityDeniedTitle)}"`}>
+            <option value="">Choisir le métier concerné...</option>
+            <option value="body">Tôlerie / carrosserie</option>
+            <option value="oilService">Entretien / vidange</option>
+            <option value="mechanical">Mécanique</option>
+            <option value="electrical">Électricité</option>
+            <option value="prep">Préparation peinture</option>
+            <option value="paint">Peinture / vernis</option>
+            <option value="reassembly">Remontage</option>
+            <option value="finish">Finition / lavage</option>
+          </select>
         </label>
-        <button class="step-primary-btn" type="submit" ${canEditQuality ? "" : `disabled title="${escapeAttr(qualityDeniedTitle)}"`}>Mettre à jour le contrôle qualité</button>
+
+        <label class="step-field">
+          <span>Motif / observation</span>
+          <textarea name="qualityReason" rows="2" placeholder="Obligatoire si non conforme. Optionnel si conforme." ${canSubmitQuality ? "" : `disabled title="${escapeAttr(qualityDeniedTitle)}"`}></textarea>
+        </label>
+
+        <button class="step-primary-btn" type="submit" ${canSubmitQuality ? "" : `disabled title="${escapeAttr(qualityDeniedTitle)}"`}>Enregistrer la décision QC</button>
       </form>
 
       ${rw.qualityStatus === "validated" ? `
         <div style="margin-top:16px;padding:12px;background:var(--green-bg,#eaffea);border-radius:var(--radius-sm);border:1px solid var(--green,#27ae60);">
-          <strong>✓ Action héritée enregistrée.</strong> Vous pouvez finaliser le dossier atelier.
+          <strong>✓ Contrôle final validé.</strong> Le véhicule peut poursuivre vers la remise client.
         </div>
       ` : ""}
 
       ${rw.qualityStatus === "rejected" || rw.qualityStatus === "rework" ? `
         <div class="step-warning-box" style="margin-top:16px;">
-          <strong>${rw.qualityStatus === "rejected" ? "QC refusé" : "Retour atelier / retravail"} :</strong>
-          ${escapeHtml(rw.qualityReturnReason || "Motif à compléter avant revalidation.")}
+          <strong>Non-conformité QC :</strong> ${escapeHtml(rw.qualityReturnReason || "Motif à compléter avant revalidation.")}
         </div>
       ` : ""}
 
@@ -1222,13 +1308,17 @@ async function handleReceptionFormSubmit(e) {
   if (form.id === "reception-quality-form") {
     e.preventDefault();
     const caseId = form.dataset.caseId;
-    const status = form.querySelector("[name=qualityStatus]")?.value || "not_started";
+    const status = form.querySelector("[name=qualityStatus]")?.value || "";
     const reason = form.querySelector("[name=qualityReason]")?.value || "";
+    const reworkStepKey = form.querySelector("[name=qualityReworkStepKey]")?.value || "";
+    const checklist = Object.fromEntries(
+      [...form.querySelectorAll("[name=qualityCheck]")].map((input) => [input.dataset.qualityKey, input.value])
+    );
     const currentUser = typeof getCurrentUser === "function" ? getCurrentUser() : null;
     const canonicalRole = typeof getCanonicalUserRole === "function"
       ? getCanonicalUserRole(currentUser)
       : currentUser?.canonicalRole;
-    const usesDedicatedQualityRpc = canonicalRole === "controle_qualite";
+    const usesDedicatedQualityRpc = ["admin_technique", "directeur", "chef_atelier", "controle_qualite"].includes(canonicalRole);
 
     if (usesDedicatedQualityRpc) {
       const targetCase = Array.isArray(state?.cases) ? state.cases.find(c => c.id === caseId) : null;
@@ -1238,13 +1328,25 @@ async function handleReceptionFormSubmit(e) {
       }
       const cleanStatus = String(status || "").trim().toLowerCase();
       const cleanReason = String(reason || "").trim();
-      const allowedStatuses = ["not_started", "in_progress", "validated", "rejected", "rework"];
+      const allowedStatuses = ["validated", "rejected"];
       if (!allowedStatuses.includes(cleanStatus)) {
-        notifyUser("Statut qualité invalide.", "error");
+        notifyUser("Choisissez Conforme ou Non conforme.", "error");
+        return;
+      }
+      if (cleanStatus === "validated" && Object.values(checklist).some((value) => !["ok", "na"].includes(value))) {
+        notifyUser("Chaque point doit être marqué OK ou N/A avant de déclarer le véhicule conforme.", "error");
+        return;
+      }
+      if (cleanStatus === "rejected" && !Object.values(checklist).includes("nok")) {
+        notifyUser("Marquez au moins un point NOK pour déclarer le véhicule non conforme.", "error");
         return;
       }
       if (cleanStatus === "rejected" && !cleanReason) {
-        notifyUser("Motif obligatoire pour refuser le contrôle qualité.", "error");
+        notifyUser("Motif obligatoire pour déclarer le contrôle non conforme.", "error");
+        return;
+      }
+      if (cleanStatus === "rejected" && !reworkStepKey) {
+        notifyUser("Choisissez le métier concerné par la retouche.", "error");
         return;
       }
       const previousStatus = String(targetCase.receptionWorkflow?.qualityStatus || "not_started").trim().toLowerCase();
@@ -1272,7 +1374,7 @@ async function handleReceptionFormSubmit(e) {
         return;
       }
 
-      const operationFingerprint = JSON.stringify([caseId, cleanStatus, cleanReason]);
+      const operationFingerprint = JSON.stringify([caseId, cleanStatus, cleanReason, checklist, reworkStepKey]);
       if (!form.dataset.qualityOperationId || form.dataset.qualityOperationFingerprint !== operationFingerprint) {
         const suffix = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
           ? crypto.randomUUID()
@@ -1287,6 +1389,8 @@ async function handleReceptionFormSubmit(e) {
           caseId,
           status: cleanStatus,
           reason: cleanReason,
+          checklist,
+          reworkStepKey,
           operationId: form.dataset.qualityOperationId,
         });
       } catch (error) {
@@ -1317,6 +1421,11 @@ async function handleReceptionFormSubmit(e) {
       try {
         const adopted = await applyRemoteEntityRow({ ...canonical, entity_version: serverVersion }, { force: true });
         if (!adopted) throw new Error("La version canonique qualité n'a pas été adoptée.");
+        const reworkCanonical = outcome?.rework_canonical;
+        if (reworkCanonical?.payload) {
+          const adoptedRework = await applyRemoteEntityRow(reworkCanonical, { force: true });
+          if (!adoptedRework) throw new Error("La tâche de retouche QC n'a pas été adoptée localement.");
+        }
         const persisted = await saveState({
           skipCloud: true,
           skipSnapshot: true,
@@ -1331,15 +1440,18 @@ async function handleReceptionFormSubmit(e) {
 
       delete form.dataset.qualityOperationId;
       delete form.dataset.qualityOperationFingerprint;
-      notifyUser("Statut qualité mis à jour.", "success");
+      notifyUser(
+        cleanStatus === "rejected"
+          ? "Contrôle non conforme : retouche atelier créée et transmise au planning."
+          : "Contrôle final validé.",
+        "success"
+      );
       renderReceptionWorkspace();
       if (typeof renderCases === "function") renderCases();
       return;
     }
 
-    const result = advanceReceptionWorkflow(caseId, "update_quality_status", { status, reason });
-    if (result.ok) { saveState({ changedCaseIds: [caseId], flushCloud: true, cloudReason: "reception-quality-update" }); notifyUser("Statut qualité mis à jour.", "success"); renderReceptionWorkspace(); if (typeof renderCases === "function") renderCases(); }
-    else notifyUser(result.message, "error");
+    notifyUser("Action qualité non autorisée pour ce rôle.", "error");
     return;
   }
 
@@ -1634,13 +1746,25 @@ function printDeliverySheet(item) {
   `).join("");
 
   const checklistObj = item.qualityChecklist || {};
-  const qcChecklist = Object.entries(checklistObj).map(([label, checked]) => `
-    <tr>
-      <td style="padding:6px 8px;border:1px solid #ccc;">${escapeHtml(label)}</td>
-      <td style="padding:6px 8px;border:1px solid #ccc;text-align:center;">${checked ? "✓" : "—"}</td>
-      <td style="padding:6px 8px;border:1px solid #ccc;">—</td>
-    </tr>
-  `).join("");
+  const qcChecklist = Object.entries(checklistObj).map(([label, rawStatus]) => {
+    const status = rawStatus === true
+      ? "ok"
+      : (rawStatus === false ? "" : String(rawStatus || "").trim().toLowerCase());
+    const display = status === "ok"
+      ? "✓ OK"
+      : status === "na"
+        ? "N/A"
+        : status === "nok"
+          ? "✕ NOK"
+          : "—";
+    return `
+      <tr>
+        <td style="padding:6px 8px;border:1px solid #ccc;">${escapeHtml(label)}</td>
+        <td style="padding:6px 8px;border:1px solid #ccc;text-align:center;">${display}</td>
+        <td style="padding:6px 8px;border:1px solid #ccc;">—</td>
+      </tr>
+    `;
+  }).join("");
 
   const html = `<!DOCTYPE html>
 <html lang="fr">
@@ -1700,7 +1824,7 @@ function printDeliverySheet(item) {
 
   ${qcChecklist ? `
     <h2>Points de finition atelier</h2>
-    <table><thead><tr><th>Point de contrôle</th><th style="width:80px;">Validé</th><th>Note</th></tr></thead><tbody>${qcChecklist}</tbody></table>
+    <table><thead><tr><th>Point de contrôle</th><th style="width:80px;">Résultat</th><th>Note</th></tr></thead><tbody>${qcChecklist}</tbody></table>
   ` : ""}
 
   ${item.arrivalNotes || rw.vehicleConditionNote ? `

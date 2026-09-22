@@ -1018,19 +1018,15 @@ async function submitSupabaseQualityReview({
     if (!opId) {
       return { ok: false, code: "OPERATION_ID_REQUIRED", message: "Identifiant d'opération qualité requis." };
     }
-    const { data: versionRow, error: versionError } = await client
-      .from("sync_entities")
-      .select("entity_version")
-      .eq("workshop_id", workshopId)
-      .eq("entity_type", "case")
-      .eq("entity_id", String(caseId || ""))
-      .is("deleted_at", null)
-      .maybeSingle();
-    if (versionError) {
-      return { ok: false, code: versionError.code || "VERSION_READ_ERROR", message: versionError.message || "Version serveur du dossier indisponible." };
-    }
-    if (versionRow?.entity_version == null) {
-      return { ok: false, code: "CASE_NOT_FOUND", message: "Dossier introuvable ou supprimé sur le serveur." };
+    const observedBaseVersion = typeof getObservedGranularServerVersion === "function"
+      ? getObservedGranularServerVersion(workshopId, "case", String(caseId || ""))
+      : null;
+    if (!Number.isFinite(Number(observedBaseVersion))) {
+      return {
+        ok: false,
+        code: "CASE_VERSION_NOT_OBSERVED",
+        message: "La version affichée du dossier n'est pas certifiée. Actualisez le dossier avant le contrôle qualité.",
+      };
     }
 
     const { data, error } = await client.rpc("nimr_apply_quality_review_v3", {
@@ -1041,7 +1037,7 @@ async function submitSupabaseQualityReview({
       p_operation_id: opId,
       p_checklist: checklist && typeof checklist === "object" ? checklist : {},
       p_rework_step_key: String(reworkStepKey || "").trim() || null,
-      p_base_version: Number(versionRow.entity_version),
+      p_base_version: Number(observedBaseVersion),
     });
     if (error) {
       return { ok: false, code: error.code || "RPC_ERROR", message: error.message || "Erreur de validation qualité." };

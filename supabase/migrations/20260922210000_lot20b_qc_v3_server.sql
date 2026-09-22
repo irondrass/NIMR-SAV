@@ -61,7 +61,7 @@ begin
     raise exception 'quality review access denied' using errcode='42501';
   end if;
 
-  if clean_status not in ('not_started','in_progress','validated','rejected') then
+  if clean_status not in ('validated','rejected') then
     raise exception 'invalid quality status: %', p_quality_status using errcode='22023';
   end if;
 
@@ -229,6 +229,17 @@ begin
   flags := coalesce(current_payload->'flags','{}'::jsonb);
   previous_status := lower(trim(coalesce(reception_workflow->>'qualityStatus','not_started')));
   now_iso := to_char(now_value at time zone 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"');
+
+  if coalesce(flags->>'delivered','false')='true'
+     or nullif(current_payload->>'archivedAt','') is not null then
+    raise exception 'Le dossier livré ou archivé ne peut plus recevoir une décision qualité.'
+      using errcode='23514';
+  end if;
+
+  if coalesce(flags->>'workCompleted','false') <> 'true' then
+    raise exception 'Terminer les travaux avant le contrôle qualité.'
+      using errcode='23514';
+  end if;
 
   history := case
     when jsonb_typeof(reception_workflow->'qualityReviewHistory')='array'

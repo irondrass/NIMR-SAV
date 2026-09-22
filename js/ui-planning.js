@@ -1047,32 +1047,36 @@ function renderUsersAndRoles() {
   const accountSnapshot = renderAccountAccessFoundation();
   const serverManagementDecision = renderWorkshopUserAdminProvisioning(accountSnapshot);
 
-  const canManageUsers = typeof canRenderAction === "function" ? canRenderAction("users.manage") : false;
-  const deniedTitle = canManageUsers ? "" : (typeof getPermissionDeniedMessage === "function" ? getPermissionDeniedMessage("users.manage") : "Action réservée administrateur.");
+  const canManageLocalUsers = typeof canRenderAction === "function" ? canRenderAction("users.manage") : false;
+  const canManageServerUsers = serverManagementDecision.allowed;
+  const canViewManagedUsers = canManageLocalUsers || canManageServerUsers;
+  const deniedTitle = canManageLocalUsers ? "" : (typeof getPermissionDeniedMessage === "function" ? getPermissionDeniedMessage("users.manage") : "Action réservée administrateur.");
   const onlineAuthority = typeof hasValidatedOnlineServerAuthority === "function"
     && hasValidatedOnlineServerAuthority();
   const serverManagedReadOnlyTitle = "Profil miroir géré par Supabase — modification locale indisponible en ligne.";
 
-  form.hidden = !canManageUsers;
-  list.hidden = !canManageUsers;
+  form.hidden = !canManageLocalUsers;
+  list.hidden = !canViewManagedUsers;
+  const managedUserAccounts = document.getElementById("managed-user-accounts");
+  if (managedUserAccounts) managedUserAccounts.hidden = !canViewManagedUsers;
   const localProfileManagement = document.getElementById("local-profile-management");
-  if (localProfileManagement) localProfileManagement.hidden = !canManageUsers;
+  if (localProfileManagement) localProfileManagement.hidden = !canManageLocalUsers;
   const summary = document.getElementById("roles-permissions-summary");
   if (summary) {
-    summary.hidden = !canManageUsers;
-    summary.style.display = canManageUsers ? "" : "none";
+    summary.hidden = !canManageLocalUsers;
+    summary.style.display = canManageLocalUsers ? "" : "none";
     // Also hide the header right before it if possible
     const prevEl = summary.previousElementSibling;
     if (prevEl && prevEl.classList.contains("section-heading")) {
-      prevEl.hidden = !canManageUsers;
-      prevEl.style.display = canManageUsers ? "" : "none";
+      prevEl.hidden = !canManageLocalUsers;
+      prevEl.style.display = canManageLocalUsers ? "" : "none";
     }
   }
 
   Array.from(form.elements || []).forEach((control) => {
     if (control.id === "current-user-selector" || control.name === "userId") return;
-    control.disabled = !canManageUsers;
-    control.title = canManageUsers ? "" : deniedTitle;
+    control.disabled = !canManageLocalUsers;
+    control.title = canManageLocalUsers ? "" : deniedTitle;
   });
 
   const resourceSelect = form.elements.resourceId;
@@ -1089,6 +1093,9 @@ function renderUsersAndRoles() {
   }
 
   const users = Array.isArray(state.users) ? state.users : [];
+  const visibleUsers = canManageLocalUsers
+    ? users
+    : users.filter((user) => typeof isServerManagedLocalProfile === "function" && isServerManagedLocalProfile(user));
   const activeUsers = users.filter(u => u.active !== false);
   const duplicates = [];
   activeUsers.forEach((u) => {
@@ -1119,14 +1126,14 @@ function renderUsersAndRoles() {
     }
   }
 
-  list.innerHTML = users.map((user) => {
+  list.innerHTML = visibleUsers.map((user) => {
     const isCurrent = user.id === state.currentUserId;
     const linkedResource = user.resourceId ? state.resources.find(r => r.id === user.resourceId) : null;
     const canonicalRole = getCanonicalUserRole(user);
     const isTechWithoutRes = canonicalRole === "technicien" && !user.resourceId;
     const serverManagedProfile = typeof isServerManagedLocalProfile === "function" && isServerManagedLocalProfile(user);
     const serverManagedReadOnly = onlineAuthority && serverManagedProfile;
-    const mutationDisabled = !canManageUsers || serverManagedReadOnly;
+    const mutationDisabled = !canManageLocalUsers || serverManagedReadOnly;
     const mutationTitle = serverManagedReadOnly ? serverManagedReadOnlyTitle : deniedTitle;
     const targetAuthUserId = String(user.authUserId || "").trim();
     const isCurrentServerIdentity = Boolean(targetAuthUserId && targetAuthUserId === String(accountSnapshot?.authIdentity?.id || ""));
@@ -1189,7 +1196,7 @@ function renderUsersAndRoles() {
 
   if (switcher) {
     const currentLocalUser = activeUsers.find((user) => user.id === state.currentUserId) || null;
-    const selectorUsers = canManageUsers ? activeUsers : (currentLocalUser ? [currentLocalUser] : []);
+    const selectorUsers = canManageLocalUsers ? activeUsers : (currentLocalUser ? [currentLocalUser] : []);
     switcher.innerHTML = selectorUsers.map(u => {
       const emailNorm = String(u.email || "").trim().toLowerCase();
       const canonicalRole = getCanonicalUserRole(u);
@@ -1199,10 +1206,10 @@ function renderUsersAndRoles() {
         : `${u.name} (${CANONICAL_USER_ROLES[canonicalRole] || USER_ROLES[u.role] || u.role})`;
       return `<option value="${escapeAttr(u.id)}" ${u.id === state.currentUserId ? 'selected' : ''}>${escapeHtml(displayLabel)}</option>`;
     }).join("");
-    switcher.disabled = onlineAuthority || !canManageUsers;
+    switcher.disabled = onlineAuthority || !canManageLocalUsers;
     switcher.title = onlineAuthority
       ? "La session Supabase reste autoritaire. Déconnectez-vous pour changer de compte."
-      : (canManageUsers ? "Sélecteur de compatibilité locale hors ligne" : deniedTitle);
+      : (canManageLocalUsers ? "Sélecteur de compatibilité locale hors ligne" : deniedTitle);
     const selectorNote = document.getElementById("current-user-selector-note");
     if (selectorNote) {
       selectorNote.textContent = onlineAuthority

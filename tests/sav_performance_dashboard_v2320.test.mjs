@@ -14,12 +14,31 @@ run(`state = normalizeState({
     { id: "case-active", clientName: "Secret Alpha", plate: "123 TU 456", createdAt: "2026-06-06T08:00:00.000Z", updatedAt: "2026-06-06T09:00:00.000Z", flags: { received: true, workStarted: true }, durations: { body: 1 }, claims: [{ type: "client", includeInPlanning: true, estimate: { lines: [{ phase: "body", laborHours: 1 }] } }] },
     { id: "case-blocked", clientName: "Secret Beta", plate: "987 TU 654", createdAt: "2026-06-06T08:30:00.000Z", updatedAt: "2026-06-06T09:00:00.000Z", partsStatus: "waiting_parts", blockerReason: "waiting_parts", durations: { mechanical: 1 }, claims: [{ type: "client", includeInPlanning: true, estimate: { lines: [{ phase: "mechanical", laborHours: 1 }] } }] },
     { id: "case-completed", clientName: "Secret Gamma", createdAt: "2026-06-06T07:00:00.000Z", updatedAt: "2026-06-06T09:30:00.000Z", flags: { received: true, workStarted: true, workCompleted: true }, durations: { paint: 1 }, claims: [{ type: "client", includeInPlanning: true, estimate: { lines: [{ phase: "paint", laborHours: 1 }] } }] },
-    { id: "case-closed", clientName: "Secret Closed", createdAt: "2026-06-06T06:00:00.000Z", closedAt: "2026-06-06T09:45:00.000Z", flags: { received: true, workStarted: true, workCompleted: true, invoiced: true } }
+    { id: "case-closed", clientName: "Secret Closed", createdAt: "2026-06-06T06:00:00.000Z", closedAt: "2026-06-06T09:45:00.000Z", flags: { received: true, workStarted: true, workCompleted: true, invoiced: true, delivered: true } }
   ],
   bookings: []
 })`);
 const dashboard = context.buildSavPerformanceDashboard(new Date("2026-06-06T10:00:00.000Z"));
-assert.equal(dashboard.metrics.activeCases, 3);
+
+// ----------------------------------------------------
+// Contrats A, B, C, D, E: Dérivation physique de l'activité atelier
+// ----------------------------------------------------
+// Contrat A & B: Un véhicule reçu, même avec travaux finis et facturé, reste physiquement présent et actif tant qu'il n'est pas livré
+const vehiclePresentNotDelivered = {
+  id: "case-present-pending-delivery",
+  flags: { received: true, workStarted: true, workCompleted: true, invoiced: true, delivered: false },
+  closedAt: "2026-06-06T09:45:00.000Z"
+};
+assert.equal(context.isCasePhysicallyPresent(vehiclePresentNotDelivered), true, "Contrat A: Reçu + non livré => véhicule physiquement présent");
+assert.equal(context.isSavDashboardActiveCase(vehiclePresentNotDelivered), true, "Contrat B: Travaux finis + facturé + non livré => TOUJOURS actif dans le dashboard");
+
+// Contrat C: Un véhicule livré et clôturé n'est plus actif
+const vehicleDeliveredClosed = run('state.cases.find((c) => c.id === "case-closed")');
+assert.equal(context.isCasePhysicallyPresent(vehicleDeliveredClosed), false, "Contrat C: Livré => plus physiquement présent");
+assert.equal(context.isSavDashboardActiveCase(vehicleDeliveredClosed), false, "Contrat C: Livré et clôturé => inactif dans le dashboard");
+
+// Contrat D: Compte exact des dossiers actifs
+assert.equal(dashboard.metrics.activeCases, 3, "Contrat D: activeCases doit refléter exactement les dossiers en cours ou présents (3)");
 assert.equal(dashboard.metrics.blockedCases, 1);
 assert.equal(dashboard.metrics.completedWorkCases, 1);
 assert.equal("pendingQualityControls" in dashboard.metrics, false);

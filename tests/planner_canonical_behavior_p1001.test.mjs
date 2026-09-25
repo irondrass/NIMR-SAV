@@ -102,9 +102,13 @@ function scenario(id, title, classification, check) {
 scenario("A", "single sequential case / no conflicts", "PASS", () => {
   resetState();
   const proposal = schedule({ id: "a", durations: { body: 1 } });
-  assert.equal(proposal.steps.length, 1);
-  assert.equal(proposal.steps[0].planningMode, "standard");
-  return { start: proposal.start, resource: proposal.steps[0].primaryResourceId };
+  const productiveSteps = proposal.steps.filter((s) => s.key !== "quality");
+  const qualitySteps = proposal.steps.filter((s) => s.key === "quality");
+  assert.equal(productiveSteps.length, 1, "Une tâche productive");
+  assert.equal(qualitySteps.length, 1, "Un jalon QC final");
+  assert.equal(productiveSteps[0].planningMode, "standard");
+  assert.ok(new Date(qualitySteps[0].start) >= new Date(productiveSteps[0].end), "QC planifié après la tâche productive");
+  return { start: proposal.start, resource: productiveSteps[0].primaryResourceId, qcResource: qualitySteps[0].primaryResourceId };
 });
 
 scenario("B", "explicit task graph with linear dependencies", "PASS", () => {
@@ -192,7 +196,10 @@ scenario("J", "work-hours boundary", "PASS", () => {
 });
 
 scenario("K", "lunch/non-working interval", "PASS", () => {
-  resetState({ resources: [baseResources[0]] });
+  resetState({
+    resources: [baseResources[0]],
+    workHours: { 1: [["08:00", "12:00"], ["13:00", "16:00"]] },
+  });
   const proposal = schedule({ id: "k", durations: { body: 2 } }, [], "2026-09-07T11:00:00+01:00");
   assert.equal(proposal.steps[0].segments.length, 2);
   assert.equal(totalMinutes(proposal.steps[0]), 120);
@@ -274,7 +281,17 @@ scenario("T", "pending proposal blocks capacity before acceptance", "PASS", () =
   run("generatedProposals.pending = { proposal: __pendingProposal, availableDates: [] };");
   context.__targetItem = target;
   const proposal = toPlain(run("generateSingleProposal(__targetItem, new Date(__p1001Start))"));
-  assert.ok(new Date(proposal.start) >= new Date(pending.end));
+
+  const pendingBody = pending.steps.find((s) => s.key === "body");
+  const targetBody = proposal.steps.find((s) => s.key === "body");
+  assert.ok(targetBody, "La proposition cible planifie le travail productif");
+  assert.ok(new Date(targetBody.start) >= new Date(pendingBody.end), "Le travail productif attend que la ressource tôlier se libère");
+
+  const pendingQuality = pending.steps.find((s) => s.key === "quality");
+  const targetQuality = proposal.steps.find((s) => s.key === "quality");
+  assert.ok(pendingQuality, "La proposition en attente doit obligatoirement inclure le jalon qualité");
+  assert.ok(targetQuality, "La proposition cible doit obligatoirement inclure le jalon qualité");
+  assert.ok(new Date(targetQuality.start) >= new Date(pendingQuality.end), "Le QC de la cible attend la libération de la ressource contrôle");
   return { pendingEnd: pending.end, targetStart: proposal.start };
 });
 
@@ -311,15 +328,16 @@ scenario("W", "external task behavior", "PASS", () => {
 scenario("X", "long task greater than daily capacity", "PASS", () => {
   resetState({ resources: [baseResources[2], baseResources[5]] });
   const proposal = graph({ id: "x", durations: {} }, [{ id: "paint", key: "paint", durationMinutes: 600, requiredRole: "peintre", equipmentRole: "cabine" }]);
-  assert.equal(proposal.steps.length, 1);
-  assert.equal(totalMinutes(proposal.steps[0]), 600);
-  assert.ok(proposal.steps[0].segments.length > 2);
-  assert.deepEqual(proposal.steps[0].resourceIds, ["painter-1", "booth"]);
+  const productiveSteps = proposal.steps.filter((s) => s.key !== "quality");
+  assert.equal(productiveSteps.length, 1);
+  assert.equal(totalMinutes(productiveSteps[0]), 600);
+  assert.ok(productiveSteps[0].segments.length >= 2);
+  assert.deepEqual(productiveSteps[0].resourceIds, ["painter-1", "booth"]);
   assert.equal(run(`todayKey(new Date(${JSON.stringify(proposal.start)}))`), "2026-09-07");
   return {
     representation: "one step, multi-day productive segments",
     start: proposal.start,
-    segments: proposal.steps[0].segments.length,
+    segments: productiveSteps[0].segments.length,
     result: "the first day uses its 420-minute capacity and the remaining 180 minutes continue on the next working day",
   };
 });
@@ -327,10 +345,14 @@ scenario("X", "long task greater than daily capacity", "PASS", () => {
 scenario("Y", "very long task spanning multiple days", "PASS", () => {
   resetState({ resources: [baseResources[0]] });
   const proposal = schedule({ id: "y", durations: { body: 20 } });
-  assert.equal(proposal.steps.length, 1);
-  assert.equal(totalMinutes(proposal.steps[0]), 1200);
-  assert.ok(proposal.steps[0].segments.length > 2);
-  return { result: "one logical booking spans multiple bounded working segments", segments: proposal.steps[0].segments.length };
+  const productiveSteps = proposal.steps.filter((s) => s.key !== "quality");
+  const qualitySteps = proposal.steps.filter((s) => s.key === "quality");
+  assert.equal(productiveSteps.length, 1, "Une seule tâche productive");
+  assert.equal(qualitySteps.length, 1, "Un jalon QC final distinct");
+  assert.equal(totalMinutes(productiveSteps[0]), 1200);
+  assert.ok(productiveSteps[0].segments.length > 2);
+  assert.ok(new Date(qualitySteps[0].start) >= new Date(productiveSteps[0].end), "Le QC est planifié après les 20h de tôlerie");
+  return { result: "one logical booking spans multiple bounded working segments", segments: productiveSteps[0].segments.length };
 });
 
 scenario("Z", "body to prep to paint to reassembly to finish flow", "PASS", () => {

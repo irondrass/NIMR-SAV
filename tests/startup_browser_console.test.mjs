@@ -239,10 +239,30 @@ async function exercisePdfFirstStartup(send, sessionId, label) {
       }
 
       const importView = document.getElementById("view-reception-workspace");
-      const activeView = document.querySelector(".view:not([hidden])");
-      if (!importView) throw new Error("Vue PDF-first #view-reception-workspace introuvable");
-      if (importView.hidden || activeView !== importView) {
-        throw new Error("La vue PDF-first reception-workspace doit être la vue active");
+      const todayView = document.getElementById("view-today");
+      const visibleViews = [...document.querySelectorAll(".view:not([hidden])")];
+      const activeView = visibleViews[0] || null;
+
+      if (!importView) {
+        throw new Error("Vue PDF-first #view-reception-workspace introuvable");
+      }
+
+      if (!todayView) {
+        throw new Error("Vue d'accueil #view-today introuvable");
+      }
+
+      if (!importView.hidden) {
+        throw new Error("La vue PDF-first reception-workspace ne doit pas être active au démarrage");
+      }
+
+      if (todayView.hidden || activeView !== todayView) {
+        throw new Error("La vue today doit être la vue active au démarrage");
+      }
+
+      if (visibleViews.length !== 1) {
+        throw new Error(
+          "Une seule vue principale doit être visible au démarrage, reçu : " + visibleViews.length
+        );
       }
 
       const normalizeText = (value) => String(value || "").replace(/\\s+/g, " ").trim();

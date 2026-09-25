@@ -412,64 +412,12 @@ function getInterventionTypeLabelForPrint(item) {
   return item.orderType || item.type || "Intervention atelier";
 }
 
-const QUALITY_CHECKLISTS_BY_INTERVENTION = {
-  service_rapide: [
-    "Niveau huile vérifié",
-    "Filtre remplacé si prévu",
-    "Témoin entretien remis à zéro",
-    "Absence de fuite",
-    "Essai / contrôle final",
-    "Propreté véhicule",
-  ],
-  mecanique: [
-    "Serrages contrôlés",
-    "Absence de fuite",
-    "Essai routier si nécessaire",
-    "Défauts diagnostic traités",
-    "Sécurité freinage / direction vérifiée",
-  ],
-  electrique: [
-    "Défauts effacés",
-    "Test batterie / alternateur si concerné",
-    "Équipement réparé fonctionnel",
-    "Contrôle voyant tableau de bord",
-  ],
-  diagnostic: [
-    "Lecture défauts effectuée",
-    "Cause probable documentée",
-    "Essai ou mesure de confirmation",
-    "Recommandation remise au chef atelier",
-  ],
-  carrosserie: [
-    "Alignement carrosserie",
-    "Teinte et vernis",
-    "Remontage accessoires",
-    "Nettoyage intérieur/extérieur",
-    "Photos après réparation",
-  ],
-  garantie: [
-    "Travaux conformes accord garantie",
-    "Référence garantie vérifiée",
-    "Pièces remplacées documentées",
-    "Essai / contrôle final",
-  ],
-};
-
-function getQualityChecklistType(item) {
-  const rawType = typeof getCasePrimaryType === "function" ? getCasePrimaryType(item) : (item.orderType || item.type || "");
-  const summary = getInterventionTypeLabelForPrint(item);
-  const text = `${rawType} ${summary}`.toLowerCase();
-  if (text.includes("vidange") || text.includes("rapide") || text.includes("entretien")) return "service_rapide";
-  if (text.includes("élect") || text.includes("elect")) return "electrique";
-  if (text.includes("diagnostic")) return "diagnostic";
-  if (text.includes("mécan") || text.includes("mecan")) return "mecanique";
-  if (text.includes("garantie")) return "garantie";
-  return "carrosserie";
-}
-
 function getQualityChecklistForCase(item) {
-  const type = getQualityChecklistType(item);
-  return QUALITY_CHECKLISTS_BY_INTERVENTION[type] || DEFAULT_QUALITY_CHECKS;
+  // API historique conservée, mais alimentée par la source QC-PRO unique.
+  return getProfessionalQualityChecklistDefinition(item)
+    .flatMap((section) =>
+      (section.points || []).map((point) => point.label)
+    );
 }
 
 function isPrintEquipmentResource(resource) {
@@ -652,23 +600,66 @@ function buildPlanningPdfLines(item) {
 }
 
 function buildQualityPdfLines(item) {
-  const checklist = getQualityChecklistForCase(item);
+  const sections = getProfessionalQualityChecklistDefinition(item);
+  const checklist = normalizeQualityChecklist(
+    item.qualityChecklist || {},
+    item
+  );
+
+  const printMark = (value) => {
+    const normalized =
+      typeof normalizeQualityChecklistValue === "function"
+        ? normalizeQualityChecklistValue(value)
+        : String(value || "").trim().toLowerCase();
+
+    if (normalized === "ok") return "[OK]";
+    if (normalized === "na") return "[N/A]";
+    if (normalized === "nok") return "[NOK]";
+    return "[  ]";
+  };
+
+  const checklistLines = sections.flatMap((section) => [
+    "",
+    section.label,
+
+    ...(section.points || []).map((point) => {
+      const metadata = [
+        point.critical ? "CRITIQUE" : "",
+        point.evidence === "photo" ? "PHOTO" : "",
+        point.evidence === "scan" ? "SCAN" : "",
+        point.evidence === "measurement" ? "MESURE" : "",
+        point.evidence === "mileage" ? "KM ESSAI" : "",
+      ].filter(Boolean);
+
+      return `${printMark(checklist[point.id])} ${point.label}${
+        metadata.length ? ` [${metadata.join(" · ")}]` : ""
+      }`;
+    }),
+  ]);
+
   return [
-    ...buildCommonPdfHeader(item, "POINTS DE FINITION ATELIER", "Document atelier"),
+    ...buildCommonPdfHeader(
+      item,
+      "FICHE DE CONTRÔLE QUALITÉ FINAL",
+      "Document atelier"
+    ),
+
     `Type d'intervention: ${getInterventionTypeLabelForPrint(item)}`,
     `Contrôleur: ______________________________`,
     `Date/heure vérification: ______________________________`,
+
+    ...checklistLines,
+
     "",
-    ...checklist.map((label) => `${item.qualityChecklist?.[label] ? "[OK]" : "[  ]"} ${label}`),
-    "",
-    `Vérification atelier enregistrée: ${item.flags.qualityApproved ? "Oui" : "Non"}`,
-    `Résultat: [  ] Conforme   [  ] À reprendre`,
+    `Vérification atelier enregistrée: ${
+      item.flags.qualityApproved ? "Oui" : "Non"
+    }`,
+    `Résultat: [  ] Conforme   [  ] Non conforme`,
     `Défaut constaté: ______________________________`,
     `Action corrective: ______________________________`,
     `Recontrôle nécessaire: [  ] Oui   [  ] Non`,
     "",
-    "Signature atelier: ______________________________",
-    "Signature chef atelier: ______________________________",
+    "Signature contrôleur qualité: ______________________________",
   ];
 }
 

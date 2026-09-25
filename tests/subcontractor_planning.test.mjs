@@ -85,10 +85,24 @@ run(`state.cases.push(normalizeCase({
 }))`);
 const externalModeCase = run('state.cases.find((entry) => entry.id === "case-external-mode")');
 const externalModeProposal = context.generateSingleProposal(externalModeCase, start);
+const subcontractSteps = externalModeProposal.steps.filter((step) => step.subcontractPhase);
 assert.deepEqual(
-  Array.from(externalModeProposal.steps, (step) => step.subcontractPhase),
+  Array.from(subcontractSteps, (step) => step.subcontractPhase),
   ["subcontract_transfer_out", "subcontract_work", "subcontract_transfer_return"],
   "le choix externe persisté dans le dossier doit piloter le planning réel",
+);
+const qcSteps = externalModeProposal.steps.filter((step) => step.key === "quality");
+assert.equal(qcSteps.length, 1, "un jalon QC final doit suivre la fin de la sous-traitance");
+const qcStep = qcSteps[0];
+assert.equal(qcStep.taskId, "quality");
+assert.equal(qcStep.requiredRole, "controle");
+// Note: legacy_control_fallback - ce test n'ayant pas de profil contrôleur explicite dans son jeu de données,
+// le planificateur utilise la ressource de repli 'controle-1'.
+assert.equal(qcStep.primaryResourceId, "controle-1");
+const returnStep = subcontractSteps.find((step) => step.subcontractPhase === "subcontract_transfer_return");
+assert.ok(
+  new Date(qcStep.start) >= new Date(returnStep.end),
+  "le jalon QC doit démarrer après le retour de sous-traitance",
 );
 
 const comparison = context.chooseTaskServicePlan(item, { ...task, serviceMode: "auto" }, start, { allowExternal: true });

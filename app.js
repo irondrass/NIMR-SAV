@@ -1,5 +1,16 @@
 let quickEstimateCreationDraft = null;
 
+const WORKSHOP_INVITE_RESOURCE_ROLES = new Set([
+  "technicien",
+  "controle_qualite",
+  "chef_atelier",
+]);
+
+const WORKSHOP_INVITE_REQUIRED_RESOURCE_ROLES = new Set([
+  "technicien",
+  "controle_qualite",
+]);
+
 async function initApp() {
   const appShell = document.querySelector(".app-shell");
   appShell?.setAttribute("inert", "");
@@ -1272,14 +1283,69 @@ function bindWorkshopForms() {
   const inviteResourceField = document.getElementById("invite-workshop-member-resource-field");
   const inviteResource = document.getElementById("invite-workshop-member-resource");
   const inviteSubmit = document.getElementById("invite-workshop-member-submit");
+  const populateInviteResourcesForRole = () => {
+    if (!inviteResource) return [];
+
+    const selectedRole = String(inviteRole?.value || "");
+
+    const capability = typeof getWorkshopUserAdminCapabilityState === "function"
+      ? getWorkshopUserAdminCapabilityState()
+      : null;
+
+    const allResources = Array.isArray(capability?.humanResources)
+      ? capability.humanResources
+      : [];
+
+    const resources = ["controle_qualite", "chef_atelier"].includes(selectedRole)
+      ? allResources.filter((resource) => resource.type === "controle")
+      : allResources;
+
+    inviteResource.innerHTML = `
+      <option value="">Selectionner une ressource humaine</option>
+      ${resources.map((resource) => `
+        <option value="${escapeAttr(resource.id)}">
+          ${escapeHtml(resource.name)} ? ${escapeHtml(ROLE_LABELS[resource.type] || resource.type)}
+        </option>
+      `).join("")}
+    `;
+
+    return resources;
+  };
+
   const updateInviteResourceRequirement = () => {
-    const technicianSelected = inviteRole?.value === "technicien";
-    if (inviteResourceField) inviteResourceField.hidden = !technicianSelected;
+    const resourceRoleSelected =
+      WORKSHOP_INVITE_RESOURCE_ROLES.has(inviteRole?.value);
+
+    const resourceRequired =
+      WORKSHOP_INVITE_REQUIRED_RESOURCE_ROLES.has(inviteRole?.value);
+
+    if (inviteResourceField) {
+      inviteResourceField.hidden = !resourceRoleSelected;
+    }
+
     if (inviteResource) {
-      inviteResource.required = technicianSelected;
-      if (!technicianSelected) inviteResource.value = "";
+      const previousValue = inviteResource.value;
+
+      populateInviteResourcesForRole();
+
+      inviteResource.required = resourceRequired;
+
+      if (
+        resourceRoleSelected
+        && previousValue
+        && [...inviteResource.options].some(
+          (option) => option.value === previousValue
+        )
+      ) {
+        inviteResource.value = previousValue;
+      }
+
+      if (!resourceRoleSelected) {
+        inviteResource.value = "";
+      }
     }
   };
+
   const closeInviteDialog = () => {
     if (inviteDialog?.open) inviteDialog.close();
     if (inviteForm) inviteForm.reset();
@@ -1333,7 +1399,9 @@ function bindWorkshopForms() {
       name: normalizeTextInputValue(data.get("name")),
       email: normalizeTextInputValue(data.get("email")).toLowerCase(),
       role: String(data.get("role") || ""),
-      resource_id: inviteRole?.value === "technicien" ? String(data.get("resourceId") || "") : null,
+      resource_id: WORKSHOP_INVITE_RESOURCE_ROLES.has(inviteRole?.value)
+        ? String(data.get("resourceId") || "")
+        : null,
     };
     if (inviteSubmit) inviteSubmit.disabled = true;
     if (inviteStatus) {

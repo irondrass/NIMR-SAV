@@ -244,12 +244,49 @@ function browserLargeDatasetScenario() {
     const originalSaveState = saveState;
     saveState = () => {};
     const statusSelect = document.getElementById("case-status-filter");
+
+    const selectablePhaseFilters = [...statusSelect.options]
+      .map((option) => option.value)
+      .filter((value) => value.startsWith("phase:"));
+
+    if (!selectablePhaseFilters.length) {
+      throw new Error("Aucun filtre de phase opérationnelle disponible");
+    }
+
+    const targetStatusFilter = selectablePhaseFilters.find((filter) =>
+      state.cases.some((item) => caseMatchesStatusFilter(item, filter))
+    );
+
+    if (!targetStatusFilter) {
+      throw new Error("Aucun filtre de phase ne correspond au jeu de données 4000");
+    }
+
+    const targetOperationalPhase = targetStatusFilter.slice("phase:".length);
+
+    const expectedStatusMatches = state.cases.filter((item) =>
+      caseMatchesStatusFilter(item, targetStatusFilter)
+    ).length;
+
+    if (expectedStatusMatches <= 0) {
+      throw new Error("Le filtre de phase choisi doit posséder au moins un dossier");
+    }
+
     const statusFilter = await timed(async () => {
-      statusSelect.value = "chief_validation";
+      statusSelect.value = targetStatusFilter;
       statusSelect.dispatchEvent(new Event("change", { bubbles: true }));
-      await waitUntil(() => list.dataset.caseListFilteredCount === "800", "Filtre statut PDF non rendu");
+
+      await waitUntil(
+        () => list.dataset.caseListFilteredCount === String(expectedStatusMatches),
+        "Filtre phase opérationnelle non rendu"
+      );
     });
-    const filteredStatuses = [...list.querySelectorAll("[data-case]")].map((element) => getCaseStatus(getIndexedCaseById(element.dataset.case)));
+
+    const filteredOperationalPhases = [...list.querySelectorAll("[data-case]")]
+      .map((element) =>
+        getCaseOperationalPhase(
+          getIndexedCaseById(element.dataset.case)
+        ).key
+      );
 
     statusSelect.value = "all";
     statusSelect.dispatchEvent(new Event("change", { bubbles: true }));
@@ -320,9 +357,17 @@ function browserLargeDatasetScenario() {
       },
       search: { ids: searchedIds },
       statuses: {
-        filteredCount: filteredStatuses.length,
-        allPdfChiefValidation: filteredStatuses.every((status) => status === "chief_validation"),
-        samples: [0, 1, 2, 3, 4].map((index) => getCaseStatus(state.cases[index])),
+        filter: targetStatusFilter,
+        operationalPhase: targetOperationalPhase,
+        totalMatched: expectedStatusMatches,
+        renderedCount: filteredOperationalPhases.length,
+        allMatchOperationalPhase: filteredOperationalPhases.every(
+          (phase) => phase === targetOperationalPhase
+        ),
+        samples: [0, 1, 2, 3, 4].map((index) => ({
+          legacyStatus: getCaseStatus(state.cases[index]),
+          operationalPhase: getCaseOperationalPhase(state.cases[index]).key,
+        })),
       },
       dashboard: {
         activeCases: dashboard.value.metrics.activeCases,
@@ -402,8 +447,28 @@ try {
   assert.equal(metrics.pagination.pageTwoCount, 50, "la deuxième page doit contenir 50 dossiers");
   assert.deepEqual(metrics.pagination.duplicates, [], "deux pages successives ne doivent partager aucun dossier");
   assert.deepEqual(metrics.search.ids, ["large-case-3999"], "la recherche doit retrouver le dossier exact");
-  assert.equal(metrics.statuses.filteredCount, 50, "le filtre doit rendre uniquement la première page de résultats");
-  assert.equal(metrics.statuses.allPdfChiefValidation, true, "le filtre statut doit être exact");
+  assert.match(
+    metrics.statuses.filter,
+    /^phase:(expected|preparing|in_progress|finalizing|ready|delivered)$/,
+    "le filtre à l'échelle doit utiliser une phase opérationnelle actuellement proposée par l'interface"
+  );
+
+  assert.ok(
+    metrics.statuses.totalMatched > 0,
+    "la phase opérationnelle sélectionnée doit correspondre à au moins un dossier"
+  );
+
+  assert.equal(
+    metrics.statuses.renderedCount,
+    Math.min(50, metrics.statuses.totalMatched),
+    "le filtre doit rendre au maximum la première page de 50 dossiers correspondants"
+  );
+
+  assert.equal(
+    metrics.statuses.allMatchOperationalPhase,
+    true,
+    "tous les dossiers rendus doivent appartenir exactement à la phase opérationnelle sélectionnée"
+  );
   assert.equal(metrics.replacementVisible, true, "l'index caseById doit être explicitement invalidable");
   assert.ok(metrics.planning.renderedBookings > 0, "le planning réel doit rendre les réservations du jour");
   assert.equal(metrics.indexedStorage.marker.largeState, true, "la sauvegarde locale doit utiliser un marqueur compact");

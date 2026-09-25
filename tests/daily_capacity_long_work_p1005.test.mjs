@@ -331,22 +331,41 @@ check("R proposal booking reload preserves one logical multi-segment task", () =
   context.__p1005PreparedBookings = run("proposalToBookings(__p1005Item, __p1005Proposal, false)");
   assert.equal(run("applyAcceptedPlanningProposal(__p1005Item, __p1005Proposal, { throwOnError: true, notify: false })"), true);
   context.__p1005Accepted = run("state.bookings");
-  assert.equal(run("__p1005Accepted.length"), 1);
-  assert.equal(run("__p1005Accepted[0].taskId"), "long-task");
-  assert.equal(run("__p1005Accepted[0].businessTaskId"), "long-task");
-  assert.equal(run("sumBookingSegmentsMinutes(__p1005Accepted[0].segments)"), 600);
+
+  // Séparation explicite : 1 tâche productive multi-segments + 1 jalon QC final distinct
+  const productiveBookings = run("__p1005Accepted.filter((b) => b.taskId === 'long-task')");
+  const qualityBookings = run("__p1005Accepted.filter((b) => b.key === 'quality' || b.taskId === 'quality')");
+
+  assert.equal(productiveBookings.length, 1, "La tâche productive longue reste une seule tâche logique");
+  assert.equal(qualityBookings.length, 1, "Un seul jalon QC final distinct est planifié");
+  assert.equal(run("__p1005Accepted.length"), 2, "La proposition acceptée contient exactement le travail productif et son QC");
+
+  const longBooking = productiveBookings[0];
+  const qcBooking = qualityBookings[0];
+
+  assert.equal(longBooking.taskId, "long-task");
+  assert.equal(longBooking.businessTaskId, "long-task");
+  assert.equal(run("sumBookingSegmentsMinutes(__p1005Accepted.find((b) => b.taskId === 'long-task').segments)"), 600);
+  assert.ok(longBooking.segments.length > 1, "La tâche productive longue est bien découpée en plusieurs segments");
+  assert.equal(qcBooking.taskId, "quality");
+  assert.ok(new Date(qcBooking.start) >= new Date(longBooking.end), "Le QC est positionné strictement après la fin du travail productif");
+
+  // Reload / persistence conserve la tâche métier logique et le QC final distinct
   context.__p1005Reload = run("normalizeState({ ...state, bookings: JSON.parse(JSON.stringify(__p1005Accepted)) })");
-  const before = toPlain(run("__p1005Accepted[0]"));
-  const after = toPlain(run("__p1005Reload.bookings[0]"));
-  assert.equal(after.taskId, before.taskId);
-  assert.equal(after.businessTaskId, before.businessTaskId);
-  assert.deepEqual(after.resourceIds, before.resourceIds);
-  assert.deepEqual(after.segments, before.segments);
-  assert.equal(after.start, before.start);
-  assert.equal(after.end, before.end);
-  assert.deepEqual(after.dependencies, before.dependencies);
-  assert.equal(after.vehicleExclusive, false);
-  assert.equal(after.parallelizable, true);
+  const beforeLong = toPlain(run("__p1005Accepted.find((b) => b.taskId === 'long-task')"));
+  const afterLong = toPlain(run("__p1005Reload.bookings.find((b) => b.taskId === 'long-task')"));
+  const afterQc = toPlain(run("__p1005Reload.bookings.find((b) => b.taskId === 'quality')"));
+
+  assert.ok(afterQc, "Le QC est préservé au reload");
+  assert.equal(afterLong.taskId, beforeLong.taskId);
+  assert.equal(afterLong.businessTaskId, beforeLong.businessTaskId);
+  assert.deepEqual(afterLong.resourceIds, beforeLong.resourceIds);
+  assert.deepEqual(afterLong.segments, beforeLong.segments);
+  assert.equal(afterLong.start, beforeLong.start);
+  assert.equal(afterLong.end, beforeLong.end);
+  assert.deepEqual(afterLong.dependencies, beforeLong.dependencies);
+  assert.equal(afterLong.vehicleExclusive, false);
+  assert.equal(afterLong.parallelizable, true);
 });
 
 check("S identical inputs produce byte-identical deterministic slots", () => {
@@ -361,7 +380,7 @@ check("T canonical sync representation retains full booking JSON and RPC segment
   assert.match(syncSource, /const segments = Array\.isArray\(step\.segments\)/u);
   assert.match(syncSource, /return segments\.map\(\(segment, segmentIndex\)/u);
   run("markEntityBookingDirty(__p1005Accepted[0])");
-  context.__p1005Mutation = run("captureEntityMutationBatch(state, { workshopId: 'local-workshop' }).find((entry) => entry.entityType === 'booking')");
+  context.__p1005Mutation = run("captureEntityMutationBatch(state, { workshopId: 'local-workshop' }).find((entry) => entry.entityType === 'booking' && entry.entityId === __p1005Accepted[0].id)");
   assert.deepEqual(toPlain(run("__p1005Mutation.payload.entity.segments")), toPlain(run("__p1005Accepted[0].segments")));
 });
 

@@ -35,18 +35,120 @@ check("A UX-001/002 release surfaces remain internally consistent", () => {
 });
 
 check("B Today is the role-aware operational startup destination", () => {
-  assert.match(appSource, /canAccessTab\("today"\)[\s\S]*\? "today"/u);
-  assert.match(appSource, /canAccessTab\("technician"\)[\s\S]*\? "technician"/u);
-  assert.match(appSource, /setActiveTab\(startupTab\);/u);
+  const roleDefaultsStart = stateSource.indexOf("const ROLE_DEFAULT_TABS = {");
+  const roleDefaultsEnd = stateSource.indexOf("};", roleDefaultsStart);
+
+  assert.ok(
+    roleDefaultsStart >= 0 && roleDefaultsEnd > roleDefaultsStart,
+    "ROLE_DEFAULT_TABS block is available",
+  );
+
+  const roleDefaults = stateSource.slice(roleDefaultsStart, roleDefaultsEnd + 2);
+
+  assert.match(roleDefaults, /admin:\s*"today"/u);
+  assert.match(roleDefaults, /directeur_sav:\s*"pilotage"/u);
+  assert.match(roleDefaults, /chef_atelier:\s*"today"/u);
+  assert.match(roleDefaults, /reception:\s*"today"/u);
+  assert.match(roleDefaults, /technicien:\s*"technician"/u);
+  assert.match(roleDefaults, /controle_qualite:\s*"technician"/u);
+
+  const defaultTabStart = stateSource.indexOf("function getDefaultTabForRole(");
+  const allowedTabsStart = stateSource.indexOf("function getAllowedTabsForRole(", defaultTabStart);
+
+  assert.ok(
+    defaultTabStart >= 0 && allowedTabsStart > defaultTabStart,
+    "getDefaultTabForRole source block is available",
+  );
+
+  const defaultTabBlock = stateSource.slice(defaultTabStart, allowedTabsStart);
+
+  assert.match(
+    defaultTabBlock,
+    /ROLE_DEFAULT_TABS\[toRuntimeUserRole\(role\)\]\s*\|\|\s*"dossiers"/u,
+  );
+
+  const ensureStart = stateSource.indexOf("function ensureCurrentTabAllowed(");
+  const guardStart = stateSource.indexOf("function guardUserSwitch(", ensureStart);
+
+  assert.ok(
+    ensureStart >= 0 && guardStart > ensureStart,
+    "ensureCurrentTabAllowed source block is available",
+  );
+
+  const ensureBlock = stateSource.slice(ensureStart, guardStart);
+
+  assert.match(ensureBlock, /getDefaultTabForRole\(user\.role\)/u);
+  assert.match(ensureBlock, /getAllowedTabsForCurrentUser\(\)/u);
+  assert.match(
+    ensureBlock,
+    /\(defaultTab && allowed\.includes\(defaultTab\)\)\s*\?\s*defaultTab\s*:\s*allowed\[0\]/u,
+  );
+  assert.match(ensureBlock, /setActiveTab\(target\);/u);
+
+  const resumeStart = appSource.indexOf("function resumeValidatedLocalIdentity(");
+  const startupStart = appSource.indexOf("async function checkUserSessionStartup(", resumeStart);
+
+  assert.ok(
+    resumeStart >= 0 && startupStart > resumeStart,
+    "resumeValidatedLocalIdentity source block is available",
+  );
+
+  const resumeBlock = appSource.slice(resumeStart, startupStart);
+
+  assert.match(resumeBlock, /ensureCurrentTabAllowed\(true\);/u);
+
   assert.match(indexSource, /class="nav-button active" type="button" data-tab="today" aria-current="page"/u);
   assert.match(indexSource, /class="view active" id="view-today"/u);
   assert.doesNotMatch(indexSource, /class="view active" id="view-reception-workspace"/u);
 });
 
 check("C PDF import is presented as the New dossier action instead of a destination", () => {
-  assert.match(indexSource, /data-tab="reception-workspace"[\s\S]{0,700}Nouveau dossier/u);
-  assert.match(indexSource, /id="pdf-import-title">Nouveau dossier</u);
-  assert.match(indexSource, /Déposez le devis PDF, vérifiez les informations détectées puis créez le dossier/u);
+  const receptionStart = indexSource.indexOf('<section class="view" id="view-reception-workspace">');
+
+  assert.ok(receptionStart >= 0, "reception workspace is available");
+
+  const nextViewStart = indexSource.indexOf(
+    '<section class="view"',
+    receptionStart + 1,
+  );
+
+  const receptionView = nextViewStart >= 0
+    ? indexSource.slice(receptionStart, nextViewStart)
+    : indexSource.slice(receptionStart);
+
+  assert.match(receptionView, /class="panel pdf-import-home"/u);
+  assert.match(receptionView, /id="pdf-import-title">Nouveau dossier/u);
+  assert.match(
+    receptionView,
+    /<p>Importez un devis ou enregistrez directement une arrivée sans document\.<\/p>/u,
+  );
+
+  assert.match(receptionView, /class="minimal-case-entry"/u);
+  assert.match(receptionView, /id="minimal-case-form"/u);
+  assert.match(receptionView, /Arrivée sans devis \/ diagnostic/u);
+
+  const pdfFormStart = receptionView.indexOf('<form id="case-form" class="pdf-import-form">');
+  const previewStart = receptionView.indexOf(
+    '<section class="pdf-estimate-preview"',
+    pdfFormStart,
+  );
+
+  assert.ok(
+    pdfFormStart >= 0 && previewStart > pdfFormStart,
+    "PDF import form source block is available",
+  );
+
+  const pdfImportEntry = receptionView.slice(pdfFormStart, previewStart);
+
+  assert.match(pdfImportEntry, /class="pdf-import-dropzone"/u);
+  assert.match(pdfImportEntry, /id="quick-estimate-file-input"/u);
+  assert.match(pdfImportEntry, /accept="\.pdf,application\/pdf"/u);
+  assert.match(pdfImportEntry, /Importer un devis PDF/u);
+
+  assert.match(
+    indexSource,
+    /data-tab="reception-workspace"[\s\S]{0,700}Nouveau dossier/u,
+  );
 });
 
 check("D active tab is exposed only as presentation state", () => {

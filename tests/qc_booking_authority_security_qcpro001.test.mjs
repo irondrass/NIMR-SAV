@@ -323,6 +323,28 @@ test("QC-PRO D3.22 — Migration file exists and has correct trigger and authori
     /chef\s+atelier\s+cannot\s+self-assign\s+quality\s+fallback/iu,
     "l'auto-attribution du Chef doit être explicitement rejetée"
   );
+
+  // Separation of powers & legacy bypass protection
+  const legacySig = "uuid,text,text,text,jsonb,text,text,bigint";
+  const newSig = "uuid,text,text,text,text,jsonb,text,bigint";
+
+  assert.match(
+    hardeningSource,
+    new RegExp(`revoke\\s+all\\s+on\\s+function\\s+public\\.nimr_apply_quality_review_v3\\(\\s*${legacySig}\\s*\\)\\s*from\\s+public,\\s*anon,\\s*authenticated;`, "iu"),
+    "l'ancienne surcharge public doit être révoquée pour tous les rôles"
+  );
+
+  assert.match(
+    hardeningSource,
+    new RegExp(`revoke\\s+all\\s+on\\s+function\\s+nimr_internal\\.nimr_apply_quality_review_v3\\(\\s*${legacySig}\\s*\\)\\s*from\\s+public,\\s*anon,\\s*authenticated;`, "iu"),
+    "l'ancienne surcharge internal doit être révoquée pour tous les rôles"
+  );
+
+  assert.match(
+    hardeningSource,
+    new RegExp(`grant\\s+execute\\s+on\\s+function\\s+public\\.nimr_apply_quality_review_v3\\(\\s*${newSig}\\s*\\)\\s*to\\s+authenticated;`, "iu"),
+    "seule la nouvelle surcharge QC-PRO doit être accordée à authenticated"
+  );
 });
 
 // ============================================================================
@@ -539,5 +561,68 @@ test("Attaque 10 — Tentative d'utiliser un vieux booking forgé ou non authent
       db.applyQualityReview(chefA, "case-001", "validated", {});
     },
     (err) => err.message.includes("quality booking lacks verified server authority") || err.code === "42501"
+  );
+});
+
+test("Attaque 11 — Tentative de contournement via l'ancienne surcharge RPC (p_decision) => REFUS", () => {
+  const legacySig = "uuid,text,text,text,jsonb,text,text,bigint";
+
+  // Verify that the hardening migration explicitly revokes legacy overloads
+  const legacyPublicRevoked = new RegExp(
+    `revoke\\s+all\\s+on\\s+function\\s+public\\.nimr_apply_quality_review_v3\\(\\s*${legacySig}\\s*\\)\\s*from\\s+public,\\s*anon,\\s*authenticated`,
+    "i"
+  ).test(hardeningSource);
+
+  const legacyInternalRevoked = new RegExp(
+    `revoke\\s+all\\s+on\\s+function\\s+nimr_internal\\.nimr_apply_quality_review_v3\\(\\s*${legacySig}\\s*\\)\\s*from\\s+public,\\s*anon,\\s*authenticated`,
+    "i"
+  ).test(hardeningSource);
+
+  const legacyPublicGranted = new RegExp(
+    `grant\\s+execute[\\s\\S]*?public\\.nimr_apply_quality_review_v3\\(\\s*${legacySig}\\s*\\)[\\s\\S]*?to\\s+authenticated`,
+    "i"
+  ).test(hardeningSource);
+
+  assert.ok(
+    legacyPublicRevoked,
+    "L'ancienne surcharge publique doit être expressément révoquée de public, anon, authenticated"
+  );
+  assert.ok(
+    legacyInternalRevoked,
+    "L'ancienne surcharge interne doit être expressément révoquée de public, anon, authenticated"
+  );
+  assert.ok(
+    !legacyPublicGranted,
+    "L'ancienne surcharge publique ne doit jamais être accordée à authenticated"
+  );
+
+  // Simulation of client calling with legacy parameter names (p_decision, p_rework_key)
+  const clientPayload = {
+    p_workshop_id: "ws-0001",
+    p_case_id: "case-001",
+    p_decision: "validated",
+    p_reason: "Bypass attempt",
+    p_checklist: {},
+    p_rework_key: null,
+    p_operation_id: "op-bypass",
+    p_base_version: 1,
+  };
+
+  const dispatch = (role, payload) => {
+    if (Object.prototype.hasOwnProperty.call(payload, "p_decision") || Object.prototype.hasOwnProperty.call(payload, "p_rework_key")) {
+      if (!legacyPublicGranted) {
+        const err = new Error("permission denied for function nimr_apply_quality_review_v3");
+        err.code = "42501";
+        throw err;
+      }
+    }
+    return { ok: true };
+  };
+
+  assert.throws(
+    () => {
+      dispatch("authenticated", clientPayload);
+    },
+    (err) => err.code === "42501" && err.message.includes("permission denied")
   );
 });

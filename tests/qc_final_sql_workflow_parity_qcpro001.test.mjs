@@ -152,9 +152,62 @@ test('R1 security — final RPC retains server authority, concurrency and restri
   assert.match(final.source, /security definer\s+set search_path to 'pg_catalog','public'/);
   for (const guard of ['auth.uid() is null', "actor_role not in ('controle_qualite','chef_atelier')", 'current_resource_id is null', 'quality resource assignment mismatch', 'quality booking lacks verified server authority', 'chief fallback requires administrative authorization', 'pg_advisory_xact_lock', 'for update', 'p_base_version', 'accepted_receipt', 'set local "nimr.quality_review_v3"']) assert.ok(sql.includes(guard), guard);
   const migration = fs.readFileSync(new URL(final.file, migrations), 'utf8');
-  assert.match(migration, /revoke all on function nimr_internal\.nimr_apply_quality_review_v3\([\s\S]*?from public, anon, authenticated/);
-  assert.match(migration, /revoke all on function public\.nimr_apply_quality_review_v3\([\s\S]*?from public, anon;/);
+
+  const legacySig = 'uuid,text,text,text,jsonb,text,text,bigint';
+  const newSig = 'uuid,text,text,text,text,jsonb,text,bigint';
+
+  // 1 & 2. Both internal and public legacy signatures must be fully revoked from public, anon, authenticated
+  assert.match(migration, new RegExp(`revoke all on function nimr_internal\\.nimr_apply_quality_review_v3\\(\\s*${legacySig}\\s*\\)\\s*from public, anon, authenticated;`, 'i'));
+  assert.match(migration, new RegExp(`revoke all on function public\\.nimr_apply_quality_review_v3\\(\\s*${legacySig}\\s*\\)\\s*from public, anon, authenticated;`, 'i'));
+
+  // 3. New QC-PRO internal signature revoked from all
+  assert.match(migration, new RegExp(`revoke all on function nimr_internal\\.nimr_apply_quality_review_v3\\(\\s*${newSig}\\s*\\)\\s*from public, anon, authenticated;`, 'i'));
+
+  // 4. New QC-PRO public signature revoked from public, anon, and granted to authenticated
+  assert.match(migration, new RegExp(`revoke all on function public\\.nimr_apply_quality_review_v3\\(\\s*${newSig}\\s*\\)\\s*from public, anon;`, 'i'));
+  assert.match(migration, new RegExp(`grant execute on function public\\.nimr_apply_quality_review_v3\\(\\s*${newSig}\\s*\\)\\s*to authenticated;`, 'i'));
+
+  // Guarantee that authenticated is NEVER granted on the legacy signature
+  assert.doesNotMatch(migration, new RegExp(`grant\\s+execute[\\s\\S]*?public\\.nimr_apply_quality_review_v3\\(\\s*${legacySig}\\s*\\)[\\s\\S]*?to authenticated`, 'i'));
+
   assert.doesNotMatch(final.source, /service_role|auth\.admin|user_metadata/i);
+});
+
+test('R1 client & bypass security — client uses exclusively new signature and legacy bypass is closed', () => {
+  const clientSrc = fs.readFileSync(new URL('../js/supabase-client.js', import.meta.url), 'utf8');
+  const rpcCallMatch = clientSrc.match(/client\.rpc\(\s*["']nimr_apply_quality_review_v3["']\s*,\s*\{([\s\S]*?)\}\s*\)/);
+  assert.ok(rpcCallMatch, 'client.rpc for nimr_apply_quality_review_v3 must be present');
+  const rpcParams = rpcCallMatch[1];
+
+  // Phase 4: Client uses only modern parameters
+  for (const requiredParam of ['p_workshop_id', 'p_case_id', 'p_quality_status', 'p_reason', 'p_operation_id', 'p_checklist', 'p_rework_step_key', 'p_base_version']) {
+    assert.ok(rpcParams.includes(requiredParam), `client rpc must include ${requiredParam}`);
+  }
+  assert.doesNotMatch(rpcParams, /\bp_decision\b/, 'client rpc must NOT pass p_decision');
+  assert.doesNotMatch(rpcParams, /\bp_rework_key\b/, 'client rpc must NOT pass p_rework_key');
+
+  // Phase 5: Static bypass simulation
+  const migration = fs.readFileSync(new URL(final.file, migrations), 'utf8');
+  function simulateAclDispatch(role, callArgs) {
+    const isLegacyCall = Object.prototype.hasOwnProperty.call(callArgs, 'p_decision') || Object.prototype.hasOwnProperty.call(callArgs, 'p_rework_key');
+    if (isLegacyCall) {
+      // Legacy wrapper: all privileges revoked from public, anon, authenticated
+      const legacyGranted = /grant\s+execute\s+on\s+function\s+public\.nimr_apply_quality_review_v3\(\s*uuid,text,text,text,jsonb,text,text,bigint\s*\)\s*to\s+authenticated/i.test(migration);
+      return legacyGranted ? 'EXECUTE_GRANTED' : 'PERMISSION_DENIED';
+    } else {
+      // New QC-PRO wrapper: granted to authenticated
+      const newGranted = /grant\s+execute\s+on\s+function\s+public\.nimr_apply_quality_review_v3\(\s*uuid,text,text,text,text,jsonb,text,bigint\s*\)\s*to\s+authenticated/i.test(migration);
+      return (role === 'authenticated' && newGranted) ? 'EXECUTE_GRANTED' : 'PERMISSION_DENIED';
+    }
+  }
+
+  // A. New API called by authenticated => EXECUTE_GRANTED
+  assert.equal(simulateAclDispatch('authenticated', { p_quality_status: 'validated', p_operation_id: 'op-1', p_checklist: {} }), 'EXECUTE_GRANTED');
+  // B. Legacy API called by authenticated => PERMISSION_DENIED (bypass prevented)
+  assert.equal(simulateAclDispatch('authenticated', { p_decision: 'validated', p_rework_key: 'step-1' }), 'PERMISSION_DENIED');
+  // C. Anon calling either => PERMISSION_DENIED
+  assert.equal(simulateAclDispatch('anon', { p_quality_status: 'validated' }), 'PERMISSION_DENIED');
+  assert.equal(simulateAclDispatch('anon', { p_decision: 'validated' }), 'PERMISSION_DENIED');
 });
 
 if (process.env.NIMR_QC_PARITY_REPORT === '1') {

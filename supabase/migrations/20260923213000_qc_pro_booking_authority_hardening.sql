@@ -818,6 +818,11 @@ revoke all on function nimr_internal.nimr_apply_quality_review_v3(
   uuid,text,text,text,text,jsonb,text,bigint
 ) from public, anon, authenticated;
 
+-- Fail-closed revocation on legacy internal overload (p_decision, p_rework_key)
+revoke all on function nimr_internal.nimr_apply_quality_review_v3(
+  uuid,text,text,text,jsonb,text,text,bigint
+) from public, anon, authenticated;
+
 create or replace function public.nimr_apply_quality_review_v3(
   p_workshop_id uuid,
   p_case_id text,
@@ -844,6 +849,12 @@ as $function$
     p_base_version
   )
 $function$;
+
+-- Hardening: revoke all execution on legacy public wrapper (p_decision, p_rework_key)
+-- Prevents authenticated users from bypassing QC-PRO verified server authority via the legacy overload.
+revoke all on function public.nimr_apply_quality_review_v3(
+  uuid,text,text,text,jsonb,text,text,bigint
+) from public, anon, authenticated;
 
 revoke all on function public.nimr_apply_quality_review_v3(
   uuid,text,text,text,text,jsonb,text,bigint

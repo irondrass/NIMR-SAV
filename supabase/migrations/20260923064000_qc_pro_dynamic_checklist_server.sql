@@ -37,7 +37,7 @@ declare
   input_value text;
   normalized_value text;
   context_text text;
-  current_role text;
+  actor_role text;
   current_resource_id uuid;
   current_resource_local_id text;
   clean_status text := lower(trim(coalesce(p_quality_status,'')));
@@ -67,10 +67,10 @@ begin
       using errcode='22023';
   end if;
 
-  current_role :=
+  actor_role :=
     public.nimr_current_workshop_role(p_workshop_id);
 
-  if current_role not in ('controle_qualite','chef_atelier') then
+  if actor_role not in ('controle_qualite','chef_atelier') then
     raise exception 'quality review access denied'
       using errcode='42501';
   end if;
@@ -228,7 +228,7 @@ begin
       using errcode='42501';
   end if;
 
-  if current_role='controle_qualite'
+  if actor_role='controle_qualite'
      and trim(coalesce(
        quality_booking.payload->>'qualityAssignmentMode',
        ''
@@ -237,7 +237,7 @@ begin
       using errcode='42501';
   end if;
 
-  if current_role='chef_atelier'
+  if actor_role='chef_atelier'
      and trim(coalesce(
        quality_booking.payload->>'qualityAssignmentMode',
        ''

@@ -150,7 +150,7 @@ test('R1 NOK — distinct rework persists and revalidation requires its complete
 
 test('R1 security — final RPC retains server authority, concurrency and restricted execute grants', () => {
   assert.match(final.source, /security definer\s+set search_path to 'pg_catalog','public'/);
-  for (const guard of ['auth.uid() is null', "current_role not in ('controle_qualite','chef_atelier')", 'current_resource_id is null', 'quality resource assignment mismatch', 'quality booking lacks verified server authority', 'chief fallback requires administrative authorization', 'pg_advisory_xact_lock', 'for update', 'p_base_version', 'accepted_receipt', 'set local "nimr.quality_review_v3"']) assert.ok(sql.includes(guard), guard);
+  for (const guard of ['auth.uid() is null', "actor_role not in ('controle_qualite','chef_atelier')", 'current_resource_id is null', 'quality resource assignment mismatch', 'quality booking lacks verified server authority', 'chief fallback requires administrative authorization', 'pg_advisory_xact_lock', 'for update', 'p_base_version', 'accepted_receipt', 'set local "nimr.quality_review_v3"']) assert.ok(sql.includes(guard), guard);
   const migration = fs.readFileSync(new URL(final.file, migrations), 'utf8');
   assert.match(migration, /revoke all on function nimr_internal\.nimr_apply_quality_review_v3\([\s\S]*?from public, anon, authenticated/);
   assert.match(migration, /revoke all on function public\.nimr_apply_quality_review_v3\([\s\S]*?from public, anon;/);

@@ -1,4 +1,4 @@
-﻿import assert from "node:assert/strict";
+import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 
@@ -107,7 +107,7 @@ test("QC-PRO D3.4 — Directeur et Admin ne sont pas des exécutants QC ordinair
 
   assert.match(
     migrationSource,
-    /current_role\s+not\s+in\s*\(\s*'controle_qualite'\s*,\s*'chef_atelier'\s*\)/iu
+    /actor_role\s+not\s+in\s*\(\s*'controle_qualite'\s*,\s*'chef_atelier'\s*\)/iu
   );
 });
 
@@ -141,7 +141,7 @@ test("QC-PRO D3.5 — le serveur exige un booking QC réel pour ce dossier", () 
 test("QC-PRO D3.6 — Contrôleur Qualité uniquement sur affectation quality_controller", () => {
   assert.match(
     migrationSource,
-    /current_role\s*=\s*'controle_qualite'/iu
+    /actor_role\s*=\s*'controle_qualite'/iu
   );
 
   assert.match(
@@ -158,7 +158,7 @@ test("QC-PRO D3.6 — Contrôleur Qualité uniquement sur affectation quality_co
 test("QC-PRO D3.7 — Chef Atelier uniquement sur fallback explicite", () => {
   assert.match(
     migrationSource,
-    /current_role\s*=\s*'chef_atelier'/iu
+    /actor_role\s*=\s*'chef_atelier'/iu
   );
 
   assert.match(

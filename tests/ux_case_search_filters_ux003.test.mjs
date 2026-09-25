@@ -65,7 +65,7 @@ check("E Reset-filter control exists and resets UI filter state cleanly", () => 
 
 check("F renderCases retains canonical matching and sorting functions", () => {
   assert.match(uiCasesSource, /const matchesText = caseMatchesGlobalSearch\(item, search\);/u);
-  assert.match(uiCasesSource, /const matchesStatus = statusFilter === "all" \|\| getCaseStatus\(item\) === statusFilter;/u);
+  assert.match(uiCasesSource, /const matchesStatus = caseMatchesStatusFilter\(item, statusFilter\);/u);
   assert.match(uiCasesSource, /const matchesType = caseMatchesTypeFilter\(item, typeFilter\);/u);
   assert.match(uiCasesSource, /cases\.sort\(compareCasesForList\);/u);
 });
@@ -75,7 +75,7 @@ check("G CASE_LIST_PAGE_SIZE remains 50", () => {
 });
 
 check("H Case cards preserve data-case, status, primary type, next-action tag, and vehicle identity", () => {
-  assert.match(uiCasesSource, /data-case="\$\{item\.id\}"/u);
+  assert.match(uiCasesSource, /data-case="\$\{escapeAttr\(item\.id\)\}"/u);
   assert.match(uiCasesSource, /class="case-card-head"/u);
   assert.match(uiCasesSource, /class="case-card-client"/u);
   assert.match(uiCasesSource, /class="tag case-status-tag"/u);

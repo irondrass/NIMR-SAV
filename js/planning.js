@@ -395,6 +395,7 @@ function makePlanningStep(item, template, match, options = {}) {
     sourceLaborHours: Number(options.sourceLaborHours || 0),
     color: getVehiclePlanningColor(item),
     planningMode: options.planningMode || "standard",
+    qualityAssignmentMode: options.qualityAssignmentMode || "",
     details: options.details || "",
   };
 }
@@ -452,6 +453,8 @@ function scheduleSingleStep(item, template, cursor, duration, tempBookings, assi
       requiredCategory: planningOptions.requiredCategory || "",
       capacityUnits: planningOptions.capacityUnits || 1,
       resourceUnits: planningOptions.resourceUnits || {},
+      allowedPrimaryResourceIds: planningOptions.allowedPrimaryResourceIds || [],
+      qualityAssignmentMode: planningOptions.qualityAssignmentMode || "",
       item,
       lockedPrimaryResourceId: constraint.lockedPrimaryResourceId,
       lockedEquipmentResourceId: preferredEquipmentId || "",
@@ -505,18 +508,191 @@ function getActivatableCanonicalPlanningTasks(item) {
   return tasks;
 }
 
+function getProfessionalQualityControlMinutes(item = {}) {
+  const durations = item?.durations || {};
+  const qualityControl = item?.qualityControl || {};
+
+  // Standard NIMR QC-PRO-001 :
+  // base documentaire/statique = 15 min
+  // intervention technique significative = +15 min
+  // essai routier requis = +15 min
+  // sécurité critique / HV / ADAS / comeback = +15 min
+  let minutes = 15;
+
+  const technicalKeys = [
+    "body",
+    "mechanical",
+    "electrical",
+    "prep",
+    "paint",
+    "reassembly",
+    "finish",
+  ];
+
+  if (technicalKeys.some((key) => Number(durations[key] || 0) > 0)) {
+    minutes += 15;
+  }
+
+  if (qualityControl.roadTestRequired === true) {
+    minutes += 15;
+  }
+
+  if (
+    qualityControl.criticalSafety === true
+    || qualityControl.highVoltage === true
+    || qualityControl.adas === true
+    || qualityControl.comeback === true
+    || qualityControl.repeatRepair === true
+  ) {
+    minutes += 15;
+  }
+
+  return Math.min(60, Math.max(15, minutes));
+}
+
+function getProfessionalQualityResourceGroups() {
+  const controlResources = (state.resources || []).filter((resource) => (
+    resource?.active !== false
+    && normalizePlanningRole(resource.role || resource.category || "") === "controle"
+  ));
+
+  const controlIds = new Set(controlResources.map((resource) => resource.id));
+
+  const linkedIdsForRole = (role) => [...new Set(
+    (state.users || [])
+      .filter((user) => user?.active !== false && getCanonicalUserRole(user) === role)
+      .map((user) => String(user.resourceId || "").trim())
+      .filter((resourceId) => resourceId && controlIds.has(resourceId))
+  )];
+
+  return {
+    qualityControllerIds: linkedIdsForRole("controle_qualite"),
+    chiefIds: linkedIdsForRole("chef_atelier"),
+    legacyControlIds: controlResources.map((resource) => resource.id),
+  };
+}
+
+function scheduleProfessionalQualityControlStep(item, proposal, bookings) {
+  if (!proposal?.steps?.length) return proposal;
+
+  // Ne pas dupliquer une ancienne étape explicitement fournie.
+  if (proposal.steps.some((step) => step.key === "quality")) {
+    return proposal;
+  }
+
+  const productiveSteps = proposal.steps.filter((step) => (
+    step.key !== "quality"
+    && step.key !== "subcontract_transfer_out"
+    && step.key !== "subcontract_transfer_return"
+  ));
+
+  if (!productiveSteps.length) return proposal;
+
+  const groups = getProfessionalQualityResourceGroups();
+
+  // Compatibilité transitoire des anciens tests/configurations qui ne
+  // déclarent aucune ressource contrôle. En exploitation NIMR, une ressource
+  // QC/chef doit exister ; un gate dédié sera ajouté avant production.
+  if (!groups.legacyControlIds.length) return proposal;
+
+  const baseTemplate = STEP_TEMPLATES.find((template) => template.key === "quality");
+  if (!baseTemplate) throw new Error("Template Contrôle Qualité introuvable.");
+
+  const template = getPlanningTemplateForItem(item, baseTemplate);
+  const duration = getProfessionalQualityControlMinutes(item);
+  const cursor = new Date(proposal.end || proposal.steps.at(-1).end);
+
+  const tempBookings = isIndexedPlannerBookingView(bookings)
+    ? bookings.fork()
+    : createIndexedPlannerBookingView(bookings, { excludedCaseId: item.id });
+
+  proposal.steps.forEach((step) => {
+    tempBookings.addOverlay(stepToBooking(item, step, true));
+  });
+
+  const assignment = createPlanningAssignmentContext(
+    item,
+    getContinuityHistorySource(bookings, item)
+  );
+
+  const attempt = (resourceIds, mode) => {
+    if (!resourceIds.length) return null;
+    try {
+      return scheduleSingleStep(
+        item,
+        template,
+        cursor,
+        duration,
+        tempBookings,
+        assignment,
+        isFastLaneJob(item),
+        "Contrôle Qualité Final",
+        "",
+        "quality-control",
+        {
+          allowedPrimaryResourceIds: resourceIds,
+          qualityAssignmentMode: mode,
+          // La continuité de métier ne doit jamais forcer un ancien Chef
+          // Atelier si un Contrôleur Qualité est disponible aujourd'hui.
+          continuityPrimaryResourceId: "",
+          requiredRole: template.role,
+        }
+      );
+    } catch (error) {
+      return null;
+    }
+  };
+
+  let qualityStep = null;
+
+  // Priorité absolue au Contrôleur Qualité.
+  qualityStep = attempt(groups.qualityControllerIds, "quality_controller");
+
+  // Fallback Chef Atelier seulement si aucun contrôleur ne peut être planifié.
+  if (!qualityStep) {
+    qualityStep = attempt(groups.chiefIds, "chief_fallback");
+  }
+
+  // Compatibilité d'anciens ateliers où la ressource "controle" n'est pas
+  // encore liée à un compte utilisateur.
+  if (!qualityStep) {
+    qualityStep = attempt(groups.legacyControlIds, "legacy_control_fallback");
+  }
+
+  if (!qualityStep) {
+    throw new Error("Aucune ressource habilitée disponible pour le Contrôle Qualité.");
+  }
+
+  proposal.steps.push(qualityStep);
+  proposal.end = qualityStep.end;
+
+  // Le buffer de livraison existant reste après le QC.
+  proposal.delivery = addWorkingMinutes(
+    new Date(qualityStep.end),
+    Number(proposal.marginMinutes || 0)
+  ).toISOString();
+
+  proposal.qualityControlPlanned = true;
+  return proposal;
+}
+
 function schedulePipeline(item, startAfter, bookings) {
+  let proposal;
+
   const explicitTasks = getExplicitPlanningTasks(item);
   if (explicitTasks.length) {
-    return scheduleTaskGraph(item, explicitTasks, startAfter, bookings);
+    proposal = scheduleTaskGraph(item, explicitTasks, startAfter, bookings);
+    return scheduleProfessionalQualityControlStep(item, proposal, bookings);
   }
 
   const canonicalTasks = getActivatableCanonicalPlanningTasks(item);
   if (canonicalTasks.length) {
-    return scheduleTaskGraph(item, canonicalTasks, startAfter, bookings);
+    proposal = scheduleTaskGraph(item, canonicalTasks, startAfter, bookings);
+    return scheduleProfessionalQualityControlStep(item, proposal, bookings);
   }
 
-  return scheduleSequentialPipeline(item, startAfter, bookings);
+  proposal = scheduleSequentialPipeline(item, startAfter, bookings);
+  return scheduleProfessionalQualityControlStep(item, proposal, bookings);
 }
 
 function scheduleSequentialPipeline(item, startAfter, bookings) {
@@ -875,9 +1051,19 @@ function findBestResourceSlot(template, startAfter, duration, bookings, fastJob,
   const lockedPrimary = lockedPrimaryResourceId
     ? resolveLockedPrimaryResource(planningOptions.item || null, template, lockedPrimaryResourceId, fastJob, planningOptions)
     : null;
-  const primaryResources = lockedPrimary
+  const orderedPrimaryResources = lockedPrimary
     ? [lockedPrimary]
     : orderPrimaryResourcesForStep(template.role, fastJob, bookings, startAfter, preferredPrimaryId, planningOptions);
+
+  const allowedPrimaryIds = new Set(
+    Array.isArray(planningOptions.allowedPrimaryResourceIds)
+      ? planningOptions.allowedPrimaryResourceIds.filter(Boolean)
+      : []
+  );
+
+  const primaryResources = allowedPrimaryIds.size
+    ? orderedPrimaryResources.filter((resource) => allowedPrimaryIds.has(resource.id))
+    : orderedPrimaryResources;
   const equipmentResources = template.equipmentRole
     // La catégorie métier de la tâche qualifie la ressource principale. Elle
     // ne doit pas rendre incompatible l'équipement associé (ex. une cabine
@@ -1646,6 +1832,7 @@ function stepToBooking(item, step, temporary) {
     status: temporary ? "temporary" : "planned",
     color: step.color,
     planningMode: step.planningMode || "standard",
+    qualityAssignmentMode: step.qualityAssignmentMode || "",
     details: step.details || "",
     temporary,
   };

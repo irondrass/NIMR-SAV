@@ -2,20 +2,44 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
+import { createNimrVmContext } from "./helpers/nimr_vm_context.mjs";
 import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const BASE_SHA = "a96f62caf7185931da2f6e589c5b87c2c66321ca";
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function assertReleaseConsumers() {
+  const versionSource = readProjectFile("js/version.js");
+  const match = versionSource.match(/^window\.APP_VERSION = "(v\d+\.\d+\.\d+)";$/mu);
+  assert.ok(match, "Canonical APP_VERSION must be a complete semantic version");
+  const version = match[1];
+  const numericVersion = version.slice(1);
+  const declarations = [
+    [versionSource, /^window\.NIMR_BUILD = "([^"]+)";$/mu, version, "NIMR_BUILD"],
+    [versionSource, /^window\.NIMR_CACHE_NAME = "([^"]+)";$/mu, "nimr-sav-" + version, "NIMR_CACHE_NAME"],
+    [readProjectFile("js/state.js"), /^const APP_VERSION = "([^"]+)";$/mu, version, "state APP_VERSION"],
+    [readProjectFile("sw.js"), /^const CACHE_NAME = "([^"]+)";$/mu, "nimr-sav-" + version, "service worker cache"],
+  ];
+  for (const [source, pattern, expected, label] of declarations) {
+    const declaration = source.match(pattern);
+    assert.ok(declaration, "Missing " + label);
+    assert.equal(declaration[1], expected, label + " must match the canonical release");
+  }
+  const index = readProjectFile("index.html");
+  for (const asset of ["app.js", "styles.css"]) {
+    const references = [...index.matchAll(new RegExp('(?:src|href)="' + escapeRegExp(asset) + '\\?v=([^"]+)"', "gu"))];
+    assert.equal(references.length, 1, "Expected one versioned " + asset + " reference");
+    assert.equal(references[0][1], numericVersion, asset + " must match the canonical release");
+  }
+}
+
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const browserSmokeRequested = process.argv.includes("--browser-smoke");
 const readProjectFile = (relativePath) => fs.readFileSync(path.join(repoRoot, relativePath), "utf8");
-const readBaseFile = (relativePath) => execFileSync("git", ["show", `${BASE_SHA}:${relativePath}`], {
-  cwd: repoRoot,
-  encoding: "utf8",
-  maxBuffer: 40 * 1024 * 1024,
-});
-const normalizeEol = (value) => String(value || "").replace(/\r\n/gu, "\n");
 const sourceSlice = (source, start, end) => {
   const startIndex = source.indexOf(start);
   const endIndex = source.indexOf(end, startIndex + start.length);
@@ -30,9 +54,75 @@ const appSource = readProjectFile("app.js");
 const indexSource = readProjectFile("index.html");
 const stateSource = readProjectFile("js/state.js");
 
+function assertMirrorGuards() {
+  const fixture = createNimrVmContext();
+  const { run } = fixture;
+  run(`
+    state = normalizeState({
+      users: [
+        { id: "admin", name: "Admin", role: "admin_technique", active: true },
+        { id: "mirror", name: "Mirror", role: "reception", authUserId: "server-user", active: true },
+        { id: "local", name: "Local", role: "reception", active: true }
+      ], currentUserId: "admin", resources: [], cases: [], bookings: []
+    });
+    navigator.onLine = true;
+    window.__nimrValidatedAuthUserId = "server-user";
+    setAccountAccessRuntimeContext(
+      { id: "server-user" },
+      { workshop_id: "workshop-a", user_id: "server-user", role: "reception" }
+    );
+  `);
+  assert.equal(run("isServerManagedLocalProfile({ authUserId: 'server-user' })"), true);
+  assert.equal(run("isServerManagedLocalProfile({ authSource: 'supabase_membership' })"), true);
+  assert.equal(run("isServerManagedLocalProfile({ id: 'local' })"), false);
+  assert.equal(run("hasValidatedOnlineServerAuthority()"), true);
+  const before = run("JSON.stringify(state)");
+  assert.equal(run("updateUserLocal('mirror', { name: 'Changed', role: 'admin_technique' }).code"), "SERVER_MANAGED_PROFILE_READ_ONLY");
+  assert.equal(run("JSON.stringify(state)"), before, "Denied mirror update must not mutate state");
+  assert.equal(run("updateUserLocal('local', { name: 'Local changed', role: 'reception' }).ok"), true);
+  assert.equal(run("getUserById('local').name"), "Local changed");
+  run("window.__nimrValidatedAuthUserId = 'different-user'");
+  assert.equal(run("hasValidatedOnlineServerAuthority()"), false);
+  run("window.__nimrValidatedAuthUserId = 'server-user'; navigator.onLine = false");
+  assert.equal(run("hasValidatedOnlineServerAuthority()"), false);
+  return fixture;
+}
+
+function resolveTypeScript(rootDirectory) {
+  const require = createRequire(import.meta.url);
+  try {
+    return require("typescript");
+  } catch {}
+
+  const localAppTs = path.join(rootDirectory, "apps/nimr-sav-react/node_modules/typescript");
+  if (fs.existsSync(localAppTs)) return require(localAppTs);
+
+  try {
+    const commonDir = execFileSync("git", ["rev-parse", "--git-common-dir"], { cwd: rootDirectory, encoding: "utf8" }).trim();
+    if (commonDir) {
+      const mainRepo = path.dirname(path.resolve(rootDirectory, commonDir));
+      const mainTs = path.join(mainRepo, "apps/nimr-sav-react/node_modules/typescript");
+      if (fs.existsSync(mainTs)) return require(mainTs);
+    }
+  } catch {}
+
+  try {
+    const worktrees = execFileSync("git", ["worktree", "list", "--porcelain"], { cwd: rootDirectory, encoding: "utf8" });
+    for (const line of worktrees.split(/\r?\n/u)) {
+      if (line.startsWith("worktree ")) {
+        const wtPath = line.slice(9).trim();
+        const candidate = path.join(wtPath, "apps/nimr-sav-react/node_modules/typescript");
+        if (fs.existsSync(candidate)) return require(candidate);
+      }
+    }
+  } catch {}
+
+  throw new Error("TypeScript dependency could not be resolved from current worktree or linked git worktrees.");
+}
+
 function loadEdgeFactory() {
   const require = createRequire(import.meta.url);
-  const typescript = require(path.join(repoRoot, "apps/nimr-sav-react/node_modules/typescript"));
+  const typescript = resolveTypeScript(repoRoot);
   const testableSource = edgeSource.replace(
     /^import \{ createClient \} from "npm:@supabase\/supabase-js@2\.111\.0";$/mu,
     "const createClient = globalThis.__edgeCreateClient;",
@@ -206,7 +296,7 @@ await check("A Edge Function requires an authenticated user JWT and has no anony
   const result = await invokeEdge({ action: "capabilities", workshop_id: "workshop-a" }, {}, { auth: false });
   assert.equal(result.status, 401);
   assert.equal(result.body.code, "UNAUTHENTICATED");
-  assert.match(readProjectFile("js/version.js"), /^window\.APP_VERSION = "v23\.3\.20";$/mu);
+  assertReleaseConsumers();
 });
 
 await check("B Browser code contains no Auth Admin API, secret key or privileged client", () => {
@@ -243,9 +333,10 @@ await check("D Cross-workshop operations are rejected", async () => {
 });
 
 await check("E Canonical target role whitelist is exact and enforced", async () => {
-  for (const role of ["admin_technique", "directeur", "chef_atelier", "reception", "technicien", "controle_qualite", "lecture_seule"]) {
-    assert.match(edgeSource, new RegExp(`"${role}"`, "u"));
-  }
+  const roleSet = sourceSlice(edgeSource, "const CANONICAL_WORKSHOP_ROLES = new Set([", "]);");
+  assert.deepEqual([...roleSet.matchAll(/"([^"]+)"/gu)].map((match) => match[1]).sort(),
+    ["admin_technique", "directeur", "chef_atelier", "reception", "technicien", "controle_qualite", "lecture_seule",
+      "directeur_pieces", "responsable_magasin", "responsable_garantie_support", "responsable_qualite_parc_vn"].sort());
   const result = await invokeEdge({ action: "invite_member", workshop_id: "workshop-a", email: "user@example.test", name: "User", role: "admin" });
   assert.equal(result.body.code, "INVALID_WORKSHOP_ROLE");
   assert.deepEqual(result.fixture.events, []);
@@ -317,7 +408,9 @@ await check("K Server invite UI invokes only the Edge Function and never local u
   assert.doesNotMatch(inviteHandler, /createUserLocal\s*\(|updateUserLocal\s*\(/u);
   assert.match(indexSource, /<dialog[^>]+id="invite-workshop-member-dialog"/u);
   assert.match(uiSource, /WORKSHOP_USER_ADMIN_HUMAN_TYPES/u);
-  assert.doesNotMatch(uiSource, /humanResources[\s\S]{0,400}cabine|pont_mecanique|zone_preparation/u);
+  assert.doesNotMatch(uiSource, /humanResources[\s\S]{0,400}(?:cabine|pont_mecanique|zone_preparation)/u);
+  assert.match(uiSource, /WORKSHOP_USER_ADMIN_HUMAN_TYPES\.has/u);
+  assert.match(appSource, /["']controle_qualite["']\s*,\s*["']chef_atelier["'][\s\S]{0,100}resource\.type\s*===\s*["']controle["']/u);
 });
 
 await check("L Offboarding soft-revokes history before Auth cleanup and preserves revocation on cleanup failure", async () => {
@@ -362,25 +455,30 @@ await check("M Self-offboarding and last-admin offboarding are rejected server-s
 });
 
 await check("N Offline/local compatibility and IDENTITY-001A server-mirror guard remain intact", () => {
-  const baseState = readBaseFile("js/state.js");
-  for (const [start, end] of [
-    ["function isServerManagedLocalProfile", "function hasValidatedOnlineServerAuthority"],
-    ["function hasValidatedOnlineServerAuthority", "function isAccountAccessHumanResource"],
-    ["function updateUserLocal", "function resolvePermissionUser"],
-  ]) {
-    assert.equal(normalizeEol(sourceSlice(stateSource, start, end)), normalizeEol(sourceSlice(baseState, start, end)), start);
-  }
+  const { run } = assertMirrorGuards();
   assert.match(clientSource, /code: "OFFLINE_NOT_ALLOWED"[\s\S]*opération de sécurité ne sera pas mise en attente/u);
   assert.match(uiSource, /Hors ligne : invitations et retraits d’accès serveur indisponibles/u);
   assert.match(uiSource, /serverManagedReadOnly = onlineAuthority && serverManagedProfile/u);
-  for (const block of ["const CANONICAL_USER_ROLES", "const DIRECTOR_PERMISSIONS", "const ROLE_PERMISSIONS", "const ROLE_TABS", "const ROLE_DEFAULT_TABS"]) {
-    const nextBlock = block === "const ROLE_DEFAULT_TABS" ? "const USER_ROLE_ALIASES" : "const ";
-    const currentStart = stateSource.indexOf(block);
-    const baseStart = baseState.indexOf(block);
-    assert.ok(currentStart >= 0 && baseStart >= 0, block);
-    const currentEnd = stateSource.indexOf(nextBlock, currentStart + block.length);
-    const baseEnd = baseState.indexOf(nextBlock, baseStart + block.length);
-    assert.equal(normalizeEol(stateSource.slice(currentStart, currentEnd)), normalizeEol(baseState.slice(baseStart, baseEnd)), block);
+  const permissions = JSON.parse(run("JSON.stringify(ROLE_PERMISSIONS)"));
+  const canonicalRoles = [
+    "admin_technique", "directeur", "chef_atelier", "reception", "technicien", "controle_qualite", "lecture_seule",
+    "directeur_pieces", "responsable_magasin", "responsable_garantie_support", "responsable_qualite_parc_vn",
+  ];
+  assert.deepEqual(JSON.parse(run("JSON.stringify(Object.keys(CANONICAL_USER_ROLES))")).sort(), [...canonicalRoles].sort());
+  for (const role of canonicalRoles) assert.ok(Array.isArray(permissions[role]), "Missing permissions for " + role);
+  for (const permission of ["audit.view", "dashboard.view", "case.view", "case.create", "case.edit", "planning.view", "planning.edit", "resource.view"]) {
+    assert.ok(permissions.directeur.includes(permission), "Missing director permission: " + permission);
+  }
+  for (const permission of ["planning.edit", "users.manage", "quality.validate"]) {
+    assert.equal(permissions.technicien.some((granted) => run("permissionMatches")(granted, permission)), false, "Technician must not receive " + permission);
+  }
+  assert.deepEqual(permissions.controle_qualite, JSON.parse(run("JSON.stringify(QUALITY_CONTROLLER_PERMISSIONS)")));
+  const readOnly = JSON.parse(run("JSON.stringify(READ_ONLY_PERMISSIONS)"));
+  const tabs = JSON.parse(run("JSON.stringify(ROLE_TABS)"));
+  assert.deepEqual(tabs.technicien, ["technician"]);
+  for (const role of ["directeur_pieces", "responsable_magasin", "responsable_garantie_support", "responsable_qualite_parc_vn"]) {
+    assert.deepEqual(permissions[role], readOnly, role + " must remain read-only");
+    assert.deepEqual(tabs[role], role === "responsable_garantie_support" ? ["vn-part", "dossiers"] : ["vn-part"]);
   }
 });
 

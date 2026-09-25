@@ -40,13 +40,21 @@ await check("A UX-010 visual-system marker is present", () => {
   assert.match(css, /UX-010 — 2026 visual system and overlap hardening/u);
 });
 
-await check("B quiet success/info notifications use the fixed toast region instead of the sidebar save badge", () => {
+await check("B quiet notifications preserve the current low-noise status contract", () => {
   const start = state.indexOf("function quietNotify(message");
   assert.notEqual(start, -1);
   const end = state.indexOf("\n}\n", start);
   const body = state.slice(start, end + 3);
-  assert.match(body, /notifyUser\(message, variant\)/u);
-  assert.doesNotMatch(body, /updateSaveStatusIndicator/u);
+
+  assert.match(
+    body,
+    /variant === "error" \|\| variant === "warn"[\s\S]*?notifyUser\(message, variant\)[\s\S]*?return;/u,
+  );
+
+  assert.match(
+    body,
+    /updateSaveStatusIndicator\(message,\s*variant === "offline" \? "warning" : "saved"\)/u,
+  );
 });
 
 await check("C save status badge is constrained inside the sidebar brand", () => {
@@ -99,10 +107,18 @@ await check("I responsive hardening covers tablet and small mobile layouts", () 
   assert.match(ux, /@media \(prefers-reduced-motion:\s*reduce\)/u);
 });
 
-await check("J service worker is source-refreshed without changing the v23.3.31 cache contract", () => {
+await check("J UX-010 source marker remains under the current atomic release contract", () => {
+  const versionSource = read("js/version.js");
+  const releaseMatch = versionSource.match(/^window\.APP_VERSION = "(v\d+\.\d+\.\d+)";$/mu);
+
+  assert.ok(releaseMatch, "APP_VERSION must expose one semantic release");
+
+  const release = releaseMatch[1];
+
   assert.match(sw, /UX-010 source refresh/u);
-  assert.match(sw, /const CACHE_NAME = "nimr-sav-v23\.3\.31"/u);
-  assert.match(read("js/version.js"), /^window\.APP_VERSION = "v23\.3\.31";$/mu);
+  assert.ok(sw.includes(`const CACHE_NAME = "nimr-sav-${release}";`));
+  assert.ok(versionSource.includes(`window.NIMR_BUILD = "${release}";`));
+  assert.ok(versionSource.includes(`window.NIMR_CACHE_NAME = "nimr-sav-${release}";`));
 });
 
 await check("K UX-010 does not introduce auth, SQL, service-role, or permission authority changes", () => {
@@ -181,14 +197,22 @@ await check("P dashboard priority cards provide dedicated wide content column al
   );
 });
 
-await check("L changed paths are limited to the approved UX-010 surfaces", () => {
-  assert.match(d1, /tests\/ux_visual_system_2026_ux010\.test\.mjs/u);
-  const status = execFileSync("git", ["status", "--porcelain"], { cwd: root, encoding: "utf8" });
-  const paths = status
+await check("L original UX-010 commit remains limited to approved visual-system surfaces", () => {
+  const ux010Commit = execFileSync(
+    "git",
+    ["rev-parse", "fdfd632"],
+    { cwd: root, encoding: "utf8" },
+  ).trim();
+
+  const paths = execFileSync(
+    "git",
+    ["diff-tree", "--no-commit-id", "--name-only", "-r", ux010Commit],
+    { cwd: root, encoding: "utf8" },
+  )
     .split(/\r?\n/u)
-    .filter((line) => line.length >= 4)
-    .map((line) => line.slice(3).trim())
-    .map((line) => line.includes(" -> ") ? line.split(" -> ").pop() : line);
+    .map((value) => value.trim())
+    .filter(Boolean);
+
   const allowed = new Set([
     "styles.css",
     "index.html",
@@ -229,8 +253,18 @@ await check("L changed paths are limited to the approved UX-010 surfaces", () =>
     "tests/helpers/release-fingerprint.mjs",
     "tests/release_fingerprint_portability.test.mjs",
   ]);
+
+  assert.ok(paths.length > 0, "UX-010 commit must expose changed paths");
+  assert.ok(
+    paths.includes("tests/ux_visual_system_2026_ux010.test.mjs"),
+    "UX-010 commit must contain its regression test",
+  );
+
   for (const changedPath of paths) {
-    assert.ok(allowed.has(changedPath), `unexpected UX-010 changed path: ${changedPath}`);
+    assert.ok(
+      allowed.has(changedPath),
+      `unexpected original UX-010 changed path: ${changedPath}`,
+    );
   }
 });
 

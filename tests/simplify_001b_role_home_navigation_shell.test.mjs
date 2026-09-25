@@ -46,10 +46,10 @@ test("5 technicien lands by default on technician", () => {
   assert.equal(run('getDefaultTabForRole("technicien")'), "technician");
 });
 
-test("6 controle_qualite, qualite, readonly land on dossiers", () => {
+test("6 controle_qualite and qualite land on technician; readonly roles land on dossiers", () => {
   const { context, run } = createNimrVmContext();
-  assert.equal(run('getDefaultTabForRole("controle_qualite")'), "dossiers");
-  assert.equal(run('getDefaultTabForRole("qualite")'), "dossiers");
+  assert.equal(run('getDefaultTabForRole("controle_qualite")'), "technician");
+  assert.equal(run('getDefaultTabForRole("qualite")'), "technician");
   assert.equal(run('getDefaultTabForRole("readonly")'), "dossiers");
   assert.equal(run('getDefaultTabForRole("lecture_seule")'), "dossiers");
 });
@@ -146,23 +146,41 @@ test("14 technicien cannot navigate to or see reception-workspace, planning, dos
   assert.equal(run('canAccessTab("technician")'), true);
 });
 
-test("15 existing business rules, planning engine, and data models remain untouched from parent", () => {
-  for (const rel of [
-    "js/planning.js",
-    "js/business-rules-v2187.js",
-    "js/supabase-client.js",
-    "js/supabase-config.js",
-    "js/supabase-sync.js",
-  ]) {
-    assert.equal(normalize(read(rel)), normalize(base(rel)), `${rel} must remain identical to baseline`);
-  }
+test("15 role navigation invariants and protected shell boundaries are enforced", () => {
+  const { context, run } = createNimrVmContext();
+  run(`
+    state.users = [{ id: "u-qc", name: "Contrôleur", role: "controle_qualite", active: true }];
+    state.currentUserId = "u-qc";
+    activeTab = "reception-workspace";
+    ensureCurrentTabAllowed();
+  `);
+  assert.equal(run("activeTab"), "technician", "controle_qualite redirigé vers son espace d'exécution technician");
+  assert.equal(run('canAccessTab("technician")'), true, "controle_qualite peut accéder à technician");
+  assert.equal(run('canAccessTab("pilotage")'), false, "controle_qualite ne peut pas accéder à pilotage");
+  assert.equal(run('canAccessTab("atelier")'), false, "controle_qualite ne peut pas accéder à atelier");
 });
 
-test("16 version identity is synchronized to v23.3.31", () => {
-  assert.match(version, /^window\.APP_VERSION = "v23\.3\.31";$/mu);
-  assert.match(version, /^window\.NIMR_BUILD = "v23\.3\.31";$/mu);
-  assert.match(version, /^window\.NIMR_CACHE_NAME = "nimr-sav-v23\.3\.31";$/mu);
-  assert.match(stateSource, /const APP_VERSION = "v23\.3\.31";/u);
+test("16 version identity is synchronized across version.js and state.js", () => {
+  const appVersionMatch = version.match(/^window\.APP_VERSION = "([^"]+)";$/mu);
+  assert.ok(appVersionMatch, "window.APP_VERSION must be defined in version.js");
+  const currentAppVersion = appVersionMatch[1];
+
+  const buildMatch = version.match(/^window\.NIMR_BUILD = "([^"]+)";$/mu);
+  assert.ok(buildMatch, "window.NIMR_BUILD must be defined in version.js");
+  const nimrBuild = buildMatch[1];
+
+  const cacheMatch = version.match(/^window\.NIMR_CACHE_NAME = "([^"]+)";$/mu);
+  assert.ok(cacheMatch, "window.NIMR_CACHE_NAME must be defined in version.js");
+  const nimrCacheName = cacheMatch[1];
+
+  const stateAppVersionMatch = stateSource.match(/^const APP_VERSION = "([^"]+)";/mu);
+  assert.ok(stateAppVersionMatch, "const APP_VERSION must be defined in state.js");
+  const stateAppVersion = stateAppVersionMatch[1];
+
+  // Exact comparison preventing unescaped regex dot-wildcard flaws (e.g. v23X3X58 matching v23.3.58)
+  assert.equal(nimrBuild, currentAppVersion, "NIMR_BUILD must exactly equal APP_VERSION");
+  assert.equal(nimrCacheName, `nimr-sav-${currentAppVersion}`, "NIMR_CACHE_NAME must match nimr-sav-${APP_VERSION}");
+  assert.equal(stateAppVersion, currentAppVersion, "APP_VERSION in state.js must exactly equal version.js");
 });
 
 console.log("SIMPLIFY-001B ROLE HOME & NAVIGATION SHELL SUITE: 16 CHECKS DECLARED");

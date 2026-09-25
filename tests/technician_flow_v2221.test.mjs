@@ -121,10 +121,14 @@ function setupSafetyState(extraBookings = '') {
           marginMinutes: 15
         },
         claims: [{
+          id: 'claim-1',
           type: 'client',
           includeInPlanning: true,
           expertApproved: true,
           clientApproved: true,
+          authorizationReference: 'OR-SAFE-001',
+          authorizationAt: '2026-06-01T08:00:00.000Z',
+          authorizationBy: 'reception',
           estimate: {
             lines: [
               { phase: 'body', operation: 'Tôlerie', laborHours: 1 },
@@ -240,8 +244,18 @@ setupSafetyState(`,
           start: '2026-06-01T12:00:00.000Z',
           end: '2026-06-01T13:00:00.000Z'
         }`);
+// Test négatif obligatoire (Gate D3.18 / WORK-AUTHORIZATION-001) :
+// Sans référence d'autorisation formelle, la tâche ne doit pas démarrer même si le congé est hors créneau
+app(`state.cases[0].claims[0].authorizationReference = '';`);
+let unauthorizedResult = app(`startTechnicianTask(state.cases[0], 'booking-main', 'tech-1')`);
+assert.equal(unauthorizedResult.ok, false, 'le démarrage doit être refusé sans référence d’autorisation formelle');
+assert.match(unauthorizedResult.message, /accord client \/ interne à confirmer/i);
+assert.notEqual(app(`state.bookings.find((b) => b.id === 'booking-main').status`), 'started', 'la tâche ne doit pas passer en started');
+
+// Rétablissement de l'autorisation formelle valide : le congé hors créneau ne doit alors pas bloquer
+app(`state.cases[0].claims[0].authorizationReference = 'OR-SAFE-001';`);
 let leaveOutsideResult = app(`startTechnicianTask(state.cases[0], 'booking-main', 'tech-1')`);
-assert.equal(leaveOutsideResult.ok, true, 'un congé hors créneau ne doit pas bloquer le démarrage');
+assert.equal(leaveOutsideResult.ok, true, 'un congé hors créneau avec autorisation valide ne doit pas bloquer le démarrage');
 
 setupSafetyState(`,
         {

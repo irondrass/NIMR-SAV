@@ -23,6 +23,17 @@ const CANONICAL_WORKSHOP_ROLES = new Set([
   "responsable_qualite_parc_vn",
 ]);
 const WORKSHOP_ADMIN_ROLES = new Set(["admin_technique", "directeur"]);
+
+const RESOURCE_LINKED_WORKSHOP_ROLES = new Set([
+  "technicien",
+  "controle_qualite",
+  "chef_atelier",
+]);
+
+const RESOURCE_REQUIRED_WORKSHOP_ROLES = new Set([
+  "technicien",
+  "controle_qualite",
+]);
 const HUMAN_RESOURCE_TYPES = new Set(["controle", "electricien", "mecanicien", "peintre", "tolier"]);
 const CALLER_ROLE_ALIASES: Record<string, string> = Object.freeze({
   admin: "admin_technique",
@@ -193,16 +204,35 @@ async function countActiveTechnicalAdmins(adminClient: SupabaseClientLike, works
     .filter((membership) => canonicalizeCallerRole(membership.role) === "admin_technique").length;
 }
 
-async function validateTechnicianResource(
+async function validateWorkshopResourceLink(
   adminClient: SupabaseClientLike,
   workshopId: string,
   role: string,
   requestedResourceId: unknown,
 ): Promise<{ ok: true; resourceId: string | null } | { ok: false; response: Response }> {
-  if (role !== "technicien") return { ok: true, resourceId: null };
+
+  if (!RESOURCE_LINKED_WORKSHOP_ROLES.has(role)) {
+    return { ok: true, resourceId: null };
+  }
+
   const resourceId = String(requestedResourceId || "").trim();
+
   if (!resourceId) {
-    return { ok: false, response: failure("TECHNICIAN_RESOURCE_REQUIRED", "Une ressource humaine est obligatoire pour un technicien.") };
+    if (!RESOURCE_REQUIRED_WORKSHOP_ROLES.has(role)) {
+      return { ok: true, resourceId: null };
+    }
+
+    const errorCode = role === "technicien"
+      ? "TECHNICIAN_RESOURCE_REQUIRED"
+      : "WORKSHOP_RESOURCE_REQUIRED";
+
+    return {
+      ok: false,
+      response: failure(
+        errorCode,
+        "Une ressource humaine est obligatoire pour ce role operationnel."
+      ),
+    };
   }
 
   const { data: resource, error: resourceError } = await adminClient
@@ -212,17 +242,50 @@ async function validateTechnicianResource(
     .eq("workshop_id", workshopId)
     .is("deleted_at", null)
     .maybeSingle();
-  if (resourceError) {
-    return { ok: false, response: failure("RESOURCE_NOT_FOUND", "Ressource technicien introuvable.") };
+
+  if (resourceError || !resource) {
+    return {
+      ok: false,
+      response: failure(
+        "RESOURCE_NOT_FOUND",
+        "Ressource atelier introuvable."
+      ),
+    };
   }
-  if (!resource) {
-    return { ok: false, response: failure("RESOURCE_NOT_FOUND", "Ressource technicien introuvable.") };
-  }
+
   if (resource.active !== true) {
-    return { ok: false, response: failure("RESOURCE_INACTIVE", "La ressource technicien est inactive.") };
+    return {
+      ok: false,
+      response: failure(
+        "RESOURCE_INACTIVE",
+        "La ressource atelier est inactive."
+      ),
+    };
   }
-  if (!HUMAN_RESOURCE_TYPES.has(cleanToken(resource.type))) {
-    return { ok: false, response: failure("RESOURCE_NOT_HUMAN", "La ressource technicien doit être une personne, pas un équipement.") };
+
+  const resourceType = cleanToken(resource.type);
+
+  if (!HUMAN_RESOURCE_TYPES.has(resourceType)) {
+    return {
+      ok: false,
+      response: failure(
+        "RESOURCE_NOT_HUMAN",
+        "La ressource doit etre une personne, pas un equipement."
+      ),
+    };
+  }
+
+  if (
+    ["controle_qualite", "chef_atelier"].includes(role)
+    && resourceType !== "controle"
+  ) {
+    return {
+      ok: false,
+      response: failure(
+        "QUALITY_RESOURCE_REQUIRED",
+        "Le role qualite doit etre lie a une ressource de controle."
+      ),
+    };
   }
 
   const { data: linkedMembers, error: linkedError } = await adminClient
@@ -232,12 +295,28 @@ async function validateTechnicianResource(
     .eq("resource_id", resourceId)
     .is("deleted_at", null)
     .limit(1);
+
   if (linkedError) {
-    return { ok: false, response: failure("RESOURCE_LINK_CHECK_FAILED", "Impossible de vérifier la disponibilité de la ressource.", 500) };
+    return {
+      ok: false,
+      response: failure(
+        "RESOURCE_LINK_CHECK_FAILED",
+        "Impossible de verifier la disponibilite de la ressource.",
+        500
+      ),
+    };
   }
+
   if (Array.isArray(linkedMembers) && linkedMembers.length > 0) {
-    return { ok: false, response: failure("RESOURCE_ALREADY_LINKED", "Cette ressource est déjà liée à un membre actif de l’atelier.") };
+    return {
+      ok: false,
+      response: failure(
+        "RESOURCE_ALREADY_LINKED",
+        "Cette ressource est deja liee a un membre actif de l'atelier."
+      ),
+    };
   }
+
   return { ok: true, resourceId };
 }
 
@@ -271,32 +350,147 @@ async function handleLinkTechnicianResource(
   callerId: string,
   payload: JsonRecord,
 ): Promise<Response> {
+
   const targetUserId = String(payload.user_id || "").trim();
-  if (!targetUserId) return failure("TARGET_REQUIRED", "Sélectionnez le compte technicien.");
-  const { data: target, error } = await adminClient.from("workshop_members")
+
+  if (!targetUserId) {
+    return failure(
+      "TARGET_REQUIRED",
+      "Selectionnez le compte a lier."
+    );
+  }
+
+  const { data: target, error } = await adminClient
+    .from("workshop_members")
     .select("user_id, workshop_id, role, resource_id")
-    .eq("user_id", targetUserId).eq("workshop_id", authority.workshopId).is("deleted_at", null).maybeSingle();
-  if (error) return failure("MEMBER_READ_FAILED", "Impossible de vérifier le compte technicien.", 500);
-  if (!target || canonicalizeCallerRole(target.role) !== "technicien") {
-    return failure("TECHNICIAN_MEMBER_REQUIRED", "Ce compte n'est pas un technicien actif de cet atelier.", 403);
+    .eq("user_id", targetUserId)
+    .eq("workshop_id", authority.workshopId)
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  if (error) {
+    return failure(
+      "MEMBER_READ_FAILED",
+      "Impossible de verifier le compte.",
+      500
+    );
   }
-  if (!Object.hasOwn(payload, "expected_resource_id") || String(payload.expected_resource_id || "") !== String(target.resource_id || "")) {
-    return failure("MEMBER_CHANGED", "La liaison a changé. Actualisez les comptes avant de recommencer.", 409);
+
+  const targetRole = canonicalizeCallerRole(target?.role);
+
+  if (
+    !target
+    || !RESOURCE_LINKED_WORKSHOP_ROLES.has(targetRole)
+  ) {
+    return failure(
+      "RESOURCE_LINKED_MEMBER_REQUIRED",
+      "Ce compte ne peut pas etre lie a une ressource operationnelle.",
+      403
+    );
   }
-  const requestedResourceId = String(payload.resource_id || "").trim();
-  if (!requestedResourceId) return failure("TECHNICIAN_RESOURCE_REQUIRED", "Sélectionnez une ressource humaine active.");
-  if (requestedResourceId === String(target.resource_id || "")) return response({ok: true, action: "link_technician_resource", member: target});
-  const validation = await validateTechnicianResource(adminClient, authority.workshopId, "technicien", requestedResourceId);
-  if (!validation.ok) return validation.response;
-  // The existing composite FK and unique active-resource index protect workshop
-  // scope and concurrent assignments. Compare the old link again at the write.
-  let update = adminClient.from("workshop_members").update({resource_id: validation.resourceId, updated_by: callerId, updated_at: new Date().toISOString()})
-    .eq("user_id", targetUserId).eq("workshop_id", authority.workshopId).eq("role", target.role).is("deleted_at", null);
-  update = target.resource_id ? update.eq("resource_id", target.resource_id) : update.is("resource_id", null);
-  const { data: member, error: updateError } = await update.select("user_id, workshop_id, role, resource_id").maybeSingle();
-  if (updateError) return failure("RESOURCE_LINK_FAILED", "Liaison refusée : vérifiez que la ressource est active et libre de tout autre compte.", 409);
-  if (!member) return failure("MEMBER_CHANGED", "Le compte a changé pendant l'enregistrement. Actualisez les comptes.", 409);
-  return response({ok: true, action: "link_technician_resource", member});
+
+  if (
+    !Object.hasOwn(payload, "expected_resource_id")
+    || String(payload.expected_resource_id || "")
+      !== String(target.resource_id || "")
+  ) {
+    return failure(
+      "MEMBER_CHANGED",
+      "La liaison a change. Actualisez les comptes avant de recommencer.",
+      409
+    );
+  }
+
+  const requestedResourceId =
+    String(payload.resource_id || "").trim();
+
+  if (!requestedResourceId) {
+    const errorCode = targetRole === "technicien"
+      ? "TECHNICIAN_RESOURCE_REQUIRED"
+      : "WORKSHOP_RESOURCE_REQUIRED";
+
+    return failure(
+      errorCode,
+      "Selectionnez une ressource humaine active."
+    );
+  }
+
+  if (
+    requestedResourceId
+    === String(target.resource_id || "")
+  ) {
+    return response({
+      ok: true,
+      action: "link_technician_resource",
+      member: target,
+    });
+  }
+
+  const validation = await validateWorkshopResourceLink(
+    adminClient,
+    authority.workshopId,
+    targetRole,
+    requestedResourceId
+  );
+
+  if (!validation.ok) {
+    return validation.response;
+  }
+
+  let update = adminClient
+    .from("workshop_members")
+    .update({
+      resource_id: validation.resourceId,
+      updated_by: callerId,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("user_id", targetUserId)
+    .eq("workshop_id", authority.workshopId)
+    .eq("role", target.role)
+    .is("deleted_at", null);
+
+  update = target.resource_id
+    ? update.eq("resource_id", target.resource_id)
+    : update.is("resource_id", null);
+
+  const {
+    data: member,
+    error: updateError,
+  } = await update
+    .select("user_id, workshop_id, role, resource_id")
+    .maybeSingle();
+
+  if (updateError) {
+    const message = String(updateError.message || "");
+    const resourceConflict = (
+      updateError.code === "23505"
+      && message.includes('"workshop_members_active_workshop_resource_uidx"')
+    ) || (
+      updateError.code === "23503"
+      && message.includes('"workshop_members_workshop_resource_fkey"')
+    );
+    return failure(
+      resourceConflict ? "RESOURCE_LINK_FAILED" : "RESOURCE_LINK_UPDATE_FAILED",
+      resourceConflict
+        ? "Liaison refusee : verifiez que la ressource est active et libre."
+        : "Impossible de mettre a jour la liaison de ressource.",
+      resourceConflict ? 409 : 500
+    );
+  }
+
+  if (!member) {
+    return failure(
+      "MEMBER_CHANGED",
+      "Le compte a change pendant l'enregistrement.",
+      409
+    );
+  }
+
+  return response({
+    ok: true,
+    action: "link_technician_resource",
+    member,
+  });
 }
 
 async function handleInviteMember(
@@ -312,7 +506,7 @@ async function handleInviteMember(
   if (!isValidEmail(email)) return failure("INVALID_MEMBER_EMAIL", "L’adresse email est invalide.");
   if (!role) return failure("INVALID_WORKSHOP_ROLE", "Le rôle atelier demandé n’est pas autorisé.");
 
-  const resourceValidation = await validateTechnicianResource(adminClient, authority.workshopId, role, payload.resource_id);
+  const resourceValidation = await validateWorkshopResourceLink(adminClient, authority.workshopId, role, payload.resource_id);
   if (!resourceValidation.ok) return resourceValidation.response;
 
   const { data: inviteData, error: inviteError } = await adminClient.auth.admin.inviteUserByEmail(email, {

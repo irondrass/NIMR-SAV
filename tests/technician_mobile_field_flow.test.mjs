@@ -13,6 +13,27 @@ const { result, errors } = await runMobileCdpTest({
   name: "technician-mobile-field-flow",
   cdpPort: Number(process.env.NIMR_TECHNICIAN_MOBILE_CDP_PORT || 9342),
   run: async ({ applyProfile, navigate, evaluate, waitFor, click, send, sessionId, wait }) => {
+    await send("Page.addScriptToEvaluateOnNewDocument", {
+      source: `(() => {
+        const RealDate = window.Date;
+        const now = new RealDate();
+        const anchor = new RealDate(now);
+        anchor.setHours(10, 0, 0, 0);
+        if (anchor.getDay() === 0) anchor.setDate(anchor.getDate() + 1);
+        if (anchor.getDay() === 6) anchor.setDate(anchor.getDate() + 2);
+        const offset = anchor.getTime() - now.getTime();
+        function MockDate(...args) {
+          if (!new.target) return new RealDate(RealDate.now() + offset).toString();
+          if (args.length === 0) return new RealDate(RealDate.now() + offset);
+          return new RealDate(...args);
+        }
+        MockDate.prototype = RealDate.prototype;
+        MockDate.now = () => RealDate.now() + offset;
+        MockDate.parse = RealDate.parse;
+        MockDate.UTC = RealDate.UTC;
+        window.Date = MockDate;
+      })();`,
+    }, sessionId);
     await applyProfile(android);
     await navigate("?technician-mobile-field-flow=1");
     const fixture = await evaluate(technicianFixtureExpression({ role: "technicien", started: true }));
@@ -53,33 +74,43 @@ const { result, errors } = await runMobileCdpTest({
     await click('#technician-field-action-dock [data-tech-action="pause"]');
     await waitFor("!document.querySelector('#custom-modal-overlay').hidden", "modal pause");
     await evaluate(`(() => { const input = document.querySelector("#prompt-modal-input"); input.value = "pause repas"; input.dispatchEvent(new Event("change", { bubbles: true })); document.querySelector("#custom-modal-confirm").click(); })()`);
-    await waitFor("document.querySelector('#technician-field-action-dock [data-tech-action=\"resume\"]')", "action reprendre après pause");
+    await waitFor("Boolean(document.querySelector('#custom-modal-overlay')?.hidden) && Boolean(document.querySelector('#technician-field-action-dock [data-tech-action=\"resume\"]')) && !document.querySelector('#technician-field-action-dock [data-tech-action=\"resume\"]')?.disabled && state.bookings.some((booking) => booking.status === 'paused')", "action reprendre après pause");
     assert.equal(await evaluate(`state.bookings.some((booking) => booking.status === "paused")`), true, "pause non persistée");
 
     await click('#technician-field-action-dock [data-tech-action="resume"]');
-    await waitFor("document.querySelector('#technician-field-action-dock [data-tech-action=\"complete\"]')", "tâche reprise");
+    await waitFor("Boolean(document.querySelector('#technician-field-action-dock [data-tech-action=\"complete\"]')) && !document.querySelector('#technician-field-action-dock [data-tech-action=\"complete\"]')?.disabled", "tâche reprise");
 
     await click('#technician-field-action-dock [data-tech-action="note"]');
     await waitFor("!document.querySelector('#custom-modal-overlay').hidden", "modal modèle observation");
     await evaluate(`(() => { const input = document.querySelector("#prompt-modal-input"); input.value = "Essai et vérification fonctionnelle effectués."; input.dispatchEvent(new Event("change", { bubbles: true })); document.querySelector("#custom-modal-confirm").click(); })()`);
-    await waitFor("state.bookings.some((booking) => booking.notes?.some((note) => /Essai/.test(note.text)))", "observation modèle enregistrée");
+    await waitFor("state.bookings.some((booking) => booking.notes?.some((note) => /Essai/.test(note.text))) && Boolean(document.querySelector('#custom-modal-overlay')?.hidden) && !document.querySelector('#technician-field-action-dock [data-tech-action=\"block\"]')?.disabled", "observation modèle enregistrée et dock prêt");
 
     await click('#technician-field-action-dock [data-tech-action="block"]');
     await waitFor("!document.querySelector('#custom-modal-overlay').hidden", "modal motif blocage");
-    await evaluate(`(() => { const input = document.querySelector("#prompt-modal-input"); input.value = "difficulté technique"; input.dispatchEvent(new Event("change", { bubbles: true })); document.querySelector("#custom-modal-confirm").click(); })()`);
-    await waitFor("!document.querySelector('#custom-modal-overlay').hidden && document.querySelector('#prompt-modal-input')?.tagName === 'INPUT'", "modal détail blocage");
-    await evaluate(`(() => { const input = document.querySelector("#prompt-modal-input"); input.value = "Diagnostic complémentaire requis"; input.dispatchEvent(new Event("input", { bubbles: true })); document.querySelector("#custom-modal-confirm").click(); })()`);
-    await waitFor("document.querySelector('#technician-field-action-dock [data-tech-action=\"resume\"]')", "tâche bloquée");
+    await evaluate(`(() => {
+      const select = document.querySelector("#prompt-modal-input");
+      if (select) {
+        select.value = "difficulté technique";
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      const details = document.querySelector("#custom-modal-body textarea");
+      if (details) {
+        details.value = "Diagnostic complémentaire requis";
+        details.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      document.querySelector("#custom-modal-confirm").click();
+    })()`);
+    await waitFor("Boolean(document.querySelector('#custom-modal-overlay')?.hidden) && Boolean(document.querySelector('#technician-field-action-dock [data-tech-action=\"resume\"]')) && !document.querySelector('#technician-field-action-dock [data-tech-action=\"resume\"]')?.disabled && state.bookings.some((booking) => booking.blockReason === 'difficulté technique')", "tâche bloquée");
     assert.equal(await evaluate(`state.bookings.some((booking) => booking.blockReason === "difficulté technique")`), true, "motif rapide non enregistré");
 
     await click('#technician-field-action-dock [data-tech-action="resume"]');
-    await waitFor("document.querySelector('#technician-field-action-dock [data-tech-action=\"complete\"]')", "reprise après blocage");
+    await waitFor("!document.querySelector('#custom-modal-overlay').hidden", "confirmation déblocage");
+    await click("#custom-modal-confirm");
+    await waitFor("Boolean(document.querySelector('#custom-modal-overlay')?.hidden) && Boolean(document.querySelector('#technician-field-action-dock [data-tech-action=\"complete\"]')) && !document.querySelector('#technician-field-action-dock [data-tech-action=\"complete\"]')?.disabled", "reprise après blocage");
     await click('#technician-field-action-dock [data-tech-action="complete"]');
     await waitFor("!document.querySelector('#custom-modal-overlay').hidden", "confirmation fin");
     await click("#custom-modal-confirm");
-    await waitFor("!document.querySelector('#custom-modal-overlay').hidden && document.querySelector('#prompt-modal-input')", "note fin facultative");
-    await click("#custom-modal-confirm");
-    await waitFor("state.bookings.filter((booking) => booking.businessTaskId === 'task-mobile-current').every((booking) => getBookingOperationalStatus(booking) === 'completed')", "fin sans photo");
+    await waitFor("Boolean(document.querySelector('#custom-modal-overlay')?.hidden) && document.querySelector('[data-technician-current-task]')?.dataset.currentBookingId === 'booking-mobile-next'", "tâche suivante prioritaire");
 
     const finalState = await evaluate(`(() => ({
       completed: state.bookings.filter((booking) => booking.businessTaskId === "task-mobile-current").every((booking) => getBookingOperationalStatus(booking) === "completed"),

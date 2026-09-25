@@ -98,7 +98,7 @@ function setupPauseState() {
         flags: { received: true },
         appointment: { start: '${start}', end: '${end}', delivery: '${end}', marginMinutes: 15 },
         durations: { mechanical: 2 },
-        claims: [{ type: 'client', includeInPlanning: true, expertApproved: true, clientApproved: true, estimate: { lines: [{ phase: 'mechanical', operation: 'MO', laborHours: 2 }] } }]
+        claims: [{ type: 'client', includeInPlanning: true, expertApproved: true, clientApproved: true, authorizationReference: 'AUTH-PAUSE-001', authorizationAt: '2026-06-02T08:55:00.000Z', authorizationBy: 'fixture', estimate: { lines: [{ phase: 'mechanical', operation: 'MO', laborHours: 2 }] } }]
       }],
       bookings: [{
         id: 'booking-main',
@@ -121,6 +121,18 @@ function setupPauseState() {
 
 setupPauseState();
 assert.equal(app(`startTechnicianTask(state.cases[0], 'booking-main', 'tech-1').ok`), true, 'la tâche doit démarrer');
+
+app(`(() => {
+  const booking = state.bookings.find((entry) => entry.id === 'booking-main');
+  const startedAt = new Date(Date.now() - 5 * 60000).toISOString();
+
+  booking.startedAt = startedAt;
+  booking.actualStart = startedAt;
+
+  const session = booking.workSessions?.at(-1);
+  if (session) session.startedAt = startedAt;
+})()`);
+
 const pauseResult = app(`pauseTechnicianTask(state.cases[0], 'booking-main', 'tech-1', 'attente pièces')`);
 assert.equal(pauseResult.ok, true, 'la tâche démarrée doit pouvoir être mise en pause');
 assert.equal(app(`state.bookings.length`), 2, 'la pause doit conserver un reliquat technique dans le planning');
@@ -197,7 +209,10 @@ function clearMockTime() {
 setMockTime('2026-06-02T09:00:00.000Z');
 vm.runInContext(`
   state = normalizeState({
-    users: [{ id: 'SOFIENE', name: 'SOFIENE', role: 'technicien', resourceId: 'tech-sofiene', active: true }],
+    users: [
+      { id: 'SOFIENE', name: 'SOFIENE', role: 'technicien', resourceId: 'tech-sofiene', active: true },
+      { id: 'chef-pause', name: 'Chef Atelier', role: 'chef_atelier', active: true }
+    ],
     currentUserId: 'SOFIENE',
     resources: [
       { id: 'tech-sofiene', name: 'SOFIENE', role: 'mecanicien', active: true }
@@ -210,7 +225,7 @@ vm.runInContext(`
       flags: { received: true },
       appointment: { start: '2026-06-02T09:00:00.000Z', end: '2026-06-02T09:24:00.000Z', delivery: '2026-06-02T09:39:00.000Z', marginMinutes: 15 },
       durations: { oilService: 0.4 },
-      claims: [{ type: 'client', includeInPlanning: true, expertApproved: true, clientApproved: true, estimate: { lines: [{ phase: 'oilService', operation: 'Vidange / entretien rapide', laborHours: 0.4 }] } }]
+      claims: [{ type: 'client', includeInPlanning: true, expertApproved: true, clientApproved: true, authorizationReference: 'AUTH-PAUSE-001', authorizationAt: '2026-06-02T08:55:00.000Z', authorizationBy: 'fixture', estimate: { lines: [{ phase: 'oilService', operation: 'Vidange / entretien rapide', laborHours: 0.4 }] } }]
     }],
     bookings: [{
       id: 'booking-production',
@@ -250,10 +265,90 @@ assert.equal(prodRows.length, 1, 'Mes tâches doit afficher une seule carte pour
 assert.equal(prodRows[0].status, 'paused', 'la carte prod unique doit être en pause');
 assert.equal(prodRows[0].booking.id, 'booking-production', 'la carte prod montre toujours la tâche métier principale');
 
-// 6. reprendre la tâche (à 09:30 par exemple)
+// 6. dépassement total : reprise soumise à estimation Chef Atelier
 setMockTime('2026-06-02T09:30:00.000Z');
+
 const prodRemainderId = prodRows[0].actionBookingId;
-assert.equal(app(`resumeTechnicianTask(state.cases[0], '${prodRemainderId}', 'tech-sofiene').ok`), true, 'la reprise du reliquat prod doit réussir');
+const prodRemainderBeforeEstimate = app(
+  `state.bookings.find((booking) => booking.id === '${prodRemainderId}')`
+);
+
+assert.equal(
+  prodRemainderBeforeEstimate.remainingMinutes,
+  0,
+  'un dépassement complet laisse zéro minute calculable automatiquement'
+);
+
+assert.equal(
+  prodRemainderBeforeEstimate.needsScheduling,
+  true,
+  'le reliquat dépassé doit être explicitement à replanifier'
+);
+
+assert.equal(
+  prodRemainderBeforeEstimate.remainingEstimateRequired,
+  true,
+  'le reliquat dépassé exige une estimation du Chef Atelier'
+);
+
+const directResume = app(
+  `resumeTechnicianTask(state.cases[0], '${prodRemainderId}', 'tech-sofiene')`
+);
+
+assert.equal(
+  directResume.ok,
+  false,
+  'le technicien ne doit pas reprendre directement un reliquat sans durée restante connue'
+);
+
+assert.match(
+  directResume.message || '',
+  /Chef Atelier doit estimer le temps restant/i,
+  'le refus doit expliquer que le Chef Atelier doit estimer le temps restant'
+);
+
+app(`state.currentUserId = 'chef-pause'`);
+
+const chiefReplan = app(`
+  rescheduleCaseBooking(
+    state.cases[0],
+    '${prodRemainderId}',
+    '2026-06-02T09:30:00.000Z',
+    { durationMinutes: 15 }
+  )
+`);
+
+assert.equal(
+  chiefReplan.ok,
+  true,
+  'le Chef Atelier doit pouvoir estimer 15 minutes et replanifier le reliquat'
+);
+
+assert.equal(
+  app(`state.bookings.find((booking) => booking.id === '${prodRemainderId}').plannedMinutes`),
+  15,
+  'l estimation Chef Atelier devient la nouvelle durée planifiée'
+);
+
+assert.equal(
+  app(`state.bookings.find((booking) => booking.id === '${prodRemainderId}').needsScheduling`),
+  false,
+  'la replanification Chef doit lever needsScheduling'
+);
+
+assert.equal(
+  app(`state.bookings.find((booking) => booking.id === '${prodRemainderId}').remainingEstimateRequired`),
+  false,
+  'la replanification Chef doit lever remainingEstimateRequired'
+);
+
+app(`state.currentUserId = 'SOFIENE'`);
+
+assert.equal(
+  app(`resumeTechnicianTask(state.cases[0], '${prodRemainderId}', 'tech-sofiene').ok`),
+  true,
+  'après estimation et replanification Chef Atelier, le technicien peut reprendre'
+);
 
 // 7. vérifier que la carte unique est repassée en "in_progress"
 prodRows = app("getTechnicianTaskRows('tech-sofiene', todayKey(new Date('2026-06-02T09:00:00.000Z')))");

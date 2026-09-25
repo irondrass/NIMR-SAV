@@ -869,15 +869,12 @@ function renderStep10_QualityCheck(item) {
       : "Action qualité non autorisée.")
     : (!workReady ? "Terminez les travaux / la retouche avant le contrôle qualité." : "");
 
-  const checks = [
-    ["Alignement carrosserie", "Alignement carrosserie"],
-    ["Teinte et vernis", "Teinte et vernis"],
-    ["Remontage accessoires", "Remontage accessoires"],
-    ["Nettoyage intérieur/extérieur", "Nettoyage intérieur / extérieur"],
-    ["Essai final et validation client", "Essai final / fonctionnement"],
-  ];
-  const checklist = item.qualityChecklist || {};
+  const qualitySections = getProfessionalQualityChecklistDefinition(item);
+  const checklist = normalizeQualityChecklist(item.qualityChecklist || {}, item);
   const normalizeChecklistState = (value) => {
+    if (typeof normalizeQualityChecklistValue === "function") {
+      return normalizeQualityChecklistValue(value);
+    }
     if (value === true) return "ok";
     if (value === false || value == null) return "";
     const normalized = String(value).trim().toLowerCase();
@@ -924,26 +921,64 @@ function renderStep10_QualityCheck(item) {
 
       <form id="reception-quality-form" class="step-form" data-case-id="${item.id}">
         <div class="step-field">
-          <span>Checklist contrôle final</span>
-          <div style="display:grid;gap:8px;margin-top:6px;">
-            ${checks.map(([key, label]) => {
-              const value = normalizeChecklistState(checklist[key]);
-              return `
-                <label style="display:grid;grid-template-columns:minmax(180px,1fr) minmax(120px,180px);align-items:center;gap:10px;">
-                  <span>${escapeHtml(label)}</span>
-                  <select
-                    name="qualityCheck"
-                    data-quality-key="${escapeAttr(key)}"
-                    ${canSubmitQuality ? "" : `disabled title="${escapeAttr(qualityDeniedTitle)}"`}
-                  >
-                    <option value="" ${value === "" ? "selected" : ""}>À contrôler</option>
-                    <option value="ok" ${value === "ok" ? "selected" : ""}>OK</option>
-                    <option value="na" ${value === "na" ? "selected" : ""}>N/A</option>
-                    <option value="nok" ${value === "nok" ? "selected" : ""}>NOK</option>
-                  </select>
-                </label>
-              `;
-            }).join("")}
+          <span>Fiche de contrôle qualité</span>
+
+          <div style="display:grid;gap:14px;margin-top:8px;">
+            ${qualitySections.map((section) => `
+              <fieldset style="border:1px solid var(--border,#dfe6eb);border-radius:8px;padding:10px 12px;">
+                <legend style="padding:0 6px;font-weight:700;">
+                  ${escapeHtml(section.label)}
+                </legend>
+
+                <div style="display:grid;gap:8px;">
+                  ${(section.points || []).map((point) => {
+                    const value = normalizeChecklistState(checklist[point.id]);
+
+                    const badges = [
+                      point.critical
+                        ? `<span class="tag priority-urgent" style="font-size:.72rem;">Critique</span>`
+                        : "",
+                      point.evidence === "photo"
+                        ? `<span class="tag" style="font-size:.72rem;">Photo requise</span>`
+                        : "",
+                      point.evidence === "scan"
+                        ? `<span class="tag" style="font-size:.72rem;">Scan requis</span>`
+                        : "",
+                      point.evidence === "measurement"
+                        ? `<span class="tag" style="font-size:.72rem;">Mesure</span>`
+                        : "",
+                      point.evidence === "mileage"
+                        ? `<span class="tag" style="font-size:.72rem;">Km essai</span>`
+                        : "",
+                    ].filter(Boolean).join(" ");
+
+                    return `
+                      <label style="display:grid;grid-template-columns:minmax(220px,1fr) minmax(120px,180px);align-items:center;gap:10px;">
+                        <span>
+                          ${escapeHtml(point.label)}
+                          ${badges
+                            ? `<span style="display:inline-flex;gap:4px;margin-left:6px;flex-wrap:wrap;">${badges}</span>`
+                            : ""}
+                        </span>
+
+                        <select
+                          name="qualityCheck"
+                          data-quality-key="${escapeAttr(point.id)}"
+                          data-quality-critical="${point.critical ? "true" : "false"}"
+                          data-quality-evidence="${escapeAttr(point.evidence || "")}"
+                          ${canSubmitQuality ? "" : `disabled title="${escapeAttr(qualityDeniedTitle)}"`}
+                        >
+                          <option value="" ${value === "" ? "selected" : ""}>À contrôler</option>
+                          <option value="ok" ${value === "ok" ? "selected" : ""}>OK</option>
+                          <option value="na" ${value === "na" ? "selected" : ""}>N/A</option>
+                          <option value="nok" ${value === "nok" ? "selected" : ""}>NOK</option>
+                        </select>
+                      </label>
+                    `;
+                  }).join("")}
+                </div>
+              </fieldset>
+            `).join("")}
           </div>
         </div>
 

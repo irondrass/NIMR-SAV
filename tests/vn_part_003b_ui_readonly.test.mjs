@@ -107,7 +107,7 @@ test("2. Default Tabs: 4 new roles default to vn-part, 7 existing unchanged", ()
   assert.match(block, /chef_atelier:\s*"today"/, "chef_atelier must default to today");
   assert.match(block, /reception:\s*"today"/, "reception must default to today");
   assert.match(block, /technicien:\s*"technician"/, "technicien must default to technician");
-  assert.match(block, /controle_qualite:\s*"today"/, "controle_qualite must default to today");
+  assert.match(block, /controle_qualite:\s*"technician"/, "controle_qualite must default to technician");
   assert.match(block, /readonly:\s*"dossiers"/, "readonly must default to dossiers");
 });
 
@@ -868,7 +868,11 @@ test("14. Server rendering: text, attributes and invalid dates are escaped befor
 });
 
 test("15. CSS scope: every added style selector is confined to VN-PART", () => {
-  const addedCss = stylesCssContent.slice(stylesCssContent.indexOf(".vn-part-shell {"));
+  const vnPartStart = stylesCssContent.indexOf(".vn-part-shell {");
+  const nextSectionIndex = stylesCssContent.indexOf("/* CA-USER-001", vnPartStart);
+  const addedCss = nextSectionIndex !== -1
+    ? stylesCssContent.slice(vnPartStart, nextSectionIndex)
+    : stylesCssContent.slice(vnPartStart);
   assert.ok(addedCss.length > 0 && addedCss.length < stylesCssContent.length);
   const withoutComments = addedCss.replace(/\/\*[\s\S]*?\*\//g, "");
   const heads = [...withoutComments.matchAll(/([^{}]+)\{/g)].map((match) => match[1].trim());

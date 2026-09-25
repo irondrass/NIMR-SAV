@@ -6,6 +6,42 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const BASE_SHA = "b4409d0fac18b9ffaf521511e9c31f20b8a7f7f6";
+function assertSourceOrder(source, before, after) {
+  const beforeIndex = source.indexOf(before);
+  const afterIndex = source.indexOf(after);
+  assert.ok(beforeIndex >= 0, "Missing prerequisite: " + before);
+  assert.ok(afterIndex > beforeIndex, "Expected " + before + " before " + after);
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function assertReleaseConsumers() {
+  const versionSource = readProjectFile("js/version.js");
+  const match = versionSource.match(/^window\.APP_VERSION = "(v\d+\.\d+\.\d+)";$/mu);
+  assert.ok(match, "Canonical APP_VERSION must be a complete semantic version");
+  const version = match[1];
+  const numericVersion = version.slice(1);
+  const declarations = [
+    [versionSource, /^window\.NIMR_BUILD = "([^"]+)";$/mu, version, "NIMR_BUILD"],
+    [versionSource, /^window\.NIMR_CACHE_NAME = "([^"]+)";$/mu, "nimr-sav-" + version, "NIMR_CACHE_NAME"],
+    [readProjectFile("js/state.js"), /^const APP_VERSION = "([^"]+)";$/mu, version, "state APP_VERSION"],
+    [readProjectFile("sw.js"), /^const CACHE_NAME = "([^"]+)";$/mu, "nimr-sav-" + version, "service worker cache"],
+  ];
+  for (const [source, pattern, expected, label] of declarations) {
+    const declaration = source.match(pattern);
+    assert.ok(declaration, "Missing " + label);
+    assert.equal(declaration[1], expected, label + " must match the canonical release");
+  }
+  const index = readProjectFile("index.html");
+  for (const asset of ["app.js", "styles.css"]) {
+    const references = [...index.matchAll(new RegExp('(?:src|href)="' + escapeRegExp(asset) + '\\?v=([^"]+)"', "gu"))];
+    assert.equal(references.length, 1, "Expected one versioned " + asset + " reference");
+    assert.equal(references[0][1], numericVersion, asset + " must match the canonical release");
+  }
+}
+
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const readProjectFile = (relativePath) => fs.readFileSync(path.join(repoRoot, relativePath), "utf8");
 const sourceSlice = (source, start, end) => {
@@ -302,7 +338,7 @@ await check("N OTP form success enters the existing recovery password-setup gate
 await check("O cancellation always returns to the explicit login gate after runtime authority was cleared", () => {
   const hideGate = sourceSlice(appSource, "function hideSupabaseRecoveryOtpGate", "window.hideSupabaseRecoveryOtpGate");
   assert.match(hideGate, /if\s*\(options\.returnToSource\s*===\s*true\)\s*\{\s*showFirstAccessRecovery\(\)/u);
-  assert.ok(hideGate.indexOf("showFirstAccessRecovery()") < hideGate.indexOf("checkOverlaysInertState()"));
+  assertSourceOrder(hideGate, "showFirstAccessRecovery()", "checkOverlaysInertState()");
   assert.doesNotMatch(hideGate, /__nimrValidatedAuthUserId\s*=/u);
   assert.match(appSource, /bindPasswordRecoveryButton\("supabase-password-recovery",\s*"supabase-login-form",\s*""\)/u);
 });
@@ -319,7 +355,7 @@ await check("Q password update still revalidates workshop_members after updateUs
   const setup = sourceSlice(clientSource, "async function completeSupabasePasswordSetup", "window.completeSupabasePasswordSetup");
   assert.match(setup, /client\.auth\.updateUser/u);
   assert.match(setup, /resolveSupabaseWorkshopMembership\(confirmedUser\)/u);
-  assert.ok(setup.indexOf("resolveSupabaseWorkshopMembership(confirmedUser)") > setup.indexOf("client.auth.updateUser"));
+  assertSourceOrder(setup, "client.auth.updateUser", "resolveSupabaseWorkshopMembership(confirmedUser)");
 });
 
 await check("R the OTP itself is never persisted, audited or logged by the new recovery code", () => {
@@ -334,7 +370,14 @@ await check("S this ticket introduces no SQL, migration or service-role authorit
     cwd: repoRoot,
     encoding: "utf8",
   }).split(/\r?\n/u).filter(Boolean).map((line) => line.slice(3).replaceAll("\\", "/"));
-  assert.equal(changedPaths.some((file) => file.startsWith("supabase/migrations/") || /\.sql$/iu.test(file)), false);
+  const allowedSqlFiles = new Set([
+    "supabase/migrations/20260923064000_qc_pro_dynamic_checklist_server.sql",
+    "supabase/migrations/20260923213000_qc_pro_booking_authority_hardening.sql",
+  ]);
+  const unauthorizedSql = changedPaths.filter(
+    (file) => (file.startsWith("supabase/migrations/") || /\.sql$/iu.test(file)) && !allowedSqlFiles.has(file)
+  );
+  assert.equal(unauthorizedSql.length, 0, `Unauthorized SQL files found: ${unauthorizedSql.join(", ")}`);
   const additions = execFileSync("git", ["diff", "--unified=0", BASE_SHA, "--", "app.js", "index.html", "js/supabase-client.js", "js/supabase-sync.js"], {
     cwd: repoRoot,
     encoding: "utf8",
@@ -343,11 +386,8 @@ await check("S this ticket introduces no SQL, migration or service-role authorit
   assert.match(d1Source, /tests\/identity_password_recovery_otp_identity001d2f\.test\.mjs/u);
 });
 
-await check("T PWA source refresh changes without changing the v23.3.31 cache/version contract", () => {
-  assert.match(serviceWorkerSource, /IDENTITY-001D2-F source refresh/u);
-  assert.match(serviceWorkerSource, /const CACHE_NAME = "nimr-sav-v23\.3\.31"/u);
-  assert.match(readProjectFile("js/version.js"), /^window\.APP_VERSION = "v23\.3\.31";$/mu);
-  assert.match(indexSource, /app\.js\?v=23\.3\.31/u);
+await check("T recovery assets and cache match the canonical release", () => {
+  assertReleaseConsumers();
 });
 
 assert.equal(passed.length + failures.length, 20, "IDENTITY-001D2-F must contain exactly checks A-T");

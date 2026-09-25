@@ -460,6 +460,17 @@ const QUALITY_CONTROLLER_PERMISSIONS = [
   "quality.validate",
   "quality.reject",
   "quality.revalidate",
+  // QC-PRO-001 — le contrôleur exécute uniquement les bookings QC
+  // qui lui sont affectés. guardAction() applique ensuite
+  // canActOnTechnicianTask() pour conserver l'isolation ressource.
+  "task.start",
+  "task.pause",
+  "task.resume",
+  "task.complete",
+  "task.block",
+  "task.unblock",
+  "task.note",
+  "task.actual_time",
 ];
 
 const ROLE_PERMISSIONS = {
@@ -2186,6 +2197,10 @@ function getCurrentUser() {
 }
 
 const ACCOUNT_ACCESS_HUMAN_RESOURCE_ROLES = new Set(["tolier", "mecanicien", "electricien", "peintre", "controle"]);
+const RESOURCE_REQUIRED_ACCOUNT_ROLES = new Set([
+  "technicien",
+  "controle_qualite",
+]);
 let accountAccessRuntimeContext = Object.freeze({ authIdentity: null, serverMembership: null });
 
 function sanitizeAccountAuthIdentity(authIdentity) {
@@ -2343,7 +2358,7 @@ function getAccountAccessSnapshot(options = {}) {
     addIssue("RESOURCE_PARITY_MISMATCH", "warning", "La ressource locale diffère de la ressource workshop_members.");
   }
 
-  let technicianResourceStatus = serverRole === "technicien" ? "missing" : "not_required";
+  let technicianResourceStatus = RESOURCE_REQUIRED_ACCOUNT_ROLES.has(serverRole) ? "missing" : "not_required";
   if (serverRole === "technicien") {
     if (!serverResourceId) {
       addIssue("TECHNICIAN_RESOURCE_MISSING", "error", "Le technicien doit être lié à une ressource humaine dans workshop_members.");
@@ -2356,6 +2371,24 @@ function getAccountAccessSnapshot(options = {}) {
     } else if (resource.active === false) {
       technicianResourceStatus = "inactive";
       addIssue("TECHNICIAN_RESOURCE_INACTIVE", "error", "La ressource humaine liée au technicien est inactive.");
+    } else {
+      technicianResourceStatus = "valid";
+    }
+  } else if (serverRole === "controle_qualite") {
+    if (!serverResourceId) {
+      addIssue("QC_RESOURCE_MISSING", "error", "Le contrôleur qualité doit être lié à une ressource humaine de type contrôle dans workshop_members.");
+    } else if (!resource) {
+      technicianResourceStatus = "not_found";
+      addIssue("QC_RESOURCE_NOT_FOUND", "error", "La ressource contrôle qualité du serveur n'existe pas dans le miroir local synchronisé.");
+    } else if (!isAccountAccessHumanResource(resource)) {
+      technicianResourceStatus = "equipment";
+      addIssue("QC_RESOURCE_EQUIPMENT", "error", "La ressource liée au contrôleur qualité est un équipement ou une ressource non humaine.");
+    } else if (resource.type !== "controle" && resource.role !== "controle") {
+      technicianResourceStatus = "invalid_type";
+      addIssue("QC_RESOURCE_TYPE_INVALID", "error", "Le contrôleur qualité doit être lié à une ressource de type contrôle.");
+    } else if (resource.active === false) {
+      technicianResourceStatus = "inactive";
+      addIssue("QC_RESOURCE_INACTIVE", "error", "La ressource humaine liée au contrôleur qualité est inactive.");
     } else {
       technicianResourceStatus = "valid";
     }
@@ -2377,7 +2410,7 @@ function getAccountAccessSnapshot(options = {}) {
   if (serverResourceLocalId) {
     const duplicateLocalLinks = users.filter((user) => user?.active !== false && String(user?.resourceId || "").trim() === serverResourceLocalId);
     if (duplicateLocalLinks.length > 1) {
-      addIssue("DUPLICATE_ACTIVE_RESOURCE_LINK", "error", "Plusieurs profils locaux actifs utilisent la même ressource technicien.");
+      addIssue("DUPLICATE_ACTIVE_RESOURCE_LINK", "error", "Plusieurs profils locaux actifs utilisent la même ressource opérationnelle.");
     }
   }
 
@@ -2390,7 +2423,7 @@ function getAccountAccessSnapshot(options = {}) {
   } else if (membershipStatus === "invalid_role") {
     overallStatus = "invalid_role";
     overallLabel = "Rôle invalide";
-  } else if (serverRole === "technicien" && technicianResourceStatus !== "valid") {
+  } else if (RESOURCE_REQUIRED_ACCOUNT_ROLES.has(serverRole) && technicianResourceStatus !== "valid") {
     overallStatus = "resource_missing";
     overallLabel = "Ressource manquante";
   } else if (hasError) {
@@ -2894,9 +2927,31 @@ function isReadOnlyMode() {
 function canActOnTechnicianTask(user, booking) {
   const resolvedUser = resolvePermissionUser(user);
   if (!resolvedUser || !booking || resolvedUser.active === false) return false;
+
+  const canonicalRole = getCanonicalUserRole(resolvedUser);
+  const assignedResource = Boolean(
+    resolvedUser.resourceId
+    && (booking.resourceIds || []).includes(resolvedUser.resourceId)
+  );
+
+  // QC-PRO-001 — une tâche qualité constitue une frontière dédiée :
+  // - Contrôleur Qualité uniquement sur son booking normal ;
+  // - Chef Atelier uniquement sur un fallback explicite ;
+  // - aucun autre rôle, y compris un manager générique, ne peut
+  //   exécuter directement ce booking.
+  if (booking.key === "quality") {
+    if (canonicalRole === "controle_qualite") {
+      return booking.qualityAssignmentMode === "quality_controller" && assignedResource;
+    }
+    if (canonicalRole === "chef_atelier") {
+      return booking.qualityAssignmentMode === "chief_fallback" && assignedResource;
+    }
+    return false;
+  }
+
   if (isWorkshopManager(resolvedUser)) return true;
-  if (getCanonicalUserRole(resolvedUser) !== "technicien" || !resolvedUser.resourceId) return false;
-  return (booking.resourceIds || []).includes(resolvedUser.resourceId);
+  if (canonicalRole !== "technicien" || !resolvedUser.resourceId) return false;
+  return assignedResource;
 }
 
 function syncLocalUserFromSupabaseMembership(authUser, membership) {
@@ -3344,6 +3399,7 @@ function normalizeBooking(booking, resourceIds) {
     rescheduledAt: booking.rescheduledAt || "",
     color: booking.color || (type === "leave" ? "#6b7280" : "#11415f"),
     planningMode: booking.planningMode || "standard",
+    qualityAssignmentMode: String(booking.qualityAssignmentMode || ""),
     details: booking.details || "",
     temporary: Boolean(booking.temporary),
     deletedAt: booking.deletedAt || "",
@@ -3536,7 +3592,18 @@ function normalizeCase(item, bookings, realBookingCaseIds = null) {
     },
     appointmentStatus,
     status: normalizeWorkshopCaseStatus(item.status, item),
-    qualityChecklist: normalizeQualityChecklist(item.qualityChecklist),
+    qualityChecklist: normalizeQualityChecklist(
+      item.qualityChecklist,
+      { ...item, durations: normalizedDurations }
+    ),
+    qualityControl: {
+      roadTestRequired: item.qualityControl?.roadTestRequired === true,
+      criticalSafety: item.qualityControl?.criticalSafety === true,
+      highVoltage: item.qualityControl?.highVoltage === true,
+      adas: item.qualityControl?.adas === true,
+      comeback: item.qualityControl?.comeback === true,
+      repeatRepair: item.qualityControl?.repeatRepair === true,
+    },
     appointment: item.appointment || null,
     claims: normalizedClaims,
     customerClaims: Array.isArray(item.customerClaims) ? item.customerClaims.map(normalizeCustomerClaim).filter(Boolean) : [],
@@ -4739,7 +4806,7 @@ function clearCasePlanning(item, reason = "Planning atelier annulé") {
   item.flags.qualityApproved = false;
   item.flags.delivered = false;
   item.appointmentStatus = "none";
-  item.qualityChecklist = createEmptyQualityChecklist();
+  item.qualityChecklist = createEmptyQualityChecklist(item);
   generatedProposals[item.id] = null;
   if (hadPlanning) addHistory(item, "planning.cleared", reason);
 }
@@ -4990,18 +5057,464 @@ function getPhotoCategoryLabel(category) {
   return PHOTO_CATEGORIES[normalizePhotoCategory(category)];
 }
 
-function createEmptyQualityChecklist() {
-  return DEFAULT_QUALITY_CHECKS.reduce((checks, label) => {
-    checks[label] = false;
-    return checks;
-  }, {});
+const QUALITY_LEGACY_KEY_MAP = Object.freeze({
+  "Alignement carrosserie": "body.panel_alignment",
+  "Teinte et vernis": "body.paint_finish",
+  "Remontage accessoires": "body.reassembly",
+  "Nettoyage intérieur/extérieur": "delivery.clean_vehicle",
+  "Nettoyage intérieur / extérieur": "delivery.clean_vehicle",
+  "Nettoyage int?rieur/ext?rieur": "delivery.clean_vehicle",
+  "Nettoyage int?rieur / ext?rieur": "delivery.clean_vehicle",
+  "Essai final et validation client": "general.repaired_functions_verified",
+});
+
+function makeQualityControlPoint(id, label, critical = false, evidence = "") {
+  return {
+    id: String(id || ""),
+    label: String(label || ""),
+    critical: critical === true,
+    evidence: String(evidence || ""),
+  };
 }
 
-function normalizeQualityChecklist(checklist = {}) {
-  return DEFAULT_QUALITY_CHECKS.reduce((checks, label) => {
-    checks[label] = Boolean(checklist[label]);
-    return checks;
-  }, {});
+function getProfessionalQualityChecklistDefinition(item = {}) {
+  const durations = item?.durations || {};
+  const qc = item?.qualityControl || {};
+
+  const hasDuration = (key) => Number(durations[key] || 0) > 0;
+
+  const contextText = [
+    item?.orderType,
+    item?.type,
+    item?.visitReason,
+    item?.arrivalNotes,
+    item?.damageNotes,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  const sections = [
+    {
+      id: "documentary",
+      label: "A. Contrôle documentaire",
+      points: [
+        makeQualityControlPoint(
+          "documentary.work_order_complete",
+          "Ordre de réparation et opérations réalisées cohérents",
+          true
+        ),
+        makeQualityControlPoint(
+          "documentary.authorizations_present",
+          "Accords client / garantie requis présents",
+          true
+        ),
+        makeQualityControlPoint(
+          "documentary.operations_recorded",
+          "Pièces et opérations complémentaires enregistrées",
+          false
+        ),
+        makeQualityControlPoint(
+          "documentary.technician_notes_complete",
+          "Diagnostic, conclusion et notes technicien renseignés",
+          false
+        ),
+      ],
+    },
+    {
+      id: "general_safety",
+      label: "B. Contrôle général / sécurité",
+      points: [
+        makeQualityControlPoint(
+          "general.no_warning_lights",
+          "Aucun voyant ou message d'alerte anormal",
+          true
+        ),
+        makeQualityControlPoint(
+          "general.no_leak",
+          "Absence de fuite anormale",
+          true
+        ),
+        makeQualityControlPoint(
+          "general.reassembly_secure",
+          "Éléments démontés, connecteurs et protections correctement remontés",
+          true
+        ),
+        makeQualityControlPoint(
+          "general.repaired_functions_verified",
+          "Fonctions concernées par l'intervention vérifiées",
+          true
+        ),
+        makeQualityControlPoint(
+          "general.no_tools_left",
+          "Aucun outil, pièce ou objet atelier oublié dans le véhicule",
+          false
+        ),
+      ],
+    },
+  ];
+
+  if (hasDuration("oilService")) {
+    sections.push({
+      id: "quick_service",
+      label: "C. Entretien / service rapide",
+      points: [
+        makeQualityControlPoint(
+          "service.oil_level",
+          "Niveau d'huile conforme après intervention",
+          true
+        ),
+        makeQualityControlPoint(
+          "service.filter_correct",
+          "Filtres prévus remplacés et correctement montés",
+          false
+        ),
+        makeQualityControlPoint(
+          "service.drain_plug_secure",
+          "Bouchon, joint et fixation contrôlés",
+          true
+        ),
+        makeQualityControlPoint(
+          "service.no_leak",
+          "Absence de fuite après mise en route",
+          true
+        ),
+        makeQualityControlPoint(
+          "service.maintenance_reset",
+          "Indicateur d'entretien remis à zéro si applicable",
+          false
+        ),
+        makeQualityControlPoint(
+          "service.tyre_pressure",
+          "Pression pneumatiques vérifiée si prévue par l'entretien",
+          false
+        ),
+      ],
+    });
+  }
+
+  if (hasDuration("mechanical")) {
+    sections.push({
+      id: "mechanical",
+      label: "D. Mécanique",
+      points: [
+        makeQualityControlPoint(
+          "mechanical.repair_function",
+          "Organe réparé : fonctionnement conforme",
+          true
+        ),
+        makeQualityControlPoint(
+          "mechanical.fasteners",
+          "Fixations et serrages concernés contrôlés",
+          true
+        ),
+        makeQualityControlPoint(
+          "mechanical.no_leak",
+          "Absence de fuite liée à l'intervention",
+          true
+        ),
+        makeQualityControlPoint(
+          "mechanical.noise_vibration",
+          "Absence de bruit ou vibration anormale",
+          false
+        ),
+        makeQualityControlPoint(
+          "mechanical.temperature_pressure",
+          "Température / pression / paramètres concernés conformes",
+          true
+        ),
+      ],
+    });
+  }
+
+  const diagnosticRequested = (
+    hasDuration("electrical")
+    || contextText.includes("diagnostic")
+    || contextText.includes("élect")
+    || contextText.includes("elect")
+  );
+
+  if (diagnosticRequested) {
+    sections.push({
+      id: "electrical_diagnostic",
+      label: "E. Électricité / diagnostic",
+      points: [
+        makeQualityControlPoint(
+          "electrical.final_scan",
+          "Scan diagnostic final effectué si applicable",
+          false,
+          "scan"
+        ),
+        makeQualityControlPoint(
+          "electrical.no_relevant_dtc",
+          "Aucun DTC pertinent actif après réparation",
+          true,
+          "scan"
+        ),
+        makeQualityControlPoint(
+          "electrical.repaired_function",
+          "Fonction électrique / électronique réparée opérationnelle",
+          true
+        ),
+        makeQualityControlPoint(
+          "electrical.charging_12v",
+          "Alimentation et charge 12 V contrôlées si concernées",
+          false,
+          "measurement"
+        ),
+        makeQualityControlPoint(
+          "electrical.connectors_secure",
+          "Connecteurs, verrouillages et faisceaux concernés sécurisés",
+          true
+        ),
+        makeQualityControlPoint(
+          "electrical.calibration_complete",
+          "Codage / programmation / calibration terminés si requis",
+          true
+        ),
+      ],
+    });
+  }
+
+  if (
+    hasDuration("body")
+    || hasDuration("prep")
+    || hasDuration("paint")
+    || hasDuration("reassembly")
+    || hasDuration("finish")
+  ) {
+    sections.push({
+      id: "body_paint",
+      label: "F. Carrosserie / peinture / finition",
+      points: [
+        makeQualityControlPoint(
+          "body.panel_alignment",
+          "Alignement, jeux et affleurements conformes",
+          false
+        ),
+        makeQualityControlPoint(
+          "body.paint_finish",
+          "Teinte, vernis, texture et aspect conformes",
+          false
+        ),
+        makeQualityControlPoint(
+          "body.reassembly",
+          "Remontage, clips, garnitures et accessoires conformes",
+          true
+        ),
+        makeQualityControlPoint(
+          "body.openings_function",
+          "Ouvrants concernés fonctionnent correctement",
+          true
+        ),
+        makeQualityControlPoint(
+          "body.sensors_lighting",
+          "Éclairage, capteurs et équipements démontés fonctionnent",
+          true
+        ),
+        makeQualityControlPoint(
+          "body.final_photo",
+          "Photo finale après réparation enregistrée",
+          false,
+          "photo"
+        ),
+      ],
+    });
+  }
+
+  if (qc.highVoltage === true) {
+    sections.push({
+      id: "ev_hev",
+      label: "G. EV / HEV à haute tension",
+      points: [
+        makeQualityControlPoint(
+          "hv.no_relevant_fault",
+          "Aucun défaut HV pertinent actif",
+          true,
+          "scan"
+        ),
+        makeQualityControlPoint(
+          "hv.protection_connectors",
+          "Protections, connecteurs et verrouillages HV conformes",
+          true
+        ),
+        makeQualityControlPoint(
+          "hv.function_verified",
+          "Système HV concerné fonctionnel après intervention",
+          true
+        ),
+        makeQualityControlPoint(
+          "hv.charging_verified",
+          "Fonction de charge vérifiée si concernée par l'intervention",
+          true
+        ),
+      ],
+    });
+  }
+
+  if (qc.criticalSafety === true) {
+    sections.push({
+      id: "critical_safety",
+      label: "H. Organes de sécurité",
+      points: [
+        makeQualityControlPoint(
+          "safety.braking_function",
+          "Freinage conforme",
+          true
+        ),
+        makeQualityControlPoint(
+          "safety.steering_function",
+          "Direction conforme",
+          true
+        ),
+        makeQualityControlPoint(
+          "safety.wheel_fasteners",
+          "Roues / fixations concernées contrôlées",
+          true
+        ),
+        makeQualityControlPoint(
+          "safety.no_safety_warning",
+          "Aucun témoin sécurité anormal",
+          true
+        ),
+      ],
+    });
+  }
+
+  if (qc.roadTestRequired === true) {
+    sections.push({
+      id: "road_test",
+      label: "I. Essai dynamique",
+      points: [
+        makeQualityControlPoint(
+          "road.complaint_resolved",
+          "Plainte client reproduite puis vérifiée résolue",
+          true
+        ),
+        makeQualityControlPoint(
+          "road.braking_steering",
+          "Freinage et direction conformes en dynamique",
+          true
+        ),
+        makeQualityControlPoint(
+          "road.transmission_engine",
+          "Moteur / transmission conformes en conditions d'essai",
+          true
+        ),
+        makeQualityControlPoint(
+          "road.no_abnormal_noise_vibration",
+          "Absence de bruit ou vibration anormale",
+          false
+        ),
+        makeQualityControlPoint(
+          "road.no_warning_lights",
+          "Aucun nouveau voyant ou message d'alerte après essai",
+          true
+        ),
+        makeQualityControlPoint(
+          "road.mileage_recorded",
+          "Kilométrage début / fin d'essai enregistré",
+          false,
+          "mileage"
+        ),
+      ],
+    });
+  }
+
+  sections.push({
+    id: "delivery_preparation",
+    label: "J. Préparation restitution",
+    points: [
+      makeQualityControlPoint(
+        "delivery.clean_vehicle",
+        "Véhicule propre intérieurement et extérieurement",
+        false
+      ),
+      makeQualityControlPoint(
+        "delivery.no_new_damage",
+        "Aucune nouvelle dégradation constatée",
+        true
+      ),
+      makeQualityControlPoint(
+        "delivery.protections_removed",
+        "Protections atelier retirées",
+        false
+      ),
+      makeQualityControlPoint(
+        "delivery.client_items_present",
+        "Objets et accessoires client présents",
+        false
+      ),
+      makeQualityControlPoint(
+        "delivery.documents_ready",
+        "Documents nécessaires à la restitution disponibles",
+        false
+      ),
+    ],
+  });
+
+  return sections;
+}
+
+function normalizeQualityChecklistValue(value) {
+  if (value === true) return "ok";
+  if (value === false || value == null) return "";
+
+  const normalized = String(value).trim().toLowerCase();
+
+  if (["true", "ok", "conforme", "pass"].includes(normalized)) {
+    return "ok";
+  }
+
+  if (
+    ["na", "n/a", "not_applicable", "non_applicable", "non applicable"]
+      .includes(normalized)
+  ) {
+    return "na";
+  }
+
+  if (["false", "nok", "ko", "non_conforme", "non conforme", "fail"].includes(normalized)) {
+    return "nok";
+  }
+
+  return "";
+}
+
+function createEmptyQualityChecklist(item = {}) {
+  const checks = {};
+
+  getProfessionalQualityChecklistDefinition(item).forEach((section) => {
+    (section.points || []).forEach((point) => {
+      checks[point.id] = "";
+    });
+  });
+
+  return checks;
+}
+
+function normalizeQualityChecklist(checklist = {}, item = {}) {
+  const normalized = createEmptyQualityChecklist(item);
+  const source = checklist && typeof checklist === "object"
+    ? checklist
+    : {};
+
+  Object.entries(source).forEach(([rawKey, rawValue]) => {
+    const key = QUALITY_LEGACY_KEY_MAP[rawKey] || rawKey;
+    const value = normalizeQualityChecklistValue(rawValue);
+
+    if (Object.prototype.hasOwnProperty.call(normalized, key)) {
+      normalized[key] = value;
+      return;
+    }
+
+    // Préserver les contrôles historiques migrés même si la définition
+    // dynamique actuelle ne contient plus cette section.
+    if (Object.prototype.hasOwnProperty.call(QUALITY_LEGACY_KEY_MAP, rawKey)) {
+      normalized[key] = value;
+    }
+  });
+
+  return normalized;
 }
 
 function cloneWorkHours(workHours) {
@@ -5427,8 +5940,8 @@ const ROLE_TABS = {
   chef_atelier:  ["reception-workspace", "dossiers", "today", "pilotage", "planning", "technician", "atelier", "vn-part"],
   reception:     ["reception-workspace", "dossiers", "today"],
   technicien:    ["technician"],
-  controle_qualite: ["today", "dossiers"],
-  qualite:       ["today", "dossiers"],
+  controle_qualite: ["today", "dossiers", "technician"],
+  qualite:       ["today", "dossiers", "technician"],
   readonly:      ["dossiers", "pilotage", "planning", "vn-part"],
   directeur_pieces: ["vn-part"],
   responsable_magasin: ["vn-part"],
@@ -5443,8 +5956,8 @@ const ROLE_DEFAULT_TABS = {
   chef_atelier:  "today",
   reception:     "today",
   technicien:    "technician",
-  controle_qualite: "today",
-  qualite:       "today",
+  controle_qualite: "technician",
+  qualite:       "technician",
   readonly:      "dossiers",
   directeur_pieces: "vn-part",
   responsable_magasin: "vn-part",

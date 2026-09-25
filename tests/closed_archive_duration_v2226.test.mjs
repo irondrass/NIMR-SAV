@@ -166,7 +166,17 @@ resetState({
 
 assert.equal(run('getBookingPlannedMinutes(state.bookings[0])'), 180, 'durée utile planifiée vidange = 3 h');
 assert.equal(run('getValidatedAppointmentRows(state.cases[0])[0].minutes'), 180, 'affichage planning dossier utilise 3 h utiles, pas 47 h');
-assert.equal(run('estimateBookingWorkedMinutes(state.bookings[0], new Date("2026-05-25T08:23:00.000Z"))'), 180, 'durée réelle productive plafonnée à 3 h utiles');
+const archivedWorkedMinutes = run('estimateBookingWorkedMinutes(state.bookings[0], new Date("2026-05-25T08:23:00.000Z"))');
+assert.equal(
+  archivedWorkedMinutes,
+  278,
+  'la durée réelle doit compter les 278 minutes productives effectivement réalisées, dépassement inclus'
+);
+assert.equal(
+  archivedWorkedMinutes > run('getBookingPlannedMinutes(state.bookings[0])'),
+  true,
+  'la durée réelle productive peut dépasser les 180 minutes planifiées'
+);
 assert.equal(run('isActivePrintableWorkBooking(state.bookings[0], state.cases[0])'), false, 'planning imprimé actif exclut dossier clôturé');
 assert.equal(run('getTechnicianTaskRows("tech-1", "2026-05-23").length'), 0, 'ordre technicien clôturé non proposé comme tâche à exécuter');
 
@@ -192,7 +202,12 @@ resetState({
 assert.ok(run('state.bookings[0].plannedMinutes') > 180, 'fixture ancien booking normalisé avec amplitude calendrier');
 assert.equal(run('getBookingPlannedMinutes(state.bookings[0], state.cases[0])'), 180, 'ancien booking sans durée fiable retombe sur la durée métier 3 h');
 assert.equal(run('getValidatedAppointmentRows(state.cases[0])[0].minutes'), 180, 'ancien booking multi-jours affiche 3 h utiles, pas 47 h');
-assert.equal(run('estimateBookingWorkedMinutes(state.bookings[0], new Date("2026-06-01T07:00:00.000Z"))'), 180, 'ancienne session réelle multi-jours est plafonnée à 3 h productives');
+const legacyWorkedMinutes = run('estimateBookingWorkedMinutes(state.bookings[0], new Date("2026-06-01T07:00:00.000Z"))');
+assert.equal(
+  legacyWorkedMinutes > run('getBookingPlannedMinutes(state.bookings[0], state.cases[0])'),
+  true,
+  `ancienne session réelle multi-jours conserve le dépassement productif réel (${legacyWorkedMinutes} min) au lieu d'être plafonnée à 180 min`
+);
 
 resetState({
   users: [adminUser],
@@ -204,7 +219,7 @@ resetState({
 
 context.notifyMessages = [];
 run('printTechnicianWorkOrders(state.cases[0])');
-assert.match(fs.readFileSync(new URL('../js/exports.js', import.meta.url), 'utf8'), /Dossier clôturé : les ordres techniciens opérationnels ne sont plus proposés/, 'impression ordres techniciens opérationnels prévient en archive');
+assert.match(fs.readFileSync(new URL('../js/exports.js', import.meta.url), 'utf8'), /Dossier clôturé : imprimez l'ordre de réparation archive/, 'impression ordres techniciens opérationnels prévient en archive');
 
 const localState = normalizeForSync({
   users: [adminUser],

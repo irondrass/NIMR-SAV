@@ -93,6 +93,10 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L4 17l3 3 5.3-5.3a4 4 0 0 0 5.4-5.4l-2.4 2.4-3-3 2.4-2.4Z"/><path d="m7 17 3 3"/></svg>
             Technicien
           </button>
+          <button class="nav-button" type="button" data-tab="parts-availability">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5M12 22V12"/></svg>
+            Pièces OR
+          </button>
           <div class="sidebar-nav-divider" role="separator" aria-orientation="horizontal"></div>
           <button class="nav-button nav-button-utility" type="button" data-tab="atelier">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -357,6 +361,26 @@
               </div>
             </section>
           </div>
+        </section>
+
+        <section class="view" id="view-parts-availability" hidden>
+          <section class="panel parts-availability-shell" aria-labelledby="parts-availability-title">
+            <div class="panel-heading parts-availability-heading">
+              <div>
+                <span class="eyebrow">Responsable Magasin</span>
+                <h1 id="parts-availability-title">Pièces OR</h1>
+                <p>Contrôlez les pièces livrées et signalez uniquement celles qui sont indisponibles.</p>
+              </div>
+            </div>
+            <div class="parts-availability-workbench">
+              <aside class="parts-availability-cases" aria-label="Dossiers avec pièces à contrôler">
+                <div id="parts-availability-case-list" class="parts-availability-case-list"></div>
+              </aside>
+              <section id="parts-availability-detail" class="parts-availability-detail" aria-live="polite">
+                <div class="empty-state"><strong>Sélectionnez un dossier</strong></div>
+              </section>
+            </div>
+          </section>
         </section>
 
         <section class="view" id="view-pilotage">
@@ -1522,6 +1546,7 @@
 
     <script src="vendor/pdf.min.js?v=23.3.59" defer></script>
     <script src="js/utils.js?v=23.3.59" defer></script>
+    <script src="js/parts-availability.js?v=23.3.59" defer></script>
     <script src="js/state.js?v=23.3.59" defer></script>
     <script src="js/ui-reception.js?v=23.3.59" defer></script>
     <script src="js/ui-cases.js?v=23.3.59" defer></script>
@@ -1529,6 +1554,7 @@
     <script src="js/ui-planning.js?v=23.3.59" defer></script>
     <script src="js/photos.js?v=23.3.59" defer></script>
     <script src="js/storage.js?v=23.3.59" defer></script>
+    <script src="js/parts-availability-ui.js?v=23.3.59" defer></script>
     <script src="js/work-hours-sync.js?v=23.3.59" defer></script>
     <script src="js/planning.js?v=23.3.59" defer></script>
     <script src="js/exports.js?v=23.3.59" defer></script>

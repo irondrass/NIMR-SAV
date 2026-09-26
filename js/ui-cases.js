@@ -5199,6 +5199,16 @@ function renderCaseDetail() {
         render();
         return;
       }
+
+      if (field === "qualityApproved") {
+        input.checked = Boolean(item.flags.qualityApproved);
+        notifyUser(
+          "Utilisez la fiche professionnelle de contrôle qualité pour valider ou rejeter le véhicule.",
+          "error"
+        );
+        return;
+      }
+
       item.flags[field] = checked;
       if (field === "qualityApproved" && !checked) {
         item.flags.delivered = false;
@@ -5357,6 +5367,12 @@ function renderOperationalDecisions(root, item) {
     ? `<button type="button" class="primary-button" data-operational-action="${action}" ${extra}>${label}</button>` : "";
   const quality = item.flags.workCompleted && !isCaseQualityValidated(item);
   const finalizationIssues = item.flags.workCompleted ? getCaseFinalizationIssues(item) : [];
+  const professionalQualityRole = ["controle_qualite", "chef_atelier"].includes(role);
+  const professionalQualityHtml = quality
+    && professionalQualityRole
+    && typeof renderStep10_QualityCheck === "function"
+      ? renderStep10_QualityCheck(item)
+      : "";
   panel.innerHTML = `
     <div class="section-heading"><h2>${escapeHtml(phase.label)}</h2><span>${isCasePhysicallyPresent(item) ? "Véhicule présent" : item.flags.delivered ? "Remise confirmée" : "Réception à confirmer"}</span></div>
     ${!root.closest?.("dialog") && role !== "controle_qualite" ? `${renderClientSituation(item)}<button type="button" class="ghost-button" data-client-situation>Engagement et suivi client</button>` : ""}
@@ -5369,10 +5385,11 @@ function renderOperationalDecisions(root, item) {
     ${finalizationIssues.length ? `<ul class="finalization-issues">${finalizationIssues.map(issue => `<li>${escapeHtml(issue)}</li>`).join("")}</ul>` : ""}
     <div class="operational-actions">
       ${!item.flags.received ? button("receive", "Confirmer l’arrivée", "vehicle.receive") : ""}
-      ${quality ? button("quality", "Valider le contrôle final", "quality.validate", finalizationIssues.length ? `disabled aria-disabled="true"` : "") : ""}
-      ${item.flags.workCompleted ? button("rework", "Signaler une anomalie", "quality.reject") : ""}
       ${isCaseReadyForDelivery(item) ? button("deliver", "Confirmer la remise du véhicule", "delivery.complete") : ""}
-    </div>`;
+    </div>
+    ${professionalQualityHtml
+      ? `<section data-professional-quality-control>${professionalQualityHtml}</section>`
+      : ""}`;
   panel.querySelectorAll("[data-operational-action]").forEach((control) => control.addEventListener("click", async () => {
     control.disabled = true;
     const overlay = document.getElementById("custom-modal-overlay");
@@ -5390,17 +5407,13 @@ function renderOperationalDecisions(root, item) {
       } else if (control.dataset.operationalAction === "receive") {
         if (!guardVisibleCaseRevision(item, visibleRevision).ok) return;
         result = advanceReceptionWorkflow(item.id, "receive_vehicle");
-      } else if (control.dataset.operationalAction === "rework") {
-        const reason = await showInputPromptModal({ title: "Retour atelier", message: "Anomalie constatée et correction nécessaire :", defaultValue: "" });
-        if (reason === null) return;
-        if (!String(reason).trim()) { notifyUser("Indiquer l'anomalie constatée.", "error"); return; }
+      } else if (control.dataset.operationalAction === "deliver") {
+        if (!await showConfirmModal("Confirmer la remise physique de ce véhicule ?")) return;
         if (!guardVisibleCaseRevision(item, visibleRevision).ok) return;
-        result = advanceReceptionWorkflow(item.id, "update_quality_status", { status: "rejected", reason });
+        result = advanceReceptionWorkflow(item.id, "deliver_vehicle");
       } else {
-        const deliver = control.dataset.operationalAction === "deliver";
-        if (!await showConfirmModal(deliver ? "Confirmer la remise physique de ce véhicule ?" : "Confirmer que les contrôles applicables et la préparation sont terminés ?")) return;
-        if (!guardVisibleCaseRevision(item, visibleRevision).ok) return;
-        result = advanceReceptionWorkflow(item.id, deliver ? "deliver_vehicle" : "update_quality_status", { status: "validated" });
+        notifyUser("Action opérationnelle non autorisée.", "error");
+        return;
       }
       restoreModal();
       if (!result?.ok) { notifyUser(result?.message || "Action impossible.", "error"); return; }
@@ -5411,6 +5424,20 @@ function renderOperationalDecisions(root, item) {
       if (root.closest?.("dialog")?.open) renderOperationalDecisions(root, item);
     } finally { restoreModal(); control.disabled = false; }
   }));
+
+  const professionalQualityControl = panel.querySelector("[data-professional-quality-control]");
+  if (professionalQualityControl) {
+    if (typeof handleReceptionFormSubmit === "function") {
+      professionalQualityControl.addEventListener("submit", handleReceptionFormSubmit);
+    }
+    if (typeof handleReceptionClick === "function") {
+      professionalQualityControl.addEventListener("click", handleReceptionClick);
+    }
+    if (typeof handleReceptionChange === "function") {
+      professionalQualityControl.addEventListener("change", handleReceptionChange);
+    }
+  }
+
   panel.querySelector("[data-client-situation]")?.addEventListener("click", () => openOperationalCasePanel(item.id));
 }
 
@@ -5475,6 +5502,7 @@ function setupCaseDetailTabs(root, item) {
     if (action) {
       const targetEl =
         (nextAction.code === "validate_pdf_work" ? root.querySelector("#validate-pdf-import-work") : null) ||
+        (action === "qualityApproved" ? root.querySelector("[data-professional-quality-control]") : null) ||
         root.querySelector(`[data-action-flag="${action}"]`) ||
         root.querySelector(`[data-toggle="${action}"]`) ||
         (action === "labor" ? root.querySelector("[data-manual-labor-entry]") : null) ||
@@ -5499,7 +5527,7 @@ function getTabForAction(action) {
   if (action === "claim") return "claims";
   if (action === "labor") return "claims";
   if (action === "appointment") return "planning";
-  if (["received", "workStarted", "workCompleted", "close", "archive", "invoiced"].includes(action)) return "atelier";
+  if (["received", "workStarted", "workCompleted", "qualityApproved", "close", "archive", "invoiced"].includes(action)) return "atelier";
   return "claims";
 }
 
@@ -5522,7 +5550,12 @@ function applyWorkflowAction(item, action) {
     return { ok: false, message: issues.join("\n") };
   }
   if (typeof noteCaseRevisionCandidate === "function") noteCaseRevisionCandidate(item);
-  if (action === "qualityApproved") return advanceReceptionWorkflow(item.id, "update_quality_status", { status: "validated" });
+  if (action === "qualityApproved") {
+    return {
+      ok: false,
+      message: "Utilisez la fiche professionnelle de contrôle qualité pour valider le véhicule.",
+    };
+  }
   if (action === "delivered") return advanceReceptionWorkflow(item.id, "deliver_vehicle");
 
   const workflowClaimIds = new Set(getWorkflowClaims(item).map((claim) => claim.id));

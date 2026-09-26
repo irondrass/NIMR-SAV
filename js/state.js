@@ -21,7 +21,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v23.3.58";
+const APP_VERSION = "v23.3.59";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const CURRENT_DATA_SCHEMA_VERSION = 2;
@@ -196,7 +196,7 @@ const ACTION_LABELS = {
   received: "Confirmer la réception véhicule",
   workStarted: "Démarrer les travaux",
   workCompleted: "Terminer les travaux",
-  qualityApproved: "Action héritée",
+  qualityApproved: "Effectuer le contrôle qualité final",
   delivered: "Action héritée",
   close: "Clôturer le dossier atelier",
   archive: "Archiver le dossier",

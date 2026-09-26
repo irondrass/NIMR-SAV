@@ -6546,6 +6546,17 @@ a:focus-visible,
   .reception-step-content {
     padding: 12px;
   }
+
+  #reception-quality-form fieldset,
+  [data-professional-quality-control] fieldset {
+    min-width: 0;
+    margin-inline: 0;
+  }
+
+  #reception-quality-form fieldset label,
+  [data-professional-quality-control] fieldset label {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
 }
 
 /* ========================================================

@@ -1481,6 +1481,11 @@ async function handleReceptionFormSubmit(e) {
           : "Contrôle final validé.",
         "success"
       );
+      const operationalRoot = form.closest("[data-context-decisions]");
+      const canonicalCase = state.cases.find((item) => item.id === caseId);
+      if (operationalRoot && canonicalCase && typeof renderOperationalDecisions === "function") {
+        renderOperationalDecisions(operationalRoot, canonicalCase);
+      }
       renderReceptionWorkspace();
       if (typeof renderCases === "function") renderCases();
       return;

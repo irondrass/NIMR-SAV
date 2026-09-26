@@ -104,6 +104,7 @@ test("9 sidebar contains all required tabs in order", () => {
     "planning",
     "pilotage",
     "technician",
+    "parts-availability",
     "atelier",
   ]);
 });

@@ -267,7 +267,7 @@ function render() {
   }
 
   // Block unauthorized view content from rendering to prevent leaks in DOM
-  const tabs = ["dossiers", "today", "pilotage", "planning", "technician", "atelier", "reception-workspace"];
+  const tabs = ["dossiers", "today", "pilotage", "planning", "technician", "atelier", "reception-workspace", "parts-availability"];
   tabs.forEach((tab) => {
     const view = document.getElementById(`view-${tab}`);
     if (!view) return;
@@ -340,6 +340,9 @@ function render() {
     renderWorkHoursSettings();
     if (typeof renderUsersAndRoles === "function") renderUsersAndRoles();
   }
+  if (activeTab === "parts-availability" && (typeof canAccessTab !== "function" || canAccessTab("parts-availability"))) {
+    if (typeof renderPartsAvailabilityView === "function") renderPartsAvailabilityView();
+  }
 
   renderSyncStatusStrip();
   renderMetrics(directorDashboardSnapshot);
@@ -361,6 +364,7 @@ const UNAUTHORIZED_VIEW_SCRUB_SELECTORS = {
     "#resource-leave-list",
     "#activity-log-table-body",
   ],
+  "parts-availability": ["#parts-availability-case-list", "#parts-availability-detail"],
 };
 
 function renderNavigationVisibility() {
@@ -5915,6 +5919,14 @@ function renderCaseBlockerControls(root, item) {
   const visibleRevision = getVisibleCaseRevision(item);
   const target = $("[data-field='case-blocker-controls']", root);
   if (!target) return;
+  const hasCanonicalPartsReview = Boolean(
+    item.partsAvailabilityReview
+    && typeof validatePartsAvailabilityReview === "function"
+    && validatePartsAvailabilityReview(item.partsAvailabilityReview).valid,
+  );
+  if (hasCanonicalPartsReview && typeof synchronizePartsAvailabilityStatus === "function") {
+    synchronizePartsAvailabilityStatus(item);
+  }
   const blocked = isCaseBlocked(item);
   target.innerHTML = `
     <div class="blocker-head">
@@ -5940,8 +5952,10 @@ function renderCaseBlockerControls(root, item) {
   `;
   const canEdit = canRenderAction("case.edit", { item });
   $$("[data-case-parts-status], [data-case-blocker-reason], [data-case-blocker-details]", target).forEach((control) => {
-    control.disabled = !canEdit;
-    if (!canEdit) control.title = getPermissionDeniedMessage("case.edit", { item });
+    const isCanonicalPartsStatus = hasCanonicalPartsReview && control.matches("[data-case-parts-status]");
+    control.disabled = !canEdit || isCanonicalPartsStatus;
+    if (isCanonicalPartsStatus) control.title = "Statut dérivé du contrôle « Pièces OR ».";
+    else if (!canEdit) control.title = getPermissionDeniedMessage("case.edit", { item });
   });
   const clearButton = target.querySelector("[data-clear-case-blocker]");
   if (clearButton && !canEdit) {
@@ -5960,6 +5974,11 @@ function renderCaseBlockerControls(root, item) {
     if (!guardVisibleCaseRevision(item, visibleRevision).ok) return;
     const permissionGuard = guardCaseEdit(item);
     if (!permissionGuard.ok) return;
+    if (sourceLabel === "Statut pièces" && hasCanonicalPartsReview) {
+      synchronizePartsAvailabilityStatus(item);
+      renderCaseBlockerControls(root, item);
+      return;
+    }
     const previousBlocked = isCaseBlocked(item);
     item.partsStatus = normalizePartsStatus(target.querySelector("[data-case-parts-status]")?.value);
     item.blockerReason = normalizeBlockerReason(target.querySelector("[data-case-blocker-reason]")?.value);

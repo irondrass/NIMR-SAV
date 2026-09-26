@@ -3204,6 +3204,21 @@ function normalizePartsStatus(value) {
   return PARTS_STATUS_LABELS[normalized] ? normalized : "unchecked";
 }
 
+function synchronizePartsAvailabilityStatus(item) {
+  if (!item || typeof item !== "object") return "unchecked";
+  if (
+    item.partsAvailabilityReview
+    && typeof validatePartsAvailabilityReview === "function"
+    && typeof derivePartsStatus === "function"
+    && validatePartsAvailabilityReview(item.partsAvailabilityReview).valid
+  ) {
+    item.partsStatus = derivePartsStatus(item.partsAvailabilityReview);
+    return item.partsStatus;
+  }
+  item.partsStatus = normalizePartsStatus(item.partsStatus);
+  return item.partsStatus;
+}
+
 function normalizeBlockerReason(value) {
   const normalized = String(value || "").trim();
   return BLOCKER_REASON_LABELS[normalized] !== undefined ? normalized : "";
@@ -3495,7 +3510,17 @@ function hasRealBooking(caseId, bookings) {
 function normalizeCase(item, bookings, realBookingCaseIds = null) {
   item = item && typeof item === "object" ? item : {};
   const caseId = item.id || "";
-  const normalizedPartsStatus = normalizePartsStatus(item.partsStatus);
+  let normalizedPartsAvailabilityReview = null;
+  if (item.partsAvailabilityReview && typeof createPartsAvailabilityReview === "function") {
+    try {
+      normalizedPartsAvailabilityReview = createPartsAvailabilityReview(item.partsAvailabilityReview);
+    } catch {
+      normalizedPartsAvailabilityReview = null;
+    }
+  }
+  const normalizedPartsStatus = normalizedPartsAvailabilityReview && typeof derivePartsStatus === "function"
+    ? derivePartsStatus(normalizedPartsAvailabilityReview)
+    : normalizePartsStatus(item.partsStatus);
   const normalizedBlockerReason = normalizeBlockerReason(item.blockerReason);
   const hasLegacyBlocker = BLOCKING_PARTS_STATUSES.has(normalizedPartsStatus) || Boolean(normalizedBlockerReason);
   const blockerSource = ["manual", "task"].includes(item.blockerSource)
@@ -3559,6 +3584,7 @@ function normalizeCase(item, bookings, realBookingCaseIds = null) {
     pdfImportWarning: item.pdfImportWarning || "",
     pdfImportTaskCount: Math.max(0, Number(item.pdfImportTaskCount || 0)),
     partsStatus: normalizedPartsStatus,
+    partsAvailabilityReview: normalizedPartsAvailabilityReview,
     blockerReason: normalizedBlockerReason,
     blockerDetails: item.blockerDetails || item.blockerNote || "",
     blockerSource,
@@ -4921,6 +4947,7 @@ async function enqueueGranularCloudMutationsAfterPersistence(options = {}) {
 function saveState(options = {}) {
   let saveCompletion = Promise.resolve(true);
   try {
+    (Array.isArray(state?.cases) ? state.cases : []).forEach(synchronizePartsAvailabilityStatus);
     const modified = detectAndIncrementCaseRevisions(options);
     invalidateStateReplacementIndexes();
     const offline = typeof navigator !== "undefined" && navigator.onLine === false;
@@ -5943,8 +5970,8 @@ const ROLE_TABS = {
   controle_qualite: ["today", "dossiers", "technician"],
   qualite:       ["today", "dossiers", "technician"],
   readonly:      ["dossiers", "pilotage", "planning", "vn-part"],
-  directeur_pieces: ["vn-part"],
-  responsable_magasin: ["vn-part"],
+  directeur_pieces: ["parts-availability", "vn-part"],
+  responsable_magasin: ["parts-availability", "vn-part"],
   responsable_garantie_support: ["vn-part", "dossiers"],
   responsable_qualite_parc_vn: ["vn-part"],
 };
@@ -5959,8 +5986,8 @@ const ROLE_DEFAULT_TABS = {
   controle_qualite: "technician",
   qualite:       "technician",
   readonly:      "dossiers",
-  directeur_pieces: "vn-part",
-  responsable_magasin: "vn-part",
+  directeur_pieces: "parts-availability",
+  responsable_magasin: "parts-availability",
   responsable_garantie_support: "vn-part",
   responsable_qualite_parc_vn: "vn-part",
 };

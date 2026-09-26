@@ -20,8 +20,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <script src="js/version.js?v=23.3.58"></script>
-    <link rel="stylesheet" href="styles.css?v=23.3.58" />
+    <script src="js/version.js?v=23.3.59"></script>
+    <link rel="stylesheet" href="styles.css?v=23.3.59" />
   </head>
   <body data-active-tab="today">
     <button id="mobile-menu-toggle" class="mobile-menu-btn" type="button" aria-label="Ouvrir la navigation principale" aria-expanded="false" aria-controls="primary-sidebar" hidden>
@@ -734,11 +734,11 @@
                         <option value="responsable_qualite_parc_vn">Responsable Qualité / Chef de Parc VN</option>
                       </select>
                       <div class="account-admin-resource-field" id="invite-workshop-member-resource-field" hidden>
-                        <label for="invite-workshop-member-resource">Ressource technicien</label>
+                        <label for="invite-workshop-member-resource">Ressource opérationnelle</label>
                         <select id="invite-workshop-member-resource" name="resourceId">
                           <option value="">Sélectionner une ressource humaine</option>
                         </select>
-                        <p>Seules les ressources humaines actives de l’atelier sont proposées. Les équipements ne peuvent pas représenter un technicien.</p>
+                        <p>Seules les ressources humaines actives de l’atelier sont proposées. Les équipements ne peuvent pas représenter une ressource opérationnelle.</p>
                       </div>
                       <p class="account-authority-note">Le rôle et la ressource sont vérifiés par le service de gestion des comptes. Une invitation n'accorde aucun accès avant cette vérification.</p>
                       <output class="account-admin-form-status" id="invite-workshop-member-status" role="status" aria-live="polite"></output>
@@ -775,7 +775,7 @@
                     <input name="email" type="email" placeholder="Email (optionnel)" />
                     <input name="pin" type="password" inputmode="numeric" placeholder="PIN de sécurité (requis si sensible)" minlength="4" />
                     <select name="resourceId">
-                      <option value="">Lier à aucune ressource technicien</option>
+                      <option value="">Lier à aucune ressource opérationnelle</option>
                     </select>
                     <label class="check-card">
                       <input type="checkbox" name="active" checked />
@@ -1520,25 +1520,26 @@
       </div>
     </div>
 
-    <script src="vendor/pdf.min.js?v=23.3.58" defer></script>
-    <script src="js/utils.js?v=23.3.58" defer></script>
-    <script src="js/state.js?v=23.3.58" defer></script>
-    <script src="js/ui-cases.js?v=23.3.58" defer></script>
-    <script src="js/estimate-import.js?v=23.3.58" defer></script>
-    <script src="js/ui-planning.js?v=23.3.58" defer></script>
-    <script src="js/photos.js?v=23.3.58" defer></script>
-    <script src="js/storage.js?v=23.3.58" defer></script>
-    <script src="js/work-hours-sync.js?v=23.3.58" defer></script>
-    <script src="js/planning.js?v=23.3.58" defer></script>
-    <script src="js/exports.js?v=23.3.58" defer></script>
-    <script src="js/business-rules-v2187.js?v=23.3.58" defer></script>
+    <script src="vendor/pdf.min.js?v=23.3.59" defer></script>
+    <script src="js/utils.js?v=23.3.59" defer></script>
+    <script src="js/state.js?v=23.3.59" defer></script>
+    <script src="js/ui-reception.js?v=23.3.59" defer></script>
+    <script src="js/ui-cases.js?v=23.3.59" defer></script>
+    <script src="js/estimate-import.js?v=23.3.59" defer></script>
+    <script src="js/ui-planning.js?v=23.3.59" defer></script>
+    <script src="js/photos.js?v=23.3.59" defer></script>
+    <script src="js/storage.js?v=23.3.59" defer></script>
+    <script src="js/work-hours-sync.js?v=23.3.59" defer></script>
+    <script src="js/planning.js?v=23.3.59" defer></script>
+    <script src="js/exports.js?v=23.3.59" defer></script>
+    <script src="js/business-rules-v2187.js?v=23.3.59" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.111.0" defer></script>
-    <script src="js/supabase-config.js?v=23.3.58" defer></script>
-    <script src="js/supabase-client.js?v=23.3.58" defer></script>
-    <script src="js/supabase-sync.js?v=23.3.58" defer></script>
-    <script src="js/vn-part-client.js?v=23.3.58" defer></script>
-    <script src="vendor/xlsx.mini.min.js?v=23.3.58" defer></script>
-    <script src="js/vn-part-ui.js?v=23.3.58" defer></script>
-    <script src="app.js?v=23.3.58" defer></script>
+    <script src="js/supabase-config.js?v=23.3.59" defer></script>
+    <script src="js/supabase-client.js?v=23.3.59" defer></script>
+    <script src="js/supabase-sync.js?v=23.3.59" defer></script>
+    <script src="js/vn-part-client.js?v=23.3.59" defer></script>
+    <script src="vendor/xlsx.mini.min.js?v=23.3.59" defer></script>
+    <script src="js/vn-part-ui.js?v=23.3.59" defer></script>
+    <script src="app.js?v=23.3.59" defer></script>
   </body>
 </html>

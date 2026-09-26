@@ -8,6 +8,7 @@ const read = (file) => fs.readFileSync(path.join(ROOT, file), "utf8");
 const ui = read("js/ui-cases.js");
 const css = read("styles.css");
 const version = read("js/version.js");
+const state = read("js/state.js");
 
 function between(startMarker, endMarker) {
   const start = ui.indexOf(startMarker);
@@ -40,6 +41,10 @@ const taskCard = between(
 const taskActions = between(
   "function renderTechnicianTaskActions(",
   "function renderPermissionAwareButton("
+);
+const permissionButton = between(
+  "function renderPermissionAwareButton(",
+  "const WORKSHOP_FIELD_GROUP_CONFIG"
 );
 
 console.log("WORKSHOP-001F EXACT LABOR INSTRUCTIONS SUITE");
@@ -105,7 +110,8 @@ test("10 rest-of-day technician cards show exact labor instruction", () => {
 
 test("11 action booking contract remains untouched", () => {
   assert.match(taskActions, /row\.actionBookingId \|\| actionBooking\.id/);
-  assert.match(taskActions, /data-tech-action/);
+  assert.match(taskActions, /renderPermissionAwareButton\(/);
+  assert.match(permissionButton, /data-tech-action="\$\{escapeAttr\(action\)\}"/);
 });
 
 test("12 technician resource isolation path remains role-bound", () => {
@@ -120,9 +126,14 @@ test("13 exact labor UI has dedicated responsive styles", () => {
   assert.match(css, /@media \(max-width: 768px\)/);
 });
 
-test("14 packaged release identity is v23.3.30", () => {
-  assert.match(version, /APP_VERSION\s*=\s*"v23\.3\.30"/);
-  assert.match(version, /NIMR_BUILD\s*=\s*"v23\.3\.30"/);
+test("14 packaged release identity is consistent with version.js", () => {
+  const versionMatch = version.match(/window\.APP_VERSION = "(v\d+\.\d+\.\d+)";/u);
+  assert.ok(versionMatch, "version.js defines semantic APP_VERSION");
+  const currentVersion = versionMatch[1];
+  const cacheName = `nimr-sav-${currentVersion}`;
+  assert.match(version, new RegExp(`window\\.NIMR_BUILD = "${currentVersion.replaceAll(".", "\\.")}";`, "u"));
+  assert.match(version, new RegExp(`window\\.NIMR_CACHE_NAME = "${cacheName.replaceAll(".", "\\.")}";`, "u"));
+  assert.match(state, new RegExp(`const APP_VERSION = "${currentVersion.replaceAll(".", "\\.")}";`, "u"));
 });
 
 test("15 no diagnostic duration or complaint workflow is introduced in 001F", () => {

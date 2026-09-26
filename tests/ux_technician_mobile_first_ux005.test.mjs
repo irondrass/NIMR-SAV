@@ -51,7 +51,8 @@ check("C Current and next task architecture in fieldFocus before rest of day", (
   assert.match(uiCasesSource, /const nextRow = orderedRows\.find/u);
   assert.match(uiCasesSource, /const remainingRows = orderedRows\.filter\(/u);
   assert.match(uiCasesSource, /row !== currentRow && row !== nextRow/u);
-  assert.match(uiCasesSource, /fieldFocus\.innerHTML = renderTechnicianFieldFocus\(currentRow/u);
+  assert.match(uiCasesSource, /const missingTechnicianLink = role === "technicien" && !technicians\.length;/u);
+  assert.match(uiCasesSource, /fieldFocus\.innerHTML = missingTechnicianLink\s*\?[\s\S]*?: renderTechnicianFieldFocus\(currentRow, nextRow\);/u);
   assert.match(uiCasesSource, /data-technician-current-task/u);
   assert.match(uiCasesSource, /data-technician-next-task/u);
   assert.match(uiCasesSource, /data-technician-elapsed-booking=/u);
@@ -74,7 +75,9 @@ check("E Existing action contract remains intact with [data-tech-action]", () =>
   assert.match(uiCasesSource, /renderPermissionAwareButton\([^)]*"block"/u);
   assert.match(uiCasesSource, /renderPermissionAwareButton\([^)]*"note"/u);
   assert.match(uiCasesSource, /renderPermissionAwareButton\([^)]*"photo"/u);
-  assert.match(uiCasesSource, /data-tech-action="print-block"/u);
+  assert.match(uiCasesSource, /function renderPermissionAwareButton\(permission, label, action, dataset, className, booking\)/u);
+  assert.match(uiCasesSource, /data-tech-action="\$\{escapeAttr\(action\)\}"/u);
+  assert.match(uiCasesSource, /renderPermissionAwareButton\("print\.task", "Imprimer fiche", "print"/u);
   assert.match(uiCasesSource, /handleTechnicianTaskAction/u);
 });
 

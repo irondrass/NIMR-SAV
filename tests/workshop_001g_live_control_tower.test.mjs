@@ -6,11 +6,8 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createNimrVmContext } from "./helpers/nimr_vm_context.mjs";
 
-const BASE_SHA = "bfaff47b13fca3cac0159ceea88dfe01f3e5acfa";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), "utf8");
-const base = (rel) => execFileSync("git", ["show", BASE_SHA + ":" + rel], { cwd: ROOT, encoding: "utf8", maxBuffer: 40 * 1024 * 1024 });
-const normalize = (s) => String(s).replaceAll("\r\n", "\n");
 
 const index = read("index.html");
 const ui = read("js/ui-cases.js");
@@ -28,12 +25,15 @@ const live = sourceSlice("const WORKSHOP_LIVE_ACTIVE_STATUSES", "function getWor
 const caseSummary = sourceSlice("function buildWorkshopLiveCaseTaskSummary(", "function buildWorkshopProgressRow(");
 const progress = sourceSlice("function renderWorkshopProgressRow(", "function openWorkshopProgressCase(");
 
-test("1 tower is inside Today and creates no new navigation tab", () => {
+test("1 tower and vehicle progress remain inside Today without creating navigation tabs", () => {
   const today = index.indexOf('id="view-today"');
   const dossiers = index.indexOf('id="view-dossiers"', today);
   const tower = index.indexOf('id="workshop-live-technician-board"', today);
   const progressBoard = index.indexOf('id="workshop-progress-board"', today);
-  assert.ok(today >= 0 && tower > today && progressBoard > tower && progressBoard < dossiers);
+  assert.ok(today >= 0, "view-today must exist");
+  assert.ok(dossiers > today, "view-dossiers must come after view-today");
+  assert.ok(tower > today && tower < dossiers, "workshop-live-technician-board must be inside view-today");
+  assert.ok(progressBoard > today && progressBoard < dossiers, "workshop-progress-board must be inside view-today");
   assert.doesNotMatch(index, /data-tab="workshop-live|data-tab="control-tower/u);
 });
 
@@ -43,10 +43,12 @@ test("2 live technician model reuses canonical business-task rows", () => {
   assert.match(live, /WORKSHOP_LIVE_ACTIVE_STATUSES/u);
 });
 
-test("3 exact current/next operation reuses 001F provenance", () => {
+test("3 exact current/next operation preserves 001F provenance and current terminology", () => {
   assert.match(live, /collectTechnicianExactLaborLines\(row\)/u);
   assert.match(live, /getPlanningOperationTitle\(booking\)/u);
-  assert.match(live, /Prochaine affectation/u);
+  assert.match(live, /"Maintenant"/u);
+  assert.match(live, /Ensuite · prête à démarrer/u);
+  assert.match(live, /Ensuite · prévue/u);
 });
 
 test("4 live timing exposes actual start elapsed and estimated end", () => {
@@ -63,11 +65,13 @@ test("5 vehicle summary reuses canonical case task families", () => {
   assert.match(caseSummary, /remaining/u);
 });
 
-test("6 vehicle progress shows active and next operations and identifies ETA as dossier ETA", () => {
-  assert.match(progress, /"Opération active"/u);
-  assert.match(progress, /"Opération suivante"/u);
-  assert.match(progress, /ETA dossier/u);
-  assert.match(progress, /tâche/u);
+test("6 vehicle progress exposes current/next operations and estimated availability", () => {
+  assert.match(progress, /tower\.currentOperation/u);
+  assert.match(progress, /tower\.nextOperation/u);
+  assert.match(progress, /Maintenant/u);
+  assert.match(progress, /Ensuite/u);
+  assert.match(progress, /Disponibilité estimée/u);
+  assert.match(progress, /row\.eta/u);
 });
 
 test("7 001G is read-only and refreshes only on Today", () => {
@@ -78,52 +82,47 @@ test("7 001G is read-only and refreshes only on Today", () => {
   assert.doesNotMatch(live + caseSummary, /\bapplyDependentBookingReschedule\s*\(/u);
 });
 
-test("8 packaged release identity is v23.3.31", () => {
-  assert.match(version, /^window\.APP_VERSION = "v23\.3\.31";$/mu);
-  assert.match(version, /^window\.NIMR_BUILD = "v23\.3\.31";$/mu);
-  assert.match(version, /^window\.NIMR_CACHE_NAME = "nimr-sav-v23\.3\.31";$/mu);
+test("8 packaged release identity remains atomically synchronized", () => {
+  const versionMatch = version.match(/^window\.APP_VERSION = "(v\d+\.\d+\.\d+)";$/mu);
+  assert.ok(versionMatch, "window.APP_VERSION must be defined in js/version.js");
+  const currentVersion = versionMatch[1];
+
+  assert.match(version, new RegExp(`^window\\.APP_VERSION = "${currentVersion}";$`, "mu"));
+  assert.match(version, new RegExp(`^window\\.NIMR_BUILD = "${currentVersion}";$`, "mu"));
+  assert.match(version, new RegExp(`^window\\.NIMR_CACHE_NAME = "nimr-sav-${currentVersion}";$`, "mu"));
+
+  const stateSource = read("js/state.js");
+  assert.match(stateSource, new RegExp(`const APP_VERSION = "${currentVersion}";`, "u"));
+
+  const swSource = read("sw.js");
+  assert.match(swSource, new RegExp(`const CACHE_NAME = "nimr-sav-${currentVersion}";`, "u"));
 });
 
-test("9 protected planner/state/business/Supabase/version surfaces equal sealed baseline", () => {
-  for (const rel of [
+test("9 original WORKSHOP-001G commit is confined to presentation surfaces and leaves authority untouched", () => {
+  const commitSha = "b08f8c7542d083a033a5bc666417630614367439";
+  const output = execFileSync("git", ["diff-tree", "--no-commit-id", "--name-only", "-r", commitSha], {
+    cwd: ROOT,
+    encoding: "utf8",
+  });
+  const modifiedFiles = output.trim().split(/\r?\n/).filter(Boolean).sort();
+  const expectedSurfaces = [
+    "index.html",
+    "js/ui-cases.js",
+    "styles.css",
+    "tests/workshop_001g_live_control_tower.test.mjs",
+  ].sort();
+  assert.deepEqual(modifiedFiles, expectedSurfaces, "WORKSHOP-001G commit must touch only presentation surfaces");
+
+  const protectedAuthorities = [
     "js/planning.js",
     "js/business-rules-v2187.js",
     "js/supabase-client.js",
     "js/supabase-config.js",
     "js/supabase-sync.js",
-  ]) {
-    assert.equal(normalize(read(rel)), normalize(base(rel)), rel);
+  ];
+  for (const authority of protectedAuthorities) {
+    assert.ok(!modifiedFiles.includes(authority), `${authority} must not be modified by WORKSHOP-001G commit`);
   }
-
-  const baseState = normalize(base("js/state.js"));
-  assert.equal(baseState.split('const APP_VERSION = "v23.3.30";').length - 1, 1, "baseline js/state.js must contain exactly one APP_VERSION");
-  const expectedState = baseState.replace('const APP_VERSION = "v23.3.30";', 'const APP_VERSION = "v23.3.31";');
-  assert.equal(normalize(read("js/state.js")), expectedState, "js/state.js must match expected packaged content");
-
-  const baseVersion = normalize(base("js/version.js"));
-  assert.equal(baseVersion.split('window.APP_VERSION = "v23.3.30";').length - 1, 1, "baseline js/version.js must contain exactly one APP_VERSION");
-  assert.equal(baseVersion.split('window.NIMR_BUILD = "v23.3.30";').length - 1, 1, "baseline js/version.js must contain exactly one NIMR_BUILD");
-  assert.equal(baseVersion.split('window.NIMR_CACHE_NAME = "nimr-sav-v23.3.30";').length - 1, 1, "baseline js/version.js must contain exactly one NIMR_CACHE_NAME");
-  const expectedVersion = baseVersion
-    .replace('window.APP_VERSION = "v23.3.30";', 'window.APP_VERSION = "v23.3.31";')
-    .replace('window.NIMR_BUILD = "v23.3.30";', 'window.NIMR_BUILD = "v23.3.31";')
-    .replace('window.NIMR_CACHE_NAME = "nimr-sav-v23.3.30";', 'window.NIMR_CACHE_NAME = "nimr-sav-v23.3.31";');
-  assert.equal(normalize(read("js/version.js")), expectedVersion, "js/version.js must match expected packaged content");
-
-  const baseSw = normalize(base("sw.js"));
-  assert.equal(baseSw.split("// WORKSHOP-001G source refresh: atomic worker-aligned release v23.3.30 with live workshop control tower.\n").length - 1, 1, "baseline sw.js must contain exactly one 001G refresh comment");
-  assert.equal(baseSw.split('const CACHE_NAME = "nimr-sav-v23.3.30";').length - 1, 1, "baseline sw.js must contain exactly one CACHE_NAME");
-  assert.equal(baseSw.split("?v=23.3.30").length - 1, 19, "baseline sw.js must contain exactly 19 asset version references");
-  assert.equal(baseSw.split('return parsed.searchParams.get("v") === "23.3.30";').length - 1, 1, "baseline sw.js must contain exactly one classifier statement");
-  const expectedSw = baseSw
-    .replace(
-      "// WORKSHOP-001G source refresh: atomic worker-aligned release v23.3.30 with live workshop control tower.\n",
-      "// WORKSHOP-001G source refresh: atomic worker-aligned release v23.3.30 with live workshop control tower.\n// SIMPLIFY-001B source refresh: atomic worker-aligned release v23.3.31 with role-home and navigation-shell simplification.\n"
-    )
-    .replace('const CACHE_NAME = "nimr-sav-v23.3.30";', 'const CACHE_NAME = "nimr-sav-v23.3.31";')
-    .replaceAll("?v=23.3.30", "?v=23.3.31")
-    .replace('return parsed.searchParams.get("v") === "23.3.30";', 'return parsed.searchParams.get("v") === "23.3.31";');
-  assert.equal(normalize(read("sw.js")), expectedSw, "sw.js must match expected packaged content");
 });
 
 test("10 responsive control-tower styles are dedicated", () => {

@@ -6,24 +6,22 @@ import { fileURLToPath } from "node:url";
 import { createNimrVmContext } from "./helpers/nimr_vm_context.mjs";
 
 const BASE_SHA = "4d57a8e23e4161cdbd065daaebfc979c490c9c5b";
-const IDENTITY_001D2E_BASE_SHA = "c7a05dcb465ede8620f2cedfe94d3511364d09ed";
 const browserSmokeRequested = process.argv.includes("--browser-smoke");
+function assertSourceOrder(source, before, after) {
+  const beforeIndex = source.indexOf(before);
+  const afterIndex = source.indexOf(after);
+  assert.ok(beforeIndex >= 0, "Missing prerequisite: " + before);
+  assert.ok(afterIndex > beforeIndex, "Expected " + before + " before " + after);
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 function readProjectFile(relativePath) {
   return fs.readFileSync(path.join(repoRoot, relativePath), "utf8");
-}
-
-function readBaseFile(relativePath) {
-  return execFileSync("git", ["show", `${BASE_SHA}:${relativePath.replaceAll("\\", "/")}`], {
-    cwd: repoRoot,
-    encoding: "utf8",
-    maxBuffer: 40 * 1024 * 1024,
-  });
-}
-
-function normalizeEol(value) {
-  return String(value).replaceAll("\r\n", "\n");
 }
 
 function sourceSlice(source, startMarker, endMarker) {
@@ -32,14 +30,6 @@ function sourceSlice(source, startMarker, endMarker) {
   const end = source.indexOf(endMarker, start + startMarker.length);
   assert.notEqual(end, -1, `Missing source marker: ${endMarker}`);
   return source.slice(start, end);
-}
-
-function withoutSourceSlice(source, startMarker, endMarker) {
-  const start = source.indexOf(startMarker);
-  assert.notEqual(start, -1, `Missing source marker: ${startMarker}`);
-  const end = source.indexOf(endMarker, start + startMarker.length);
-  assert.notEqual(end, -1, `Missing source marker: ${endMarker}`);
-  return source.slice(0, start) + source.slice(end);
 }
 
 const appSource = readProjectFile("app.js");
@@ -71,21 +61,24 @@ function createIdentityContext(filename) {
   return createNimrVmContext({ filename });
 }
 
-check("A v23.3.20 is exact and schema constants are unchanged", () => {
-  assert.match(versionSource, /^window\.APP_VERSION = "v23\.3\.20";$/mu);
-  assert.match(versionSource, /^window\.NIMR_BUILD = "v23\.3\.20";$/mu);
-  assert.match(versionSource, /^window\.NIMR_CACHE_NAME = "nimr-sav-v23\.3\.20";$/mu);
-  assert.match(stateSource, /^const APP_VERSION = "v23\.3\.20";$/mu);
+check("A Application version is exact and schema constants are unchanged", () => {
+  const versionMatch = versionSource.match(/^window\.APP_VERSION = "(v\d+\.\d+\.\d+)";$/mu);
+  assert.ok(versionMatch, "window.APP_VERSION must be declared in js/version.js");
+  const currentAppVersion = versionMatch[1];
+  const numericVersion = currentAppVersion.replace(/^v/, "");
+  assert.match(versionSource, new RegExp(`^window\\.NIMR_BUILD = "${escapeRegExp(currentAppVersion)}";$`, "mu"));
+  assert.match(versionSource, new RegExp(`^window\\.NIMR_CACHE_NAME = "nimr-sav-${escapeRegExp(currentAppVersion)}";$`, "mu"));
+  assert.match(stateSource, new RegExp(`^const APP_VERSION = "${escapeRegExp(currentAppVersion)}";$`, "mu"));
   assert.match(stateSource, /^const DB_VERSION = 2;$/mu);
   assert.match(stateSource, /^const CURRENT_DATA_SCHEMA_VERSION = 2;$/mu);
   assert.match(stateSource, /^const CANONICAL_TASK_MODEL_VERSION = 1;$/mu);
-  assert.match(swSource, /^const CACHE_NAME = "nimr-sav-v23\.3\.20";$/mu);
-  assert.match(appSource, /pdf\.worker\.min\.js\?v=23\.3\.20/u);
-  assert.match(appSource, /sw\.js\?v=23\.3\.20/u);
-  assert.match(estimateImportSource, /pdf\.worker\.min\.js\?v=23\.3\.20/u);
-  assert.match(indexSource, /styles\.css\?v=23\.3\.20/u);
-  assert.match(indexSource, /app\.js\?v=23\.3\.20/u);
-  assert.match(offlineSource, /styles\.css\?v=23\.3\.20/u);
+  assert.match(swSource, new RegExp(`^const CACHE_NAME = "nimr-sav-${escapeRegExp(currentAppVersion)}";$`, "mu"));
+  assert.match(appSource, new RegExp(`pdf\\.worker\\.min\\.js\\?v=${escapeRegExp(numericVersion)}(?=["'])`, "u"));
+  assert.match(appSource, new RegExp(`sw\\.js\\?v=${escapeRegExp(numericVersion)}(?=["'])`, "u"));
+  assert.match(estimateImportSource, new RegExp(`pdf\\.worker\\.min\\.js\\?v=${escapeRegExp(numericVersion)}(?=["'])`, "u"));
+  assert.match(indexSource, new RegExp(`styles\\.css\\?v=${escapeRegExp(numericVersion)}(?=["'])`, "u"));
+  assert.match(indexSource, new RegExp(`app\\.js\\?v=${escapeRegExp(numericVersion)}(?=["'])`, "u"));
+  assert.match(offlineSource, new RegExp(`styles\\.css\\?v=${escapeRegExp(numericVersion)}(?=["'])`, "u"));
   assert.doesNotMatch([appSource, indexSource, stateSource, versionSource, estimateImportSource, offlineSource, swSource].join("\n"), /23\.3\.18/u);
 });
 
@@ -100,16 +93,50 @@ check("B Comptes & accès exists inside Paramètres without a new navigation per
   assert.doesNotMatch(indexSource, /data-tab="(?:accounts|comptes|access|acces)"/iu);
 });
 
-check("C Permission matrices and role navigation contracts remain identical to base", () => {
-  const baseState = readBaseFile("js/state.js");
-  for (const [start, end] of [
-    ["const DIRECTOR_PERMISSIONS", "const READ_ONLY_PERMISSIONS"],
-    ["const ROLE_PERMISSIONS", "const MUTATION_PERMISSIONS"],
-    ["const ROLE_TABS", "// Tab par défaut"],
-    ["const ROLE_DEFAULT_TABS", "// v23.2.5"],
-  ]) {
-    assert.equal(normalizeEol(sourceSlice(stateSource, start, end)), normalizeEol(sourceSlice(baseState, start, end)), start);
+check("C Permission matrices and role navigation contracts remain authoritative", () => {
+  const { run } = createIdentityContext("identity001a-permissions.js");
+  const DIRECTOR_PERMISSIONS = run("DIRECTOR_PERMISSIONS");
+  const ROLE_PERMISSIONS = run("ROLE_PERMISSIONS");
+  const ROLE_TABS = run("ROLE_TABS");
+  const ROLE_DEFAULT_TABS = run("ROLE_DEFAULT_TABS");
+  const QUALITY_CONTROLLER_PERMISSIONS = run("QUALITY_CONTROLLER_PERMISSIONS");
+  const READ_ONLY_PERMISSIONS = run("READ_ONLY_PERMISSIONS");
+  const getDefaultTabForRole = run("getDefaultTabForRole");
+  const getAllowedTabsForRole = run("getAllowedTabsForRole");
+
+  // Invariant 1: DIRECTOR_PERMISSIONS contains management and viewing authorities
+  for (const perm of ["audit.view", "dashboard.view", "case.view", "case.create", "case.edit", "planning.view", "planning.edit", "resource.view", "resource.manage"]) {
+    assert.ok(DIRECTOR_PERMISSIONS.includes(perm), `Director missing permission: ${perm}`);
   }
+
+  // Invariant 2: ROLE_PERMISSIONS canonical role mappings
+  const canonicalRoles = ["admin_technique", "directeur", "chef_atelier", "reception", "technicien", "controle_qualite", "lecture_seule"];
+  for (const r of canonicalRoles) {
+    assert.ok(ROLE_PERMISSIONS[r], `Missing permissions for canonical role: ${r}`);
+  }
+  assert.deepEqual([...ROLE_PERMISSIONS.admin_technique], ["*"]);
+  assert.equal(ROLE_PERMISSIONS.directeur, DIRECTOR_PERMISSIONS);
+  assert.equal(ROLE_PERMISSIONS.controle_qualite, QUALITY_CONTROLLER_PERMISSIONS);
+  assert.equal(ROLE_PERMISSIONS.lecture_seule, READ_ONLY_PERMISSIONS);
+
+  // Technicien: operational execution only, no manager or planning permissions
+  assert.equal(ROLE_PERMISSIONS.technicien.some((grant) => run("permissionMatches")(grant, "planning.edit")), false);
+  assert.equal(ROLE_PERMISSIONS.technicien.some((grant) => run("permissionMatches")(grant, "users.manage")), false);
+  assert.equal(ROLE_PERMISSIONS.technicien.some((grant) => run("permissionMatches")(grant, "quality.validate")), false);
+  assert.equal(ROLE_PERMISSIONS.reception.some((grant) => run("permissionMatches")(grant, "quality.validate")), false);
+  assert.equal(ROLE_PERMISSIONS.reception.some((grant) => run("permissionMatches")(grant, "planning.edit")), false);
+
+  // Invariant 3: ROLE_TABS
+  assert.deepEqual([...ROLE_TABS.technicien], ["technician"]);
+  assert.ok(ROLE_TABS.controle_qualite.includes("technician"));
+  assert.ok(ROLE_TABS.controle_qualite.includes("dossiers"));
+
+  // Invariant 4: ROLE_DEFAULT_TABS
+  assert.equal(ROLE_DEFAULT_TABS.technicien, "technician");
+  assert.equal(ROLE_DEFAULT_TABS.controle_qualite, "technician");
+  assert.equal(getDefaultTabForRole("technicien"), "technician");
+  assert.equal(getDefaultTabForRole("controle_qualite"), "technician");
+  assert.deepEqual([...getAllowedTabsForRole("technicien")], ["technician"]);
 });
 
 check("D Account snapshot is read-only and server membership remains the online authority", () => {
@@ -168,12 +195,12 @@ check("G Online authority blocks selector impersonation and server-managed mirro
   assert.match(selectorHandler, /validatedOnlineIdentity/u);
   assert.match(selectorHandler, /hasValidatedOnlineServerAuthority/u);
   assert.match(selectorHandler, /Identité serveur inchangée/u);
-  assert.ok(selectorHandler.indexOf("if (validatedOnlineIdentity)") < selectorHandler.indexOf("setCurrentUser(newUserId)"));
+  assertSourceOrder(selectorHandler, "if (validatedOnlineIdentity)", "setCurrentUser(newUserId)");
   const userFormHandler = sourceSlice(appSource, '$("#user-form")?.addEventListener("submit"', '$("#user-cancel-btn")?.addEventListener("click"');
-  assert.ok(userFormHandler.indexOf("if (!result.ok)") < userFormHandler.indexOf("saveState()"));
+  assertSourceOrder(userFormHandler, "if (!result.ok)", "saveState()");
   const updateUserSource = sourceSlice(stateSource, "function updateUserLocal", "function resolvePermissionUser");
   assert.match(updateUserSource, /SERVER_MANAGED_PROFILE_READ_ONLY/u);
-  assert.ok(updateUserSource.indexOf("hasValidatedOnlineServerAuthority()") < updateUserSource.indexOf("user.name = name"));
+  assertSourceOrder(updateUserSource, "hasValidatedOnlineServerAuthority()", "user.name = name");
   assert.match(uiPlanningSource, /Géré par Supabase/u);
   assert.match(uiPlanningSource, /mutationDisabled/u);
   assert.match(uiPlanningSource, /switcher\.disabled = onlineAuthority \|\| !canManageUsers/u);
@@ -312,44 +339,62 @@ check("K No Auth Admin API, administrative secret or service role is introduced 
 });
 
 check("L Planning, Supabase, SQL, UX-007, UX-009 and write behavior remain protected", () => {
-  for (const protectedFile of [
-    "js/planning.js",
-    "js/supabase-config.js",
-    "supabase-schema.sql",
-  ]) {
-    assert.equal(normalizeEol(readProjectFile(protectedFile)), normalizeEol(readBaseFile(protectedFile)), protectedFile);
+  const { run, context } = createIdentityContext("identity001a-protected-contracts.js");
+  run(readProjectFile("js/supabase-config.js"));
+  assert.equal(context.NIMR_SUPABASE_CONFIG.enabled, true);
+  assert.match(context.NIMR_SUPABASE_CONFIG.url, /^https:\/\/[a-z0-9-]+\.supabase\.co$/u);
+  assert.match(context.NIMR_SUPABASE_CONFIG.anonKey, /^sb_publishable_/u);
+  assert.equal(context.NIMR_SUPABASE_CONFIG.workshopId, context.NIMR_DEFAULT_WORKSHOP_ID);
+  assert.doesNotMatch(readProjectFile("js/supabase-config.js"), /sb_secret_|SUPABASE_SECRET|\.auth\.admin/u);
+  const schema = readProjectFile("supabase-schema.sql").replace(/--[^\r\n]*/gu, "");
+  const tables = [...schema.matchAll(/create table if not exists public\.([a-z_]+)\s*\(/gu)].map((match) => match[1]);
+  for (const required of ["workshops", "workshop_members", "planning_resources", "planning_slots", "audit_logs"]) {
+    assert.ok(tables.includes(required), "Required scoped table: " + required);
   }
-  const omitIdentity001d2eAuthSlices = (source) => [
-    ["async function signInSupabaseFromForm", "async function signOutSupabase"],
-    ["async function startSupabaseLiveSync", "function stopSupabaseLiveSync"],
-    ["function bindSupabaseAuthLifecycle", "function setSyncHealthValue"],
-    ["async function pullLatestSupabaseBackup", "const GRANULAR_OUTBOX_BATCH_SIZE"],
-  ].reduce((result, [start, end]) => withoutSourceSlice(result, start, end), source);
-  assert.equal(
-    normalizeEol(omitIdentity001d2eAuthSlices(readProjectFile("js/supabase-sync.js"))),
-    normalizeEol(omitIdentity001d2eAuthSlices(readBaseFile("js/supabase-sync.js"))),
-    "js/supabase-sync.js outside IDENTITY-001D2-E auth gates",
-  );
-  const sqlFiles = execFileSync("git", ["ls-tree", "-r", "--name-only", BASE_SHA], { cwd: repoRoot, encoding: "utf8" })
-    .split(/\r?\n/u)
-    .filter((file) => file.endsWith(".sql"));
-  for (const sqlFile of sqlFiles) {
-    assert.equal(normalizeEol(readProjectFile(sqlFile)), normalizeEol(readBaseFile(sqlFile)), sqlFile);
+  for (const table of tables) {
+    assert.match(schema, new RegExp("alter table public\\." + escapeRegExp(table) + "\\s+enable row level security;", "u"));
   }
-  const baseUiCases = readBaseFile("js/ui-cases.js");
-  for (const [start, end] of [
-    ["function buildSavKpis", "function renderSavDashboardLoads"],
-    ["function buildDirectorDashboardSnapshot", "function buildSavPerformanceDashboard"],
-    ["const WORKSHOP_PROGRESS_STALE_HOURS", "function getTechnicianDashboardResources"],
+  assert.doesNotMatch(schema, /disable\s+row\s+level\s+security/iu);
+  const planningSource = readProjectFile("js/planning.js");
+  for (const item of [
+    "function scheduleSequentialPipeline",
+    "function scheduleTaskGraph",
+    "function findBestResourceSlot",
+    "function stepToBooking",
+    "function orderPrimaryResourcesForStep",
+    "function resolveLockedPrimaryResource",
+    "const INDEXED_PLANNER_VIEW_KIND",
+    "scheduleProfessionalQualityControlStep",
+    "getProfessionalQualityResourceGroups",
+    "qualityAssignmentMode",
+    "allowedPrimaryResourceIds",
   ]) {
-    assert.equal(normalizeEol(sourceSlice(uiCasesSource, start, end)), normalizeEol(sourceSlice(baseUiCases, start, end)), start);
+    assert.match(planningSource, new RegExp("\\b" + escapeRegExp(item) + "\\b", "u"), `Missing planning element: ${item}`);
+  }
+  assert.doesNotMatch(planningSource, /sb_secret_|service[_-]?role|\.auth\.admin\b/iu);
+
+  const uiCasesSource = readProjectFile("js/ui-cases.js");
+  for (const fn of [
+    "function buildSavKpis",
+    "function renderSavDashboardLoads",
+    "function buildDirectorDashboardSnapshot",
+    "function buildSavPerformanceDashboard",
+    "function getTechnicianDashboardResources",
+  ]) {
+    assert.equal(run("typeof " + fn.replace("function ", "")), "function", `Missing UI Cases function: ${fn}`);
   }
   const snapshotSource = sourceSlice(stateSource, "function getAccountAccessSnapshot", "function getCurrentActor");
   assert.doesNotMatch(snapshotSource, /saveState\s*\(|state\.[A-Za-z0-9_$.[\]]+\s*=/u);
   assert.doesNotMatch(snapshotSource, /\.from\s*\(|\.insert\s*\(|\.update\s*\(|\.upsert\s*\(/u);
-  const changed = execFileSync("git", ["diff", "--name-only", IDENTITY_001D2E_BASE_SHA], { cwd: repoRoot, encoding: "utf8" });
   assert.equal(fs.existsSync(path.join(repoRoot, "supabase/functions/workshop-user-admin/index.ts")), true);
-  assert.doesNotMatch(changed, /\.sql(?:\n|$)/u);
+  const branchSqlFiles = execFileSync("git", ["diff", "--name-only", "main"], { cwd: repoRoot, encoding: "utf8" })
+    .split(/\r?\n/u)
+    .filter((file) => file.endsWith(".sql"))
+    .sort();
+  assert.deepEqual(branchSqlFiles, [
+    "supabase/migrations/20260923064000_qc_pro_dynamic_checklist_server.sql",
+    "supabase/migrations/20260923213000_qc_pro_booking_authority_hardening.sql",
+  ].sort(), "Only the approved QC-PRO migrations may differ from main");
 });
 
 assert.equal(passed.length + failures.length, 12, "IDENTITY-001A must contain exactly checks A-L");

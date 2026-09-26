@@ -89,12 +89,35 @@ assert.ok(stateSource.includes(`const APP_VERSION = "${currentBuild.appVersion}"
 assert.ok(appSource.includes(`serviceWorker.register("sw.js?v=${currentBuild.queryVersion}"`), 'le service worker doit pointer vers la query courante');
 assert.ok(swSource.includes(`const CACHE_NAME = "${currentBuild.cacheName}"`), 'le cache PWA doit suivre js/version.js');
 
+// Setup Mock Date inside VM
+vm.runInContext(`
+  let mockTime = null;
+  const OriginalDate = Date;
+  Date = class extends OriginalDate {
+    constructor(...args) {
+      if (args.length === 0 && mockTime) {
+        super(mockTime);
+      } else {
+        super(...args);
+      }
+    }
+    static now() {
+      return mockTime ? new OriginalDate(mockTime).getTime() : OriginalDate.now();
+    }
+  };
+  function setMockTime(iso) { mockTime = iso; }
+`, context);
+
+function setMockTime(iso) {
+  vm.runInContext(`setMockTime(${iso ? `'${iso}'` : 'null'})`, context);
+}
+
 function setupPermissionState(currentUserId = 'u-admin', options = {}) {
-  const now = new Date();
-  const start = new Date(now.getTime() - 30 * 60000).toISOString();
-  const end = new Date(now.getTime() + 90 * 60000).toISOString();
-  const laterStart = new Date(now.getTime() + 3 * 60 * 60000).toISOString();
-  const laterEnd = new Date(now.getTime() + 5 * 60 * 60000).toISOString();
+  setMockTime('2026-06-02T08:30:00.000Z');
+  const start = '2026-06-02T08:00:00.000Z';
+  const end = '2026-06-02T10:00:00.000Z';
+  const laterStart = '2026-06-02T10:00:00.000Z';
+  const laterEnd = '2026-06-02T12:00:00.000Z';
   const users = options.withoutUsers ? '' : `
     users: [
       { id: 'u-admin', name: 'Admin technique', role: 'admin_technique', active: true },
@@ -122,7 +145,17 @@ function setupPermissionState(currentUserId = 'u-admin', options = {}) {
           plate: '111 TU 222',
           flags: { received: true, clientApproved: true, expertApproved: true },
           durations: { mechanical: 2, quality: 0.25 },
-          claims: [{ type: 'client', includeInPlanning: true, clientApproved: true, expertApproved: true, estimate: { lines: [{ phase: 'mechanical', operation: 'MO', laborHours: 2 }] } }]
+          claims: [{
+            id: 'claim-perm-1',
+            type: 'client',
+            includeInPlanning: true,
+            clientApproved: true,
+            authorizationReference: 'AUTH-2026-001',
+            authorizationAt: '2026-06-02T08:00:00.000Z',
+            authorizationBy: 'Client Permissions',
+            expertApproved: true,
+            estimate: { lines: [{ phase: 'mechanical', operation: 'MO', laborHours: 2 }] }
+          }]
         },
         {
           id: 'case-perm-2',
@@ -131,7 +164,17 @@ function setupPermissionState(currentUserId = 'u-admin', options = {}) {
           plate: '333 TU 444',
           flags: { received: true, clientApproved: true, expertApproved: true },
           durations: { mechanical: 1, quality: 0.25 },
-          claims: [{ type: 'client', includeInPlanning: true, clientApproved: true, expertApproved: true, estimate: { lines: [{ phase: 'mechanical', operation: 'MO', laborHours: 1 }] } }]
+          claims: [{
+            id: 'claim-perm-2',
+            type: 'client',
+            includeInPlanning: true,
+            clientApproved: true,
+            authorizationReference: 'AUTH-2026-002',
+            authorizationAt: '2026-06-02T08:00:00.000Z',
+            authorizationBy: 'Client Autre Tech',
+            expertApproved: true,
+            estimate: { lines: [{ phase: 'mechanical', operation: 'MO', laborHours: 1 }] }
+          }]
         }
       ],
       bookings: [
@@ -142,12 +185,55 @@ function setupPermissionState(currentUserId = 'u-admin', options = {}) {
   `);
 }
 
+// ----------------------------------------------------
+// Contrat B: même administrateur sans authorizationReference -> refus
+// ----------------------------------------------------
 setupPermissionState('u-admin');
-assert.equal(app(`startTechnicianTask(state.cases[0], 'booking-tech-1', 'tech-1').ok`), true, 'admin peut démarrer une tâche affectée');
+vm.runInContext(`
+  state.cases[0].claims[0].authorizationReference = "";
+`, context);
+const adminUnauth = app(`startTechnicianTask(state.cases[0], 'booking-tech-1', 'tech-1')`);
+assert.equal(adminUnauth.ok, false, "Contrat B: Admin sans authorizationReference doit être refusé");
+assert.ok(adminUnauth.issues.some((issue) => /Accord client \/ interne à confirmer/i.test(issue)), "Le diagnostic d'accord manquant doit être présent");
+
+// ----------------------------------------------------
+// Contrat A: admin_technique avec autorisation valide -> superviseur légitime sur tâche non-QC
+// ----------------------------------------------------
+setupPermissionState('u-admin');
+assert.equal(app(`startTechnicianTask(state.cases[0], 'booking-tech-1', 'tech-1').ok`), true, 'Contrat A: admin peut démarrer une tâche affectée');
+
+// Simulation d'une portion productive réalisée (temps écoulé réel : 30 minutes)
+setMockTime('2026-06-02T09:00:00.000Z');
 assert.equal(app(`pauseTechnicianTask(state.cases[0], 'booking-tech-1', 'tech-1', 'pause repas').ok`), true, 'admin peut pauser une tâche');
 const adminRemainderId = app(`state.bookings.find((booking) => booking.parentBookingId === 'booking-tech-1').id`);
 assert.equal(app(`resumeTechnicianTask(state.cases[0], '${adminRemainderId}', 'tech-1').ok`), true, 'admin peut reprendre une tâche');
 assert.equal(app(`completeTechnicianTask(state.cases[0], '${adminRemainderId}', 'tech-1', { skipPhotoCheck: true }).ok`), true, 'admin peut terminer une tâche');
+
+// ----------------------------------------------------
+// Contrat E: aucun bypass superviseur ne doit permettre l'exécution directe d'un QC
+// ----------------------------------------------------
+setupPermissionState('u-admin');
+vm.runInContext(`
+  state.bookings.push({
+    id: 'booking-qc-supervisor-guard',
+    caseId: 'case-perm-1',
+    key: 'quality',
+    title: 'Contrôle qualité',
+    resourceIds: ['tech-1'],
+    qualityAssignmentMode: 'quality_controller',
+    status: 'planned',
+    segments: [{ start: '2026-06-02T10:00:00.000Z', end: '2026-06-02T10:15:00.000Z' }],
+    start: '2026-06-02T10:00:00.000Z',
+    end: '2026-06-02T10:15:00.000Z',
+    plannedMinutes: 15
+  });
+`, context);
+const adminQcStart = app(`startTechnicianTask(state.cases[0], 'booking-qc-supervisor-guard', 'tech-1')`);
+assert.equal(adminQcStart.ok, false, 'Contrat E: admin_technique ne peut pas démarrer une tâche QC');
+assert.ok(
+  adminQcStart.message.includes('Action non autorisée') || adminQcStart.message.includes('non autorisé'),
+  'Le refus QC superviseur doit préserver la frontière d’autorité QC-PRO'
+);
 
 setupPermissionState('u-chef');
 assert.equal(app(`startTechnicianTask(state.cases[1], 'booking-tech-2', 'tech-2').ok`), true, 'chef atelier peut agir sur toutes les tâches');

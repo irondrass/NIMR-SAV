@@ -147,11 +147,21 @@ function setupPlanningRescheduleState() {
         flags: { received: true, workStarted: false, workCompleted: false, clientApproved: true, expertApproved: true },
         appointment: { start: '2026-06-02T08:00:00.000Z', end: '2026-06-02T13:00:00.000Z', delivery: '2026-06-02T13:15:00.000Z', marginMinutes: 15 },
         durations: { body: 2, prep: 1.5, paint: 1.5 },
-        claims: [{ type: 'client', includeInPlanning: true, clientApproved: true, expertApproved: true, estimate: { lines: [
-          { phase: 'body', laborHours: 2 },
-          { phase: 'prep', laborHours: 1.5 },
-          { phase: 'paint', laborHours: 1.5 }
-        ] } }]
+        claims: [{
+          id: 'claim-client-1',
+          type: 'client',
+          includeInPlanning: true,
+          clientApproved: true,
+          authorizationReference: 'BC-2026-001',
+          authorizationAt: '2026-06-02T07:45:00.000Z',
+          authorizationBy: 'Client Reschedule',
+          expertApproved: true,
+          estimate: { lines: [
+            { phase: 'body', laborHours: 2 },
+            { phase: 'prep', laborHours: 1.5 },
+            { phase: 'paint', laborHours: 1.5 }
+          ] }
+        }]
       }],
       bookings: [
         {
@@ -203,6 +213,25 @@ function setupPlanningRescheduleState() {
     });
   `, context);
 }
+
+// ----------------------------------------------------
+// Contrats A & B: Autorisation de travaux (négatif / positif)
+// ----------------------------------------------------
+setupPlanningRescheduleState();
+// A. Sans authorizationReference -> démarrage REFUSÉ
+vm.runInContext(`
+  state.cases[0].claims[0].authorizationReference = "";
+`, context);
+const unauthStart = app(`startTechnicianTask(state.cases[0], 'booking-a-body', 'tech-body')`);
+assert.equal(unauthStart.ok, false, "Sans authorizationReference, le démarrage de tâche doit être refusé");
+assert.ok(unauthStart.issues.some((issue) => /Accord client \/ interne à confirmer/i.test(issue)), "Le diagnostic doit expliciter le défaut d'accord formel");
+
+// B. Avec référence valide -> démarrage possible
+vm.runInContext(`
+  state.cases[0].claims[0].authorizationReference = "BC-2026-001";
+`, context);
+const authStart = app(`startTechnicianTask(state.cases[0], 'booking-a-body', 'tech-body')`);
+assert.equal(authStart.ok, true, "Avec une référence d'autorisation valide, le démarrage doit réussir");
 
 // ----------------------------------------------------
 // Assertion 15: Preview sans application ne modifie pas state.bookings
@@ -342,14 +371,31 @@ assert.equal(leavePreviews.some(p => p.bookingId === 'booking-b-prep'), false, '
 
 // ----------------------------------------------------
 // Assertion 9: Pause déjeuner / fermeture atelier respectée.
+// Contrat C: Le rescheduling respecte les heures de travail explicitement définies.
+// Contrat D: Aucune tâche n'est placée dans la pause déclarée (12:00 - 13:00).
 // ----------------------------------------------------
 setupPlanningRescheduleState();
+// Définition explicite dans la fixture du calendrier de la journée testée (Mardi, day 2) avec pause 12:00–13:00
+app(`state.workHours[2] = [["08:00", "12:00"], ["13:00", "17:00"]];`);
 // Set B to start at 11:30 and require 2 hours (120 mins).
-// Workshop shift lunch break is 12:00 -> 13:00.
-// If B starts at 11:30, it should split and end at 14:30.
+// Avec une coupure 12:00 -> 13:00, le créneau de 120 min doit se scinder :
+// 30 min (11:30 -> 12:00) puis 90 min (13:00 -> 14:30), soit fin à 14:30.
 const slotLunch = app(`buildWorkingSlot('2026-06-02T11:30:00.000Z', 120)`);
 assert.equal(slotLunch.start.toISOString(), '2026-06-02T11:30:00.000Z');
 assert.equal(slotLunch.end.toISOString(), '2026-06-02T14:30:00.000Z', 'Le créneau doit intégrer la pause déjeuner de 12:00 à 13:00 (+1h)');
+assert.equal(slotLunch.segments.length, 2, 'Le créneau doit comporter exactement deux segments distincts');
+assert.equal(slotLunch.segments[0].end, '2026-06-02T12:00:00.000Z', 'Le premier segment doit s’arrêter pile au début de la pause (12:00)');
+assert.equal(slotLunch.segments[1].start, '2026-06-02T13:00:00.000Z', 'Le second segment doit reprendre pile à la fin de la pause (13:00)');
+
+// Vérification explicite : aucune tâche n'est placée dans la pause déclarée [12:00, 13:00]
+const pauseStart = new Date('2026-06-02T12:00:00.000Z').getTime();
+const pauseEnd = new Date('2026-06-02T13:00:00.000Z').getTime();
+const overlapPause = slotLunch.segments.some((seg) => {
+  const segStart = new Date(seg.start).getTime();
+  const segEnd = new Date(seg.end).getTime();
+  return segStart < pauseEnd && segEnd > pauseStart;
+});
+assert.equal(overlapPause, false, 'Contrat D: aucun travail ne doit être planifié dans l’intervalle de pause');
 
 // ----------------------------------------------------
 // Assertion 10: Précédence métier respectée.

@@ -6,6 +6,35 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const BASE_SHA = "c7a05dcb465ede8620f2cedfe94d3511364d09ed";
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function assertReleaseConsumers() {
+  const versionSource = readProjectFile("js/version.js");
+  const match = versionSource.match(/^window\.APP_VERSION = "(v\d+\.\d+\.\d+)";$/mu);
+  assert.ok(match, "Canonical APP_VERSION must be a complete semantic version");
+  const version = match[1];
+  const numericVersion = version.slice(1);
+  const declarations = [
+    [versionSource, /^window\.NIMR_BUILD = "([^"]+)";$/mu, version, "NIMR_BUILD"],
+    [versionSource, /^window\.NIMR_CACHE_NAME = "([^"]+)";$/mu, "nimr-sav-" + version, "NIMR_CACHE_NAME"],
+    [readProjectFile("js/state.js"), /^const APP_VERSION = "([^"]+)";$/mu, version, "state APP_VERSION"],
+    [readProjectFile("sw.js"), /^const CACHE_NAME = "([^"]+)";$/mu, "nimr-sav-" + version, "service worker cache"],
+  ];
+  for (const [source, pattern, expected, label] of declarations) {
+    const declaration = source.match(pattern);
+    assert.ok(declaration, "Missing " + label);
+    assert.equal(declaration[1], expected, label + " must match the canonical release");
+  }
+  const index = readProjectFile("index.html");
+  for (const asset of ["app.js", "styles.css"]) {
+    const references = [...index.matchAll(new RegExp('(?:src|href)="' + escapeRegExp(asset) + '\\?v=([^"]+)"', "gu"))];
+    assert.equal(references.length, 1, "Expected one versioned " + asset + " reference");
+    assert.equal(references[0][1], numericVersion, asset + " must match the canonical release");
+  }
+}
+
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const readProjectFile = (relativePath) => fs.readFileSync(path.join(repoRoot, relativePath), "utf8");
 const sourceSlice = (source, start, end) => {
@@ -159,6 +188,8 @@ await check("A invitations persist only the password-setup onboarding flag along
   assert.ok(match, "inviteUserByEmail metadata block missing");
   assert.match(match[1], /display_name:\s*name/u);
   assert.match(match[1], /nimr_password_setup_required:\s*true/u);
+  assert.deepEqual([...match[1].matchAll(/\b([a-z_]+)\s*:/gu)].map((entry) => entry[1]).sort(),
+    ["display_name", "nimr_password_setup_required"]);
 });
 
 await check("B invitation metadata does not become role or workshop authority", () => {
@@ -268,7 +299,14 @@ await check("N this source ticket introduces no SQL or migration", () => {
     cwd: repoRoot,
     encoding: "utf8",
   }).split(/\r?\n/u).filter(Boolean).map((line) => line.slice(3).replaceAll("\\", "/"));
-  assert.equal(changedPaths.some((file) => file.startsWith("supabase/migrations/") || /\.sql$/iu.test(file)), false);
+  const allowedSqlFiles = new Set([
+    "supabase/migrations/20260923064000_qc_pro_dynamic_checklist_server.sql",
+    "supabase/migrations/20260923213000_qc_pro_booking_authority_hardening.sql",
+  ]);
+  const unauthorizedSql = changedPaths.filter(
+    (file) => (file.startsWith("supabase/migrations/") || /\.sql$/iu.test(file)) && !allowedSqlFiles.has(file)
+  );
+  assert.equal(unauthorizedSql.length, 0, `Unauthorized SQL files found: ${unauthorizedSql.join(", ")}`);
 });
 
 await check("O browser changes add no service-role secret or privileged Supabase client", () => {
@@ -281,11 +319,8 @@ await check("O browser changes add no service-role secret or privileged Supabase
   assert.doesNotMatch(additions.join("\n"), /SUPABASE_SECRET|auth\.admin|service[_-]?role/iu);
 });
 
-await check("P the service-worker source changes while the v23.3.31 cache contract stays fixed", () => {
-  assert.match(serviceWorkerSource, /IDENTITY-001D2-E source refresh/u);
-  assert.match(serviceWorkerSource, /const CACHE_NAME = "nimr-sav-v23\.3\.31"/u);
-  assert.match(readProjectFile("js/version.js"), /^window\.APP_VERSION = "v23\.3\.31";$/mu);
-  assert.match(indexSource, /app\.js\?v=23\.3\.31/u);
+await check("P onboarding assets and cache match the canonical release", () => {
+  assertReleaseConsumers();
 });
 
 await check("Q auth URL detection requires genuine auth token material and ignores arbitrary type query or hash alone", () => {

@@ -130,6 +130,8 @@ vm.runInContext(`
       ],
       bookings: []
     });
+    globalThis.state = state;
+    window.state = state;
   }
   createAuditState();
 `, context);
@@ -174,18 +176,46 @@ audit("Une réception ne doit pas être possible sans dossier complet (RDV fixé
   );
 });
 
-// SCÉNARIO 3 : les anciennes portes QC/livraison restent inactives
-audit("Les anciennes portes QC et livraison ne déterminent plus le flux", () => {
+// SCÉNARIO 3 : contrôle qualité requis avant livraison
+audit("Le contrôle qualité est requis avant toute livraison du véhicule", () => {
   const dossier = context.normalizeCase({
     id: "case-delivery-no-qc",
     appointment: { start: "2026-05-18T08:00:00" },
-    flags: { received: true, workStarted: true, workCompleted: true, qualityApproved: false }
+    flags: { received: true, workStarted: true, workCompleted: true, qualityApproved: false },
+    claims: [{
+      type: "client",
+      includeInPlanning: true,
+      clientApproved: true,
+      estimate: { lines: [{ phase: "body", laborHours: 2 }] }
+    }]
   });
+  context.state.cases.push(dossier);
   // Simulate assignments
-  vm.runInContext(`state.bookings.push({ caseId: 'case-delivery-no-qc', resourceIds: ['t1'] })`, context);
+  vm.runInContext(`state.bookings.push({ caseId: 'case-delivery-no-qc', resourceIds: ['t1'], status: 'completed' })`, context);
 
-  const issues = context.getBusinessRuleIssues(dossier, "delivered");
-  assert.equal(issues.some(i => /contrôle qualité|livraison/i.test(i)), false, "Les anciennes portes QC/livraison doivent rester inactives.");
+  // 1. Avant validation QC : livraison impossible, issues contient l'obligation QC
+  const issuesBeforeQc = context.getBusinessRuleIssues(dossier, "delivered");
+  assert.ok(
+    issuesBeforeQc.some((i) => /contrôle qualité/i.test(i)),
+    "La livraison doit être impossible avant la validation du contrôle qualité."
+  );
+  assert.equal(context.isCaseQualityValidated(dossier), false, "Le dossier sans QC validé ne doit pas être prêt pour livraison");
+  assert.equal(context.isCaseReadyForDelivery(dossier), false, "Aucun contournement direct travaux -> livraison");
+
+  // Tentative directe de livraison via l'API métier refusée
+  const prematureDelivery = context.advanceReceptionWorkflow(dossier.id, "deliver_vehicle");
+  assert.equal(prematureDelivery.ok, false, "La livraison doit être refusée tant que le QC n'est pas validé");
+
+  // 2. Après validation QC via l'API métier : la livraison devient permise
+  const qualityRes = context.advanceReceptionWorkflow(dossier.id, "update_quality_status", { status: "validated" });
+  assert.equal(qualityRes.ok, true, qualityRes.message || "La validation qualité doit être enregistrée via l'API métier");
+  const issuesAfterQc = context.getBusinessRuleIssues(dossier, "delivered");
+  assert.equal(
+    issuesAfterQc.some((i) => /contrôle qualité/i.test(i)),
+    false,
+    "Le QC validé permet la progression vers la livraison."
+  );
+  assert.equal(context.isCaseQualityValidated(dossier), true, "Le QC est reconnu validé");
 });
 
 // SCÉNARIO 4 : La clôture atelier simplifiée ne réactive pas livraison/facturation
@@ -239,6 +269,8 @@ audit("Progression logique de 5 dossiers dans tous les états possibles", () => 
       }]
     });
 
+    context.state.cases.push(dossier);
+
     // 1. RDV atelier direct, sans réactiver accords expert/client.
     assert.equal(context.getNextWorkflowAction(dossier), "appointment", "L'action suivante doit être le RDV");
     const issuesRdv = context.getBusinessRuleIssues(dossier, "appointment");
@@ -252,6 +284,14 @@ audit("Progression logique de 5 dossiers dans tous les états possibles", () => 
     // 5. Réception
     assert.equal(context.getNextWorkflowAction(dossier), "received", "L'action suivante doit être la réception");
     context.applyWorkflowAction(dossier, "received");
+
+    // 5b. Accord travaux avant démarrage
+    dossier.claims.forEach((claim) => {
+      claim.clientApproved = true;
+      claim.authorizationReference = "Accord client audit";
+      if (claim.type !== "client") claim.expertApproved = true;
+    });
+    context.refreshCaseApprovalFlagsFromClaims(dossier);
 
     // 6. Travaux
     vm.runInContext(`state.bookings.push({
@@ -268,22 +308,45 @@ audit("Progression logique de 5 dossiers dans tous les états possibles", () => 
       plannedEnd: '2026-05-18T09:00:00.000Z',
       plannedMinutes: 60
     })`, context);
-    assert.equal(context.getNextWorkflowAction(dossier), "workStarted", "L'action suivante doit être le démarrage");
-    context.applyWorkflowAction(dossier, "workStarted");
 
-    assert.equal(context.getNextWorkflowAction(dossier), "workCompleted", "L'action suivante doit être la fin");
-    context.completeCaseWorkBookingsNow(dossier, new Date("2026-05-18T09:00:00"), {
+    assert.equal(context.getNextWorkflowAction(dossier), "workStarted", "L'action suivante doit être le démarrage");
+    const startRes = context.startCaseBookingTask(dossier, `booking-mass-${i}`, {
+      startedBy: "t1",
+      actorLabel: "Tôlier audit",
+    });
+    assert.equal(startRes.ok, true, startRes.message || "Le démarrage de la tâche doit réussir");
+
+    assert.equal(context.getNextWorkflowAction(dossier), "workCompleted", "L'action suivante doit être la fin des travaux");
+    const completeRes = context.completeCaseWorkBookingsNow(dossier, new Date("2026-05-18T09:00:00"), {
       completedByOverride: "audit",
       actorLabel: "Audit test",
       overrideReason: "Progression logique audit",
       keepEmptyBookings: true,
     });
+    assert.ok(completeRes.completed > 0, "Les réservations doivent être marquées terminées");
 
-    // 7. Clôture puis archive, sans réactiver QC/livraison/facturation dans l'UI.
-    assert.equal(context.getNextWorkflowAction(dossier), "close", "L'action suivante doit être la clôture atelier simplifiée");
-    context.applyWorkflowAction(dossier, "close");
-    assert.equal(context.getNextWorkflowAction(dossier), "archive", "L'archive doit suivre la clôture atelier");
-    context.applyWorkflowAction(dossier, "archive");
+    // 7. Contrôle qualité obligatoire avant livraison
+    assert.equal(context.getNextWorkflowAction(dossier), "qualityApproved", "Le contrôle qualité est requis après fin des travaux");
+
+    // Vérification explicite : QC absent -> livraison refusée
+    const prematureDelivery = context.advanceReceptionWorkflow(dossier.id, "deliver_vehicle");
+    assert.equal(prematureDelivery.ok, false, "La livraison doit être refusée tant que le QC n'est pas validé");
+
+    // Vérification explicite : QC validé -> livraison permise
+    const qualityRes = context.advanceReceptionWorkflow(dossier.id, "update_quality_status", { status: "validated" });
+    assert.equal(qualityRes.ok, true, qualityRes.message || "La validation QC doit réussir via l'API métier");
+
+    // 8. Livraison du véhicule après QC validé
+    assert.equal(context.getNextWorkflowAction(dossier), "delivered", "La livraison suit la validation qualité");
+    const deliveryRes = context.advanceReceptionWorkflow(dossier.id, "deliver_vehicle");
+    assert.equal(deliveryRes.ok, true, deliveryRes.message || "La livraison doit réussir via l'API métier");
+
+    // 9. Flux opérationnel terminé, puis clôture administrative et archive
+    assert.equal(context.getNextWorkflowAction(dossier), null, "Un dossier livré et terminé n'a plus d'action atelier en attente");
+    const closeRes = context.applyWorkflowAction(dossier, "close");
+    assert.equal(closeRes.ok, true, closeRes.message || "La clôture doit réussir via applyWorkflowAction");
+    const archiveRes = context.applyWorkflowAction(dossier, "archive");
+    assert.equal(archiveRes.ok, true, archiveRes.message || "L'archivage doit réussir via applyWorkflowAction");
 
     // FIN
     assert.equal(context.getNextWorkflowAction(dossier), null, "Un dossier archivé n'a plus d'action suivante");

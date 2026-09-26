@@ -100,8 +100,8 @@ const offlineSource = readRepositoryFile("offline.html");
 
 check("les textes PDF-first sont présents et les anciens textes sont absents", () => {
   const requiredTexts = [
-    "Import devis PDF atelier",
-    "Importez le devis PDF pour créer automatiquement le dossier, les travaux et la préparation planning.",
+    "Import devis PDF",
+    "Importez un devis ou enregistrez directement une arrivée sans document.",
     "Importer un devis PDF",
     "Créer dossier depuis devis PDF",
   ];
@@ -143,6 +143,7 @@ check("les scripts de démarrage requis existent et sont chargés dans un ordre 
     "vendor/pdf.min.js",
     "js/utils.js",
     "js/state.js",
+    "js/ui-reception.js",
     "js/ui-cases.js",
     "js/estimate-import.js",
     "js/ui-planning.js",
@@ -169,7 +170,7 @@ check("les scripts de démarrage requis existent et sont chargés dans un ordre 
   localScripts.forEach((script) => {
     assert.ok(fs.existsSync(path.join(repositoryRoot, script)), `script local référencé mais absent : ${script}`);
   });
-  assert.equal(localScripts.includes("js/ui-reception.js"), false, "l'ancien module ui-reception.js ne doit plus être chargé");
+  assert.equal(localScripts.filter((script) => script === "js/ui-reception.js").length, 1, "le module QC professionnel doit être chargé une seule fois");
   assert.equal(localScripts.at(-1), "app.js", "app.js doit être le dernier script local chargé");
 });
 

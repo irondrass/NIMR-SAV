@@ -170,12 +170,56 @@ const getElement = (id) => {
 };
 
 global.document = {
+  listeners: new Map(),
   getElementById: (id) => getElement(id),
   querySelector: (sel) => getElement(sel),
   querySelectorAll: (sel) => [],
+  addEventListener(event, listener) {
+    if (!this.listeners.has(event)) this.listeners.set(event, []);
+    this.listeners.get(event).push(listener);
+  },
+  removeEventListener(event, listener) {
+    const listeners = this.listeners.get(event) || [];
+    this.listeners.set(
+      event,
+      listeners.filter((item) => item !== listener)
+    );
+  },
+  dispatchEvent(event) {
+    const type = typeof event === "string" ? event : event?.type;
+    const listeners = this.listeners.get(type) || [];
+    listeners.forEach((listener) => listener(event));
+  },
   body: {
     innerHTML: ""
   }
+};
+
+const windowEventListeners = new Map();
+
+if (!global.window) {
+  global.window = global;
+}
+
+global.window.addEventListener = (event, listener) => {
+  if (!windowEventListeners.has(event)) {
+    windowEventListeners.set(event, []);
+  }
+  windowEventListeners.get(event).push(listener);
+};
+
+global.window.removeEventListener = (event, listener) => {
+  const listeners = windowEventListeners.get(event) || [];
+  windowEventListeners.set(
+    event,
+    listeners.filter((item) => item !== listener)
+  );
+};
+
+global.window.dispatchEvent = (event) => {
+  const type = typeof event === "string" ? event : event?.type;
+  const listeners = windowEventListeners.get(type) || [];
+  listeners.forEach((listener) => listener(event));
 };
 
 global.$ = (sel) => getElement(sel);

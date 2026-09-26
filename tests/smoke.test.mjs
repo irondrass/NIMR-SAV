@@ -604,7 +604,7 @@ vm.runInContext(`state = normalizeState({
 });`, context);
 const sinistreOrder = context.schedulePipeline({ id: 'case-sequence', durations: { body: 1, mechanical: 1, prep: 1, paint: 1, electrical: 1, reassembly: 1 } }, new Date('2026-05-18T08:00:00.000Z'), []);
 const orderKeys = sinistreOrder.steps.map((step) => step.key).join('>');
-assert.equal(orderKeys, 'body>mechanical>prep>paint>electrical>reassembly', 'ordre SAV sinistre attendu: tôlerie, mécanique, préparation, peinture, électrique, remontage');
+assert.equal(orderKeys, 'body>mechanical>prep>paint>electrical>reassembly>quality', 'ordre SAV sinistre attendu: tôlerie, mécanique, préparation, peinture, électrique, remontage, contrôle qualité final');
 console.log('Planning sequence regression OK');
 
 const clientFastCase = context.normalizeCase({
@@ -914,7 +914,7 @@ assert.ok(printPlanningRegression.deliveryLines.some((line) => line.includes('FI
 assert.ok(printPlanningRegression.deliveryLines.some((line) => line.includes('Kilométrage sortie')), 'la fiche de clôture doit contenir le kilométrage sortie');
 assert.ok(printPlanningRegression.deliveryLines.some((line) => line.includes('Observations atelier')), 'la fiche de clôture doit contenir les observations atelier');
 assert.equal(printPlanningRegression.deliveryLines.some((line) => line.includes('Signature client')), false, 'la fiche de clôture ne doit plus contenir de signature client');
-assert.ok(printPlanningRegression.qualityLines.some((line) => line.includes('Serrages contrôlés')), 'la fiche de finition mécanique doit utiliser une checklist adaptée');
+assert.ok(printPlanningRegression.qualityLines.some((line) => line.includes('Fixations et serrages concernés contrôlés')), 'la fiche de finition mécanique doit utiliser une checklist adaptée');
 
 const leaveConflictRegression = JSON.parse(vm.runInContext(`(() => {
   state = normalizeState({

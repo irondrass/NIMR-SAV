@@ -62,14 +62,24 @@ for (const [userId, matrix] of Object.entries(expectations)) {
 }
 
 run(`state.currentUserId = "qc"`);
+
+// 1. Avant fin des travaux (workCompleted = false) : le contrôle qualité est bloqué
+run("state.cases[0].flags.workCompleted = false");
+const qcHtmlBefore = run("renderStep10_QualityCheck(state.cases[0])");
+const qcFormBefore = qcHtmlBefore.slice(qcHtmlBefore.indexOf('<form id="reception-quality-form"'), qcHtmlBefore.indexOf("</form>") + 7);
+assert.match(qcFormBefore, /disabled/u, "Avant workCompleted, même le rôle QC ne peut pas valider prématurément");
+
+// 2. Après fin des travaux (workCompleted = true) : le rôle QC a le formulaire activé
+run("state.cases[0].flags.workCompleted = true");
 const qcHtml = run("renderStep10_QualityCheck(state.cases[0])");
 const qcForm = qcHtml.slice(qcHtml.indexOf('<form id="reception-quality-form"'), qcHtml.indexOf("</form>") + 7);
-assert.doesNotMatch(qcForm, /disabled/u, "QC doit voir le formulaire qualité activé");
+assert.doesNotMatch(qcForm, /disabled/u, "QC doit voir le formulaire qualité activé lorsque les travaux sont terminés");
 
+// 3. Rôle non autorisé (readonly) : formulaire désactivé même lorsque les travaux sont terminés
 run(`state.currentUserId = "readonly"`);
 const readonlyHtml = run("renderStep10_QualityCheck(state.cases[0])");
 const readonlyForm = readonlyHtml.slice(readonlyHtml.indexOf('<form id="reception-quality-form"'), readonlyHtml.indexOf("</form>") + 7);
-assert.match(readonlyForm, /disabled/u, "lecture seule ne doit pas voir les mutations qualité activées");
+assert.match(readonlyForm, /disabled/u, "lecture seule ne doit pas voir les mutations qualité activées même après travaux");
 
 const claimCase = { id: "claim-case", plate: "AA-001", customerClaims: [{ status: "open", text: "Claim" }], flags: {} };
 run('showConfirmModal = async () => true');

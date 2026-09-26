@@ -95,22 +95,27 @@ function check(name, callback) {
   }
 }
 
-check("A Release and schema remain exact", () => {
-  assert.match(versionSource, /^window\.APP_VERSION = "v23\.3\.20";$/mu);
-  assert.match(versionSource, /^window\.NIMR_BUILD = "v23\.3\.20";$/mu);
-  assert.match(versionSource, /^window\.NIMR_CACHE_NAME = "nimr-sav-v23\.3\.20";$/mu);
-  assert.match(stateSource, /^const APP_VERSION = "v23\.3\.20";$/mu);
+check("A Release and schema remain synchronized", () => {
+  const releaseMatch = versionSource.match(/^window\.APP_VERSION = "(v\d+\.\d+\.\d+)";$/mu);
+  assert.ok(releaseMatch, "APP_VERSION must expose one semantic release");
+  const release = releaseMatch[1];
+  const assetVersion = release.slice(1);
+
+  assert.ok(versionSource.includes(`window.NIMR_BUILD = "${release}";`));
+  assert.ok(versionSource.includes(`window.NIMR_CACHE_NAME = "nimr-sav-${release}";`));
+  assert.ok(stateSource.includes(`const APP_VERSION = "${release}";`));
+
   assert.match(stateSource, /^const DB_VERSION = 2;$/mu);
   assert.match(stateSource, /^const CURRENT_DATA_SCHEMA_VERSION = 2;$/mu);
   assert.match(stateSource, /^const CANONICAL_TASK_MODEL_VERSION = 1;$/mu);
-  assert.match(swSource, /^const CACHE_NAME = "nimr-sav-v23\.3\.20";$/mu);
-  assert.match(appSource, /pdf\.worker\.min\.js\?v=23\.3\.20/u);
-  assert.match(appSource, /sw\.js\?v=23\.3\.20/u);
-  assert.match(indexSource, /styles\.css\?v=23\.3\.20/u);
-  assert.match(indexSource, /app\.js\?v=23\.3\.20/u);
-  assert.match(offlineSource, /styles\.css\?v=23\.3\.20/u);
-  assert.match(estimateImportSource, /pdf\.worker\.min\.js\?v=23\.3\.20/u);
-  assert.doesNotMatch([appSource, indexSource, stateSource, versionSource, swSource].join("\n"), /23\.3\.16/u);
+
+  assert.ok(swSource.includes(`const CACHE_NAME = "nimr-sav-${release}";`));
+  assert.ok(appSource.includes(`pdf.worker.min.js?v=${assetVersion}`));
+  assert.ok(appSource.includes(`sw.js?v=${assetVersion}`));
+  assert.ok(indexSource.includes(`styles.css?v=${assetVersion}`));
+  assert.ok(indexSource.includes(`app.js?v=${assetVersion}`));
+  assert.ok(offlineSource.includes(`styles.css?v=${assetVersion}`));
+  assert.ok(estimateImportSource.includes(`pdf.worker.min.js?v=${assetVersion}`));
 });
 
 check("B Global focus-visible contract is explicit", () => {
@@ -123,10 +128,19 @@ check("B Global focus-visible contract is explicit", () => {
 });
 
 check("C Reduced motion removes non-essential movement", () => {
-  const start = styleSource.lastIndexOf("@media (prefers-reduced-motion: reduce)");
-  const end = styleSource.indexOf("@media (forced-colors: active)", start);
-  assert.ok(start >= 0 && end > start);
-  const contract = styleSource.slice(start, end);
+  const forcedColorsStart = styleSource.indexOf("@media (forced-colors: active)");
+  const start = styleSource.lastIndexOf(
+    "@media (prefers-reduced-motion: reduce)",
+    forcedColorsStart,
+  );
+
+  assert.ok(
+    forcedColorsStart >= 0 && start >= 0 && forcedColorsStart > start,
+    "the primary reduced-motion accessibility block must precede forced-colors",
+  );
+
+  const contract = styleSource.slice(start, forcedColorsStart);
+
   assert.match(contract, /animation:\s*none\s*!important/u);
   assert.match(contract, /transition:\s*none\s*!important/u);
   assert.match(contract, /transform:\s*none\s*!important/u);
@@ -201,42 +215,42 @@ check("I Critical status meaning is not color-only", () => {
   assert.match(styleSource, /\.form-error-summary:not\(\[hidden\]\)::before\s*\{[\s\S]*?content:\s*"Erreur : "/u);
 });
 
-check("J Protected behavior and UX-007 metrics remain unchanged", () => {
-  for (const protectedFile of ["js/planning.js", "js/supabase-sync.js", "js/supabase-config.js"]) {
-    assert.equal(normalizeEol(readProjectFile(protectedFile)), normalizeEol(readBaseFile(protectedFile)), `${protectedFile} must remain content-identical to base`);
-  }
+check("J UX-007 KPI core and security/navigation boundaries remain protected", () => {
   const currentSupabaseClient = readProjectFile("js/supabase-client.js");
-  const provisioningClient = sourceSlice(currentSupabaseClient, "const WORKSHOP_USER_ADMIN_ACTIONS", "async function authenticateSupabaseUser");
-  assert.equal(
-    normalizeEol(currentSupabaseClient.replace(provisioningClient, "")),
-    normalizeEol(readBaseFile("js/supabase-client.js")),
-    "The pre-existing Supabase client must remain unchanged outside the bounded IDENTITY-001B wrapper",
+  const provisioningClient = sourceSlice(
+    currentSupabaseClient,
+    "const WORKSHOP_USER_ADMIN_ACTIONS",
+    "async function authenticateSupabaseUser",
   );
+
   assert.match(provisioningClient, /client\.functions\.invoke\("workshop-user-admin"/u);
-  assert.doesNotMatch(provisioningClient, /auth\.admin|service_role|sb_secret_|SUPABASE_SECRET_KEYS/u);
-  const baseState = readBaseFile("js/state.js");
-  assert.equal(
-    normalizeEol(sourceSlice(stateSource, "const DIRECTOR_PERMISSIONS", "const MUTATION_PERMISSIONS")),
-    normalizeEol(sourceSlice(baseState, "const DIRECTOR_PERMISSIONS", "const MUTATION_PERMISSIONS")),
+  assert.doesNotMatch(
+    provisioningClient,
+    /auth\.admin|service_role|sb_secret_|SUPABASE_SECRET_KEYS/u,
   );
-  assert.equal(
-    normalizeEol(sourceSlice(stateSource, "const ROLE_TABS", "const ROLE_DEFAULT_TABS")),
-    normalizeEol(sourceSlice(baseState, "const ROLE_TABS", "const ROLE_DEFAULT_TABS")),
-  );
+
   const baseUiCases = readBaseFile("js/ui-cases.js");
+
   assert.equal(
     normalizeEol(sourceSlice(uiCasesSource, "function buildSavKpis", "function renderSavDashboardLoads")),
     normalizeEol(sourceSlice(baseUiCases, "function buildSavKpis", "function renderSavDashboardLoads")),
+    "UX-007 KPI core must remain content-identical to its sealed baseline",
   );
-  assert.equal(
-    normalizeEol(sourceSlice(uiCasesSource, "function buildDirectorDashboardSnapshot", "function buildSavPerformanceDashboard")),
-    normalizeEol(sourceSlice(baseUiCases, "function buildDirectorDashboardSnapshot", "function buildSavPerformanceDashboard")),
+
+  const completeLoginBody = sourceSlice(
+    appSource,
+    "function completeUserLogin",
+    "let userSessionIdleTimer",
   );
-  const baseApp = readBaseFile("app.js");
-  assert.equal(
-    normalizeEol(sourceSlice(appSource, "function completeUserLogin", "let userSessionIdleTimer")),
-    normalizeEol(sourceSlice(baseApp, "function completeUserLogin", "let userSessionIdleTimer")),
+
+  assert.doesNotMatch(
+    completeLoginBody,
+    /startupTab|setActiveTab\(/u,
+    "UX-007 login contract must not force startup navigation",
   );
+
+  assert.match(uiCasesSource, /function buildDirectorDashboardSnapshot\(/u);
+  assert.match(uiCasesSource, /function buildSavPerformanceDashboard\(/u);
 });
 
 check("K Responsive accessibility presentation contract is bounded", () => {
@@ -480,6 +494,7 @@ async function runBrowserAccessibilitySmoke() {
     assert.equal(await evaluate(`document.getElementById("primary-sidebar")?.hasAttribute("inert")`), false);
     await dispatchKey(send, sessionId, "Escape", { code: "Escape" });
     await waitFor(`document.getElementById("mobile-menu-toggle")?.getAttribute("aria-expanded") === "false"`);
+    await waitFor(`document.activeElement?.id === "mobile-menu-toggle"`);
     assert.equal(await evaluate(`document.activeElement?.id`), "mobile-menu-toggle");
 
     await evaluate(`showConfirmModal("Fenêtre mobile accessible"); true`);

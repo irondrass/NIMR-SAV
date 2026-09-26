@@ -29,40 +29,42 @@
 // CA-LOT-C source refresh: atomic worker-aligned release v23.3.56 with role-neutral pilotage and blocker vocabulary.
 // CA-LOT-D source refresh: atomic worker-aligned release v23.3.57 with user account menu and server/local account authority separation.
 // LOT20B source refresh: atomic worker-aligned release v23.3.58 with authoritative final QC and rework workflow.
-const CACHE_NAME = "nimr-sav-v23.3.58";
+// QC-PRO-001 Gate 0: atomic QC booking completion and safe existing-case cutover v23.3.59.
+const CACHE_NAME = "nimr-sav-v23.3.59";
 const ASSETS = [
   "./",
   "./index.html",
   "./offline.html",
   "./rescue.html",
-  "./styles.css?v=23.3.58",
-  "./app.js?v=23.3.58",
+  "./styles.css?v=23.3.59",
+  "./app.js?v=23.3.59",
   "./manifest.webmanifest",
-  "./js/version.js?v=23.3.58",
+  "./js/version.js?v=23.3.59",
   "./supabase-schema.sql",
   "./assets/icon.svg",
   "./assets/icon-192.png",
   "./assets/icon-512.png",
   "./assets/apple-touch-icon.png",
-  "./vendor/pdf.min.js?v=23.3.58",
-  "./vendor/pdf.worker.min.js?v=23.3.58",
-  "./vendor/xlsx.mini.min.js?v=23.3.58",
-  "./js/utils.js?v=23.3.58",
-  "./js/state.js?v=23.3.58",
-  "./js/ui-cases.js?v=23.3.58",
-  "./js/estimate-import.js?v=23.3.58",
-  "./js/ui-planning.js?v=23.3.58",
-  "./js/photos.js?v=23.3.58",
-  "./js/storage.js?v=23.3.58",
-  "./js/work-hours-sync.js?v=23.3.58",
-  "./js/planning.js?v=23.3.58",
-  "./js/exports.js?v=23.3.58",
-  "./js/business-rules-v2187.js?v=23.3.58",
-  "./js/supabase-config.js?v=23.3.58",
-  "./js/supabase-client.js?v=23.3.58",
-  "./js/supabase-sync.js?v=23.3.58",
-  "./js/vn-part-client.js?v=23.3.58",
-  "./js/vn-part-ui.js?v=23.3.58",
+  "./vendor/pdf.min.js?v=23.3.59",
+  "./vendor/pdf.worker.min.js?v=23.3.59",
+  "./vendor/xlsx.mini.min.js?v=23.3.59",
+  "./js/utils.js?v=23.3.59",
+  "./js/state.js?v=23.3.59",
+  "./js/ui-reception.js?v=23.3.59",
+  "./js/ui-cases.js?v=23.3.59",
+  "./js/estimate-import.js?v=23.3.59",
+  "./js/ui-planning.js?v=23.3.59",
+  "./js/photos.js?v=23.3.59",
+  "./js/storage.js?v=23.3.59",
+  "./js/work-hours-sync.js?v=23.3.59",
+  "./js/planning.js?v=23.3.59",
+  "./js/exports.js?v=23.3.59",
+  "./js/business-rules-v2187.js?v=23.3.59",
+  "./js/supabase-config.js?v=23.3.59",
+  "./js/supabase-client.js?v=23.3.59",
+  "./js/supabase-sync.js?v=23.3.59",
+  "./js/vn-part-client.js?v=23.3.59",
+  "./js/vn-part-ui.js?v=23.3.59",
 ];
 
 async function precache() {
@@ -91,7 +93,7 @@ self.addEventListener("activate", (event) => {
 function isReleaseAsset(url) {
   try {
     const parsed = new URL(url);
-    return parsed.searchParams.get("v") === "23.3.58";
+    return parsed.searchParams.get("v") === "23.3.59";
   } catch {
     return false;
   }

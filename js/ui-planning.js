@@ -756,6 +756,13 @@ function renderResourceLeaves() {
 
 const WORKSHOP_USER_ADMIN_UI_ROLES = new Set(["admin_technique", "directeur"]);
 const WORKSHOP_USER_ADMIN_HUMAN_TYPES = new Set(["controle", "electricien", "mecanicien", "peintre", "tolier"]);
+const WORKSHOP_RESOURCE_LINK_ROLES = new Set([
+  "technicien",
+  "controle_qualite",
+  "chef_atelier",
+]);
+const RESOURCE_LINKED_ACCOUNT_ROLES = WORKSHOP_RESOURCE_LINK_ROLES;
+// RESOURCE_REQUIRED_ACCOUNT_ROLES is declared in js/state.js: new Set(["technicien", "controle_qualite"]);
 let workshopUserAdminCapabilityState = Object.freeze({
   status: "idle",
   contextKey: "",
@@ -966,7 +973,7 @@ function renderAccountAccessFoundation(snapshot = null) {
     : null;
   setText("account-auth-identity", model.authIdentity?.email || model.authIdentity?.id || "Aucune identité Supabase");
   setText("account-server-role", model.serverRole ? getAccountAccessRoleLabel(model.serverRole) : "Non validé");
-  setText("account-server-resource", model.resource?.name || model.serverResourceId || (model.serverRole === "technicien" ? "Ressource requise" : "Non requise"));
+  setText("account-server-resource", model.resource?.name || model.serverResourceId || (RESOURCE_REQUIRED_ACCOUNT_ROLES.has(model.serverRole) ? "Ressource requise" : "Non requise"));
   setText("account-session-state", sessionLabels[model.sessionStatus] || model.sessionStatus);
   setText("account-membership-state", membershipLabels[model.membershipStatus] || model.membershipStatus);
   setText("account-local-name", localUser?.name || localUser?.email || "Aucun profil local");
@@ -981,7 +988,7 @@ function renderAccountAccessFoundation(snapshot = null) {
   }
 
   const checkState = (condition, attention = false) => condition ? "pass" : (attention ? "attention" : "error");
-  const technicianRole = model.serverRole === "technicien";
+  const resourceRequired = RESOURCE_REQUIRED_ACCOUNT_ROLES.has(model.serverRole);
   const diagnostics = [
     {
       label: "Session Supabase",
@@ -1000,13 +1007,13 @@ function renderAccountAccessFoundation(snapshot = null) {
     },
     {
       label: "Ressource liée",
-      status: technicianRole ? checkState(Boolean(model.serverResourceId)) : "pass",
-      detail: technicianRole ? (model.serverResourceId || "Ressource technicien manquante") : "Non requise pour ce rôle",
+      status: resourceRequired ? checkState(Boolean(model.serverResourceId)) : "pass",
+      detail: resourceRequired ? (model.serverResourceId || "Ressource opérationnelle manquante") : "Non requise pour ce rôle",
     },
     {
       label: "Ressource humaine valide",
-      status: technicianRole ? checkState(model.technicianResourceStatus === "valid") : "pass",
-      detail: technicianRole ? (model.technicianResourceStatus === "valid" ? "Ressource humaine active" : "Liaison technicien à corriger") : "Non requise pour ce rôle",
+      status: resourceRequired ? checkState(model.technicianResourceStatus === "valid") : "pass",
+      detail: resourceRequired ? (model.technicianResourceStatus === "valid" ? "Ressource humaine active" : "Liaison de ressource à corriger") : "Non requise pour ce rôle",
     },
     {
       label: "Compte local actif",
@@ -1048,6 +1055,7 @@ function renderUsersAndRoles() {
   const serverManagementDecision = renderWorkshopUserAdminProvisioning(accountSnapshot);
 
   const canManageLocalUsers = typeof canRenderAction === "function" ? canRenderAction("users.manage") : false;
+  const canManageUsers = canManageLocalUsers;
   const canManageServerUsers = serverManagementDecision.allowed;
   const canViewManagedUsers = canManageLocalUsers || canManageServerUsers;
   const deniedTitle = canManageLocalUsers ? "" : (typeof getPermissionDeniedMessage === "function" ? getPermissionDeniedMessage("users.manage") : "Action réservée administrateur.");
@@ -1130,7 +1138,7 @@ function renderUsersAndRoles() {
     const isCurrent = user.id === state.currentUserId;
     const linkedResource = user.resourceId ? state.resources.find(r => r.id === user.resourceId) : null;
     const canonicalRole = getCanonicalUserRole(user);
-    const isTechWithoutRes = canonicalRole === "technicien" && !user.resourceId;
+    const isResourceRequiredWithoutRes = RESOURCE_REQUIRED_ACCOUNT_ROLES.has(canonicalRole) && !user.resourceId;
     const serverManagedProfile = typeof isServerManagedLocalProfile === "function" && isServerManagedLocalProfile(user);
     const serverManagedReadOnly = onlineAuthority && serverManagedProfile;
     const mutationDisabled = !canManageLocalUsers || serverManagedReadOnly;
@@ -1140,7 +1148,7 @@ function renderUsersAndRoles() {
     const isLastActiveTechnicalAdmin = canonicalRole === "admin_technique"
       && workshopUserAdminCapabilityState.activeAdminTechnicalCount <= 1;
     const canRenderOffboardAction = Boolean(serverManagedProfile && targetAuthUserId && serverManagementDecision.allowed);
-    const canLinkResource = canRenderOffboardAction && canonicalRole === "technicien" && workshopUserAdminCapabilityState.canLinkTechnicianResource;
+    const canLinkResource = canRenderOffboardAction && WORKSHOP_RESOURCE_LINK_ROLES.has(canonicalRole) && RESOURCE_LINKED_ACCOUNT_ROLES.has(canonicalRole) && workshopUserAdminCapabilityState.canLinkTechnicianResource;
     const offboardTitle = isCurrentServerIdentity
       ? "Vous ne pouvez pas retirer votre propre accès atelier."
       : (isLastActiveTechnicalAdmin
@@ -1155,7 +1163,7 @@ function renderUsersAndRoles() {
       : "";
     const isDuplicate = user.active !== false && user.email && activeUsers.some(ou => ou.id !== user.id && String(ou.email || "").trim().toLowerCase() === String(user.email || "").trim().toLowerCase() && getCanonicalUserRole(ou) === canonicalRole);
     const duplicateBadge = isDuplicate ? `<span class="tag warn" title="Un autre utilisateur actif a le même email et rôle !">Doublon</span>` : "";
-    const warnNoResource = isTechWithoutRes ? `<p class="risk-pill" style="margin-top: 6px; font-size: 0.8rem; font-weight: 700;">Aucune ressource technicien liée à cet utilisateur.</p>` : "";
+    const warnNoResource = isResourceRequiredWithoutRes ? `<p class="risk-pill" style="margin-top: 6px; font-size: 0.8rem; font-weight: 700;">Aucune ressource opérationnelle liée à cet utilisateur.</p>` : "";
     
     return `
       <article class="resource-card user-card ${isCurrent ? 'active' : ''}">
@@ -1177,7 +1185,7 @@ function renderUsersAndRoles() {
           ${warnNoResource}
         </div>
         <div class="resource-actions">
-          ${canLinkResource ? `<button class="primary-button" type="button" data-link-technician-resource="${escapeAttr(user.id)}">${isTechWithoutRes ? "Rattacher la ressource" : "Changer la ressource"}</button>` : ""}
+          ${canLinkResource ? `<button class="primary-button" type="button" data-link-workshop-resource="${escapeAttr(user.id)}">${user.resourceId ? "Changer la ressource" : "Rattacher la ressource"}</button>` : ""}
           <button class="ghost-button" type="button" data-edit-user="${escapeAttr(user.id)}" ${mutationDisabled ? `disabled title="${escapeAttr(mutationTitle)}"` : ""}>
             Modifier
           </button>
@@ -1206,7 +1214,7 @@ function renderUsersAndRoles() {
         : `${u.name} (${CANONICAL_USER_ROLES[canonicalRole] || USER_ROLES[u.role] || u.role})`;
       return `<option value="${escapeAttr(u.id)}" ${u.id === state.currentUserId ? 'selected' : ''}>${escapeHtml(displayLabel)}</option>`;
     }).join("");
-    switcher.disabled = onlineAuthority || !canManageLocalUsers;
+    switcher.disabled = onlineAuthority || !canManageUsers;
     switcher.title = onlineAuthority
       ? "La session Supabase reste autoritaire. Déconnectez-vous pour changer de compte."
       : (canManageLocalUsers ? "Sélecteur de compatibilité locale hors ligne" : deniedTitle);
@@ -1298,19 +1306,24 @@ function renderUsersAndRoles() {
       notifyUser(message, result.code === "AUTH_CLEANUP_PENDING" ? "warn" : "success");
     });
   });
-  $$("[data-link-technician-resource]", list).forEach(button => {
+  $$("[data-link-workshop-resource]", list).forEach(button => {
     button.addEventListener("click", async () => {
-      const user = getUserById(button.dataset.linkTechnicianResource);
-      if (!user || !isServerManagedLocalProfile(user) || getCanonicalUserRole(user) !== "technicien") return;
+      const user = getUserById(button.dataset.linkWorkshopResource);
+      if (!user || !isServerManagedLocalProfile(user) || !RESOURCE_LINKED_ACCOUNT_ROLES.has(getCanonicalUserRole(user))) return;
       await refreshWorkshopUserAdminCapabilities({force: true});
       const decision = getWorkshopUserAdminUiDecision();
       const capability = workshopUserAdminCapabilityState;
       if (!decision.allowed || !capability.canLinkTechnicianResource) return notifyUser(decision.reason || "Gestion de liaison indisponible.", "error");
       const member = capability.members.find(candidate => String(candidate.user_id) === String(user.authUserId));
-      if (!member || member.role !== "technicien") return notifyUser("Compte technicien actif introuvable dans cet atelier.", "error");
-      const resources = capability.humanResources.filter(resource => !capability.members.some(candidate => String(candidate.user_id) !== String(user.authUserId) && String(candidate.resource_id) === resource.id));
-      const resourceId = await showInputPromptModal({title:"Ressource du compte technicien",
-        message:`${escapeHtml(user.name || user.email)} : choisissez la personne dont ce compte doit afficher les travaux.`,
+      if (!member || !WORKSHOP_RESOURCE_LINK_ROLES.has(member.role)) return notifyUser("Compte actif introuvable dans cet atelier.", "error");
+      const userRole = getCanonicalUserRole(user);
+      const isControlRole = ["controle_qualite", "chef_atelier"].includes(userRole);
+      const unassignedResources = capability.humanResources.filter(resource => !capability.members.some(candidate => String(candidate.user_id) !== String(user.authUserId) && String(candidate.resource_id) === resource.id));
+      const resources = isControlRole
+        ? unassignedResources.filter(resource => resource.type === "controle")
+        : unassignedResources;
+      const resourceId = await showInputPromptModal({title:"Ressource opérationnelle du compte",
+        message:`${escapeHtml(user.name || user.email)} : choisissez la ressource humaine à associer à ce compte.`,
         options:[["", "Choisir une ressource"], ...resources.map(resource => [resource.id, `${resource.name} · ${ROLE_LABELS[resource.type] || resource.type}`])],
         defaultValue:member.resource_id || "", confirmLabel:"Enregistrer la liaison"});
       if (resourceId === null) return;
@@ -1319,7 +1332,7 @@ function renderUsersAndRoles() {
       button.disabled = true;
       try {
         const result = await invokeWorkshopUserAdmin("link_technician_resource", {user_id:user.authUserId, resource_id:resource.id, expected_resource_id:member.resource_id || null});
-        if (!result?.ok || String(result.member?.user_id) !== String(user.authUserId) || String(result.member?.resource_id) !== resource.id || result.member?.role !== "technicien" || result.member?.workshop_id !== capability.workshopId) {
+        if (!result?.ok || String(result.member?.user_id) !== String(user.authUserId) || String(result.member?.resource_id) !== resource.id || result.member?.role !== member.role || result.member?.workshop_id !== capability.workshopId) {
           return notifyUser(result?.message || "La liaison n'a pas été confirmée par le serveur.", "error");
         }
         const localResource = state.resources.find(candidate => candidate.id === resource.localId || candidate.id === resource.id);
@@ -1330,7 +1343,7 @@ function renderUsersAndRoles() {
         }
         await refreshWorkshopUserAdminCapabilities({force:true});
         renderUsersAndRoles();
-        notifyUser(`Compte rattaché à ${resource.name}. Reconnectez le technicien pour charger ses travaux.`, "success");
+        notifyUser(`Compte rattaché à ${resource.name}. Reconnectez l'utilisateur pour actualiser ses droits.`, "success");
       } finally { button.disabled = false; }
     });
   });

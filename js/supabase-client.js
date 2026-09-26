@@ -31,6 +31,12 @@ const SEC001_SERVER_WORKSHOP_ROLES = new Set([
   "responsable_qualite_parc_vn",
 ]);
 
+const RESOURCE_LINKED_WORKSHOP_ROLES = new Set([
+  "technicien",
+  "controle_qualite",
+  "chef_atelier",
+]);
+
 function getSupabaseConfig() {
   return window.NIMR_SUPABASE_CONFIG || {};
 }
@@ -637,27 +643,51 @@ async function resolveSupabaseWorkshopMembership(authUser) {
       return { ok: false, message: "L'appartenance ne correspond pas au compte et à l'atelier connectés.", code: "MEMBERSHIP_IDENTITY_MISMATCH" };
     }
 
-    // The membership stores the server UUID; the local planning uses local_id.
+    // The membership stores the server UUID; local planning uses local_id.
     let resourceLocalId = "";
-    if (rawRole === "technicien" && data.resource_id) {
+
+    if (RESOURCE_LINKED_WORKSHOP_ROLES.has(rawRole) && data.resource_id) {
       const { data: resource, error: resourceError } = await client
         .from("planning_resources")
         .select("id, workshop_id, local_id, type, active, deleted_at")
         .eq("workshop_id", workshopId)
         .eq("id", data.resource_id)
         .maybeSingle();
+
       if (resourceError) {
-        return { ok: false, message: "Impossible de vérifier votre ressource atelier. Réessayez la connexion.", code: "RESOURCE_LOOKUP_FAILED" };
+        return {
+          ok: false,
+          message: "Impossible de verifier votre ressource atelier. Reessayez la connexion.",
+          code: "RESOURCE_LOOKUP_FAILED",
+        };
       }
-      if (resource
+
+      const resourceType = String(resource?.type || "").trim();
+
+      const humanResourceTypes = [
+        "tolier",
+        "peintre",
+        "mecanicien",
+        "electricien",
+        "controle",
+      ];
+
+      const roleCompatible = rawRole === "technicien"
+        ? humanResourceTypes.includes(resourceType)
+        : resourceType === "controle";
+
+      if (
+        resource
         && String(resource.id || "") === String(data.resource_id)
         && String(resource.workshop_id || "") === workshopId
         && resource.active === true
         && !resource.deleted_at
-        && ["tolier", "peintre", "mecanicien", "electricien", "controle"].includes(String(resource.type || "").trim())) {
+        && roleCompatible
+      ) {
         resourceLocalId = String(resource.local_id || "").trim();
       }
     }
+
     return {
       ok: true,
       membership: {

@@ -42,8 +42,8 @@ assert.equal(c.getCaseOperationalPhase(item).key,'preparing','blocking an unstar
 run(`state.bookings[0].status='started'; state.bookings[0].actualStart='2026-09-06T08:00:00Z';`);
 assert.equal(c.getCaseOperationalPhase(item).key,'in_progress');
 assert.equal(c.caseMatchesStatusFilter(item,'phase:in_progress'),true);
-assert.equal(c.getDefaultTabForRole('controle_qualite'),'today');
-assert.deepEqual(Array.from(c.getAllowedTabsForRole('controle_qualite')),['today','dossiers']);
+assert.equal(c.getDefaultTabForRole('controle_qualite'),'technician');
+assert.deepEqual(Array.from(c.getAllowedTabsForRole('controle_qualite')),['today','dossiers','technician']);
 run(`state.currentUserId='cq'; state.users.push({id:'cq',role:'controle_qualite',active:true});`);
 assert.equal(c.recordClientCommitment(item,{note:'forbidden'}).ok,false,'QC cannot alter client commitments');
 assert.throws(()=>c.createMinimalReceptionCase({identity:'123',visitReason:'No'}));

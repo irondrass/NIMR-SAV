@@ -57,7 +57,19 @@ await withBrowserPage(root, async ({ send, sessionId, url, findings, evaluate, w
   assert.equal(beforeLogout.cachedCases, 1, "le dossier doit être confirmé dans IndexedDB avant déconnexion");
   assert.equal(beforeLogout.marker.largeState, true, "localStorage doit rester un marqueur compact lorsque IndexedDB est primaire");
   assert.equal(Object.hasOwn(beforeLogout.marker, "cases"), false, "le cache métier complet ne doit pas rester dans localStorage");
-  assert.deepEqual(beforeLogout.outbox.map((entry) => ({
+  const repairOutboxBeforeLogout = beforeLogout.outbox.filter(
+    (entry) =>
+      entry.entityType === "repair_order"
+      && entry.entityId === "case-persistence-v2328"
+  );
+
+  assert.equal(
+    repairOutboxBeforeLogout.length,
+    1,
+    "exactement une mutation repair_order cible doit exister avant logout"
+  );
+
+  assert.deepEqual(repairOutboxBeforeLogout.map((entry) => ({
     operationId: entry.operationId,
     idempotencyKey: entry.idempotencyKey,
     entityType: entry.entityType,
@@ -83,8 +95,17 @@ await withBrowserPage(root, async ({ send, sessionId, url, findings, evaluate, w
     retryCount: 0,
     lastError: "",
     syncStatus: "pending",
-  }], "l'outbox IndexedDB doit conserver le contrat complet avant logout");
-  assert.equal(Object.hasOwn(beforeLogout.mirror[0] || {}, "payload"), false, "le miroir localStorage de l'outbox doit rester compact");
+  }], "la mutation repair_order doit conserver son contrat complet avant logout");
+
+  const repairMirrorBeforeLogout = beforeLogout.mirror.find(
+    (entry) => entry.operationId === "operation-persistence-v2328"
+  ) || {};
+
+  assert.equal(
+    Object.hasOwn(repairMirrorBeforeLogout, "payload"),
+    false,
+    "le miroir localStorage repair_order doit rester compact"
+  );
 
   await evaluate("window.__nimrAppReady = false");
   await send("Page.navigate", { url: `${url}?after-logout=${Date.now()}` }, sessionId);
@@ -97,16 +118,28 @@ await withBrowserPage(root, async ({ send, sessionId, url, findings, evaluate, w
   assert.deepEqual(afterLogoutReload.cases, [{ id: "case-persistence-v2328", plate: "PERSIST-001" }]);
   assert.equal(afterLogoutReload.currentUserId, "");
   assert.equal(afterLogoutReload.indexedDbPrimary, true);
-  const outboxAfterLogoutReload = await evaluate(`loadDurableOutboxOperations().then((records) => records.map((entry) => ({
-    operationId: entry.operationId,
-    syncStatus: entry.syncStatus,
-    payload: entry.payload,
-  })))`);
+  const outboxAfterLogoutReload = await evaluate(`loadDurableOutboxOperations().then((records) => records
+    .filter((entry) =>
+      entry.entityType === "repair_order"
+      && entry.entityId === "case-persistence-v2328"
+    )
+    .map((entry) => ({
+      operationId: entry.operationId,
+      syncStatus: entry.syncStatus,
+      payload: entry.payload,
+    })))`);
+
+  assert.equal(
+    outboxAfterLogoutReload.length,
+    1,
+    "logout/reload doit conserver exactement une mutation repair_order cible"
+  );
+
   assert.deepEqual(outboxAfterLogoutReload, [{
     operationId: "operation-persistence-v2328",
     syncStatus: "pending",
     payload: { plate: "PERSIST-001", mutation: "offline" },
-  }], "logout/reload ne doit ni perdre ni acquitter artificiellement l'opération hors ligne");
+  }], "logout/reload doit conserver intacte la mutation repair_order hors ligne");
 
   await evaluate(`(async () => {
     state.currentUserId = "persist-user";
@@ -123,6 +156,23 @@ await withBrowserPage(root, async ({ send, sessionId, url, findings, evaluate, w
     caseCount: state.cases.length,
   })`);
   assert.deepEqual(afterRelogin, { currentUserId: "persist-user", caseId: "case-persistence-v2328", caseCount: 1 });
+
+  const outboxAfterRelogin = await evaluate(`loadDurableOutboxOperations().then((records) => records
+    .filter((entry) =>
+      entry.entityType === "repair_order"
+      && entry.entityId === "case-persistence-v2328"
+    )
+    .map((entry) => ({
+      operationId: entry.operationId,
+      syncStatus: entry.syncStatus,
+      payload: entry.payload,
+    })))`);
+
+  assert.deepEqual(outboxAfterRelogin, [{
+    operationId: "operation-persistence-v2328",
+    syncStatus: "pending",
+    payload: { plate: "PERSIST-001", mutation: "offline" },
+  }], "relogin doit retrouver exactement la mutation repair_order attendue");
   assert.deepEqual(findings, [], `zéro console.error/pageerror attendu : ${JSON.stringify(findings)}`);
 });
 

@@ -189,22 +189,101 @@ assert.equal(run("window.__nimrValidatedAuthUserId"), "auth-admin", "failed clou
 assert.equal(elements.get("first-access-overlay").hidden, true, "failed cloud logout must not display a false fresh-login state");
 assert.equal(elements.get("supabase-config-form").children[0].disabled, false, "failed cloud logout preserves authenticated permissions");
 assert.equal(run("stopCalls"), failedLogoutStopCalls, "failed cloud logout must not stop the active session as if logout succeeded");
-
-run(`signOutSupabaseSession = async () => ({ ok: true });`);
+  const stopCallsBeforeSuccessfulLogout = run("stopCalls");
+  run(`signOutSupabaseSession = async () => ({ ok: true });`);
 const successfulLogout = await run("triggerLogout()");
 assert.equal(successfulLogout.ok, true, "confirmed cloud logout succeeds");
 assert.equal(run("state.currentUserId"), "", "confirmed cloud logout clears currentUserId");
 assert.equal(run("window.__nimrValidatedAuthUserId"), "", "confirmed cloud logout clears validated auth marker");
 assert.equal(elements.get("supabase-login-email").disabled, true, "logout disables Supabase session controls");
 assert.equal(elements.get("supabase-test").disabled, true, "logout disables operational sync controls");
-assert.equal(run("stopCalls") > 0, true, "logout stops Realtime");
+  assert.equal(run("stopCalls") > stopCallsBeforeSuccessfulLogout, true, "confirmed logout requests Realtime stop after sync-read authority is removed");
 assert.equal(elements.get("first-access-overlay").hidden, false, "confirmed cloud logout displays the cloud login gate");
+  const stopCallsBeforeReadonly = run("stopCalls");
 
-const stopCallsBeforeDowngrade = run("stopCalls");
-run(`state.currentUserId = "readonly"; window.__nimrValidatedAuthUserId = "auth-readonly"; refreshSupabasePermissionState("validated-readonly");`);
-assert.equal(elements.get("supabase-test").disabled, true, "downgrade disables operational sync controls");
-assert.equal(run("stopCalls") > stopCallsBeforeDowngrade, true, "role downgrade stops Realtime again");
+  run(`state.currentUserId = "readonly"; window.__nimrValidatedAuthUserId = "auth-readonly"; refreshSupabasePermissionState("validated-readonly");`);
 
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.equal(
+    elements.get("supabase-test").disabled,
+    true,
+    "readonly disables operational sync controls"
+  );
+
+  assert.equal(
+    run(`getCurrentUser().role`),
+    "lecture_seule",
+    "readonly mirror keeps the canonical lecture_seule role"
+  );
+
+  assert.equal(
+    run(`hasPermission("workshop.sync.read", { user: getCurrentUser() })`),
+    true,
+    "lecture_seule retains workshop.sync.read"
+  );
+
+  assert.equal(
+    run(`hasPermission("workshop.sync.write", { user: getCurrentUser() })`),
+    false,
+    "lecture_seule has no workshop.sync.write authority"
+  );
+
+  assert.equal(
+    run("stopCalls"),
+    stopCallsBeforeReadonly,
+    "readonly refresh must not stop Realtime while workshop.sync.read remains granted"
+  );
+
+  const stopCallsBeforeNoRead = run("stopCalls");
+  const startCallsBeforeNoRead = run("startCalls");
+
+  run(`
+    globalThis.__nimrTestReadonlyPermissions = [...ROLE_PERMISSIONS.lecture_seule];
+    ROLE_PERMISSIONS.lecture_seule = ROLE_PERMISSIONS.lecture_seule.filter(
+      (permission) => permission !== "workshop.sync.read"
+    );
+    refreshSupabasePermissionState("validated-readonly-no-sync-read");
+  `);
+
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.equal(
+    run(`hasPermission("workshop.sync.read", { user: getCurrentUser() })`),
+    false,
+    "controlled no-read fixture must actually remove workshop.sync.read"
+  );
+
+  assert.equal(
+    run("stopCalls") > stopCallsBeforeNoRead,
+    true,
+    "losing workshop.sync.read must request Realtime stop"
+  );
+
+  assert.equal(
+    run("startCalls"),
+    startCallsBeforeNoRead,
+    "no-read refresh must not restart Realtime"
+  );
+
+  assert.equal(
+    elements.get("supabase-test").disabled,
+    true,
+    "no-read state keeps operational sync controls disabled"
+  );
+
+  run(`
+    ROLE_PERMISSIONS.lecture_seule = [...globalThis.__nimrTestReadonlyPermissions];
+    delete globalThis.__nimrTestReadonlyPermissions;
+  `);
+
+  assert.equal(
+    run(`hasPermission("workshop.sync.read", { user: getCurrentUser() })`),
+    true,
+    "test fixture must restore lecture_seule workshop.sync.read after no-read scenario"
+  );
 run(`state = normalizeState({ users: [], currentUserId: "" });
 const authenticatedMembership = syncLocalUserFromSupabaseMembership(directorAuthUser, directorMembership);
 window.__nimrValidatedAuthUserId = directorAuthUser.id;

@@ -251,10 +251,20 @@ check("D lookup workload excludes one-time index construction", () => {
   const lookups = SCALE_TIERS.map((count) => tierRuns.get(count).stats.indexLookups);
   assert.deepEqual(lookups, [lookups[0], lookups[0], lookups[0]]);
   assert.ok(lookups[0] > 0);
-  assert.deepEqual(SCALE_TIERS.map((count) => metrics.tiers[count].indexBuildRows), SCALE_TIERS);
+  // L'overhead d'overlay correspond exactement aux étapes planifiées du dossier cible (scale-parity) :
+  // 1 booking pour la tâche productive 'body' + 1 booking pour le jalon QC obligatoire 'quality'.
+  const baselineProposal = tierRuns.get(0).proposal;
+  const productiveBookingsCount = baselineProposal.steps.filter((s) => s.key !== "quality").length;
+  const qcBookingsCount = baselineProposal.steps.filter((s) => s.key === "quality").length;
+  assert.equal(productiveBookingsCount, 1, "Le dossier cible comporte exactement 1 tâche productive (body)");
+  assert.equal(qcBookingsCount, 1, "Le dossier cible comporte exactement 1 jalon QC obligatoire (quality)");
+  const expectedOverlayCount = productiveBookingsCount + qcBookingsCount;
+  assert.equal(expectedOverlayCount, 2, "L'overhead d'overlay en fin de planification est de 2 bookings (1 productif + 1 QC)");
+
   assert.deepEqual(
     SCALE_TIERS.map((count) => tierRuns.get(count).conflictStats.sourceCount),
-    SCALE_TIERS,
+    SCALE_TIERS.map((count) => count + expectedOverlayCount),
+    "Le nombre total de sources de conflit dans la vue indexée doit être exactement tierCount + (tâches productives + jalon QC)",
   );
   const candidateRows = SCALE_TIERS.map((count) => tierRuns.get(count).conflictStats.candidateCount);
   assert.deepEqual(candidateRows, [candidateRows[0], candidateRows[0], candidateRows[0]]);
@@ -295,7 +305,7 @@ check("F relevant conflict behavior is unchanged by 10000 unrelated rows", () =>
   assert.equal(scaled.stats.fullArrayScansInCandidateLoops, 0);
   assert.equal(scaled.stats.candidateEvaluations, relevantOnly.stats.candidateEvaluations);
   assert.equal(scaled.conflictStats.candidateCount, relevantOnly.conflictStats.candidateCount);
-  assert.equal(scaled.conflictStats.sourceCount, 10001);
+  assert.equal(scaled.conflictStats.sourceCount, 10000 + relevantOnly.conflictStats.sourceCount);
   assert.equal(scaled.conflictStats.indexed, true);
 });
 
@@ -324,15 +334,18 @@ check("H fixed-resource 600-minute work stays bounded at scale", () => {
     planningTasks: [canonicalTask("long-body", "body", [], { durationMinutes: 600, resourceIds: ["body-1"] })],
   };
   const result = generate(item, { bookings: unrelatedBookings(10000) });
-  const step = result.proposal.steps[0];
+  const productiveSteps = result.proposal.steps.filter((step) => step.key !== "quality");
+  const qualitySteps = result.proposal.steps.filter((step) => step.key === "quality");
+  assert.equal(productiveSteps.length, 1, "Une seule tâche productive de 600 min");
+  assert.equal(qualitySteps.length, 1, "Un jalon QC final distinct");
+  const step = productiveSteps[0];
   metrics.longWork600 = { indexedView: result.stats, slotSearch: result.slotStats };
-  assert.equal(result.proposal.steps.length, 1);
   assert.ok(step.segments.length > 1);
   assert.equal(productiveMinutes(step), 600);
   assert.deepEqual(step.resourceIds, ["body-1"]);
   assert.ok(result.slotStats.candidateEvaluations <= 1);
   assert.ok(result.slotStats.slotRebuilds <= 1);
-  assert.equal(result.slotStats.daysSearched, 2);
+  assert.equal(result.stats.daysSearched, 2);
   assert.equal(result.stats.fullArrayScansInCandidateLoops, 0);
 });
 
@@ -471,15 +484,22 @@ check("O forty-task canonical graph preserves every node and edge", () => {
     }
   }
   const result = generate({ id: "scale-graph-40", planningTasks: tasks }, { resources, bookings: unrelatedBookings(10000) });
-  assert.equal(result.proposal.steps.length, 40);
-  assert.equal(new Set(result.proposal.steps.map((step) => step.taskId)).size, 40);
-  assert.deepEqual(result.proposal.steps.map((step) => step.taskId).sort(), tasks.map((task) => task.taskId).sort());
+  const productiveSteps = result.proposal.steps.filter((step) => step.key !== "quality");
+  const qualitySteps = result.proposal.steps.filter((step) => step.key === "quality");
+
+  assert.equal(productiveSteps.length, 40, "40 tâches productives dans le graphe");
+  assert.equal(qualitySteps.length, 1, "Un jalon QC final distinct");
+  assert.equal(result.proposal.steps.length, 41, "Total des nœuds = 40 productifs + 1 QC");
+  assert.equal(new Set(productiveSteps.map((step) => step.taskId)).size, 40);
+  assert.deepEqual(productiveSteps.map((step) => step.taskId).sort(), tasks.map((task) => task.taskId).sort());
   for (const task of tasks) {
-    const step = result.proposal.steps.find((entry) => entry.taskId === task.taskId);
+    const step = productiveSteps.find((entry) => entry.taskId === task.taskId);
     assert.equal(step.businessTaskId, task.taskId);
     assert.deepEqual(step.dependencies, task.dependencies);
     assert.equal(step.primaryResourceId, resourceId);
   }
+  const lastProductiveEnd = Math.max(...productiveSteps.map((s) => new Date(s.end).getTime()));
+  assert.ok(new Date(qualitySteps[0].start).getTime() >= lastProductiveEnd, "Le QC est planifié après l'achèvement de toutes les tâches productives");
 });
 
 check("O-conflict conflicting direct resourceIds across same-specialty tasks fail closed at scale", () => {

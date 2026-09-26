@@ -94,7 +94,8 @@ check("E Administration group placed in administration workspace with sensitive 
   assert.ok(adminPanelMatch, "Administration panel exists");
   const adminHtml = adminPanelMatch[0];
 
-  assert.match(adminHtml, /class="panel users-roles-panel"\s+data-admin-technical-panel/u);
+  assert.match(adminHtml, /class="panel users-roles-panel"/u);
+  assert.match(adminHtml, /class="panel security-panel"\s+data-admin-technical-panel/u);
   assert.match(adminHtml, /id="user-form"/u);
   assert.match(adminHtml, /id="users-list"/u);
   assert.match(adminHtml, /id="export-encrypted-backup"/u);

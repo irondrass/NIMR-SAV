@@ -31,12 +31,27 @@ const {result,errors} = await runMobileCdpTest({name:'audit-completion',cdpPort:
   await evaluate(`state.cases[0].flags.workCompleted=true; state.bookings[0].status='completed'; state.bookings[0].remainingMinutes=0; state.currentUserId=state.users[0].id; state.users[0].role='controle_qualite'; invalidateUiRuntimeIndexes(); setActiveTab('today'); render();`);
   assert.equal(await evaluate(`document.querySelectorAll('#workshop-progress-board [data-workshop-progress-case]').length`),1,'CQ only sees its finalization queue');
   await click('#workshop-progress-board [data-workshop-progress-case]');
-  await click('[data-operational-action="quality"]');
-  await waitFor(`!document.querySelector('#custom-modal-overlay').hidden`,'quality confirmation');
-  assert.equal(await evaluate(`document.querySelector('#operational-case-dialog').contains(document.querySelector('#custom-modal-overlay'))`),true,'confirmation remains above the native dialog');
-  await click('#custom-modal-confirm');
-  await waitFor(`state.cases[0].flags.qualityApproved===true`,'QC decision');
-  await waitFor(`document.querySelector('#operational-case-dialog [data-operational-action="quality"]')===null`,'durable quality decision rendered before the next user takes over');
+  // UI integration only: the dedicated RPC response is a fixture, not server authorization evidence.
+  assert.equal(await evaluate(`document.querySelector('[data-operational-action="quality"]')===null`),true);
+  await waitFor(`document.querySelector('#operational-case-dialog #reception-quality-form')!==null`,'professional QC form');
+  await evaluate(`window.__qcRequests=[]; window.submitSupabaseQualityReview=async (request)=>{
+    window.__qcRequests.push(request);
+    const payload=JSON.parse(JSON.stringify(state.cases.find(c=>c.id===request.caseId)));
+    payload.flags.qualityApproved=true;
+    payload.qualityChecklist=request.checklist;
+    payload.receptionWorkflow.qualityStatus='validated';
+    payload.receptionWorkflow.qualityReviewedAt=new Date().toISOString();
+    payload.receptionWorkflow.readyForDeliveryAt=new Date().toISOString();
+    return {ok:true,data:{accepted:true,canonical:{entity_type:'case',entity_id:request.caseId,
+      workshop_id:getSupabaseWorkshopId(),entity_version:2,payload}}};
+  };`);
+  await evaluate(`(()=>{const f=document.querySelector('#reception-quality-form'); f.elements.qualityStatus.value='validated'; f.requestSubmit();})()`);
+  assert.equal(await evaluate(`window.__qcRequests.length`),0,'incomplete checklist cannot submit');
+  assert.equal(await evaluate(`state.cases[0].flags.qualityApproved`),false);
+  await evaluate(`(()=>{const f=document.querySelector('#reception-quality-form'); f.querySelectorAll('[name=qualityCheck]').forEach(s=>s.value='ok'); f.requestSubmit();})()`);
+  await waitFor(`state.cases[0].flags.qualityApproved===true`,'canonical QC response adopted');
+  assert.equal(await evaluate(`window.__qcRequests.length`),1,'one dedicated QC RPC');
+  await waitFor(`document.querySelector('#operational-case-dialog #reception-quality-form')===null`,'durable quality decision rendered before the next user takes over');
   assert.equal(await evaluate(`document.querySelector('#operational-case-dialog [data-operational-action="deliver"]')===null`),true);
   await click('#operational-case-dialog [data-close]');
   assert.equal(await evaluate(`document.querySelector('#custom-modal-overlay') !== null`),true,'closing a panel must preserve the shared confirmation dialog');

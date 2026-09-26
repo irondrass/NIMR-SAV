@@ -427,7 +427,8 @@ check("O legacy constrained planningTask remains explicit", () => {
   assert.deepEqual(explicitTasks[0].resourceIds, ["body-2"]);
 
   const proposal = toPlain(run("schedulePipeline(state.cases[0], new Date(__p1003Start), [])"));
-  assert.equal(proposal.steps.length, 1);
+  assert.equal(proposal.steps.length, 2);
+  assert.equal(proposal.steps[1].key, "quality", "QC final follows the constrained productive operation");
   assert.equal(proposal.steps[0].taskId, "legacy-hard-resource");
   assert.deepEqual(proposal.steps[0].resourceIds, ["body-2"]);
 });

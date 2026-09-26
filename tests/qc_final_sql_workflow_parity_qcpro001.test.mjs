@@ -69,6 +69,7 @@ test('R1 effective SQL — final internal RPC and public wrapper replace the ear
     '20260922210000_lot20b_qc_v3_server.sql',
     '20260923064000_qc_pro_dynamic_checklist_server.sql',
     '20260923213000_qc_pro_booking_authority_hardening.sql',
+    '20260926195055_qc_gate0_atomic_booking_completion.sql',
   ]);
   const wrapper = definitions('public.nimr_apply_quality_review_v3').at(-1);
   assert.equal(wrapper.file, final.file);

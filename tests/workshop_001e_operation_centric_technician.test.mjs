@@ -29,7 +29,7 @@ function unchanged(rel) {
 test("1 current technician focus is operation-first", () => {
   assert.match(uiCases, /const operationTitle = getPlanningOperationTitle\(booking\)/u);
   assert.match(uiCases, /<h2>\$\{escapeHtml\(operationTitle\)\}<\/h2>/u);
-  assert.match(uiCases, /Opération actuelle/u);
+  assert.match(uiCases, /in_progress:\s*"Opération en cours"/u);
 });
 
 test("2 current technician phase stays secondary", () => {

@@ -34,6 +34,34 @@
   --safe-left: env(safe-area-inset-left, 0px);
   --safe-right: env(safe-area-inset-right, 0px);
   font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  /* UX-FOUNDATION-001 — Design tokens */
+  /* Typography families — declaration only */
+  --font-body: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-heading: Outfit, Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  /* Type scale — declaration only */
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.5rem;
+
+  /* Spacing scale — declaration only */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* Safe missing tokens — existing fallbacks preserved */
+  --line-focus: #94a3b8;
+  --panel: #ffffff;
+  --primary: #004085;
+  --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.07);
+  --surface-soft: #f6fafc;
 }
 
 /* PRELEVEMENT-AUDIT-001B — contrôle simple des pièces par OR */
@@ -877,7 +905,7 @@ main {
 }
 
 .risk-attention {
-  border-left-color: #d97706;
+  border-left-color: var(--accent);
 }
 
 .risk-urgent,
@@ -892,7 +920,7 @@ main {
 }
 
 .risk-attention .risk-pill {
-  color: #8a4b00;
+  color: var(--warn-text);
   background: #fff0d7;
 }
 
@@ -982,7 +1010,7 @@ main {
 }
 
 .workshop-live-technician-card.status-in_progress { border-left-color: var(--ok); }
-.workshop-live-technician-card.status-paused { border-left-color: #d97706; }
+.workshop-live-technician-card.status-paused { border-left-color: var(--accent); }
 .workshop-live-technician-card.status-blocked { border-left-color: var(--danger); }
 .workshop-live-technician-card.status-available { border-left-color: var(--brand); }
 
@@ -1315,7 +1343,7 @@ button.workshop-live-task:hover { border-color: color-mix(in srgb, var(--brand) 
 
 .technician-task-card.task-status-paused,
 .technician-task-card.task-status-quality_pending {
-  border-left-color: #d97706;
+  border-left-color: var(--accent);
 }
 
 .technician-task-card.task-status-blocked,
@@ -1432,7 +1460,7 @@ button.workshop-live-task:hover { border-color: color-mix(in srgb, var(--brand) 
 
 .workshop-field-card.success { border-left-color: #1f7a54; }
 .workshop-field-card.info { border-left-color: #2563eb; }
-.workshop-field-card.warn { border-left-color: #d97706; }
+.workshop-field-card.warn { border-left-color: var(--accent); }
 .workshop-field-card.danger { border-left-color: #b54040; }
 
 .panel-list {
@@ -1887,7 +1915,7 @@ select:focus {
 }
 
 .tag.priority-attention {
-  color: #8a4b00;
+  color: var(--warn-text);
   background: #fff0d7;
 }
 
@@ -2713,7 +2741,7 @@ select:focus {
 .account-source-badge.local {
   border-color: #d9dce3;
   background: #f5f6f8;
-  color: #475569;
+  color: var(--muted);
 }
 
 .account-overall-status[data-status="active"] {
@@ -2817,7 +2845,7 @@ select:focus {
   display: grid;
   gap: 7px;
   padding-left: 30px;
-  border-left-color: #d97706;
+  border-left-color: var(--accent);
   background: #fff8e5;
   color: #653d08;
 }
@@ -3084,7 +3112,7 @@ select:focus {
 
 .sav-kpi-card.success { border-left-color: #1f7a54; }
 .sav-kpi-card.info { border-left-color: #2563eb; }
-.sav-kpi-card.warn { border-left-color: #d97706; }
+.sav-kpi-card.warn { border-left-color: var(--accent); }
 .sav-kpi-card.danger { border-left-color: #b54040; }
 
 .sav-dashboard-load-grid {
@@ -3125,7 +3153,7 @@ select:focus {
 
 .sav-load-card.neutral { border-left-color: #8aa4b2; }
 .sav-load-card.info { border-left-color: #2563eb; }
-.sav-load-card.warn { border-left-color: #d97706; }
+.sav-load-card.warn { border-left-color: var(--accent); }
 .sav-load-card.danger { border-left-color: #b54040; }
 
 .pilotage-alert-block {
@@ -3899,7 +3927,7 @@ textarea:focus-visible,
 select:focus-visible,
 a:focus-visible,
 [tabindex]:focus-visible {
-  outline: 3px solid #f59e0b;
+  outline: 3px solid var(--warn);
   outline-offset: 3px;
   box-shadow: 0 0 0 5px rgba(245, 158, 11, 0.24);
 }
@@ -3913,7 +3941,7 @@ a:focus-visible,
 .filter-pill:focus-visible,
 .case-card:focus-visible,
 .touch-action-btn:focus-visible {
-  outline-color: #f59e0b;
+  outline-color: var(--warn);
   outline-offset: 4px;
 }
 
@@ -4110,8 +4138,8 @@ a:focus-visible,
 
 .pilotage-alert strong { font-size: 0.95rem; }
 .pilotage-alert span { color: var(--muted); font-size: 0.86rem; }
-.pilotage-alert.warn { border-color: #d97706; }
-.pilotage-alert.danger { border-color: #dc2626; }
+.pilotage-alert.warn { border-color: var(--accent); }
+.pilotage-alert.danger { border-color: var(--danger); }
 .pilotage-alert.info { border-color: #2563eb; }
 .pilotage-alert:hover, .pilotage-alert:focus-visible { transform: translateY(-1px); box-shadow: var(--shadow); }
 
@@ -4686,7 +4714,7 @@ a:focus-visible,
   text-transform: uppercase;
 }
 .task-status-started .task-status-pill {
-  background: #e0f2fe;
+  background: var(--brand-light);
   color: #075985;
 }
 .task-status-paused .task-status-pill {
@@ -4826,7 +4854,7 @@ a:focus-visible,
 }
 .technician-override-field span {
   font-weight: 800;
-  color: #0f3b57;
+  color: var(--brand);
 }
 .technician-override-field small {
   color: #60798c;
@@ -5086,7 +5114,7 @@ a:focus-visible,
 }
 
 .offline-banner strong {
-  color: #8a4b00;
+  color: var(--warn-text);
 }
 
 .offline-page {
@@ -5804,7 +5832,7 @@ a:focus-visible,
 
 /* Flux atelier: préparation anticipée des pièces neuves/remplacées depuis le planning */
 .validated-plan-row.anticipated-new-part-row {
-  border-left: 4px solid #d97706;
+  border-left: 4px solid var(--accent);
   background: linear-gradient(90deg, rgba(217, 119, 6, 0.10), rgba(255, 255, 255, 0.92));
 }
 .validated-plan-row.anticipated-new-part-row strong {
@@ -6586,11 +6614,11 @@ a:focus-visible,
 
 .step-option-confirm { color: #16a34a; border-color: #16a34a; }
 .step-option-confirm:hover { background: rgba(22, 163, 74, 0.06); }
-.step-option-warning { color: var(--accent-text); border-color: #d97706; }
+.step-option-warning { color: var(--accent-text); border-color: var(--accent); }
 .step-option-warning:hover { background: rgba(217, 119, 6, 0.06); }
 .step-option-pending { color: var(--brand); border-color: var(--brand); }
 .step-option-pending:hover { background: rgba(17, 65, 95, 0.06); }
-.step-option-danger { color: #dc2626; border-color: #dc2626; }
+.step-option-danger { color: var(--danger); border-color: var(--danger); }
 .step-option-danger:hover { background: rgba(220, 38, 38, 0.06); }
 
 .step-option-btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none !important; }
@@ -7073,7 +7101,7 @@ body.is-offline .sync-status-strip .sync-item:nth-of-type(3) {
 .case-filter-details {
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: #f8fafc;
+  background: var(--soft);
   font-size: 0.85rem;
 }
 
@@ -7100,7 +7128,7 @@ body.is-offline .sync-status-strip .sync-item:nth-of-type(3) {
   font-size: 0.72rem;
   font-weight: 700;
   color: var(--brand);
-  background: #e0f2fe;
+  background: var(--brand-light);
 }
 
 .case-filter-panel {
@@ -7266,7 +7294,7 @@ body.is-offline .sync-status-strip .sync-item:nth-of-type(3) {
   border: 1px solid var(--line);
   border-radius: 6px;
   font-weight: 600;
-  background: #f8fafc;
+  background: var(--soft);
   color: var(--ink);
   font-family: inherit;
   font-size: 0.88rem;
@@ -7323,7 +7351,7 @@ body.is-offline .sync-status-strip .sync-item:nth-of-type(3) {
   font-size: 0.72rem;
   font-weight: 700;
   color: var(--brand);
-  background: #e0f2fe;
+  background: var(--brand-light);
 }
 
 .planning-print-details {
@@ -7457,7 +7485,7 @@ body.is-offline .sync-status-strip .sync-item:nth-of-type(3) {
   box-shadow: var(--shadow-sm);
 }
 
-.pilotage-priority-card.severity-critical { border-left-color: #dc2626; background: #fffafa; }
+.pilotage-priority-card.severity-critical { border-left-color: var(--danger); background: #fffafa; }
 .pilotage-priority-card.severity-high { border-left-color: #ea580c; background: #fffdfa; }
 .pilotage-priority-card.severity-medium { border-left-color: #2563eb; background: #fbfdff; }
 
@@ -7483,7 +7511,7 @@ body.is-offline .sync-status-strip .sync-item:nth-of-type(3) {
   letter-spacing: 0.04em;
 }
 
-.severity-badge.critical { background: #fee2e2; color: #991b1b; }
+.severity-badge.critical { background: var(--danger-light); color: #991b1b; }
 .severity-badge.high { background: #ffedd5; color: #9a3412; }
 .severity-badge.medium { background: #dbeafe; color: #1e40af; }
 
@@ -7516,7 +7544,7 @@ body.is-offline .sync-status-strip .sync-item:nth-of-type(3) {
   height: 6px;
   overflow: hidden;
   border-radius: 999px;
-  background: #e2e8f0;
+  background: var(--line);
 }
 
 .load-bar-fill {
@@ -8707,7 +8735,7 @@ select:focus {
 .cockpit-client-name {
   font-size: 1.05rem;
   font-weight: 700;
-  color: #0f172a;
+  color: var(--ink);
 }
 
 .cockpit-client-phone {
@@ -8727,8 +8755,8 @@ select:focus {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
   padding: 14px;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  background: var(--soft);
+  border: 1px solid var(--line);
   border-radius: 8px;
   margin-bottom: 12px;
 }
@@ -8750,7 +8778,7 @@ select:focus {
 .client-info-block .info-value, .vehicle-info-block .info-value {
   font-size: 1rem;
   font-weight: 700;
-  color: #0f172a;
+  color: var(--ink);
 }
 
 .vehicle-tags {
@@ -8776,7 +8804,7 @@ select:focus {
   background: #f1f5f9;
   padding: 2px 8px;
   border-radius: 4px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--line);
 }
 
 .operational-case-section {
@@ -8789,7 +8817,7 @@ select:focus {
   gap: 10px;
   margin-top: 16px;
   padding-top: 12px;
-  border-top: 1px solid #e2e8f0;
+  border-top: 1px solid var(--line);
 }
 
 @media (max-width: 640px) {
@@ -9066,7 +9094,7 @@ select:focus {
   align-items: center;
   gap: 4px;
   padding: 2px 8px;
-  background: #e2e8f0;
+  background: var(--line);
   border-radius: 4px;
   font-size: 0.8rem;
   font-weight: 550;
@@ -9102,19 +9130,19 @@ select:focus {
 }
 
 .vn-part-badge.badge-overdue {
-  background: #fee2e2;
+  background: var(--danger-light);
   color: #991b1b;
   border: 1px solid #fecaca;
 }
 
 .vn-part-badge.badge-ready {
-  background: #d1fae5;
+  background: var(--ok-light);
   color: #065f46;
   border: 1px solid #a7f3d0;
 }
 
 .vn-part-badge.badge-waiting {
-  background: #fef3c7;
+  background: var(--warn-light);
   color: #92400e;
   border: 1px solid #fde68a;
 }
@@ -9126,15 +9154,15 @@ select:focus {
 }
 
 .vn-part-badge.badge-restored {
-  background: #e0f2fe;
+  background: var(--brand-light);
   color: #075985;
   border: 1px solid #bae6fd;
 }
 
 .vn-part-badge.badge-neutral {
   background: #f1f5f9;
-  color: #475569;
-  border: 1px solid #e2e8f0;
+  color: var(--muted);
+  border: 1px solid var(--line);
 }
 
 /* Donor Metrics Strip */
@@ -9183,7 +9211,7 @@ select:focus {
 }
 
 .vn-part-restored-banner svg {
-  stroke: #059669;
+  stroke: var(--ok);
   fill: none;
   stroke-width: 2.5;
   flex-shrink: 0;
@@ -9238,7 +9266,7 @@ select:focus {
 
 .vn-part-part-ref {
   padding: 2px 6px;
-  background: #e2e8f0;
+  background: var(--line);
   border-radius: 4px;
   font-size: 0.82rem;
   color: #1e293b;
@@ -9247,7 +9275,7 @@ select:focus {
 .vn-part-qty {
   font-size: 0.85rem;
   font-weight: 600;
-  color: #475569;
+  color: var(--muted);
 }
 
 .vn-part-removal-details-grid {
@@ -9315,7 +9343,7 @@ select:focus {
 .vn-part-spinner {
   width: 36px;
   height: 36px;
-  border: 3px solid #e2e8f0;
+  border: 3px solid var(--line);
   border-top-color: var(--brand, #0f3b57);
   border-radius: 50%;
   animation: vn-part-spin 0.8s linear infinite;
@@ -9403,7 +9431,7 @@ select:focus {
 }
 
 .vn-part-conflict-banner svg {
-  stroke: #dc2626;
+  stroke: var(--danger);
   fill: none;
   stroke-width: 2;
   flex-shrink: 0;
@@ -9461,8 +9489,8 @@ select:focus {
   font-size: 0.8rem;
   font-weight: 500;
   background: #f1f5f9;
-  border: 1px solid #e2e8f0;
-  color: #475569;
+  border: 1px solid var(--line);
+  color: var(--muted);
 }
 
 .vn-part-approval-pill .pill-role {
@@ -9481,7 +9509,7 @@ select:focus {
 }
 
 .vn-part-approval-pill.status-refused {
-  background: #fee2e2;
+  background: var(--danger-light);
   border-color: #fecaca;
   color: #991b1b;
 }
@@ -9491,7 +9519,7 @@ select:focus {
 }
 
 .vn-part-approval-pill.status-pending {
-  background: #f8fafc;
+  background: var(--soft);
   border-color: #cbd5e1;
   color: #64748b;
 }
@@ -9746,7 +9774,7 @@ select:focus {
 
 .vn-part-modal-close:hover {
   color: var(--ink, #0f172a);
-  background: #e2e8f0;
+  background: var(--line);
 }
 
 .vn-part-modal-summary {
@@ -9923,7 +9951,7 @@ select:focus {
 
 .vn-part-req-filter-btn:hover {
   border-color: var(--brand, #0f3b57);
-  background: #f8fafc;
+  background: var(--soft);
 }
 
 .vn-part-req-filter-btn.active {
@@ -10043,7 +10071,7 @@ select:focus {
 
 .vn-part-metric-chip.is-warning {
   background: #fffbeb;
-  border: 1px solid #fef3c7;
+  border: 1px solid var(--warn-light);
   color: #92400e;
 }
 
@@ -10061,7 +10089,7 @@ select:focus {
 }
 
 .vn-part-planning-notice svg {
-  stroke: #d97706;
+  stroke: var(--accent);
   fill: none;
   stroke-width: 2;
   flex-shrink: 0;
@@ -10074,7 +10102,7 @@ select:focus {
 }
 
 .vn-part-removal-item.is-planned-item {
-  border-left: 3px solid #f59e0b;
+  border-left: 3px solid var(--warn);
   background: #fffdfa;
 }
 
@@ -10132,7 +10160,7 @@ select:focus {
 
 .vn-part-donor-warning-count {
   font-weight: 700;
-  background: #fef3c7;
+  background: var(--warn-light);
   padding: 2px 8px;
   border-radius: 999px;
   font-size: 0.8rem;
@@ -10153,7 +10181,7 @@ select:focus {
   padding: 6px 10px;
   background: rgba(255, 255, 255, 0.7);
   border-radius: 4px;
-  border-left: 3px solid #d97706;
+  border-left: 3px solid var(--accent);
 }
 
 .vn-part-warning-date-row {
@@ -10207,7 +10235,7 @@ select:focus {
   gap: 8px;
   padding: 6px 8px;
   background: #ffffff;
-  border: 1px solid #fef3c7;
+  border: 1px solid var(--warn-light);
   border-radius: 4px;
   font-size: 0.8rem;
 }

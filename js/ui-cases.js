@@ -3146,6 +3146,21 @@ function getTechnicianPendingActionCount() {
   }
 }
 
+function shouldShowTechnicianElapsed(row) {
+  return Boolean(row && ["in_progress", "paused", "blocked"].includes(row.status));
+}
+
+function renderTechnicianAllDoneMessage(doneRows) {
+  const completedCount = Array.isArray(doneRows) ? doneRows.length : 0;
+  return `
+    <section class="technician-all-done-message" role="status">
+      <span class="eyebrow">Journée terminée ✓</span>
+      <h2>Toutes les opérations du jour sont terminées</h2>
+      <p>${completedCount} opération${completedCount > 1 ? "s" : ""} terminée${completedCount > 1 ? "s" : ""} aujourd'hui.</p>
+    </section>
+  `;
+}
+
 function renderTechnicianFieldFocus(currentRow, nextRow) {
   if (!currentRow) return "";
   const item = currentRow.item;
@@ -3169,10 +3184,17 @@ function renderTechnicianFieldFocus(currentRow, nextRow) {
   const currentLaborInstruction = renderTechnicianExactLaborInstruction(currentRow);
   const nextLaborInstruction = nextRow ? renderTechnicianExactLaborInstruction(nextRow, { compact: true }) : "";
   const startIssues = ["planned", "ready"].includes(currentRow.status) ? getWorkshopTaskStartIssues(currentRow) : [];
+  const fieldEyebrow = {
+    in_progress: "Opération en cours",
+    paused: "Opération en pause",
+    blocked: "Opération bloquée",
+    ready: "À démarrer",
+    planned: "Prochaine opération",
+  }[currentRow.status] || "Opération";
   return `
     <article class="technician-current-task" data-technician-current-task data-current-booking-id="${escapeAttr(booking.id)}">
       <div class="technician-field-head">
-        <div><span class="eyebrow">${currentRow.status === "in_progress" ? "Opération actuelle" : "Opération prioritaire"}</span><h2>${escapeHtml(operationTitle)}</h2>${canonicalOperation && phaseLabel !== operationTitle ? `<small class="muted">Phase · ${escapeHtml(phaseLabel)}</small>` : ""}</div>
+        <div><span class="eyebrow">${escapeHtml(fieldEyebrow)}</span><h2>${escapeHtml(operationTitle)}</h2>${canonicalOperation && phaseLabel !== operationTitle ? `<small class="muted">Phase · ${escapeHtml(phaseLabel)}</small>` : ""}</div>
         <span class="status-pill">${escapeHtml(currentRow.statusLabel || currentRow.status)}</span>
       </div>
       <div class="technician-field-identity">
@@ -3184,7 +3206,7 @@ function renderTechnicianFieldFocus(currentRow, nextRow) {
       ${currentLaborInstruction}
       <dl class="technician-field-grid">
         <div><dt>Durée prévue</dt><dd>${formatLocalizedDecimal(Number(currentRow.plannedMinutes || 0) / 60)} h</dd></div>
-        <div><dt>Temps écoulé</dt><dd class="technician-live-timer" data-technician-elapsed-booking="${escapeAttr(booking.id)}">${formatTechnicianElapsedTime(getTechnicianFamilyElapsedMilliseconds(booking.id))}</dd></div>
+        ${shouldShowTechnicianElapsed(currentRow) ? `<div><dt>Temps écoulé</dt><dd class="technician-live-timer" data-technician-elapsed-booking="${escapeAttr(booking.id)}">${formatTechnicianElapsedTime(getTechnicianFamilyElapsedMilliseconds(booking.id))}</dd></div>` : ""}
       </dl>
       <details class="technician-operation-details"><summary>Ressources et horaires</summary><dl class="technician-field-grid">
         <div><dt>Début réel</dt><dd>${actualStart ? formatTime(actualStart) : "Pas encore démarrée"}</dd></div>
@@ -3257,31 +3279,57 @@ function renderTechnicianDashboard() {
     ? getTechnicianTaskRows(selectedTechnicianId, dateInput.value)
     : [];
   const orderedRows = orderTechnicianRowsForField(rows);
-  const currentRow = orderedRows.find((row) => row.status !== "done") || orderedRows[0] || null;
-  const nextRow = orderedRows.find((row) => row !== currentRow && row.status !== "done") || null;
-  const remainingRows = orderedRows.filter((row) => row !== currentRow && row !== nextRow);
+  const doneRows = orderedRows.filter((row) => row.status === "done");
+  const actionableRows = orderedRows.filter((row) => row.status !== "done");
+  const currentRow = actionableRows[0] || null;
+  const nextRow = actionableRows[1] || null;
+  const pendingRows = actionableRows.slice(2);
+  const allDone = orderedRows.length > 0 && actionableRows.length === 0;
   const missingTechnicianLink = role === "technicien" && !technicians.length;
+
   fieldFocus.innerHTML = missingTechnicianLink
     ? `<div class="empty-state compact-empty" role="status"><strong>Compte technicien à rattacher</strong><span>Votre compte n'est associé à aucune ressource atelier active. Demandez à l'administrateur de choisir votre ressource dans Gestion des comptes.</span></div>`
-    : renderTechnicianFieldFocus(currentRow, nextRow);
-  actionDock.innerHTML = currentRow && currentRow.status !== "done" ? renderTechnicianTaskActions(currentRow) : "";
+    : allDone
+      ? renderTechnicianAllDoneMessage(doneRows)
+      : renderTechnicianFieldFocus(currentRow, nextRow);
+
+  actionDock.innerHTML = currentRow ? renderTechnicianTaskActions(currentRow) : "";
   actionDock.hidden = !actionDock.innerHTML.trim();
+
   if (!rows.length) {
     list.innerHTML = missingTechnicianLink ? "" : `<div class="empty-state compact-empty"><strong>Aucune tâche pour ce technicien.</strong><span>Les tâches apparaissent ici dès qu'elles sont planifiées et affectées.</span></div>`;
-  } else if (remainingRows.length > 0) {
-    list.innerHTML = `
-      <details class="technician-rest-of-day">
-        <summary>
-          <span>Autres tâches du jour</span>
-          <strong>${remainingRows.length}</strong>
-        </summary>
-        <div class="technician-rest-of-day-list">
-          ${remainingRows.map((row) => renderTechnicianTaskCard(row)).join("")}
-        </div>
-      </details>
-    `;
   } else {
-    list.innerHTML = "";
+    const taskSections = [];
+
+    if (pendingRows.length > 0) {
+      taskSections.push(`
+        <details class="technician-rest-of-day">
+          <summary>
+            <span>Autres tâches du jour</span>
+            <strong>${pendingRows.length}</strong>
+          </summary>
+          <div class="technician-rest-of-day-list">
+            ${pendingRows.map((row) => renderTechnicianTaskCard(row)).join("")}
+          </div>
+        </details>
+      `);
+    }
+
+    if (doneRows.length > 0) {
+      taskSections.push(`
+        <details class="technician-done-section">
+          <summary>
+            <span>Terminées aujourd'hui</span>
+            <strong>${doneRows.length}</strong>
+          </summary>
+          <div class="technician-done-section-list">
+            ${doneRows.map((row) => renderTechnicianTaskCard(row)).join("")}
+          </div>
+        </details>
+      `);
+    }
+
+    list.innerHTML = taskSections.join("");
   }
 
   manager.innerHTML = getCanonicalUserRole(currentUser) === "technicien" ? "" : renderWorkshopChiefSummary(dateInput.value);

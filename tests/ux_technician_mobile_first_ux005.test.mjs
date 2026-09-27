@@ -46,13 +46,16 @@ check("B Existing technician structural contracts remain intact", () => {
   assert.match(indexSource, /id="technician-field-focus"/u);
 });
 
-check("C Current and next task architecture in fieldFocus before rest of day", () => {
-  assert.match(uiCasesSource, /const currentRow = orderedRows\.find/u);
-  assert.match(uiCasesSource, /const nextRow = orderedRows\.find/u);
-  assert.match(uiCasesSource, /const remainingRows = orderedRows\.filter\(/u);
-  assert.match(uiCasesSource, /row !== currentRow && row !== nextRow/u);
+check("C Current, next, completed and all-done field architecture remain explicit", () => {
+  assert.match(uiCasesSource, /const doneRows = orderedRows\.filter\(\(row\) => row\.status === "done"\);/u);
+  assert.match(uiCasesSource, /const actionableRows = orderedRows\.filter\(\(row\) => row\.status !== "done"\);/u);
+  assert.match(uiCasesSource, /const currentRow = actionableRows\[0\] \|\| null;/u);
+  assert.match(uiCasesSource, /const nextRow = actionableRows\[1\] \|\| null;/u);
+  assert.match(uiCasesSource, /const pendingRows = actionableRows\.slice\(2\);/u);
+  assert.match(uiCasesSource, /const allDone = orderedRows\.length > 0 && actionableRows\.length === 0;/u);
   assert.match(uiCasesSource, /const missingTechnicianLink = role === "technicien" && !technicians\.length;/u);
-  assert.match(uiCasesSource, /fieldFocus\.innerHTML = missingTechnicianLink\s*\?[\s\S]*?: renderTechnicianFieldFocus\(currentRow, nextRow\);/u);
+  assert.match(uiCasesSource, /renderTechnicianAllDoneMessage\(doneRows\)/u);
+  assert.match(uiCasesSource, /renderTechnicianFieldFocus\(currentRow, nextRow\)/u);
   assert.match(uiCasesSource, /data-technician-current-task/u);
   assert.match(uiCasesSource, /data-technician-next-task/u);
   assert.match(uiCasesSource, /data-technician-elapsed-booking=/u);
@@ -60,12 +63,14 @@ check("C Current and next task architecture in fieldFocus before rest of day", (
   assert.match(uiCasesSource, /data-technician-sync-state/u);
 });
 
-check("D Rest of day progressively disclosed in native details and does not duplicate current or next", () => {
+check("D Pending rest of day and completed work are disclosed without duplication", () => {
   assert.doesNotMatch(uiCasesSource, /orderedRows\.map\(\s*\(row\)\s*=>\s*renderTechnicianTaskCard/u);
   assert.match(uiCasesSource, /<details class="technician-rest-of-day">/u);
-  assert.match(uiCasesSource, /<summary>/u);
   assert.match(uiCasesSource, /Autres tâches du jour/u);
-  assert.match(uiCasesSource, /remainingRows\.map\(\s*\(row\)\s*=>\s*renderTechnicianTaskCard\(row\)\)/u);
+  assert.match(uiCasesSource, /pendingRows\.map\(\s*\(row\)\s*=>\s*renderTechnicianTaskCard\(row\)\)/u);
+  assert.match(uiCasesSource, /<details class="technician-done-section">/u);
+  assert.match(uiCasesSource, /Terminées aujourd'hui/u);
+  assert.match(uiCasesSource, /doneRows\.map\(\s*\(row\)\s*=>\s*renderTechnicianTaskCard\(row\)\)/u);
 });
 
 check("E Existing action contract remains intact with [data-tech-action]", () => {

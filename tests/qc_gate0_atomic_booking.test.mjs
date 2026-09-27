@@ -36,5 +36,5 @@ test('existing-case UPSERT reaches UPDATE QC authority while new cases stay neut
   const guard = latest('public.nimr_guard_quality_domain_authority');
   assert.match(guard, /if tg_op='INSERT' then[\s\S]*?if exists \([\s\S]*?existing\.entity_id = new\.entity_id[\s\S]*?existing\.deleted_at is null[\s\S]*?return new;/i);
   assert.match(guard, /new case cannot contain completed quality decision state/);
-  assert.match(guard, /qc_changed and coalesce\(current_setting\('nimr.quality_review_v3',true\),'\'\) <> 'on'/i);
+  assert.match(guard, /qc_changed and \(\s*auth\.uid\(\) is null\s+or\s+coalesce\(current_setting\('nimr\.quality_review_v3',true\),'\'\) <> 'on'\s*\)/i);
 });

@@ -16,6 +16,9 @@ const finalization = read('20260905230951_operational_finalization_quality_sync.
 const guard = read('20260906001634_audit_completion_private_api.sql');
 const migration = read('20260926195055_qc_gate0_atomic_booking_completion.sql');
 const cutoverRepair = read('20260926202209_qc_gate0_cutover_upsert_existing_case.sql');
+const secAuditName = fs.readdirSync('supabase/migrations').find(name => name.includes('_sec_audit_001_null_auth_guard_hardening.sql'));
+if (!secAuditName) throw new Error('SEC-AUDIT-001 migration missing');
+const secAuditMigration = read(secAuditName);
 let created = false;
 try {
   docker(['run', '-d', '--name', container, '--network', 'none', '--tmpfs', '/var/lib/postgresql/data', '-e', 'POSTGRES_HOST_AUTH_METHOD=trust', 'postgres:15-alpine']); created = true;
@@ -132,6 +135,82 @@ do $$ begin
 end $$;
 rollback;`);
   console.log('PASS migrated PostgreSQL: NOK, rework, new QC, atomic rollback, receipts, idempotency, authority, cutover, delivery');
+  sql(secAuditMigration);
+  sql(`begin;
+select set_config('request.jwt.claim.sub','',true);
+insert into sync_entities values (
+  '00000000-0000-0000-0000-000000000001','case','sec-neutral',
+  '{"flags":{"received":false,"workCompleted":false,"qualityApproved":false,"delivered":false},"receptionWorkflow":{"qualityStatus":"not_started"}}',
+  1001,'sec-neutral',null,now()
+);
+insert into sync_entities values (
+  '00000000-0000-0000-0000-000000000001','booking','sec-booking',
+  '{"caseId":"sec-neutral","key":"mechanical","status":"planned"}',
+  1002,'sec-booking',null,now()
+);
+do $$ begin
+  begin update sync_entities set payload=jsonb_set(payload,'{flags,qualityApproved}','true') where entity_id='sec-neutral'; raise exception 'Expected NULL QC denial';
+  exception when insufficient_privilege then null; end;
+end $$;
+update sync_entities set payload=payload||'{"customerName":"Unrelated update"}' where entity_id='sec-neutral';
+select test_assert((select payload->>'customerName'='Unrelated update' from sync_entities where entity_id='sec-neutral'),'NULL unrelated case write allowed');
+update sync_entities set payload=payload||'{"status":"completed"}' where entity_id='sec-booking';
+select test_assert((select payload->>'status'='completed' from sync_entities where entity_id='sec-booking'),'NULL non-case write allowed');
+do $$ begin
+  begin update sync_entities set payload=payload||'{"clientCommitment":{"note":"forged"}}' where entity_id='sec-neutral'; raise exception 'Expected NULL client commitment denial';
+  exception when insufficient_privilege then null; end;
+end $$;
+do $$ begin
+  begin update sync_entities set deleted_at=now() where entity_id='sec-neutral'; raise exception 'Expected NULL deletion denial';
+  exception when insufficient_privilege then null; end;
+end $$;
+do $$ begin
+  begin update sync_entities set payload=jsonb_set(payload,'{flags,delivered}','true') where entity_id='sec-neutral'; raise exception 'Expected NULL delivery denial';
+  exception when insufficient_privilege then null; end;
+end $$;
+select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000000099',true);
+do $$ begin
+  begin update sync_entities set payload=jsonb_set(payload,'{flags,qualityApproved}','true') where entity_id='sec-neutral'; raise exception 'Expected unauthorized QC denial';
+  exception when insufficient_privilege then null; end;
+end $$;
+select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000000002',true);
+insert into sync_entities values (
+  '00000000-0000-0000-0000-000000000001','case','sec-authorized',
+  '{"flags":{"received":true,"workCompleted":true,"qualityApproved":false,"delivered":false},"receptionWorkflow":{"qualityStatus":"not_started"}}',
+  1003,'sec-authorized',null,now()
+);
+select test_booking('sec-authorized-qc','sec-authorized');
+select test_review('sec-authorized','validated','sec-authorized-op');
+select test_assert((select payload #>> '{flags,qualityApproved}'='true' from sync_entities where entity_id='sec-authorized'),'authorized QC RPC unchanged');
+select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000000002',true);
+update sync_entities set payload=jsonb_set(payload,'{flags,delivered}','true') where entity_id='sec-authorized';
+select test_assert((select payload #>> '{flags,delivered}'='true' from sync_entities where entity_id='sec-authorized'),'authenticated delivery unchanged');
+select set_config('request.jwt.claim.sub','',true);
+do $$ begin
+  begin update sync_entities set payload=payload||'{"closedAt":"2026-09-27T01:00:00Z"}' where entity_id='sec-authorized'; raise exception 'Expected NULL closure denial';
+  exception when insufficient_privilege then null; end;
+end $$;
+do $$ begin
+  begin update sync_entities set payload=payload||'{"archivedAt":"2026-09-27T01:00:00Z"}' where entity_id='sec-authorized'; raise exception 'Expected NULL archive denial';
+  exception when insufficient_privilege then null; end;
+end $$;
+do $$ begin
+  begin update sync_entities set payload=jsonb_set(payload,'{flags,invoiced}','true') where entity_id='sec-authorized'; raise exception 'Expected NULL invoicing denial';
+  exception when insufficient_privilege then null; end;
+end $$;
+select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000000002',true);
+update sync_entities set payload=payload||'{"closedAt":"2026-09-27T01:00:00Z"}' where entity_id='sec-authorized';
+select test_assert((select payload->>'closedAt'='2026-09-27T01:00:00Z' from sync_entities where entity_id='sec-authorized'),'authenticated finalization unchanged');
+do $$ begin
+  begin update sync_entities set payload=jsonb_set(payload,'{flags,delivered}','true') where entity_id='sec-neutral'; raise exception 'Expected finalization invariant denial';
+  exception when check_violation then null; end;
+end $$;
+do $$ begin
+  begin update sync_entities set payload=payload||'{"closedAt":"2026-09-27T00:00:00Z"}' where entity_id='sec-neutral'; raise exception 'Expected closure invariant denial';
+  exception when check_violation then null; end;
+end $$;
+rollback;`);
+  console.log('PASS SEC-AUDIT-001 PostgreSQL: NULL protected denials, unrelated writes, role contracts, RPC and finalization invariants');
 } catch (e) {
   console.error(e.stderr?.toString() || e.message); process.exitCode = 1;
 } finally {

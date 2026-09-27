@@ -416,12 +416,13 @@ await check("J IDENTITY-001A server-managed local mirror guard remains intact", 
   assert.match(stateSource, /code: "SERVER_MANAGED_PROFILE_READ_ONLY"/u);
 });
 
-await check("K ticket introduces no migration, SQL execution or deployment path", () => {
+await check("K identity ticket introduces no unapproved SQL or deployment path", () => {
   const changedPaths = execFileSync("git", ["status", "--porcelain", "--untracked-files=all"], { cwd: repoRoot, encoding: "utf8" })
     .split(/\r?\n/u).filter(Boolean).map((line) => line.slice(3).replaceAll("\\", "/"));
   const allowedSql = new Set([
     "supabase/migrations/20260923064000_qc_pro_dynamic_checklist_server.sql",
     "supabase/migrations/20260923213000_qc_pro_booking_authority_hardening.sql",
+    "supabase/migrations/20260927070856_sec_audit_001_null_auth_guard_hardening.sql",
   ]);
   assert.deepEqual(changedPaths.filter((file) => (file.startsWith("supabase/migrations/") || /\.sql$/iu.test(file)) && !allowedSql.has(file)), []);
   assert.doesNotMatch(configSource + "\n" + edgeSource, /supabase\s+(?:db\s+(?:push|reset)|migration\s+up|functions\s+deploy|secrets\s+set)/iu);

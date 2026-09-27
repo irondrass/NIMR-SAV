@@ -3430,7 +3430,8 @@ function renderPermissionAwareButton(permission, label, action, dataset, classNa
   const startIssues = action === "start" && booking ? getTechnicianTaskStartIssues(getIndexedCaseById(booking.caseId), booking, technicianId) : [];
   const allowed = permissionAllowed && !startIssues.length;
   const title = !permissionAllowed ? getPermissionDeniedMessage(permission, { booking }) : startIssues[0] || "";
-  return `<button class="${className}" type="button" data-tech-action="${escapeAttr(action)}" ${dataset} ${allowed ? "" : `disabled title="${escapeAttr(title)}" aria-label="${escapeAttr(`${label} indisponible : ${title}`)}"`}>${escapeHtml(label)}</button>`;
+  const actionClassName = action === "complete" ? `${className} technician-complete-action` : className;
+  return `<button class="${actionClassName}" type="button" data-tech-action="${escapeAttr(action)}" ${dataset} ${allowed ? "" : `disabled title="${escapeAttr(title)}" aria-label="${escapeAttr(`${label} indisponible : ${title}`)}"`}>${escapeHtml(label)}</button>`;
 }
 
 const WORKSHOP_FIELD_GROUP_CONFIG = [
@@ -3567,7 +3568,15 @@ async function handleTechnicianTaskAction(action, bookingId, technicianId) {
 
   const buttons = document.querySelectorAll("[data-tech-action]");
   const previousButtonStates = new Map(Array.from(buttons, button => [button, button.disabled]));
+  const activeButton = Array.from(buttons).find((button) => (
+    button.dataset.techAction === String(action)
+    && button.dataset.bookingId === String(bookingId)
+  ));
   buttons.forEach((btn) => btn.setAttribute("disabled", "true"));
+  if (activeButton) {
+    activeButton.classList.add("is-pending");
+    activeButton.setAttribute("aria-busy", "true");
+  }
 
   try {
     const booking = state.bookings.find((candidate) => candidate.id === bookingId);
@@ -3670,6 +3679,10 @@ async function handleTechnicianTaskAction(action, bookingId, technicianId) {
     render();
   } finally {
     isTechnicianActionProcessing = false;
+    if (activeButton?.isConnected) {
+      activeButton.classList.remove("is-pending");
+      activeButton.removeAttribute("aria-busy");
+    }
     previousButtonStates.forEach((disabled, button) => { if (button.isConnected) button.disabled = disabled; });
   }
 }

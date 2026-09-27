@@ -924,14 +924,21 @@ function renderStep10_QualityCheck(item) {
           <span>Fiche de contrôle qualité</span>
 
           <div style="display:grid;gap:14px;margin-top:8px;">
-            ${qualitySections.map((section) => `
-              <fieldset style="border:1px solid var(--border,#dfe6eb);border-radius:8px;padding:10px 12px;">
+            ${qualitySections.map((section) => {
+              const sectionPoints = section.points || [];
+              const completedCount = sectionPoints.filter((point) => (
+                ["ok", "na", "nok"].includes(normalizeChecklistState(checklist[point.id]))
+              )).length;
+              const sectionComplete = sectionPoints.length > 0 && completedCount === sectionPoints.length;
+              return `
+              <fieldset class="quality-checklist-section ${sectionComplete ? "is-complete" : ""}" data-quality-section style="border:1px solid var(--border,#dfe6eb);border-radius:8px;padding:10px 12px;">
                 <legend style="padding:0 6px;font-weight:700;">
-                  ${escapeHtml(section.label)}
+                  <span>${escapeHtml(section.label)}</span>
+                  <span class="quality-section-progress ${sectionComplete ? "is-complete" : ""}" data-quality-section-progress>${completedCount}/${sectionPoints.length} contr?l?s</span>
                 </legend>
 
                 <div style="display:grid;gap:8px;">
-                  ${(section.points || []).map((point) => {
+                  ${sectionPoints.map((point) => {
                     const value = normalizeChecklistState(checklist[point.id]);
 
                     const badges = [
@@ -978,7 +985,8 @@ function renderStep10_QualityCheck(item) {
                   }).join("")}
                 </div>
               </fieldset>
-            `).join("")}
+            `;
+            }).join("")}
           </div>
         </div>
 
@@ -1418,6 +1426,27 @@ async function handleReceptionFormSubmit(e) {
         form.dataset.qualityOperationFingerprint = operationFingerprint;
       }
 
+      const qualitySubmitButton = form.querySelector('button[type="submit"]');
+      const qualitySubmitLabel = qualitySubmitButton?.textContent || "Enregistrer la d?cision QC";
+      const setQualityPending = (pending) => {
+        form.classList.toggle("is-pending", pending);
+        if (pending) form.setAttribute("aria-busy", "true");
+        else form.removeAttribute("aria-busy");
+        if (qualitySubmitButton?.isConnected) {
+          qualitySubmitButton.disabled = pending;
+          qualitySubmitButton.classList.toggle("is-pending", pending);
+          if (pending) {
+            qualitySubmitButton.setAttribute("aria-busy", "true");
+            qualitySubmitButton.textContent = "Enregistrement?";
+          } else {
+            qualitySubmitButton.removeAttribute("aria-busy");
+            qualitySubmitButton.textContent = qualitySubmitLabel;
+          }
+        }
+      };
+
+      setQualityPending(true);
+      try {
       let response;
       try {
         response = await submitSupabaseQualityReview({
@@ -1473,6 +1502,9 @@ async function handleReceptionFormSubmit(e) {
         return;
       }
 
+      } finally {
+        setQualityPending(false);
+      }
       delete form.dataset.qualityOperationId;
       delete form.dataset.qualityOperationFingerprint;
       notifyUser(
@@ -1600,6 +1632,23 @@ function applyReceptionQuickMotif(button) {
 }
 
 function handleReceptionChange(e) {
+  const qualityInput = e.target.closest('#reception-quality-form [name="qualityCheck"]');
+  if (qualityInput) {
+    const section = qualityInput.closest("[data-quality-section]");
+    if (section) {
+      const inputs = [...section.querySelectorAll('[name="qualityCheck"]')];
+      const completed = inputs.filter((input) => ["ok", "na", "nok"].includes(String(input.value || "").trim().toLowerCase())).length;
+      const progress = section.querySelector("[data-quality-section-progress]");
+      const complete = inputs.length > 0 && completed === inputs.length;
+      if (progress) {
+        progress.textContent = `${completed}/${inputs.length} contr?l?s`;
+        progress.classList.toggle("is-complete", complete);
+      }
+      section.classList.toggle("is-complete", complete);
+    }
+    return;
+  }
+
   const select = e.target.closest(".claim-status-select");
   if (select) {
     const claimId = select.dataset.claimId;

@@ -26,6 +26,11 @@
     return PARTS_AVAILABILITY_ROLES.has(String(role || "").trim());
   }
 
+  function getPartsAvailabilityStatusClass(status) {
+    const normalized = String(status || "unchecked").trim().toLowerCase();
+    return `status-${["available", "partial", "waiting_parts", "blocked_parts"].includes(normalized) ? normalized : "unchecked"}`;
+  }
+
   function getPartsAvailabilityLineKey(line) {
     return `${String(line?.sourceOrigin || "")}::${String(line?.sourcePartId || "")}`;
   }
@@ -229,7 +234,7 @@
             <strong>${escapePartsAvailabilityHtml(item.orNavNumber || item.id)}</strong>
             <span>${escapePartsAvailabilityHtml(item.vehicle || "Véhicule non renseigné")}</span>
             <small>${escapePartsAvailabilityHtml(identity)} · ${lines.length} pièce${lines.length > 1 ? "s" : ""}</small>
-            <em>${escapePartsAvailabilityHtml(PARTS_AVAILABILITY_STATUS_LABELS[status] || status)}</em>
+            <em class="parts-availability-status ${getPartsAvailabilityStatusClass(status)}" data-parts-status="${escapePartsAvailabilityHtml(status)}">${escapePartsAvailabilityHtml(PARTS_AVAILABILITY_STATUS_LABELS[status] || status)}</em>
           </button>`;
         }).join("")
       : '<div class="empty-inline">Aucun dossier avec des pièces à contrôler.</div>';
@@ -317,6 +322,16 @@
       const sourceLines = collectCasePartsAvailabilityLines(item);
       const draft = getOrCreatePartsAvailabilityDraft(item, sourceLines);
       const user = typeof getCurrentUser === "function" ? getCurrentUser() : null;
+      const saveButton = form.querySelector(".parts-availability-save");
+      const saveButtonLabel = saveButton?.textContent || "Enregistrer";
+      form.setAttribute("aria-busy", "true");
+      form.classList.add("is-pending");
+      if (saveButton) {
+        saveButton.disabled = true;
+        saveButton.classList.add("is-pending");
+        saveButton.setAttribute("aria-busy", "true");
+        saveButton.textContent = "Enregistrement?";
+      }
 
       try {
         const review = await savePartsAvailabilityReview(item, {
@@ -336,6 +351,17 @@
         if (typeof quietNotify === "function") quietNotify("Contrôle des pièces enregistré.", "success");
       } catch (error) {
         showPartsAvailabilityError(error);
+      } finally {
+        if (form.isConnected) {
+          form.removeAttribute("aria-busy");
+          form.classList.remove("is-pending");
+        }
+        if (saveButton?.isConnected) {
+          saveButton.disabled = false;
+          saveButton.classList.remove("is-pending");
+          saveButton.removeAttribute("aria-busy");
+          saveButton.textContent = saveButtonLabel;
+        }
       }
     });
   }

@@ -10304,3 +10304,89 @@ select:focus {
 .managed-user-accounts[hidden] {
   display: none !important;
 }
+/* UX-QUICK-001 — bounded UX feedback */
+
+/* Parts availability semantic status */
+.parts-availability-status.status-available {
+  background: color-mix(in srgb, #198754 12%, var(--paper));
+  color: #146c43;
+}
+
+.parts-availability-status.status-partial,
+.parts-availability-status.status-waiting_parts {
+  background: color-mix(in srgb, #d97706 14%, var(--paper));
+  color: #8a4b00;
+}
+
+.parts-availability-status.status-blocked_parts {
+  background: color-mix(in srgb, #b42318 12%, var(--paper));
+  color: #9f1d15;
+}
+
+.parts-availability-status.status-unchecked {
+  background: color-mix(in srgb, var(--muted) 10%, var(--paper));
+  color: var(--muted);
+}
+
+/* QC section progress */
+.quality-checklist-section > legend {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: calc(100% - 12px);
+}
+
+.quality-section-progress {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted) 9%, var(--paper));
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.quality-section-progress.is-complete {
+  background: color-mix(in srgb, #198754 12%, var(--paper));
+  color: #146c43;
+}
+
+/* Technician Complete CTA */
+.technician-field-action-dock .technician-complete-action {
+  min-height: 60px;
+  border-width: 2px;
+  font-size: 1.02rem;
+  font-weight: 900;
+  box-shadow:
+    0 6px 18px
+    color-mix(in srgb, var(--brand) 22%, transparent);
+}
+
+/* Async action feedback */
+button.is-pending[aria-busy="true"] {
+  cursor: progress;
+  opacity: 0.82;
+}
+
+button.is-pending[aria-busy="true"]::before {
+  content: "";
+  display: inline-block;
+  width: 0.9em;
+  height: 0.9em;
+  margin-right: 0.5em;
+  vertical-align: -0.08em;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: nimr-action-spin 0.7s linear infinite;
+}
+
+@keyframes nimr-action-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

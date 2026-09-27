@@ -19,6 +19,10 @@ const cutoverRepair = read('20260926202209_qc_gate0_cutover_upsert_existing_case
 const secAuditName = fs.readdirSync('supabase/migrations').find(name => name.includes('_sec_audit_001_null_auth_guard_hardening.sql'));
 if (!secAuditName) throw new Error('SEC-AUDIT-001 migration missing');
 const secAuditMigration = read(secAuditName);
+const secAudit001BName = fs.readdirSync('supabase/migrations')
+  .find(name => name.includes('_sec_audit_001b_role_matrix_prod_preflight.sql'));
+if (!secAudit001BName) throw new Error('SEC-AUDIT-001B migration missing');
+const secAudit001BMigration = read(secAudit001BName);
 let created = false;
 try {
   docker(['run', '-d', '--name', container, '--network', 'none', '--tmpfs', '/var/lib/postgresql/data', '-e', 'POSTGRES_HOST_AUTH_METHOD=trust', 'postgres:15-alpine']); created = true;
@@ -50,7 +54,12 @@ ${hardening}
 `);
   const setup = `
 insert into planning_resources values ('00000000-0000-0000-0000-000000000003','00000000-0000-0000-0000-000000000001','qc','controle',true,null);
-insert into workshop_members values ('00000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000002','directeur',null,null),('00000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000004','controle_qualite','00000000-0000-0000-0000-000000000003',null);
+insert into workshop_members values
+('00000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000002','directeur',null,null),
+('00000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000004','controle_qualite','00000000-0000-0000-0000-000000000003',null),
+('00000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000005','admin_technique',null,null),
+('00000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000006','chef_atelier',null,null),
+('00000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000007','reception',null,null);
 create function public.test_assert(ok boolean, label text) returns void language plpgsql as $$ begin if ok is distinct from true then raise exception 'ASSERT: %',label; end if; end $$;
 create function public.test_case(id text) returns void language plpgsql as $$ begin
   insert into sync_entities values ('00000000-0000-0000-0000-000000000001','case',id,'{"flags":{"received":true,"workCompleted":true,"qualityApproved":false,"delivered":false},"receptionWorkflow":{"qualityStatus":"not_started"},"durations":{"mechanical":1}}',1,'seed',null,now());
@@ -211,6 +220,153 @@ do $$ begin
 end $$;
 rollback;`);
   console.log('PASS SEC-AUDIT-001 PostgreSQL: NULL protected denials, unrelated writes, role contracts, RPC and finalization invariants');
+
+  sql(`drop trigger nimr_04_quality_domain_authority on sync_entities;`);
+
+  let preflightBlocked = false;
+
+  try {
+    sql(secAudit001BMigration);
+  } catch (error) {
+    const message = `${error.stderr || ''}\n${error.message || ''}`;
+
+    if (!/SEC-AUDIT-001B prerequisite missing: active QC authority trigger/iu.test(message)) {
+      throw error;
+    }
+
+    preflightBlocked = true;
+  }
+
+  if (!preflightBlocked) {
+    throw new Error(
+      'SEC-AUDIT-001B must block deployment when QC trigger is absent'
+    );
+  }
+
+  console.log('PASS SEC-AUDIT-001B production prerequisite fail-closed');
+
+  sql(`
+create trigger nimr_04_quality_domain_authority
+before insert or update on sync_entities
+for each row execute function nimr_guard_quality_domain_authority();
+`);
+
+  sql(secAudit001BMigration);
+
+  sql(`begin;
+
+select set_config(
+  'request.jwt.claim.sub',
+  '00000000-0000-0000-0000-000000000002',
+  true
+);
+
+select test_case('sec-delete-null');
+select test_case('sec-delete-directeur');
+select test_case('sec-delete-chef');
+select test_case('sec-delete-reception');
+select test_case('sec-delete-admin');
+select test_case('sec-client-reception');
+
+select set_config('request.jwt.claim.sub','',true);
+
+do $$ begin
+  begin
+    update sync_entities
+       set deleted_at=now()
+     where entity_id='sec-delete-null';
+
+    raise exception 'Expected NULL deletion denial';
+  exception when insufficient_privilege then null;
+  end;
+end $$;
+
+select set_config(
+  'request.jwt.claim.sub',
+  '00000000-0000-0000-0000-000000000002',
+  true
+);
+
+do $$ begin
+  begin
+    update sync_entities
+       set deleted_at=now()
+     where entity_id='sec-delete-directeur';
+
+    raise exception 'Expected directeur deletion denial';
+  exception when insufficient_privilege then null;
+  end;
+end $$;
+
+select set_config(
+  'request.jwt.claim.sub',
+  '00000000-0000-0000-0000-000000000006',
+  true
+);
+
+do $$ begin
+  begin
+    update sync_entities
+       set deleted_at=now()
+     where entity_id='sec-delete-chef';
+
+    raise exception 'Expected chef_atelier deletion denial';
+  exception when insufficient_privilege then null;
+  end;
+end $$;
+
+select set_config(
+  'request.jwt.claim.sub',
+  '00000000-0000-0000-0000-000000000007',
+  true
+);
+
+do $$ begin
+  begin
+    update sync_entities
+       set deleted_at=now()
+     where entity_id='sec-delete-reception';
+
+    raise exception 'Expected reception deletion denial';
+  exception when insufficient_privilege then null;
+  end;
+end $$;
+
+update sync_entities
+   set payload = payload || '{"clientCommitment":{"note":"allowed"}}'
+ where entity_id='sec-client-reception';
+
+select test_assert(
+  (
+    select payload #>> '{clientCommitment,note}'='allowed'
+    from sync_entities
+    where entity_id='sec-client-reception'
+  ),
+  'reception client commitment remains allowed'
+);
+
+select set_config(
+  'request.jwt.claim.sub',
+  '00000000-0000-0000-0000-000000000005',
+  true
+);
+
+update sync_entities
+   set deleted_at=now()
+ where entity_id='sec-delete-admin';
+
+select test_assert(
+  (
+    select deleted_at is not null
+    from sync_entities
+    where entity_id='sec-delete-admin'
+  ),
+  'admin_technique deletion allowed'
+);
+
+rollback;`);
+
+  console.log('PASS SEC-AUDIT-001B PostgreSQL: admin-only deletion + unchanged reception commitment');
 } catch (e) {
   console.error(e.stderr?.toString() || e.message); process.exitCode = 1;
 } finally {

@@ -423,6 +423,7 @@ await check("K identity ticket introduces no unapproved SQL or deployment path",
     "supabase/migrations/20260923064000_qc_pro_dynamic_checklist_server.sql",
     "supabase/migrations/20260923213000_qc_pro_booking_authority_hardening.sql",
     "supabase/migrations/20260927070856_sec_audit_001_null_auth_guard_hardening.sql",
+    "supabase/migrations/20260927093000_sec_audit_001b_role_matrix_prod_preflight.sql",
   ]);
   assert.deepEqual(changedPaths.filter((file) => (file.startsWith("supabase/migrations/") || /\.sql$/iu.test(file)) && !allowedSql.has(file)), []);
   assert.doesNotMatch(configSource + "\n" + edgeSource, /supabase\s+(?:db\s+(?:push|reset)|migration\s+up|functions\s+deploy|secrets\s+set)/iu);

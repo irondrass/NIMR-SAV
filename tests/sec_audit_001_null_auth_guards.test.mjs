@@ -19,6 +19,18 @@ function latestFunction(name) {
   ).at(-1);
 }
 
+
+function functionFromMigration(migration, name) {
+  const escaped = name.replaceAll('.', '\\.');
+  const pattern = new RegExp(
+    `create or replace function ${escaped}\\(\\)[\\s\\S]*?as\\s+(\\$[a-z_]*\\$)([\\s\\S]*?)\\1`,
+    'iu'
+  );
+  const match = migration.source.match(pattern);
+  assert.ok(match, `${name} missing from ${migration.name}`);
+  return { migration: migration.name, body: match[2] };
+}
+
 function secAuditMigration() {
   const matches = migrations.filter(({ name }) => name.includes('_sec_audit_001_null_auth_guard_hardening.sql'));
   assert.equal(matches.length, 1, 'SEC-AUDIT-001 must add exactly one forward-only migration');
@@ -54,7 +66,10 @@ test('QC guard fails closed for NULL auth only when the QC domain changes', () =
 
 test('client commitment guard denies NULL auth for protected reception changes and deletion only', () => {
   const migration = secAuditMigration();
-  const guard = latestFunction('public.nimr_guard_client_commitment');
+  const guard = functionFromMigration(
+    migration,
+    'public.nimr_guard_client_commitment'
+  );
 
   assert.equal(guard.migration, migration.name);
   assert.match(guard.body, /if new\.entity_type <> 'case' then return new; end if;/iu);

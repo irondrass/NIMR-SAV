@@ -132,3 +132,48 @@ test('Ouvrir OR positionne activeCaseId et déclenche la navigation dossiers', (
   assert.equal(JSON.stringify(state.bookings), beforeBookings);
   assert.equal(JSON.stringify(state.cases), beforeCases);
 });
+
+function multiSegmentHarness() {
+  const h = harness();
+  h.context.state = {
+    ...state,
+    bookings: [{
+      ...booking,
+      end: '2024-06-10T15:00:00Z',
+      segments: [{ start, end }, { start: '2024-06-10T13:00:00Z', end: '2024-06-10T15:00:00Z' }],
+    }],
+  };
+  return h;
+}
+
+function panelDuration(h) {
+  h.run("openBookingSidePanel('booking-abc')");
+  return h.elements['bsp-body'].innerHTML.match(/Durée<\/span><span class="bsp-value">([^<]+)<\/span>/)?.[1];
+}
+
+test('durée multi-segments : 08–12 + 13–15 affiche 6h sans helpers', () => {
+  const h = multiSegmentHarness();
+  assert.equal(panelDuration(h), '6h');
+});
+
+test('durée du panneau préfère getBookingPlannedMinutes avec le booking et son dossier', () => {
+  const h = multiSegmentHarness();
+  h.context.getBookingDurationMinutes = () => { throw new Error('Helper secondaire appelé'); };
+  for (const [minutes, expected] of [[360, '6h'], [45, '45min'], [60, '1h'], [90, '1h30']]) {
+    h.context.getBookingPlannedMinutes = (actualBooking, actualCase) => {
+      assert.equal(actualBooking, h.context.state.bookings[0]);
+      assert.equal(actualCase, state.cases[0]);
+      return minutes;
+    };
+    assert.equal(panelDuration(h), expected);
+  }
+});
+
+test('durée du panneau utilise getBookingDurationMinutes si le helper planifié est absent', () => {
+  const h = multiSegmentHarness();
+  h.context.getBookingDurationMinutes = actualBooking => {
+    assert.equal(actualBooking, h.context.state.bookings[0]);
+    return 90;
+  };
+  assert.equal(panelDuration(h), '1h30');
+});

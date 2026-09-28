@@ -1389,17 +1389,25 @@ function openBookingSidePanel(bookingId) {
     : "";
   const clientName = caseItem?.clientName || "";
 
-  const _formatDuration = (start, end) => {
-    const ms = new Date(end) - new Date(start);
-    if (!ms || ms <= 0) return "—";
-    const h = Math.floor(ms / 3600000);
-    const m = Math.round((ms % 3600000) / 60000);
+  const _formatDuration = (minutes) => {
+    if (!Number.isFinite(minutes) || minutes <= 0) return "—";
+    const total = Math.round(minutes);
+    const h = Math.floor(total / 60);
+    const m = total % 60;
     return h ? `${h}h${m ? String(m).padStart(2, "0") : ""}` : `${m}min`;
   };
 
   const panelStart = booking.segments?.[0]?.start || booking.start || null;
   const panelEnd = booking.segments?.[booking.segments.length - 1]?.end || booking.end || null;
-  const duration = panelStart && panelEnd ? _formatDuration(panelStart, panelEnd) : "—";
+  const durationMinutes = typeof getBookingPlannedMinutes === "function"
+    ? getBookingPlannedMinutes(booking, caseItem)
+    : typeof getBookingDurationMinutes === "function"
+      ? getBookingDurationMinutes(booking)
+      : (booking.segments || []).reduce((sum, segment) => {
+          const minutes = (new Date(segment?.end) - new Date(segment?.start)) / 60000;
+          return Number.isFinite(minutes) && minutes > 0 ? sum + minutes : sum;
+        }, 0);
+  const duration = _formatDuration(durationMinutes);
   const promise = caseItem?.promiseDate || caseItem?.eta || null;
   const _fmt = (v) => typeof formatDateTime === "function" ? formatDateTime(v) : String(v);
   const _esc = (v) => typeof escapeHtml === "function" ? escapeHtml(String(v)) : String(v);

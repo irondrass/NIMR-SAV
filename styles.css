@@ -10490,3 +10490,189 @@ button.is-pending[aria-busy="true"]::before {
     transform: rotate(360deg);
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   PLANNING-UX-001 — R2.1 Booking Side Panel (READ-ONLY)
+   Desktop : panneau droit fixe, planning visible.
+   Tablette : même panneau, largeur adaptée.
+   Mobile   : bottom-sheet, suit le pattern mobile-planning-list.
+   ═══════════════════════════════════════════════════════════════════ */
+
+.booking-side-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100dvh;
+  width: 360px;
+  background: var(--paper);
+  border-left: 1px solid var(--line);
+  box-shadow: -6px 0 24px rgba(0, 0, 0, 0.07);
+  z-index: 400;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: bspSlideIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes bspSlideIn {
+  from { transform: translateX(100%); opacity: 0.6; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+
+.booking-side-panel[hidden] {
+  display: none !important;
+}
+
+.bsp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+  background: var(--soft, #f8fafb);
+}
+
+.bsp-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--brand);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: Outfit, Inter, system-ui, sans-serif;
+  letter-spacing: -0.01em;
+}
+
+.bsp-close-btn {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+
+.bsp-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  -webkit-overflow-scrolling: touch;
+}
+
+.bsp-row {
+  display: grid;
+  grid-template-columns: 128px 1fr;
+  gap: 6px 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+  align-items: baseline;
+  font-size: 0.88rem;
+  line-height: 1.4;
+}
+
+.bsp-row:last-child {
+  border-bottom: none;
+}
+
+.bsp-label {
+  color: var(--muted);
+  font-weight: 700;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding-top: 2px;
+}
+
+.bsp-value {
+  color: var(--ink, #08253a);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+/* Statuts — réutilise les couleurs canoniques du planning */
+.bsp-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border-radius: 100px;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.bsp-status-planned   { background: #e8f0fe; color: #1a56db; }
+.bsp-status-started   { background: #def7ec; color: #057a55; }
+.bsp-status-paused    { background: #fff3cd; color: #92400e; }
+.bsp-status-blocked   { background: #fde8e8; color: #9b1c1c; }
+.bsp-status-completed { background: #ecfdf5; color: #065f46; }
+.bsp-status-temporary { background: #f3f4f6; color: #6b7280; }
+
+/* Ligne de conflit/blocage */
+.bsp-conflict {
+  background: #fff5f5;
+  border-radius: var(--radius-sm, 4px);
+  padding: 8px 10px;
+  margin-top: 4px;
+  border-bottom: none !important;
+  border: 1px solid #fecaca;
+}
+
+.bsp-conflict .bsp-label,
+.bsp-conflict .bsp-value {
+  color: #9b1c1c;
+}
+
+.bsp-empty {
+  color: var(--muted);
+  font-style: italic;
+  font-size: 0.9rem;
+  padding: 8px 0;
+}
+
+.bsp-actions {
+  display: flex;
+  gap: 10px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--line);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  background: var(--paper);
+}
+
+/* Tablette : panneau légèrement plus étroit */
+@media (max-width: 1100px) {
+  .booking-side-panel {
+    width: min(calc(100vw - 48px), 380px);
+  }
+}
+
+/* Mobile : bottom-sheet — suit le pattern mobile-planning-list */
+@media (max-width: 640px) {
+  .booking-side-panel {
+    top: auto;
+    bottom: 0;
+    right: 0;
+    left: 0;
+    width: 100%;
+    height: auto;
+    max-height: 80dvh;
+    border-left: none;
+    border-top: 1px solid var(--line);
+    border-radius: var(--radius-lg, 12px) var(--radius-lg, 12px) 0 0;
+    box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.12);
+    animation: bspSlideUp 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+  @keyframes bspSlideUp {
+    from { transform: translateY(100%); opacity: 0.6; }
+    to   { transform: translateY(0);    opacity: 1; }
+  }
+  .bsp-actions {
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+  }
+}
+
+/* Impression : masquer le panneau */
+@media print {
+  .booking-side-panel { display: none !important; }
+}

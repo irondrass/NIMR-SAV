@@ -310,7 +310,7 @@ function renderMobilePlanningList(date, resources, taskNumberMap, filters = null
         const blocked = typeof isCaseBlocked === "function" && isCaseBlocked(caseItem);
         const blockedLabel = blocked && typeof getCaseBlockerLabel === "function" ? getCaseBlockerLabel(caseItem) : "";
         return `
-          <article class="mobile-planning-card task-status-${escapeAttr(status)} ${blocked ? "is-blocked" : ""}">
+          <article class="mobile-planning-card task-status-${escapeAttr(status)} ${blocked ? "is-blocked" : ""}" data-booking-id="${escapeAttr(String(booking.id || ''))}" data-case-id="${escapeAttr(String(booking.caseId || ''))}" role="button" tabindex="0">
             <div class="mobile-planning-time">
               <strong>${escapeHtml(formatTime(start))}</strong>
               <span>${escapeHtml(formatTime(end))}</span>
@@ -417,7 +417,7 @@ function renderResourceBookings(resource, date, dayStart, dayEnd, total, dailyCo
       const compactClass = `${blocked ? " blocked-booking" : ""}${!isLeave ? ` task-status-${escapeAttr(getBookingOperationalStatus(booking))}` : ""}${numberOnly ? " number-only-booking" : width < 8 ? " compact-booking" : ""}`;
       const color = getBookingPlanningColor(booking, dailyColorMap);
       items.push(`
-        <div class="booking ${isLeave ? 'leave-booking' : ''}${compactClass}" style="left:${left}%;width:${width}%;background:${color}" title="${escapeAttr(bookingTitle)}" aria-label="${escapeAttr(bookingTitle)}">
+        <div class="booking ${isLeave ? 'leave-booking' : ''}${compactClass}" style="left:${left}%;width:${width}%;background:${color}" title="${escapeAttr(bookingTitle)}" aria-label="${escapeAttr(bookingTitle)}" data-booking-id="${escapeAttr(String(booking.id || ''))}" data-case-id="${escapeAttr(String(booking.caseId || ''))}" role="button" tabindex="0">
           ${taskNumber ? `<span class="booking-number">${escapeHtml(String(taskNumber))}</span>` : ""}
           ${numberOnly ? "" : `<span class="booking-time">${escapeHtml(timeLine)}</span><strong>${escapeHtml(stage)}</strong><span class="booking-stage">${escapeHtml(equipmentPrefix)}${escapeHtml(width < 8 ? compactSecondaryLine : secondaryLine)}</span>`}
         </div>
@@ -1348,3 +1348,200 @@ function renderUsersAndRoles() {
     });
   });
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// PLANNING-UX-001 — R2.1 Booking Side Panel (READ-ONLY)
+// Aucune mutation d'état, aucun INSERT/UPDATE/DELETE.
+// ═══════════════════════════════════════════════════════════════════
+
+function openBookingSidePanel(bookingId) {
+  if (!bookingId) return;
+  const booking = (state.bookings || []).find(b => b.id === bookingId);
+  if (!booking) return;
+
+  const caseItem = booking.caseId
+    ? (typeof getIndexedCaseById === "function"
+        ? getIndexedCaseById(booking.caseId)
+        : (state.cases || []).find(c => c.id === booking.caseId))
+    : null;
+
+  const resource = booking.resourceIds?.[0]
+    ? (state.resources || []).find(r => r.id === booking.resourceIds[0])
+    : null;
+
+  const identity = typeof getPlanningBookingDisplayIdentity === "function"
+    ? getPlanningBookingDisplayIdentity(booking)
+    : { operation: booking.key || "—", phase: "—", canonical: false };
+
+  const status = booking.type !== "leave"
+    ? (typeof getBookingOperationalStatus === "function" ? getBookingOperationalStatus(booking) : null)
+    : null;
+  const statusLabel = status
+    ? (typeof getBookingStatusLabel === "function" ? getBookingStatusLabel(booking) : status)
+    : null;
+
+  const blocked = caseItem && typeof isCaseBlocked === "function" && isCaseBlocked(caseItem);
+  const blockedLabel = blocked && typeof getCaseBlockerLabel === "function" ? getCaseBlockerLabel(caseItem) : "";
+
+  const plate = caseItem?.plate || caseItem?.registration || "";
+  const model = caseItem
+    ? (typeof shortVehicleModel === "function" ? shortVehicleModel(caseItem.vehicle || caseItem.model || "Véhicule") : (caseItem.vehicle || caseItem.model || ""))
+    : "";
+  const clientName = caseItem?.clientName || "";
+
+  const _formatDuration = (minutes) => {
+    if (!Number.isFinite(minutes) || minutes <= 0) return "—";
+    const total = Math.round(minutes);
+    const h = Math.floor(total / 60);
+    const m = total % 60;
+    return h ? `${h}h${m ? String(m).padStart(2, "0") : ""}` : `${m}min`;
+  };
+
+  const panelStart = booking.segments?.[0]?.start || booking.start || null;
+  const panelEnd = booking.segments?.[booking.segments.length - 1]?.end || booking.end || null;
+  const durationMinutes = typeof getBookingPlannedMinutes === "function"
+    ? getBookingPlannedMinutes(booking, caseItem)
+    : typeof getBookingDurationMinutes === "function"
+      ? getBookingDurationMinutes(booking)
+      : (booking.segments || []).reduce((sum, segment) => {
+          const minutes = (new Date(segment?.end) - new Date(segment?.start)) / 60000;
+          return Number.isFinite(minutes) && minutes > 0 ? sum + minutes : sum;
+        }, 0);
+  const duration = _formatDuration(durationMinutes);
+  const promise = caseItem?.promiseDate || caseItem?.eta || null;
+  const _fmt = (v) => typeof formatDateTime === "function" ? formatDateTime(v) : String(v);
+  const _esc = (v) => typeof escapeHtml === "function" ? escapeHtml(String(v)) : String(v);
+  const _row = (label, value) => value
+    ? `<div class="bsp-row"><span class="bsp-label">${_esc(label)}</span><span class="bsp-value">${_esc(String(value))}</span></div>`
+    : "";
+
+  let body = "";
+  if (caseItem?.orNumber || caseItem?.id) body += _row("OR / Dossier", caseItem.orNumber || caseItem.id);
+  if (clientName) body += _row("Client", clientName);
+  if (plate)      body += _row("Immatriculation", plate);
+  if (model)      body += _row("Véhicule", model);
+  body += _row("Opération", identity.operation);
+  if (identity.canonical && identity.phase && identity.phase !== identity.operation) {
+    body += _row("Phase", identity.phase);
+  }
+  if (resource?.name) body += _row("Ressource", resource.name);
+  if (panelStart)     body += _row("Début prévu", _fmt(panelStart));
+  if (panelEnd)       body += _row("Fin prévue", _fmt(panelEnd));
+  body += _row("Durée", duration);
+  if (statusLabel) {
+    body += `<div class="bsp-row"><span class="bsp-label">Statut</span><span class="bsp-value bsp-status bsp-status-${typeof escapeAttr === "function" ? escapeAttr(status) : status}">${_esc(statusLabel)}</span></div>`;
+  }
+  if (promise) body += _row("Promesse / ETA", _fmt(promise));
+  if (blocked) {
+    body += `<div class="bsp-row bsp-conflict"><span class="bsp-label">⚠ Alerte</span><span class="bsp-value">${_esc(blockedLabel || "Dossier bloqué")}</span></div>`;
+  }
+
+  const panel   = document.getElementById("booking-side-panel");
+  const bodyEl  = document.getElementById("bsp-body");
+  const titleEl = document.getElementById("bsp-title");
+  const openOrBtn = document.getElementById("bsp-open-or");
+
+  if (!panel || !bodyEl) return;
+
+  if (titleEl) titleEl.textContent = identity.operation || "Réservation";
+  bodyEl.innerHTML = body || `<p class="bsp-empty">Aucune donnée disponible.</p>`;
+
+  if (openOrBtn) {
+    const hasDossier = Boolean(caseItem?.id);
+    openOrBtn.hidden = !hasDossier;
+    openOrBtn.dataset.caseId = caseItem?.id || "";
+  }
+
+  panel.hidden = false;
+  panel.setAttribute("aria-hidden", "false");
+
+  // Focus le bouton Fermer pour l'accessibilité
+  const closeTopBtn = document.getElementById("bsp-close-top");
+  if (closeTopBtn) closeTopBtn.focus();
+}
+
+function closeBookingSidePanel() {
+  const panel = document.getElementById("booking-side-panel");
+  if (!panel) return;
+  panel.hidden = true;
+  panel.setAttribute("aria-hidden", "true");
+  // Retour du focus sur le gantt
+  const gantt = document.getElementById("gantt");
+  if (gantt) gantt.focus({ preventScroll: true });
+}
+
+function initBookingSidePanel() {
+  // Boutons de fermeture
+  document.getElementById("bsp-close-top")?.addEventListener("click", closeBookingSidePanel);
+  document.getElementById("bsp-close")?.addEventListener("click", closeBookingSidePanel);
+
+  // Escape ferme le panneau
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    const panel = document.getElementById("booking-side-panel");
+    if (!panel || panel.hidden) return;
+    e.preventDefault();
+    closeBookingSidePanel();
+  });
+
+  // [Ouvrir OR] — navigation vers le dossier via le mécanisme existant
+  document.getElementById("bsp-open-or")?.addEventListener("click", () => {
+    const openOrBtn = document.getElementById("bsp-open-or");
+    const caseId = openOrBtn?.dataset?.caseId;
+    if (!caseId) return;
+    // Positionner le dossier actif (variable globale partagée par les modules)
+    activeCaseId = caseId;
+    // Naviguer via le bouton de navigation principal existant
+    const navDossiers = document.querySelector('[data-tab="dossiers"]');
+    if (navDossiers) navDossiers.click();
+    closeBookingSidePanel();
+  });
+
+  // Délégation de clic sur le gantt (desktop)
+  const gantt = document.getElementById("gantt");
+  if (gantt) {
+    gantt.addEventListener("click", (e) => {
+      const bookingEl = e.target.closest("[data-booking-id]");
+      if (!bookingEl) return;
+      const bookingId = bookingEl.dataset.bookingId;
+      if (!bookingId) return;
+      e.stopPropagation();
+      openBookingSidePanel(bookingId);
+    });
+    // Activation clavier (Enter / Espace sur un booking focusé)
+    gantt.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      const bookingEl = e.target.closest("[data-booking-id]");
+      if (!bookingEl) return;
+      const bookingId = bookingEl.dataset.bookingId;
+      if (!bookingId) return;
+      e.preventDefault();
+      openBookingSidePanel(bookingId);
+    });
+  }
+
+  // Délégation de clic sur la liste mobile (bottom-sheet)
+  const mobileList = document.getElementById("mobile-planning-list");
+  if (mobileList) {
+    mobileList.addEventListener("click", (e) => {
+      const card = e.target.closest("[data-booking-id]");
+      if (!card) return;
+      const bookingId = card.dataset.bookingId;
+      if (!bookingId) return;
+      e.stopPropagation();
+      openBookingSidePanel(bookingId);
+    });
+    mobileList.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      const card = e.target.closest("[data-booking-id]");
+      if (!card) return;
+      const bookingId = card.dataset.bookingId;
+      if (!bookingId) return;
+      e.preventDefault();
+      openBookingSidePanel(bookingId);
+    });
+  }
+}
+
+// Auto-init: le script est chargé avec defer, le DOM est déjà prêt
+initBookingSidePanel();

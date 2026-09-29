@@ -10737,9 +10737,43 @@ button.is-pending[aria-busy="true"]::before {
 .reception-new-entry-options span { margin-top: 5px; color: var(--muted); font-size: .82rem; line-height: 1.4; }
 #reception-new-entry-panel[hidden] { display: none !important; }
 #reception-new-entry-panel-close { min-height: 44px; margin-top: 12px; }
+
+/* KHA-44 — Réception active dans le panneau opérationnel R2. */
+.active-reception-form { display: grid; gap: 16px; margin: 16px 0; padding: 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--paper); }
+.active-reception-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.active-reception-heading h3 { margin: 2px 0 0; font-size: 1.05rem; }
+.active-reception-heading small { color: var(--muted); }
+.active-reception-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.active-reception-grid label { display: grid; gap: 6px; min-width: 0; }
+.active-reception-grid .wide { grid-column: 1 / -1; }
+.active-reception-grid input,
+.active-reception-grid select,
+.active-reception-grid textarea { width: 100%; min-width: 0; }
+.active-reception-evidence,
+.active-reception-authorization-status { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; border-radius: 12px; background: var(--surface-soft, #f8fafb); }
+.active-reception-evidence div,
+.active-reception-authorization-status { min-width: 0; }
+.active-reception-evidence span,
+.active-reception-authorization-status span { display: block; margin-top: 4px; color: var(--muted); }
+.active-reception-history { border-top: 1px solid var(--line); padding-top: 10px; }
+.active-reception-history summary { cursor: pointer; font-weight: 700; }
+.active-reception-history ul { display: grid; gap: 6px; margin: 10px 0 0; padding-left: 18px; }
+.active-reception-history li span { margin-left: 8px; color: var(--muted); font-size: .85rem; }
+.active-reception-summary { margin: 12px 0; border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+.active-reception-summary summary { cursor: pointer; font-weight: 700; }
+.active-reception-summary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+.active-reception-summary-grid span { display: grid; gap: 3px; }
+.active-reception-summary-grid small { color: var(--muted); }
+.active-reception-authorization-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+
 @media (max-width: 600px) {
   .reception-today-actions { width: 100%; justify-content: space-between; }
   .reception-new-entry-dialog { padding: 16px; }
   .reception-new-entry-dialog-head { align-items: center; }
   .reception-new-entry-options { grid-template-columns: 1fr; }
+  .active-reception-grid,
+  .active-reception-summary-grid { grid-template-columns: 1fr; }
+  .active-reception-evidence,
+  .active-reception-authorization-status { align-items: stretch; flex-direction: column; }
+  .active-reception-evidence .secondary-button { width: 100%; }
 }

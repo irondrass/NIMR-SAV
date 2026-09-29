@@ -2687,6 +2687,143 @@ function guardVisibleCaseRevision(item, revision) {
   return { ok: true };
 }
 
+function getReceptionVehicleHistory(item, limit = 3) {
+  if (!item) return [];
+  const vin = normalizeCaseIdentityToken(item.vin);
+  const plate = normalizeCaseIdentityToken(item.plate);
+  if (!vin && !plate) return [];
+  return (state.cases || [])
+    .filter((candidate) => {
+      if (!candidate || candidate.id === item.id || candidate.deletedAt) return false;
+      const candidateVin = normalizeCaseIdentityToken(candidate.vin);
+      const candidatePlate = normalizeCaseIdentityToken(candidate.plate);
+      return Boolean((vin && candidateVin && vin === candidateVin) || (plate && candidatePlate && plate === candidatePlate));
+    })
+    .sort((a, b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0))
+    .slice(0, Math.max(0, Number(limit) || 0));
+}
+
+function renderReceptionActiveForm(item) {
+  const rw = normalizeReceptionWorkflow(item?.receptionWorkflow);
+  const history = getReceptionVehicleHistory(item, 3);
+  const fuelOptions = [
+    ["", "À renseigner"],
+    ["reserve", "Réserve"],
+    ["quarter", "1/4"],
+    ["half", "1/2"],
+    ["three_quarters", "3/4"],
+    ["full", "Plein"],
+    ["na", "Non applicable"],
+  ];
+  const warrantyOptions = [
+    ["", "À vérifier"],
+    ["none", "Aucun signalement"],
+    ["check", "Vérification nécessaire"],
+    ["warranty", "Garantie potentielle"],
+    ["campaign", "Campagne potentielle"],
+    ["both", "Garantie + campagne potentielles"],
+  ];
+  const pendingAuthorization = typeof getWorkAuthorizationIssues === "function" ? getWorkAuthorizationIssues(item) : [];
+  const historyHtml = history.length
+    ? history.map((entry) => `<li><strong>${escapeHtml(entry.orNavNumber || entry.plate || entry.vin || "Dossier")}</strong><span>${escapeHtml(entry.createdAt ? formatDateTime(entry.createdAt) : "Date inconnue")}</span></li>`).join("")
+    : "<li>Aucun passage antérieur retrouvé dans les dossiers NIMR-SAV de ce poste.</li>";
+  const photoCount = Array.isArray(item?.photos) ? item.photos.length : 0;
+
+  return `
+    <form class="active-reception-form" data-reception-active-form data-case-id="${escapeAttr(item.id)}">
+      <div class="active-reception-heading">
+        <div>
+          <small>Réception active</small>
+          <h3>Constater le véhicule et la demande client</h3>
+        </div>
+        <span class="tag">${photoCount} photo${photoCount > 1 ? "s" : ""}</span>
+      </div>
+
+      <div class="active-reception-grid">
+        <label>Kilométrage
+          <input name="mileage" inputmode="numeric" value="${escapeAttr(rw.vehicleMileageEntry || item.mileage || "")}" placeholder="Ex. 45 000" />
+        </label>
+        <label>Niveau carburant
+          <select name="fuelLevel">${fuelOptions.map(([value, label]) => `<option value="${value}" ${rw.vehicleFuelLevel === value ? "selected" : ""}>${label}</option>`).join("")}</select>
+        </label>
+        <label>Accessoires laissés
+          <input name="accessories" value="${escapeAttr(rw.vehicleAccessories || "")}" placeholder="Clés, câble, roue de secours..." />
+        </label>
+        <label>Documents reçus
+          <input name="documents" value="${escapeAttr(rw.vehicleDocuments || "")}" placeholder="Carnet, carte grise, document assurance..." />
+        </label>
+        <label class="wide">Objets personnels
+          <input name="personalItems" value="${escapeAttr(rw.vehiclePersonalItems || "")}" placeholder="Objets laissés dans le véhicule" />
+        </label>
+        <label class="wide">Plainte client — mots du client
+          <textarea name="complaintsText" rows="3" placeholder="Une plainte par ligne, sans reformuler"></textarea>
+        </label>
+        <label class="wide">Travaux demandés
+          <textarea name="requestedWorksText" rows="3" placeholder="Une demande par ligne"></textarea>
+        </label>
+        <label class="wide">Carrosserie / dommages visibles
+          <textarea name="damageNotes" rows="3" placeholder="Rayures, chocs, bosses...">${escapeHtml(item.damageNotes || "")}</textarea>
+        </label>
+        <label class="wide">État intérieur
+          <textarea name="interiorNote" rows="2" placeholder="Propreté, sièges, garnitures...">${escapeHtml(rw.vehicleInteriorNote || "")}</textarea>
+        </label>
+        <label class="wide">État général / observations
+          <textarea name="conditionNote" rows="3" placeholder="Constat général à l'arrivée">${escapeHtml(rw.vehicleConditionNote || item.arrivalNotes || "")}</textarea>
+        </label>
+        <label>Garantie / campagne
+          <select name="warrantyCampaignStatus">${warrantyOptions.map(([value, label]) => `<option value="${value}" ${rw.warrantyCampaignStatus === value ? "selected" : ""}>${label}</option>`).join("")}</select>
+        </label>
+        <label>Référence / remarque garantie-campagne
+          <input name="warrantyCampaignReference" value="${escapeAttr(rw.warrantyCampaignReference || "")}" placeholder="Référence si connue" />
+        </label>
+        <label>Promesse de restitution au client
+          <input type="datetime-local" name="promisedAt" value="${escapeAttr(toLocalInputDate(item.clientCommitment?.promisedAt))}" />
+        </label>
+        <label>Note de promesse
+          <input name="promiseNote" value="${escapeAttr(item.clientCommitment?.note || "")}" placeholder="Sous réserve diagnostic, pièces..." />
+        </label>
+      </div>
+
+      <div class="active-reception-evidence">
+        <div>
+          <strong>Preuves visuelles</strong>
+          <span>${photoCount ? `${photoCount} photo(s) déjà liée(s) au dossier.` : "Aucune photo liée au dossier."} L'ajout reste dans le module Photos commun.</span>
+        </div>
+        <button type="button" class="secondary-button" data-reception-open-photos>Ouvrir Photos</button>
+      </div>
+
+      <details class="active-reception-history">
+        <summary>Historique véhicule NIMR-SAV (${history.length})</summary>
+        <ul>${historyHtml}</ul>
+      </details>
+
+      <div class="active-reception-authorization-status">
+        <strong>Accord travaux</strong>
+        <span>${pendingAuthorization.length ? `${pendingAuthorization.length} ordre(s) restent à autoriser avec une preuve avant envoi atelier.` : "Les accords requis sont tracés."}</span>
+      </div>
+
+      <button type="submit" class="primary-button">Valider la réception active</button>
+    </form>
+  `;
+}
+
+function renderReceptionActiveSummary(item) {
+  const rw = normalizeReceptionWorkflow(item?.receptionWorkflow);
+  const fuelLabels = { reserve: "Réserve", quarter: "1/4", half: "1/2", three_quarters: "3/4", full: "Plein", na: "N/A" };
+  const warrantyLabels = { none: "Aucun signalement", check: "À vérifier", warranty: "Garantie potentielle", campaign: "Campagne potentielle", both: "Garantie + campagne potentielles" };
+  return `<details class="active-reception-summary">
+    <summary>Réception active enregistrée</summary>
+    <div class="active-reception-summary-grid">
+      <span><small>Kilométrage</small><strong>${escapeHtml(rw.vehicleMileageEntry || item.mileage || "—")}</strong></span>
+      <span><small>Carburant</small><strong>${escapeHtml(fuelLabels[rw.vehicleFuelLevel] || "—")}</strong></span>
+      <span><small>Accessoires</small><strong>${escapeHtml(rw.vehicleAccessories || "—")}</strong></span>
+      <span><small>Objets personnels</small><strong>${escapeHtml(rw.vehiclePersonalItems || "—")}</strong></span>
+      <span><small>Garantie / campagne</small><strong>${escapeHtml(warrantyLabels[rw.warrantyCampaignStatus] || "—")}</strong></span>
+      <span><small>Promesse client</small><strong>${item.clientCommitment?.promisedAt ? escapeHtml(formatDateTime(item.clientCommitment.promisedAt)) : "—"}</strong></span>
+    </div>
+  </details>`;
+}
+
 function openOperationalCasePanel(caseId) {
   const item = state.cases.find(c => c.id === caseId);
   if (!item || !canAccessTab("dossiers")) return;
@@ -5428,8 +5565,12 @@ function renderOperationalDecisions(root, item) {
   const role = toRuntimeUserRole(getCurrentUser()?.role);
   const exceptions = getOperationalExceptions(item);
   const pending = (item.claims || []).filter((claim) => claim.includeInPlanning !== false && !hasWorkAuthorizationEvidence(claim) && claim.status !== "refused");
-  const button = (action, label, permission, extra = "") => editable && canRenderAction(permission, { item })
-    ? `<button type="button" class="primary-button" data-operational-action="${action}" ${extra}>${label}</button>` : "";
+  const button = (action, label, permission, extra = "", className = "primary-button") => editable && canRenderAction(permission, { item })
+    ? `<button type="button" class="${className}" data-operational-action="${action}" ${extra}>${label}</button>` : "";
+  const activeReceptionHtml = !item.flags.received && editable && canRenderAction("vehicle.receive", { item })
+    ? renderReceptionActiveForm(item)
+    : (item.flags.received ? renderReceptionActiveSummary(item) : "");
+  const canSendToWorkshop = item.flags.received && !item.receptionWorkflow?.sentToWorkshopAt && pending.length === 0;
   const quality = item.flags.workCompleted && !isCaseQualityValidated(item);
   const finalizationIssues = item.flags.workCompleted ? getCaseFinalizationIssues(item) : [];
   const professionalQualityRole = ["controle_qualite", "chef_atelier"].includes(role);
@@ -5443,13 +5584,14 @@ function renderOperationalDecisions(root, item) {
     ${!root.closest?.("dialog") && role !== "controle_qualite" ? `${renderClientSituation(item)}<button type="button" class="ghost-button" data-client-situation>Engagement et suivi client</button>` : ""}
     <p class="case-sharing-status">${Number(item.localRevision || 0) > Number(item.syncRevision || 0) ? "Action enregistrée sur ce poste · partage en attente" : item.lastSyncedAt || Number(item.syncRevision || 0) > 0 ? "Dernière révision confirmée par le serveur" : "Confirmation du partage non disponible"}</p>
     ${isCasePhysicallyPresent(item) && isCaseReadonlyArchive(item) ? '<p role="alert">Ce dossier est archivé mais aucune remise physique n’est enregistrée. Faire vérifier le dossier par le responsable.</p>' : ""}
-    ${role !== "controle_qualite" ? pending.map((claim) => `<p>${escapeHtml(getClaimLabel(claim))} — accord à confirmer ${button("authorize", "Enregistrer l'accord", "case.edit", `data-claim-id="${escapeAttr(claim.id)}"`)}</p>`).join("") : ""}
+    ${activeReceptionHtml}
+    ${item.flags.received && role !== "controle_qualite" ? pending.map((claim) => `<p class="active-reception-authorization-row">${escapeHtml(getClaimLabel(claim))} — accord à confirmer ${button("authorize", "Enregistrer l'accord", "case.edit", `data-claim-id="${escapeAttr(claim.id)}"`, "secondary-button")}</p>`).join("") : ""}
     ${exceptions.length ? `<details class="operational-exceptions" open><summary>${escapeHtml(exceptions[0].label)}</summary>${exceptions.map(e => `<p>${escapeHtml(e.label)} · ${escapeHtml(e.owner)}${e.dueAt ? ` · ${escapeHtml(formatDateTime(e.dueAt))}` : ""}</p>`).join("")}</details>` : ""}
     ${isCaseBlocked(item) ? '<p>Portée du blocage : véhicule et chaîne atelier. La reprise exige la résolution de la cause ; les dépendances restent contrôlées.</p>' : ""}
     ${quality ? '<p>Travaux terminés. Contrôler le véhicule et sa préparation avant de le déclarer prêt.</p>' : ""}
     ${finalizationIssues.length ? `<ul class="finalization-issues">${finalizationIssues.map(issue => `<li>${escapeHtml(issue)}</li>`).join("")}</ul>` : ""}
     <div class="operational-actions">
-      ${!item.flags.received ? button("receive", "Confirmer l’arrivée", "vehicle.receive") : ""}
+      ${canSendToWorkshop ? button("send-workshop", "Envoyer à l’atelier", "case.edit") : ""}
       ${isCaseReadyForDelivery(item) ? button("deliver", "Confirmer la remise du véhicule", "delivery.complete") : ""}
     </div>
     ${professionalQualityHtml
@@ -5472,6 +5614,9 @@ function renderOperationalDecisions(root, item) {
       } else if (control.dataset.operationalAction === "receive") {
         if (!guardVisibleCaseRevision(item, visibleRevision).ok) return;
         result = advanceReceptionWorkflow(item.id, "receive_vehicle");
+      } else if (control.dataset.operationalAction === "send-workshop") {
+        if (!guardVisibleCaseRevision(item, visibleRevision).ok) return;
+        result = advanceReceptionWorkflow(item.id, "send_to_workshop");
       } else if (control.dataset.operationalAction === "deliver") {
         if (!await showConfirmModal("Confirmer la remise physique de ce véhicule ?")) return;
         if (!guardVisibleCaseRevision(item, visibleRevision).ok) return;
@@ -5489,6 +5634,62 @@ function renderOperationalDecisions(root, item) {
       if (root.closest?.("dialog")?.open) renderOperationalDecisions(root, item);
     } finally { restoreModal(); control.disabled = false; }
   }));
+
+  const activeReceptionForm = panel.querySelector("[data-reception-active-form]");
+  activeReceptionForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    if (typeof form.reportValidity === "function" && !form.reportValidity()) return;
+    if (!guardVisibleCaseRevision(item, visibleRevision).ok) return;
+    const data = new FormData(form);
+    const promisedRaw = String(data.get("promisedAt") || "").trim();
+    let promisedAt = "";
+    if (promisedRaw) {
+      const promisedDate = new Date(promisedRaw);
+      if (!Number.isFinite(promisedDate.getTime())) {
+        notifyUser("Date de promesse client invalide.", "error");
+        return;
+      }
+      promisedAt = promisedDate.toISOString();
+    }
+    const result = advanceReceptionWorkflow(item.id, "receive_vehicle", {
+      mileage: String(data.get("mileage") || "").trim(),
+      fuelLevel: String(data.get("fuelLevel") || "").trim(),
+      complaintsText: String(data.get("complaintsText") || "").trim(),
+      requestedWorksText: String(data.get("requestedWorksText") || "").trim(),
+      damageNotes: String(data.get("damageNotes") || "").trim(),
+      interiorNote: String(data.get("interiorNote") || "").trim(),
+      personalItems: String(data.get("personalItems") || "").trim(),
+      accessories: String(data.get("accessories") || "").trim(),
+      documents: String(data.get("documents") || "").trim(),
+      conditionNote: String(data.get("conditionNote") || "").trim(),
+      warrantyCampaignStatus: String(data.get("warrantyCampaignStatus") || "").trim(),
+      warrantyCampaignReference: String(data.get("warrantyCampaignReference") || "").trim(),
+      promisedAt,
+      promiseNote: String(data.get("promiseNote") || "").trim(),
+    });
+    if (!result?.ok) {
+      notifyUser(result?.message || "Réception active impossible.", "error");
+      return;
+    }
+    const saved = await saveState({ changedCase: item, flushCloud: true, cloudReason: "reception-active" });
+    if (!saved) {
+      notifyUser("La réception reste affichée, mais la sauvegarde n’a pas été confirmée. Gardez ce poste ouvert et prévenez le responsable.", "warn");
+      return;
+    }
+    notifyUser("Réception active enregistrée.", "success");
+    render();
+    if (root.closest?.("dialog")?.open) renderOperationalDecisions(root, item);
+  });
+
+  panel.querySelector("[data-reception-open-photos]")?.addEventListener("click", () => {
+    root.closest?.("dialog")?.close();
+    activeCaseId = item.id;
+    activeCaseDetailTab = "photos";
+    if (typeof setActiveTab === "function") setActiveTab("dossiers");
+    if (typeof renderCases === "function") renderCases();
+    if (typeof renderCaseDetail === "function") renderCaseDetail();
+  });
 
   const professionalQualityControl = panel.querySelector("[data-professional-quality-control]");
   if (professionalQualityControl) {

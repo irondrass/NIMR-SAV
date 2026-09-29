@@ -337,6 +337,13 @@ async function buildBusinessFolderSpec(client, workshopId, payload) {
     const section = cleanToken(payload.warranty_section, 40);
     if (!WARRANTY_SECTIONS.has(section)) throw new MediaDriveError("INVALID_WARRANTY_SECTION", 400);
     const claim = await loadClaim(client, workshopId, cleanText(payload.claim_id, 80));
+    const repairOrderId = cleanText(payload.repair_order_id, 80);
+    if (repairOrderId) {
+      const order = await loadRepairOrder(client, workshopId, repairOrderId);
+      if (String(claim.repair_order_id || "") !== String(order.id)) {
+        throw new MediaDriveError("CLAIM_REPAIR_ORDER_MISMATCH", 409);
+      }
+    }
     const claimLabel = safeDriveSegment(claim.local_id || claim.id, "CLAIM");
     return {
       scope,
@@ -378,6 +385,40 @@ async function listManagedFolders(fetchFn, accessToken, parentId, logicalKey) {
 function chooseStableFolder(rows) {
   return rows
     .filter((row) => row && row.id && row.trashed !== true && row.mimeType === DRIVE_FOLDER_MIME)
+    .sort((a, b) =>
+      String(a.createdTime || "").localeCompare(String(b.createdTime || ""))
+      || String(a.id).localeCompare(String(b.id))
+    )[0] || null;
+}
+
+async function listManagedMediaByLocalHash(fetchFn, accessToken, parentId, workshopId, localHash) {
+  const q = [
+    `'${escapeDriveQuery(parentId)}' in parents`,
+    "trashed = false",
+    `appProperties has { key='nimr_managed' and value='true' }`,
+    `appProperties has { key='nimr_workshop' and value='${escapeDriveQuery(workshopId)}' }`,
+    `appProperties has { key='nimr_local_hash' and value='${escapeDriveQuery(localHash)}' }`,
+  ].join(" and ");
+  const params = new URLSearchParams({
+    q,
+    spaces: "drive",
+    pageSize: "100",
+    supportsAllDrives: "true",
+    includeItemsFromAllDrives: "true",
+    fields: "files(id,name,mimeType,size,parents,appProperties,createdTime,modifiedTime,trashed,md5Checksum,sha256Checksum)",
+  });
+  const payload = await fetchJson(
+    fetchFn,
+    `${GOOGLE_DRIVE_API}/files?${params}`,
+    { method: "GET", headers: driveHeaders(accessToken) },
+    "GOOGLE_DRIVE_MEDIA_LOOKUP_FAILED",
+  );
+  return Array.isArray(payload?.files) ? payload.files : [];
+}
+
+function chooseStableMedia(rows) {
+  return rows
+    .filter((row) => row && row.id && row.trashed !== true && row.mimeType !== DRIVE_FOLDER_MIME)
     .sort((a, b) =>
       String(a.createdTime || "").localeCompare(String(b.createdTime || ""))
       || String(a.id).localeCompare(String(b.id))
@@ -724,6 +765,36 @@ export function createMediaDriveHandler(overrides = {}) {
       }
 
       if (action === "begin_upload") {
+        const localHash = await sha256Hex(uploadInput.localId);
+        const existingFile = chooseStableMedia(await listManagedMediaByLocalHash(
+          fetchFn,
+          accessToken,
+          folder.folderId,
+          workshopId,
+          localHash,
+        ));
+        if (existingFile) {
+          assertManagedFile(existingFile, workshopId, {
+            parentId: folder.folderId,
+            localHash,
+          });
+          if (String(existingFile.mimeType || "") !== uploadInput.mimeType
+            || Number(existingFile.size) !== uploadInput.sizeBytes) {
+            throw new MediaDriveError("MEDIA_IDEMPOTENCY_CONTENT_MISMATCH", 409);
+          }
+          return response({
+            ok: true,
+            action,
+            already_uploaded: true,
+            drive_file_id: String(existingFile.id),
+            file: sanitizeDriveMetadata(existingFile),
+            mime_type: uploadInput.mimeType,
+            size_bytes: uploadInput.sizeBytes,
+            local_id: uploadInput.localId,
+            folder_id: folder.folderId,
+          });
+        }
+
         const uploadUrl = await beginResumableUpload(
           fetchFn,
           accessToken,
@@ -735,6 +806,7 @@ export function createMediaDriveHandler(overrides = {}) {
         return response({
           ok: true,
           action,
+          already_uploaded: false,
           upload_url: uploadUrl,
           upload_method: "PUT",
           mime_type: uploadInput.mimeType,
@@ -749,12 +821,36 @@ export function createMediaDriveHandler(overrides = {}) {
         parentId: folder.folderId,
         localHash: finalizeLocalHash,
       });
+
+      const matchingFiles = await listManagedMediaByLocalHash(
+        fetchFn,
+        accessToken,
+        folder.folderId,
+        workshopId,
+        finalizeLocalHash,
+      );
+      for (const candidate of matchingFiles) {
+        assertManagedFile(candidate, workshopId, {
+          parentId: folder.folderId,
+          localHash: finalizeLocalHash,
+        });
+        if (String(candidate.mimeType || "") !== String(file.mimeType || "")
+          || Number(candidate.size) !== Number(file.size)) {
+          throw new MediaDriveError("MEDIA_IDEMPOTENCY_CONTENT_MISMATCH", 409);
+        }
+      }
+      const canonicalFile = chooseStableMedia(matchingFiles) || file;
+      for (const duplicate of matchingFiles) {
+        if (!duplicate?.id || String(duplicate.id) === String(canonicalFile.id)) continue;
+        await trashManagedDuplicate(fetchFn, accessToken, String(duplicate.id));
+      }
+
       return response({
         ok: true,
         action: "finalize_upload",
         scope: spec.scope,
         business_context: spec.businessContext,
-        file: sanitizeDriveMetadata(file),
+        file: sanitizeDriveMetadata(canonicalFile),
       });
     } catch (error) {
       if (error instanceof MediaDriveError) {

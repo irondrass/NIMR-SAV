@@ -34,8 +34,9 @@ Aucun upload Google Drive réel n'a été exécuté.
 
 ## Migration staging
 
-Migration locale :
-`supabase/migrations/20260929214449_media_upload_001_additive_model.sql`
+Migrations locales alignées exactement sur l'historique STAGING :
+- `supabase/migrations/20260929220514_media_upload_001_additive_model.sql`
+- `supabase/migrations/20260929220555_media_upload_001_fk_indexes.sql`
 
 Projet staging :
 `NIMR-SAV-QC-PRO-STAGING` (`ijgstcdptyxjzgqlvooc`)
@@ -55,8 +56,8 @@ Advisors restants :
 
 ## Tests
 
-- KHA-48 : 7/7 PASS
-- KHA-47 : 21/21 PASS
+- KHA-48 : 8/8 PASS
+- KHA-47 / media-drive : 25/25 PASS
 - IDENTITY-001C : 12/12 PASS
 - SECUX-001 : 42/42 PASS
 - Static startup safety : 7/7 PASS
@@ -66,3 +67,28 @@ Advisors restants :
 - Supabase security contract : PASS
 - syntax checks : PASS
 - git diff --check : PASS
+## Review KHA-48
+
+Corrections issues de la review :
+- reprise Drive idempotente : un fichier déjà terminé est retrouvé par `nimr_local_hash` avant d'ouvrir une nouvelle session ;
+- conflit de contenu fail-closed si un même `local_id` pointe vers un MIME ou une taille différents ;
+- course concurrente : la finalisation conserve le fichier géré le plus ancien et met les doublons gérés à la corbeille ;
+- garantie : si OR + claim sont fournis, le backend vérifie que le claim appartient bien à l'OR ;
+- suppression : un média déjà `uploading/uploaded` ou portant un `drive_file_id` ne peut plus être supprimé uniquement en local ;
+- historique des migrations du repo réaligné sur les deux migrations réellement enregistrées en STAGING.
+
+Contrôle navigateur réel :
+- panneau Médias dossier chargé avec photo + vidéo + statuts + retry ;
+- contrôle responsive à 390 × 844 ;
+- aucun page error ;
+- warnings Teamdev UNAUTHENTICATED attendus pendant le contrôle local sans session réelle.
+
+CI externe :
+- le check Vercel GitHub reste rouge ;
+- le même échec Vercel existait déjà sur KHA-47 et sur sa base, donc il n'est pas introduit par KHA-48 ;
+- le connecteur Vercel disponible dans cette session n'a pas l'autorisation du scope `irondrass-projects` pour lire le build log.
+
+Backend :
+- aucune Edge Function `media-drive` n'est déployée sur STAGING ou PROD ;
+- cette review ne déploie donc aucun backend Drive et ne modifie aucun secret ;
+- activation réelle reste une étape de déploiement/configuration distincte.

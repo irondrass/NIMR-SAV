@@ -428,7 +428,10 @@ await check("K identity ticket introduces no unapproved SQL or deployment path",
     "supabase/migrations/20260927070856_sec_audit_001_null_auth_guard_hardening.sql",
     "supabase/migrations/20260927093000_sec_audit_001b_role_matrix_prod_preflight.sql",
     "supabase/migrations/20260927110000_qc_gate0_legacy_quality_rpc_cutover.sql",
+    // KHA-48 review removes the initial PR-only timestamp and replaces it with the exact STAGING history below.
     "supabase/migrations/20260929214449_media_upload_001_additive_model.sql",
+    "supabase/migrations/20260929220514_media_upload_001_additive_model.sql",
+    "supabase/migrations/20260929220555_media_upload_001_fk_indexes.sql",
   ]);
   assert.deepEqual(changedPaths.filter((file) => (file.startsWith("supabase/migrations/") || /\.sql$/iu.test(file)) && !allowedSql.has(file)), []);
   assert.doesNotMatch(configSource + "\n" + edgeSource, /supabase\s+(?:db\s+(?:push|reset)|migration\s+up|functions\s+deploy|secrets\s+set)/iu);

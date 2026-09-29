@@ -41,15 +41,6 @@ alter table public.photos
   add constraint photos_uploaded_drive_check
     check (upload_status <> 'uploaded' or nullif(btrim(drive_file_id), '') is not null) not valid;
 
-create index if not exists photos_vehicle_fk_idx
-  on public.photos (vehicle_id);
-
-create index if not exists photos_claim_fk_idx
-  on public.photos (claim_id);
-
-create index if not exists photos_repair_step_fk_idx
-  on public.photos (repair_step_id);
-
 create index if not exists photos_vehicle_idx
   on public.photos (workshop_id, vehicle_id)
   where deleted_at is null and vehicle_id is not null;

@@ -324,13 +324,21 @@ async function uploadMediaNow(item, media) {
     mime_type: media.type,
     size_bytes: Number(media.size || record.blob.size || 0),
   });
-  if (!begin?.ok || !begin.upload_url) {
+  if (!begin?.ok) {
     throw Object.assign(new Error(begin?.message || begin?.code || "Session upload impossible."), begin || {});
   }
 
   media.driveFolderId = begin.folder_id || "";
-  const uploaded = await putMediaBlob(begin.upload_url, record.blob, media.type);
-  const driveFileId = mediaUploadCleanText(uploaded?.id, 256);
+  let driveFileId = "";
+  if (begin.already_uploaded && begin.drive_file_id) {
+    driveFileId = mediaUploadCleanText(begin.drive_file_id, 256);
+  } else {
+    if (!begin.upload_url) {
+      throw Object.assign(new Error(begin?.message || begin?.code || "Session upload impossible."), begin || {});
+    }
+    const uploaded = await putMediaBlob(begin.upload_url, record.blob, media.type);
+    driveFileId = mediaUploadCleanText(uploaded?.id, 256);
+  }
   if (!driveFileId) throw new Error("Google Drive n'a pas retourné d'identifiant fichier.");
   media.driveFileId = driveFileId;
   await persistLocalMediaMeta(item, media);

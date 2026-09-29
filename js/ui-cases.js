@@ -6693,7 +6693,14 @@ function renderPhotos(root, item) {
   });
   $$("[data-remove-photo]", photos).forEach((button) => {
     button.addEventListener("click", async () => {
-      const [removed] = item.photos.splice(Number(button.dataset.removePhoto), 1);
+      const index = Number(button.dataset.removePhoto);
+      const candidate = item.photos[index];
+      const cloudStatus = candidate?.uploadStatus || "pending";
+      if (candidate?.driveFileId || cloudStatus === "uploaded" || cloudStatus === "uploading") {
+        notifyUser("Ce média existe déjà dans le cloud. La suppression locale est bloquée tant que la suppression Drive sécurisée n'est pas disponible.", "warn");
+        return;
+      }
+      const [removed] = item.photos.splice(index, 1);
       if (removed?.id) {
         await deletePhotoRecord(removed.id);
         revokePhotoUrl(removed.id);

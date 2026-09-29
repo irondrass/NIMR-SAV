@@ -21,7 +21,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v23.3.65";
+const APP_VERSION = "v23.3.66";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const CURRENT_DATA_SCHEMA_VERSION = 2;
@@ -3697,6 +3697,16 @@ function hasRepairClaims(item) {
   return normalizeRepairClaims(item?.claims || [], item).length > 0;
 }
 
+function normalizeReceptionFuelLevel(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return ["reserve", "quarter", "half", "three_quarters", "full", "na"].includes(normalized) ? normalized : "";
+}
+
+function normalizeReceptionWarrantyCampaignStatus(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return ["none", "check", "warranty", "campaign", "both"].includes(normalized) ? normalized : "";
+}
+
 function normalizeReceptionWorkflow(raw) {
   raw = raw && typeof raw === "object" ? raw : {};
   return {
@@ -3740,9 +3750,14 @@ function normalizeReceptionWorkflow(raw) {
     vehicleReceivedAt: raw.vehicleReceivedAt || "",
     vehicleReceivedBy: raw.vehicleReceivedBy || "",
     vehicleMileageEntry: raw.vehicleMileageEntry || "",
+    vehicleFuelLevel: normalizeReceptionFuelLevel(raw.vehicleFuelLevel),
     vehicleAccessories: raw.vehicleAccessories || "",
     vehicleDocuments: raw.vehicleDocuments || "",
     vehicleConditionNote: raw.vehicleConditionNote || "",
+    vehicleInteriorNote: raw.vehicleInteriorNote || "",
+    vehiclePersonalItems: raw.vehiclePersonalItems || "",
+    warrantyCampaignStatus: normalizeReceptionWarrantyCampaignStatus(raw.warrantyCampaignStatus),
+    warrantyCampaignReference: raw.warrantyCampaignReference || "",
     // Étape 8 — envoi atelier
     sentToWorkshopAt: raw.sentToWorkshopAt || "",
     sentToWorkshopBy: raw.sentToWorkshopBy || "",
@@ -3775,6 +3790,34 @@ function normalizeReceptionWorkflow(raw) {
     deliveryOverride: Boolean(raw.deliveryOverride),
     deliveryOverrideReason: raw.deliveryOverrideReason || "",
   };
+}
+
+function appendReceptionCustomerClaims(item, rawText, type, actor = getCurrentActor()) {
+  const claimType = type === "request" ? "request" : "claim";
+  const lines = String(rawText || "").split(/\r?\n/u).map((line) => line.trim()).filter(Boolean);
+  if (!lines.length) return 0;
+  item.customerClaims = Array.isArray(item.customerClaims) ? item.customerClaims : [];
+  const keyOf = (entry) => `${entry?.type || "claim"}:${String(entry?.text || entry?.title || "").trim().toLocaleLowerCase("fr")}`;
+  const existing = new Set(item.customerClaims.map(keyOf));
+  let added = 0;
+  for (const line of lines) {
+    const key = `${claimType}:${line.toLocaleLowerCase("fr")}`;
+    if (existing.has(key)) continue;
+    const claim = normalizeCustomerClaim({
+      type: claimType,
+      title: line,
+      text: line,
+      priority: "normal",
+      status: "open",
+      createdBy: actor?.userName || actor?.userId || "Utilisateur",
+      createdAt: new Date().toISOString(),
+    });
+    if (!claim) continue;
+    item.customerClaims.push(claim);
+    existing.add(key);
+    added += 1;
+  }
+  return added;
 }
 
 function normalizeCustomerClaim(claim) {
@@ -6308,18 +6351,54 @@ function advanceReceptionWorkflow(caseId, action, payload = {}) {
       return { ok: true, message: "" };
     }
     case "receive_vehicle": {
+      if (payload.promisedAt && !Number.isFinite(new Date(payload.promisedAt).getTime())) {
+        return { ok: false, message: "Date de promesse client invalide." };
+      }
+      const mileage = String(payload.mileage || item.mileage || "").trim();
+      const fuelLevel = normalizeReceptionFuelLevel(payload.fuelLevel);
+      const warrantyCampaignStatus = normalizeReceptionWarrantyCampaignStatus(payload.warrantyCampaignStatus);
       item.flags.received = true;
       rw.vehicleReceivedAt = now;
       rw.vehicleReceivedBy = actor.userId;
-      rw.vehicleMileageEntry = payload.mileage || item.mileage || "";
-      rw.vehicleAccessories = payload.accessories || "";
-      rw.vehicleDocuments = payload.documents || "";
-      rw.vehicleConditionNote = payload.conditionNote || "";
+      rw.vehicleMileageEntry = mileage;
+      rw.vehicleFuelLevel = fuelLevel;
+      rw.vehicleAccessories = String(payload.accessories || "").trim();
+      rw.vehicleDocuments = String(payload.documents || "").trim();
+      rw.vehicleConditionNote = String(payload.conditionNote || "").trim();
+      rw.vehicleInteriorNote = String(payload.interiorNote || "").trim();
+      rw.vehiclePersonalItems = String(payload.personalItems || "").trim();
+      rw.warrantyCampaignStatus = warrantyCampaignStatus;
+      rw.warrantyCampaignReference = String(payload.warrantyCampaignReference || "").trim();
+      if (mileage) item.mileage = mileage;
+      if (payload.damageNotes !== undefined) item.damageNotes = String(payload.damageNotes || "").trim();
+      const addedClaims = appendReceptionCustomerClaims(item, payload.complaintsText, "claim", actor);
+      const addedRequests = appendReceptionCustomerClaims(item, payload.requestedWorksText, "request", actor);
+      if (payload.promisedAt || payload.promiseNote) {
+        const commitment = recordClientCommitment(item, {
+          promisedAt: payload.promisedAt || item.clientCommitment?.promisedAt || "",
+          note: String(payload.promiseNote || "").trim(),
+        });
+        if (!commitment.ok) return commitment;
+      }
       if (typeof recordFlagHistory === "function") recordFlagHistory(item, "received", true);
-      if (typeof addAuditLog === "function") addAuditLog("reception.vehicle_received", "Véhicule réceptionné", payload.conditionNote || `KM: ${rw.vehicleMileageEntry}`, { caseId });
+      if (typeof addAuditLog === "function") {
+        const detail = [
+          mileage ? `KM: ${mileage}` : "",
+          fuelLevel ? `carburant: ${fuelLevel}` : "",
+          addedClaims ? `${addedClaims} plainte(s)` : "",
+          addedRequests ? `${addedRequests} demande(s)` : "",
+        ].filter(Boolean).join(" · ");
+        addAuditLog("reception.vehicle_received", "Réception active validée", detail || rw.vehicleConditionNote, { caseId });
+      }
+      if (typeof addHistory === "function") {
+        addHistory(item, "reception.vehicle_received", "Réception active validée", rw.vehicleConditionNote || (mileage ? `KM: ${mileage}` : ""));
+      }
       return { ok: true, message: "" };
     }
     case "send_to_workshop": {
+      if (!item.flags?.received) return { ok: false, message: "Le véhicule n'est pas encore réceptionné." };
+      const authorizationIssues = typeof getWorkAuthorizationIssues === "function" ? getWorkAuthorizationIssues(item) : [];
+      if (authorizationIssues.length) return { ok: false, message: authorizationIssues.join("\n") };
       rw.sentToWorkshopAt = now;
       rw.sentToWorkshopBy = actor.userId;
       if (typeof addAuditLog === "function") addAuditLog("reception.sent_to_workshop", "Envoyé en atelier", payload.note || "", { caseId });

@@ -779,19 +779,63 @@ async function syncBusinessTablesToSupabase(payload, user) {
   const supplementLineSync = await safeBusinessSyncStep("repair_supplement_lines", () => upsertAndMap(client, "repair_supplement_lines", resolvedSupplementLineRows));
   if (supplementLineSync.skipped) supplementsSkipped = true;
 
-  const photoRows = (payload.photos || []).map((photo) => ({
-    local_id: photo.id,
-    repair_order_id: (() => {
-      const photoCase = localState.cases.find((candidate) => candidate.id === photo.caseId);
-      return photoCase ? orderMap.get(caseSyncLocalId(photoCase)) : orderMap.get(photo.caseId);
-    })(),
-    step_key: photo.category || null,
-    storage_bucket: "local-backup",
-    storage_path: `local/${photo.caseId || "unknown"}/${photo.id || photo.name || "photo"}`,
-    filename: photo.name || null,
-    mime_type: photo.type || null,
-    size_bytes: Number(photo.size || 0) || null,
-  })).filter((row) => row.repair_order_id);
+  const uuidOrNull = (value) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(String(value || "").trim())
+    ? String(value).trim()
+    : null;
+  const photoRows = (payload.photos || []).map((photo) => {
+    const photoCase = localState.cases.find((candidate) => candidate.id === photo.caseId);
+    const repairOrderId = photoCase ? orderMap.get(caseSyncLocalId(photoCase)) : orderMap.get(photo.caseId);
+    const vehicleId = photoCase ? vehicleMap.get(caseVehicleLocalId(photoCase)) || null : null;
+    const mediaMeta = typeof normalizeMediaUploadMeta === "function"
+      ? normalizeMediaUploadMeta(photo)
+      : {
+          mediaType: String(photo.type || "").startsWith("video/") ? "video" : "photo",
+          businessContext: photo.businessContext || null,
+          evidenceKind: photo.evidenceKind || "general",
+          caption: photo.caption || "",
+          uploadStatus: photo.uploadStatus || "pending",
+          driveFileId: photo.driveFileId || "",
+          driveFolderId: photo.driveFolderId || "",
+          checksumSha256: photo.checksumSha256 || "",
+          uploadedAt: photo.uploadedAt || "",
+          lastUploadError: photo.lastUploadError || "",
+          uploadAttempts: Number(photo.uploadAttempts || 0),
+          claimId: photo.claimId || "",
+          repairStepId: photo.repairStepId || "",
+          sourceTaskId: photo.sourceTaskId || "",
+        };
+    const driveFileId = mediaMeta.driveFileId || "";
+    const uploadStatus = mediaMeta.uploadStatus === "uploaded" && !driveFileId ? "pending" : mediaMeta.uploadStatus;
+    return {
+      local_id: photo.id,
+      repair_order_id: repairOrderId,
+      vehicle_id: vehicleId,
+      claim_id: uuidOrNull(mediaMeta.claimId),
+      repair_step_id: uuidOrNull(mediaMeta.repairStepId),
+      source_task_id: mediaMeta.sourceTaskId || null,
+      step_key: photo.category || null,
+      storage_bucket: driveFileId ? "google-drive" : "local-backup",
+      storage_path: driveFileId
+        ? `drive:${driveFileId}`
+        : `local/${photo.caseId || "unknown"}/${photo.id || photo.name || "media"}`,
+      filename: photo.name || null,
+      mime_type: photo.type || null,
+      size_bytes: Number(photo.size || 0) || null,
+      media_type: mediaMeta.mediaType,
+      business_context: mediaMeta.businessContext || null,
+      evidence_kind: mediaMeta.evidenceKind || "general",
+      drive_file_id: driveFileId || null,
+      drive_folder_id: mediaMeta.driveFolderId || null,
+      checksum_sha256: mediaMeta.checksumSha256 || null,
+      caption: mediaMeta.caption || null,
+      upload_status: uploadStatus || "pending",
+      uploaded_by: uploadStatus === "uploaded" ? user.id : null,
+      uploaded_at: uploadStatus === "uploaded" ? (mediaMeta.uploadedAt || now) : null,
+      last_upload_error: mediaMeta.lastUploadError || null,
+      upload_attempts: Math.max(0, Number(mediaMeta.uploadAttempts || 0)),
+      sync_source: "media-upload-001",
+    };
+  }).filter((row) => row.repair_order_id);
   await upsertAndMap(client, "photos", photoRows);
 
   const auditRows = [];

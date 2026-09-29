@@ -11,7 +11,7 @@
     <meta name="description" content="Application PWA de pilotage SAV, ordres de travail, rendez-vous et planning atelier global." />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://cdn.jsdelivr.net; img-src 'self' blob: data:; font-src 'self' https://fonts.gstatic.com data:; worker-src 'self' blob:; manifest-src 'self';"
+      content="default-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://cdn.jsdelivr.net https://www.googleapis.com; img-src 'self' blob: data:; media-src 'self' blob:; font-src 'self' https://fonts.gstatic.com data:; worker-src 'self' blob:; manifest-src 'self';"
     />
     <title>NIMR SAV</title>
     <link rel="manifest" href="manifest.webmanifest" />
@@ -20,8 +20,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <script src="js/version.js?v=23.3.66"></script>
-    <link rel="stylesheet" href="styles.css?v=23.3.66" />
+    <script src="js/version.js?v=23.3.67"></script>
+    <link rel="stylesheet" href="styles.css?v=23.3.67" />
   </head>
   <body data-active-tab="today">
     <button id="mobile-menu-toggle" class="mobile-menu-btn" type="button" aria-label="Ouvrir la navigation principale" aria-expanded="false" aria-controls="primary-sidebar" hidden>
@@ -1430,8 +1430,8 @@
       <section class="case-panel" data-case-panel="photos" hidden>
         <section class="detail-section full-width">
           <div class="section-heading">
-            <h2>Photos dossier</h2>
-            <label class="photo-category-picker">Catégorie
+            <h2>Médias dossier</h2>
+            <label class="photo-category-picker">Catégorie legacy
               <select id="photo-category">
                 <option value="before">Avant réparation</option>
                 <option value="supplement">Complément</option>
@@ -1439,8 +1439,32 @@
                 <option value="after">Après réparation</option>
               </select>
             </label>
+            <label class="photo-category-picker">Contexte métier
+              <select id="media-business-context">
+                <option value="reception">Réception</option>
+                <option value="diagnostic">Diagnostic</option>
+                <option value="repair">Réparation</option>
+                <option value="qc">Contrôle qualité</option>
+                <option value="delivery">Restitution</option>
+              </select>
+            </label>
+            <label class="photo-category-picker">Preuve
+              <select id="media-evidence-kind">
+                <option value="general">Général</option>
+                <option value="odometer">Kilométrage</option>
+                <option value="registration">Immatriculation</option>
+                <option value="vin">VIN / châssis</option>
+                <option value="exterior_damage">Dégât extérieur</option>
+                <option value="interior">Intérieur</option>
+                <option value="causal_part">Pièce causale</option>
+                <option value="other">Autre</option>
+              </select>
+            </label>
+            <label class="photo-category-picker">Légende
+              <input id="media-caption" type="text" maxlength="500" placeholder="Optionnel" />
+            </label>
             <label class="file-button">
-              <input type="file" id="photo-input" accept="image/*" multiple />
+              <input type="file" id="photo-input" accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm" multiple />
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h3l2-2h6l2 2h3v12H4z" /><circle cx="12" cy="13" r="3" /></svg>
               Ajouter
             </label>
@@ -1586,29 +1610,30 @@
       </div>
     </div>
 
-    <script src="vendor/pdf.min.js?v=23.3.66" defer></script>
-    <script src="js/utils.js?v=23.3.66" defer></script>
-    <script src="js/parts-availability.js?v=23.3.66" defer></script>
-    <script src="js/state.js?v=23.3.66" defer></script>
-    <script src="js/rdv-integration.js?v=23.3.66" defer></script>
-    <script src="js/ui-reception.js?v=23.3.66" defer></script>
-    <script src="js/ui-cases.js?v=23.3.66" defer></script>
-    <script src="js/estimate-import.js?v=23.3.66" defer></script>
-    <script src="js/ui-planning.js?v=23.3.66" defer></script>
-    <script src="js/photos.js?v=23.3.66" defer></script>
-    <script src="js/storage.js?v=23.3.66" defer></script>
-    <script src="js/parts-availability-ui.js?v=23.3.66" defer></script>
-    <script src="js/work-hours-sync.js?v=23.3.66" defer></script>
-    <script src="js/planning.js?v=23.3.66" defer></script>
-    <script src="js/exports.js?v=23.3.66" defer></script>
-    <script src="js/business-rules-v2187.js?v=23.3.66" defer></script>
+    <script src="vendor/pdf.min.js?v=23.3.67" defer></script>
+    <script src="js/utils.js?v=23.3.67" defer></script>
+    <script src="js/parts-availability.js?v=23.3.67" defer></script>
+    <script src="js/state.js?v=23.3.67" defer></script>
+    <script src="js/rdv-integration.js?v=23.3.67" defer></script>
+    <script src="js/ui-reception.js?v=23.3.67" defer></script>
+    <script src="js/ui-cases.js?v=23.3.67" defer></script>
+    <script src="js/estimate-import.js?v=23.3.67" defer></script>
+    <script src="js/ui-planning.js?v=23.3.67" defer></script>
+    <script src="js/photos.js?v=23.3.67" defer></script>
+    <script src="js/storage.js?v=23.3.67" defer></script>
+    <script src="js/parts-availability-ui.js?v=23.3.67" defer></script>
+    <script src="js/work-hours-sync.js?v=23.3.67" defer></script>
+    <script src="js/planning.js?v=23.3.67" defer></script>
+    <script src="js/exports.js?v=23.3.67" defer></script>
+    <script src="js/business-rules-v2187.js?v=23.3.67" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.111.0" defer></script>
-    <script src="js/supabase-config.js?v=23.3.66" defer></script>
-    <script src="js/supabase-client.js?v=23.3.66" defer></script>
-    <script src="js/supabase-sync.js?v=23.3.66" defer></script>
-    <script src="js/vn-part-client.js?v=23.3.66" defer></script>
-    <script src="vendor/xlsx.mini.min.js?v=23.3.66" defer></script>
-    <script src="js/vn-part-ui.js?v=23.3.66" defer></script>
-    <script src="app.js?v=23.3.66" defer></script>
+    <script src="js/supabase-config.js?v=23.3.67" defer></script>
+    <script src="js/supabase-client.js?v=23.3.67" defer></script>
+    <script src="js/supabase-sync.js?v=23.3.67" defer></script>
+    <script src="js/media-upload.js?v=23.3.67" defer></script>
+    <script src="js/vn-part-client.js?v=23.3.67" defer></script>
+    <script src="vendor/xlsx.mini.min.js?v=23.3.67" defer></script>
+    <script src="js/vn-part-ui.js?v=23.3.67" defer></script>
+    <script src="app.js?v=23.3.67" defer></script>
   </body>
 </html>

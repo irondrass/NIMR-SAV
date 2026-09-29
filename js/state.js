@@ -21,7 +21,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v23.3.66";
+const APP_VERSION = "v23.3.67";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const CURRENT_DATA_SCHEMA_VERSION = 2;
@@ -45,10 +45,13 @@ const WORKSHOP_NAME = "NIMR SAV";
 const MAX_ESTIMATE_IMPORT_SIZE = 10 * 1024 * 1024;
 const ESTIMATE_IMPORT_EXTENSIONS = ["pdf", "xlsx", "csv"];
 const MAX_PHOTO_SIZE = 8 * 1024 * 1024;
+const MAX_VIDEO_SIZE = 512 * 1024 * 1024;
 const MAX_BACKUP_IMPORT_SIZE = 50 * 1024 * 1024;
 const MAX_PHOTO_EDGE = 1600;
 const PHOTO_JPEG_QUALITY = 0.82;
 const ALLOWED_PHOTO_TYPES = ["image/jpeg", "image/png", "image/webp"];
+const ALLOWED_VIDEO_TYPES = ["video/mp4", "video/quicktime", "video/webm"];
+const ALLOWED_MEDIA_TYPES = [...ALLOWED_PHOTO_TYPES, ...ALLOWED_VIDEO_TYPES];
 const LOCAL_SECURITY_MAX_FAILED_ATTEMPTS = 5;
 const LOCAL_SECURITY_LOCKOUT_MS = 5 * 60 * 1000;
 const LOCAL_SECURITY_IDLE_MS = 15 * 60 * 1000;
@@ -5124,6 +5127,20 @@ function normalizePhotoMeta(photo) {
     type: meta.type || "",
     size: Number(meta.size || 0),
     category: normalizePhotoCategory(meta.category),
+    mediaType: meta.mediaType === "video" || String(meta.type || "").startsWith("video/") ? "video" : "photo",
+    businessContext: String(meta.businessContext || "").trim().toLowerCase(),
+    evidenceKind: String(meta.evidenceKind || "general").trim().toLowerCase(),
+    caption: String(meta.caption || "").trim().slice(0, 500),
+    uploadStatus: ["pending", "uploading", "uploaded", "failed"].includes(meta.uploadStatus) ? meta.uploadStatus : "pending",
+    driveFileId: String(meta.driveFileId || "").trim(),
+    driveFolderId: String(meta.driveFolderId || "").trim(),
+    checksumSha256: String(meta.checksumSha256 || "").trim().toLowerCase(),
+    uploadedAt: String(meta.uploadedAt || "").trim(),
+    lastUploadError: String(meta.lastUploadError || "").trim().slice(0, 500),
+    uploadAttempts: Math.max(0, Number.parseInt(meta.uploadAttempts || 0, 10) || 0),
+    claimId: String(meta.claimId || "").trim(),
+    repairStepId: String(meta.repairStepId || "").trim(),
+    sourceTaskId: String(meta.sourceTaskId || "").trim(),
     createdAt: meta.createdAt || new Date().toISOString(),
     deletedAt: meta.deletedAt || "",
     deletedBy: meta.deletedBy || "",

@@ -3,3 +3,6 @@ verify_jwt = true
 
 [functions.teamdev-rdv]
 verify_jwt = true
+
+[functions.media-drive]
+verify_jwt = true

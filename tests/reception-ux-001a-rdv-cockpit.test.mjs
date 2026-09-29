@@ -40,6 +40,26 @@ test('Reception Today excludes closed historical local cases', () => {
   run(`state.cases.push(normalizeCase({id:'closed-history',clientName:'Ancien dossier',flags:{delivered:true,invoiced:true},closedAt:'2026-09-28T17:00:00Z'})); var activeToday=getReceptionTodayRows(new Date('2026-09-29T08:20:00Z'));`);
   assert.equal(run(`activeToday.some(row => row.item?.id === 'closed-history')`), false);
 });
+test('Reception Today excludes open historical local cases without a today action', () => {
+  run(`state.cases=[
+    normalizeCase({id:'old-no-action',createdAt:'2026-09-27T09:00:00Z'}),
+    normalizeCase({id:'created-today',createdAt:'2026-09-29T07:00:00Z'}),
+    normalizeCase({id:'contact-today',createdAt:'2026-09-20T09:00:00Z',clientCommitment:{nextContactAt:'2026-09-29T15:00:00Z'}}),
+    normalizeCase({id:'ready-history',createdAt:'2026-09-20T09:00:00Z',flags:{received:true,workCompleted:true,qualityApproved:true}})
+  ]; receptionUpstreamRows=[]; var focusedToday=getReceptionTodayRows(new Date('2026-09-29T08:20:00Z'));`);
+  assert.equal(run(`focusedToday.some(row => row.item?.id === 'old-no-action')`), false);
+  assert.equal(run(`focusedToday.some(row => row.item?.id === 'created-today')`), true);
+  assert.equal(run(`focusedToday.some(row => row.item?.id === 'contact-today')`), true);
+  assert.equal(run(`focusedToday.some(row => row.item?.id === 'ready-history')`), true);
+});
+
+test('historical local case matching a Teamdev appointment today stays linked without duplication', () => {
+  run(`state.cases=[normalizeCase({id:'historical-match',createdAt:'2026-09-20T09:00:00Z',vin:'VIN123456789012345',phone:'22123456'})]; setReceptionUpstreamAppointments({result:[payload]}); var linkedToday=getReceptionTodayRows(new Date('2026-09-29T08:20:00Z'));`);
+  assert.equal(run('linkedToday.length'), 1);
+  assert.equal(run(`linkedToday[0].item?.id`), 'historical-match');
+  assert.equal(run(`linkedToday[0].upstream?.rdvIntegration?.interventionId`), 'i');
+});
+
 test('upstream multichamp search works before creation and renders escaped text', () => {
   run(`state.cases=[]; var upstreamOnly=getReceptionTodayRows(new Date('2026-09-29T08:20:00Z'));`);
   for (const query of ['Alice','22123456','VIN123456789012345','123 TU 456']) assert.equal(run(`filterReceptionTodayRows(upstreamOnly,'all',${JSON.stringify(query)}).length`),1);

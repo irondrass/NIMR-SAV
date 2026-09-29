@@ -564,7 +564,7 @@ function renderPrimaryNavigationVisibility() {
     admin: ["today", "dossiers", "planning", "pilotage", "atelier"],
     chef_atelier: ["today", "dossiers", "planning", "pilotage", "atelier"],
     directeur_sav: ["pilotage", "today", "dossiers", "planning"],
-    reception: ["today", "dossiers"],
+    reception: ["reception-workspace", "today", "dossiers"],
     controle_qualite: ["today", "dossiers"],
     technicien: ["technician"],
     readonly: ["pilotage", "dossiers"],

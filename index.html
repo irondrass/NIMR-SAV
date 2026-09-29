@@ -20,8 +20,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <script src="js/version.js?v=23.3.61"></script>
-    <link rel="stylesheet" href="styles.css?v=23.3.61" />
+    <script src="js/version.js?v=23.3.62"></script>
+    <link rel="stylesheet" href="styles.css?v=23.3.62" />
   </head>
   <body data-active-tab="today">
     <button id="mobile-menu-toggle" class="mobile-menu-btn" type="button" aria-label="Ouvrir la navigation principale" aria-expanded="false" aria-controls="primary-sidebar" hidden>
@@ -71,7 +71,7 @@
         <nav class="sidebar-nav" aria-label="Navigation principale">
           <button class="nav-button nav-button-action" type="button" data-tab="reception-workspace">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>
-            + Nouveau dossier
+            Réception
           </button>
           <button class="nav-button active" type="button" data-tab="today" aria-current="page">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 2v4M16 2v4M3 10h18" /><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M8 15h4M8 18h8" /></svg>
@@ -152,10 +152,32 @@
         </section>
 
         <section class="view" id="view-reception-workspace">
-          <section class="panel pdf-import-home" aria-labelledby="pdf-import-title">
+          <section class="panel reception-today-cockpit" id="reception-today-cockpit" data-rdv-cockpit="true" aria-labelledby="reception-today-title">
+            <div class="panel-heading"><div><span class="eyebrow">Réception</span><h1 id="reception-today-title">Aujourd’hui</h1><p>Arrivées, suivi client et livraisons.</p></div><div class="reception-today-actions"><span id="reception-cases-count" class="status-pill" aria-live="polite"></span><button type="button" id="reception-new-entry-btn" class="primary-button">Nouvelle entrée</button></div></div>
+            <div class="reception-filters-row">
+              <div id="reception-today-counters" class="reception-today-counters"></div>
+              <button type="button" class="filter-pill active" data-filter="all">Tous les dossiers</button>
+            </div>
+            <label class="reception-today-search">Rechercher<input id="reception-case-search" type="search" placeholder="Client, téléphone, VIN, immatriculation, OR" /></label>
+            <div id="reception-case-list" class="reception-today-grid"></div>
+          </section>
+          <dialog id="reception-new-entry-dialog" class="reception-new-entry-dialog" aria-labelledby="reception-new-entry-title">
+            <div class="reception-new-entry-dialog-head">
+              <div><span class="eyebrow">Réception</span><h2 id="reception-new-entry-title">Nouvelle entrée</h2><p>Choisissez le point de départ. Un RDV existant n’est jamais ressaisi.</p></div>
+              <button type="button" id="reception-new-entry-close" class="secondary-button" aria-label="Fermer">Fermer</button>
+            </div>
+            <div class="reception-new-entry-options">
+              <button type="button" data-reception-entry="rdv"><strong>Client avec RDV</strong><span>Rechercher et reprendre le rendez-vous existant.</span></button>
+              <button type="button" data-reception-entry="walk-in"><strong>Sans rendez-vous</strong><span>Enregistrer une arrivée terrain sans créer de faux RDV.</span></button>
+              <button type="button" data-reception-entry="pdf"><strong>Importer devis PDF</strong><span>Utiliser l’import atelier existant comme action secondaire.</span></button>
+              <button type="button" data-reception-entry="existing"><strong>Reprendre dossier existant</strong><span>Ouvrir la recherche des dossiers déjà présents.</span></button>
+            </div>
+          </dialog>
+          <div class="reception-new-entry-host" data-reception-entry-host="true">
+          <section id="reception-new-entry-panel" class="panel pdf-import-home" aria-labelledby="pdf-import-title" hidden>
             <div class="pdf-import-hero">
               <span class="eyebrow">Import devis PDF</span>
-              <h1 id="pdf-import-title">Nouveau dossier</h1>
+              <h1 id="pdf-import-title">Nouveau dossier</h1><button type="button" id="reception-new-entry-panel-close" class="secondary-button">Fermer cette entrée</button>
               <p>Importez un devis ou enregistrez directement une arrivée sans document.</p>
             </div>
 
@@ -231,6 +253,7 @@
               </section>
             </form>
           </section>
+          </div>
         </section>
 
         <section class="view active" id="view-today">
@@ -1563,28 +1586,29 @@
       </div>
     </div>
 
-    <script src="vendor/pdf.min.js?v=23.3.61" defer></script>
-    <script src="js/utils.js?v=23.3.61" defer></script>
-    <script src="js/parts-availability.js?v=23.3.61" defer></script>
-    <script src="js/state.js?v=23.3.61" defer></script>
-    <script src="js/ui-reception.js?v=23.3.61" defer></script>
-    <script src="js/ui-cases.js?v=23.3.61" defer></script>
-    <script src="js/estimate-import.js?v=23.3.61" defer></script>
-    <script src="js/ui-planning.js?v=23.3.61" defer></script>
-    <script src="js/photos.js?v=23.3.61" defer></script>
-    <script src="js/storage.js?v=23.3.61" defer></script>
-    <script src="js/parts-availability-ui.js?v=23.3.61" defer></script>
-    <script src="js/work-hours-sync.js?v=23.3.61" defer></script>
-    <script src="js/planning.js?v=23.3.61" defer></script>
-    <script src="js/exports.js?v=23.3.61" defer></script>
-    <script src="js/business-rules-v2187.js?v=23.3.61" defer></script>
+    <script src="vendor/pdf.min.js?v=23.3.62" defer></script>
+    <script src="js/utils.js?v=23.3.62" defer></script>
+    <script src="js/parts-availability.js?v=23.3.62" defer></script>
+    <script src="js/state.js?v=23.3.62" defer></script>
+    <script src="js/rdv-integration.js?v=23.3.62" defer></script>
+    <script src="js/ui-reception.js?v=23.3.62" defer></script>
+    <script src="js/ui-cases.js?v=23.3.62" defer></script>
+    <script src="js/estimate-import.js?v=23.3.62" defer></script>
+    <script src="js/ui-planning.js?v=23.3.62" defer></script>
+    <script src="js/photos.js?v=23.3.62" defer></script>
+    <script src="js/storage.js?v=23.3.62" defer></script>
+    <script src="js/parts-availability-ui.js?v=23.3.62" defer></script>
+    <script src="js/work-hours-sync.js?v=23.3.62" defer></script>
+    <script src="js/planning.js?v=23.3.62" defer></script>
+    <script src="js/exports.js?v=23.3.62" defer></script>
+    <script src="js/business-rules-v2187.js?v=23.3.62" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.111.0" defer></script>
-    <script src="js/supabase-config.js?v=23.3.61" defer></script>
-    <script src="js/supabase-client.js?v=23.3.61" defer></script>
-    <script src="js/supabase-sync.js?v=23.3.61" defer></script>
-    <script src="js/vn-part-client.js?v=23.3.61" defer></script>
-    <script src="vendor/xlsx.mini.min.js?v=23.3.61" defer></script>
-    <script src="js/vn-part-ui.js?v=23.3.61" defer></script>
-    <script src="app.js?v=23.3.61" defer></script>
+    <script src="js/supabase-config.js?v=23.3.62" defer></script>
+    <script src="js/supabase-client.js?v=23.3.62" defer></script>
+    <script src="js/supabase-sync.js?v=23.3.62" defer></script>
+    <script src="js/vn-part-client.js?v=23.3.62" defer></script>
+    <script src="vendor/xlsx.mini.min.js?v=23.3.62" defer></script>
+    <script src="js/vn-part-ui.js?v=23.3.62" defer></script>
+    <script src="app.js?v=23.3.62" defer></script>
   </body>
 </html>

@@ -21,7 +21,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v23.3.61";
+const APP_VERSION = "v23.3.62";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const CURRENT_DATA_SCHEMA_VERSION = 2;
@@ -3507,6 +3507,17 @@ function hasRealBooking(caseId, bookings) {
   });
 }
 
+function normalizeRdvIntegration(value) {
+  if (!value || typeof value !== "object" || value.provider !== "teamdev-rdv") return null;
+  const result = { provider: "teamdev-rdv" };
+  for (const key of ["interventionId", "appointmentId", "vehicleId", "clientId", "serviceId", "abstractServiceId", "agencyId", "brandId", "appointmentDate", "appointmentStatus", "interventionStatus", "requestedDate", "upstreamUpdatedAt", "lastSyncedAt"]) {
+    const raw = typeof value[key] === "string" ? value[key].replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 256) : "";
+    const isDate = ["appointmentDate", "requestedDate", "upstreamUpdatedAt", "lastSyncedAt"].includes(key);
+    result[key] = isDate ? (raw && Number.isFinite(Date.parse(raw)) ? new Date(raw).toISOString() : "") : raw;
+  }
+  return result;
+}
+
 function normalizeCase(item, bookings, realBookingCaseIds = null) {
   item = item && typeof item === "object" ? item : {};
   const caseId = item.id || "";
@@ -3631,6 +3642,7 @@ function normalizeCase(item, bookings, realBookingCaseIds = null) {
       repeatRepair: item.qualityControl?.repeatRepair === true,
     },
     appointment: item.appointment || null,
+    ...(normalizeRdvIntegration(item.rdvIntegration) ? { rdvIntegration: normalizeRdvIntegration(item.rdvIntegration) } : {}),
     claims: normalizedClaims,
     customerClaims: Array.isArray(item.customerClaims) ? item.customerClaims.map(normalizeCustomerClaim).filter(Boolean) : [],
     receptionWorkflow: normalizeReceptionWorkflow(item.receptionWorkflow),

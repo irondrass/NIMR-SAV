@@ -1,2 +1,5 @@
 [functions.workshop-user-admin]
 verify_jwt = true
+
+[functions.teamdev-rdv]
+verify_jwt = true

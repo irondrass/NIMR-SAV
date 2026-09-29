@@ -28,7 +28,7 @@ function normalizeTeamdevAppointment(value) {
       appointmentStatus: raw.status, interventionStatus: intervention.status,
       requestedDate: intervention.requestedDate, upstreamUpdatedAt: raw.updatedAt,
     }),
-    clientName: [rdvText(client.firstName), rdvText(client.lastName)].filter(Boolean).join(" "),
+    clientName: [rdvText(client.firstName), rdvText(client.lastName)].filter(Boolean).join(" ") || rdvText(client.socialReason, 256),
     phone: rdvPhone(client.phones),
     vin: rdvText(vehicle.chassisNumber), plate: rdvText(vehicle.registrationNumber),
     vehicle: rdvText(vehicle.name || [vehicle.brandName, vehicle.version?.model?.title, vehicle.version?.version].filter(v => typeof v === "string").join(" ")),
@@ -88,9 +88,29 @@ function hydrateRdvCase(item, row) {
   return result;
 }
 
-// A future authorized proxy may be supplied by the host. The browser has no default transport.
+// An authorized proxy is supplied by the host. Teamdev credentials never enter this browser module.
 async function loadRdvAppointments(transport, params = {}) {
   if (typeof transport !== "function") return { enabled: false, rows: [] };
   const payload = await transport(params);
+  if (payload?.ok === false) {
+    const error = new Error(rdvText(payload.message, 500) || "Service de rendez-vous indisponible.");
+    error.code = rdvText(payload.code, 120) || "TEAMDEV_RDV_FAILED";
+    throw error;
+  }
   return { enabled: true, rows: normalizeTeamdevAppointments(payload) };
+}
+
+function rdvLocalDateKey(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(date.getTime())) return "";
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+async function refreshReceptionRdvSnapshots(transport, now = new Date()) {
+  const date = rdvLocalDateKey(now);
+  if (!date) return { enabled: false, rows: [] };
+  return loadRdvAppointments(transport, { start_date: date, end_date: date });
 }

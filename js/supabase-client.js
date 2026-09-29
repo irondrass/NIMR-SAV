@@ -783,6 +783,65 @@ async function invokeWorkshopUserAdmin(action, payload = {}) {
 }
 window.invokeWorkshopUserAdmin = invokeWorkshopUserAdmin;
 
+async function invokeTeamdevRdv(params = {}) {
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    return { ok: false, code: "OFFLINE_NOT_ALLOWED", message: "Connexion internet requise pour charger les rendez-vous." };
+  }
+  const client = getSupabaseClient();
+  if (!client?.functions?.invoke) {
+    return { ok: false, code: "NO_CLIENT", message: "Client Supabase non configuré." };
+  }
+  try {
+    const authUser = await getSupabaseUser();
+    if (!authUser?.id) {
+      return { ok: false, code: "UNAUTHENTICATED", message: "Session Supabase authentifiée requise." };
+    }
+    const membershipResult = await resolveSupabaseWorkshopMembership(authUser);
+    if (!membershipResult?.ok || !membershipResult.membership) {
+      return {
+        ok: false,
+        code: membershipResult?.code || "INVALID_MEMBERSHIP",
+        message: membershipResult?.message || "Appartenance atelier non valide.",
+      };
+    }
+    const workshopId = String(getSupabaseWorkshopId() || "").trim();
+    if (!workshopId
+      || String(membershipResult.membership.user_id || "") !== String(authUser.id)
+      || String(membershipResult.membership.workshop_id || "") !== workshopId) {
+      return {
+        ok: false,
+        code: "MEMBERSHIP_IDENTITY_MISMATCH",
+        message: "L’appartenance atelier ne correspond pas à l’identité Supabase active.",
+      };
+    }
+    const body = { workshop_id: workshopId };
+    const startDate = String(params.start_date || params.startDate || "").trim();
+    const endDate = String(params.end_date || params.endDate || "").trim();
+    if (startDate) body.start_date = startDate;
+    if (endDate) body.end_date = endDate;
+
+    const { data, error } = await client.functions.invoke("teamdev-rdv", { body });
+    if (error) {
+      const serverError = await readWorkshopUserAdminInvokeError(error);
+      return serverError || {
+        ok: false,
+        code: "TEAMDEV_RDV_FAILED",
+        message: error.message || "Le service de rendez-vous est indisponible.",
+      };
+    }
+    return data && typeof data === "object"
+      ? data
+      : { ok: false, code: "INVALID_SERVER_RESPONSE", message: "Réponse du service de rendez-vous invalide." };
+  } catch (error) {
+    return {
+      ok: false,
+      code: "TEAMDEV_RDV_EXCEPTION",
+      message: error?.message || "Chargement sécurisé des rendez-vous impossible.",
+    };
+  }
+}
+window.invokeTeamdevRdv = invokeTeamdevRdv;
+
 async function authenticateSupabaseUser(email, password) {
   const client = getSupabaseClient();
   if (!client) {
@@ -845,6 +904,9 @@ async function signOutSupabaseSession() {
       };
     }
     clearSupabasePasswordSetupRequirement(signingOutUserId);
+    if (typeof window.clearReceptionUpstreamAppointments === "function") {
+      window.clearReceptionUpstreamAppointments();
+    }
     return { ok: true };
   } catch (error) {
     console.warn("Exception déconnexion session Supabase", error);

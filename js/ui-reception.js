@@ -74,9 +74,24 @@ function setReceptionUpstreamAppointments(payload, options = {}) {
   renderReceptionWorkspace();
 }
 
+function isReceptionLocalCaseRelevantToday(item, now = new Date()) {
+  if (!item) return false;
+  if (isSameBusinessDay(item.createdAt, now)) return true;
+  if (isSameBusinessDay(item.appointment?.start, now) || isSameBusinessDay(item.appointment?.delivery, now)) return true;
+  if (isSameBusinessDay(item.rdvIntegration?.appointmentDate, now)) return true;
+  const nextContactAt = Date.parse(item.clientCommitment?.nextContactAt || "");
+  if (Number.isFinite(nextContactAt)
+    && (nextContactAt <= now.getTime() || isSameBusinessDay(item.clientCommitment?.nextContactAt, now))) {
+    return true;
+  }
+  return Boolean(isCaseReadyForDelivery(item));
+}
+
 function getReceptionTodayRows(now = new Date()) {
   const cases = (state.cases || []).filter(item => !item.deletedAt && !item.flags?.delivered && !item.flags?.invoiced && !item.closedAt && !item.archivedAt);
-  const rows = cases.map(item => ({ item, upstream: null, upstreamIndex: null }));
+  const rows = cases
+    .filter(item => isReceptionLocalCaseRelevantToday(item, now))
+    .map(item => ({ item, upstream: null, upstreamIndex: null }));
   const seen = new Set();
   receptionUpstreamRows.forEach((upstream, upstreamIndex) => {
     if (!isSameBusinessDay(upstream.rdvIntegration.appointmentDate, now)) return;
@@ -84,8 +99,12 @@ function getReceptionTodayRows(now = new Date()) {
     if (seen.has(key)) return;
     seen.add(key);
     const match = matchRdvCase(upstream, cases);
-    const linked = match.item && rows.find(row => row.item === match.item);
-    if (linked) Object.assign(linked, { upstream, upstreamIndex });
+    let linked = match.item && rows.find(row => row.item === match.item);
+    if (match.item && !linked) {
+      linked = { item: match.item, upstream: null, upstreamIndex: null };
+      rows.push(linked);
+    }
+    if (linked) Object.assign(linked, { upstream, upstreamIndex, ambiguous: match.ambiguous });
     else rows.push({ item: null, upstream, upstreamIndex, ambiguous: match.ambiguous });
   });
   return rows.map(row => {

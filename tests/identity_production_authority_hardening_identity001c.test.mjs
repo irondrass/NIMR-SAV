@@ -279,7 +279,7 @@ async function check(name, fn) {
 await check("A gateway JWT verification is enabled and the browser Supabase SDK is pinned", () => {
   assert.equal(
     normalizeEol(configSource).trim(),
-    "[functions.workshop-user-admin]\nverify_jwt = true\n\n[functions.teamdev-rdv]\nverify_jwt = true",
+    "[functions.workshop-user-admin]\nverify_jwt = true\n\n[functions.teamdev-rdv]\nverify_jwt = true\n\n[functions.media-drive]\nverify_jwt = true",
   );
   assert.doesNotMatch(configSource, /verify_jwt\s*=\s*false/iu);
   assert.match(edgeSource, /request\.headers\.get\("Authorization"\)/u);
@@ -289,7 +289,7 @@ await check("A gateway JWT verification is enabled and the browser Supabase SDK 
   assert.equal(`${configSource}\n${edgeSource}`.includes(noVerifyFlag), false);
   assert.match(indexSource, /https:\/\/cdn\.jsdelivr\.net\/npm\/@supabase\/supabase-js@2\.111\.0/u);
   assert.doesNotMatch(indexSource, /@supabase\/supabase-js@2(?:["/?])/u);
-  assert.equal((configSource.match(/\[functions\./gu) || []).length, 2);
+  assert.equal((configSource.match(/\[functions\./gu) || []).length, 3);
 });
 
 await check("B manual authenticated-user validation rejects anonymous, invalid and membership-less callers before mutation", async () => {

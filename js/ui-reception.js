@@ -4,6 +4,157 @@
 let activeReceptionFilter = "all";
 let isReceptionCreationMode = false;
 
+// Ephemeral snapshots: setting or rendering these rows never writes cases.
+let receptionUpstreamRows = [];
+let receptionLateThresholdMinutes = 15;
+
+function setReceptionUpstreamAppointments(payload, options = {}) {
+  receptionUpstreamRows = normalizeTeamdevAppointments(payload);
+  if (Number.isFinite(options.lateThresholdMinutes) && options.lateThresholdMinutes >= 0) {
+    receptionLateThresholdMinutes = options.lateThresholdMinutes;
+  }
+  renderReceptionWorkspace();
+}
+
+function getReceptionTodayRows(now = new Date()) {
+  const cases = (state.cases || []).filter(item => !item.deletedAt && !item.flags?.delivered && !item.flags?.invoiced && !item.closedAt && !item.archivedAt);
+  const rows = cases.map(item => ({ item, upstream: null, upstreamIndex: null }));
+  const seen = new Set();
+  receptionUpstreamRows.forEach((upstream, upstreamIndex) => {
+    if (!isSameBusinessDay(upstream.rdvIntegration.appointmentDate, now)) return;
+    const key = upstream.rdvIntegration.interventionId;
+    if (seen.has(key)) return;
+    seen.add(key);
+    const match = matchRdvCase(upstream, cases);
+    const linked = match.item && rows.find(row => row.item === match.item);
+    if (linked) Object.assign(linked, { upstream, upstreamIndex });
+    else rows.push({ item: null, upstream, upstreamIndex, ambiguous: match.ambiguous });
+  });
+  return rows.map(row => {
+    const item = row.item;
+    const snapshot = row.upstream || { rdvIntegration: item?.rdvIntegration };
+    const date = snapshot.rdvIntegration?.appointmentDate || item?.appointment?.start;
+    const closed = item?.flags?.delivered || item?.flags?.invoiced || item?.closedAt || item?.archivedAt;
+    const awaiting = !closed && !item?.flags?.received && !isRdvCanceled(snapshot) && isSameBusinessDay(date, now);
+    const late = awaiting && isRdvLate({ rdvIntegration: { ...snapshot.rdvIntegration, appointmentDate: date } }, now, receptionLateThresholdMinutes);
+    const contactAt = Date.parse(item?.clientCommitment?.nextContactAt || "");
+    return { ...row, expected: awaiting && !late, late,
+      inform: !closed && Number.isFinite(contactAt) && contactAt <= now.getTime(),
+      "ready-deliver": !closed && Boolean(item && isCaseReadyForDelivery(item)),
+    };
+  });
+}
+
+function filterReceptionTodayRows(rows, filter, query) {
+  return rows.filter(row => {
+    if (filter !== "all" && !row[filter]) return false;
+    if (!query) return true;
+    if (row.item && typeof caseMatchesGlobalSearch === "function" && caseMatchesGlobalSearch(row.item, query)) return true;
+    if (row.upstream && typeof caseMatchesGlobalSearch === "function") return caseMatchesGlobalSearch(row.upstream, query);
+    return false;
+  });
+}
+
+function openReceptionUpstreamAppointment(index) {
+  const row = receptionUpstreamRows[index];
+  if (!row) return;
+  const match = matchRdvCase(row, state.cases);
+  if (match.ambiguous) {
+    notifyUser("Plusieurs dossiers correspondent. Vérifiez les identités avant de lier ce RDV.", "error");
+    return;
+  }
+  let item = match.item;
+  const alreadyLinked = item?.rdvIntegration?.provider === "teamdev-rdv"
+    && (item.rdvIntegration.interventionId === row.rdvIntegration.interventionId || item.rdvIntegration.appointmentId === row.rdvIntegration.appointmentId);
+  if (!alreadyLinked) {
+    if (item ? !guardCaseEdit(item).ok : !guardCaseCreate().ok) return;
+    const created = !item;
+    const hydrated = hydrateRdvCase(item || { id: uid("case"), createdAt: new Date().toISOString() }, row);
+    hydrated.rdvIntegration.lastSyncedAt = new Date().toISOString();
+    if (item) Object.assign(item, hydrated);
+    else { item = normalizeCase(hydrated); state.cases.unshift(item); }
+    if (typeof noteCaseRevisionCandidate === "function") noteCaseRevisionCandidate(item);
+    addHistory(item, created ? "reception.case_created" : "reception.rdv_linked", created ? "Dossier créé depuis RDV" : "RDV lié au dossier");
+    saveState({ changedCase: item, flushCloud: true, cloudReason: "reception-rdv-link" });
+  }
+  activeCaseId = item.id;
+  isReceptionCreationMode = false;
+  renderReceptionWorkspace();
+  openOperationalCasePanel(item.id);
+}
+
+function renderReceptionTodayCockpit(query, now = new Date()) {
+  const rows = getReceptionTodayRows(now);
+  const filters = [["expected", "À recevoir"], ["late", "En retard"], ["inform", "À informer"], ["ready-deliver", "Prêts à livrer"]];
+  const counters = document.getElementById("reception-today-counters");
+  if (counters) counters.innerHTML = filters.map(([key, label]) => `<button type="button" class="filter-pill reception-today-counter${activeReceptionFilter === key ? " active" : ""}" data-filter="${key}" aria-pressed="${activeReceptionFilter === key}"><strong>${rows.filter(row => row[key]).length}</strong><span>${label}</span></button>`).join("");
+  const filtered = filterReceptionTodayRows(rows, activeReceptionFilter, query);
+  const count = document.getElementById("reception-cases-count");
+  if (count) count.textContent = `${filtered.length} dossier(s) / RDV`;
+  const list = document.getElementById("reception-case-list");
+  if (list) list.innerHTML = filtered.map(row => {
+    const item = row.item || row.upstream;
+    const action = row.upstream ? `data-rdv-index="${row.upstreamIndex}"` : `data-case="${escapeAttr(item.id)}"`;
+    const date = row.upstream?.rdvIntegration.appointmentDate || item.rdvIntegration?.appointmentDate;
+    return `<button type="button" class="case-card reception-today-card${row.late ? " reception-today-late" : ""}" ${action}>
+      <strong>${escapeHtml(item.clientName || "Client à compléter")}</strong>
+      <span>${escapeHtml(item.vehicle || "Véhicule à compléter")} · ${escapeHtml(item.plate || item.vin || "Identité à compléter")}</span>
+      <span>${escapeHtml(item.phone || "")}${item.orNavNumber ? ` · OR ${escapeHtml(item.orNavNumber)}` : ""}</span>
+      <span class="case-meta">${date ? escapeHtml(formatDateTime(date)) : "Dossier NIMR"}${row.late ? " · En retard" : ""}${isRdvCanceled(row.upstream || item) ? " · RDV annulé" : ""}</span>
+      <small>${row.ambiguous ? "Identité ambiguë — vérification requise" : row.item ? "Ouvrir le suivi réception" : "Lier / créer le dossier"}</small>
+    </button>`;
+  }).join("") || `<p class="empty-inline">Aucun dossier ou RDV pour ce filtre.</p>`;
+}
+
+function hideReceptionNewEntryPanel() {
+  const panel = document.getElementById("reception-new-entry-panel");
+  if (panel) panel.hidden = true;
+}
+
+function showReceptionNewEntryPanel(mode = "pdf") {
+  const panel = document.getElementById("reception-new-entry-panel");
+  if (!panel) return;
+  panel.hidden = false;
+  window.setTimeout(() => {
+    if (mode === "walk-in") {
+      const details = panel.querySelector(".minimal-case-entry");
+      if (details) details.open = true;
+      details?.querySelector('input[name="identity"]')?.focus();
+    } else {
+      document.getElementById("quick-estimate-file-input")?.focus();
+    }
+    panel.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, 20);
+}
+
+function openReceptionNewEntryDialog() {
+  hideReceptionNewEntryPanel();
+  const dialog = document.getElementById("reception-new-entry-dialog");
+  if (!dialog) return;
+  if (typeof dialog.showModal === "function" && !dialog.open) dialog.showModal();
+  window.setTimeout(() => dialog.querySelector('[data-reception-entry="rdv"]')?.focus(), 0);
+}
+
+function handleReceptionNewEntryChoice(choice) {
+  const dialog = document.getElementById("reception-new-entry-dialog");
+  if (dialog?.open) dialog.close();
+  if (choice === "rdv") {
+    activeReceptionFilter = "all";
+    renderReceptionWorkspace();
+    document.querySelectorAll(".reception-filters-row .filter-pill").forEach((pill) => pill.classList.toggle("active", pill.dataset.filter === "all"));
+    document.getElementById("reception-case-search")?.focus();
+    return;
+  }
+  if (choice === "walk-in" || choice === "pdf") {
+    showReceptionNewEntryPanel(choice);
+    return;
+  }
+  if (choice === "existing") {
+    if (typeof setActiveTab === "function") setActiveTab("dossiers");
+    window.setTimeout(() => document.getElementById("case-search")?.focus(), 20);
+  }
+}
+
 const RECEPTION_QUICK_MOTIFS = [
   { label: "Vidange + filtres", value: "Vidange moteur + filtres", orderType: "vidange" },
   { label: "Diagnostic bruit", value: "Diagnostic bruit ou vibration", orderType: "diagnostic" },
@@ -57,12 +208,22 @@ const RECEPTION_STEP_LABELS = [
 function initReceptionWorkspace() {
   const view = document.getElementById("view-reception-workspace");
   if (!view) return;
+  if (view.dataset.receptionInitialized === "true") return;
+  view.dataset.receptionInitialized = "true";
 
   // Search input
   const searchInput = document.getElementById("reception-case-search");
   if (searchInput) {
     searchInput.addEventListener("input", () => renderReceptionWorkspace());
   }
+
+  const newEntryBtn = document.getElementById("reception-new-entry-btn");
+  newEntryBtn?.addEventListener("click", openReceptionNewEntryDialog);
+  document.getElementById("reception-new-entry-close")?.addEventListener("click", () => document.getElementById("reception-new-entry-dialog")?.close());
+  document.getElementById("reception-new-entry-panel-close")?.addEventListener("click", hideReceptionNewEntryPanel);
+  document.getElementById("reception-new-entry-dialog")?.querySelectorAll("[data-reception-entry]").forEach((button) => {
+    button.addEventListener("click", () => handleReceptionNewEntryChoice(button.dataset.receptionEntry || ""));
+  });
 
   // Filter pills
   const filterContainer = view.querySelector(".reception-filters-row");
@@ -81,8 +242,16 @@ function initReceptionWorkspace() {
   const caseList = document.getElementById("reception-case-list");
   if (caseList) {
     caseList.addEventListener("click", (e) => {
+      const upstreamCard = e.target.closest("[data-rdv-index]");
+      if (upstreamCard) { openReceptionUpstreamAppointment(Number(upstreamCard.dataset.rdvIndex)); return; }
       const card = e.target.closest("[data-case]");
       if (!card) return;
+      if (document.getElementById("reception-today-cockpit")?.dataset.rdvCockpit === "true") {
+        activeCaseId = card.dataset.case;
+        isReceptionCreationMode = false;
+        openOperationalCasePanel(activeCaseId);
+        return;
+      }
       activeCaseId = card.dataset.case;
       isReceptionCreationMode = false;
       activeCaseDetailTab = "resume";
@@ -133,6 +302,10 @@ function renderReceptionWorkspace() {
 
   const searchInput = document.getElementById("reception-case-search");
   const query = String(searchInput?.value || "").trim();
+  if (document.getElementById("reception-today-cockpit")?.dataset.rdvCockpit === "true") {
+    renderReceptionTodayCockpit(query);
+    return;
+  }
 
   const allCases = (state.cases || []).filter((c) => !c.deletedAt);
   const now = new Date();
@@ -2100,6 +2273,9 @@ async function handleDeliveryAction(item) {
 if (typeof window !== "undefined") {
   window.initReceptionWorkspace = initReceptionWorkspace;
   window.renderReceptionWorkspace = renderReceptionWorkspace;
+  window.setReceptionUpstreamAppointments = setReceptionUpstreamAppointments;
+  window.openReceptionNewEntryDialog = openReceptionNewEntryDialog;
+  window.showReceptionNewEntryPanel = showReceptionNewEntryPanel;
   window.verifyDeliveryClaimsBlock = verifyDeliveryClaimsBlock;
   window.printDeliverySheet = printDeliverySheet;
   window.handleAddCustomerClaim = handleAddCustomerClaim;
@@ -2107,3 +2283,10 @@ if (typeof window !== "undefined") {
   window.handleExplainClaim = handleExplainClaim;
   window.handleAddClaimComment = handleAddClaimComment;
 }
+
+if (typeof document !== "undefined") document.addEventListener("DOMContentLoaded", () => {
+  if (document.getElementById("reception-today-cockpit")?.dataset.rdvCockpit === "true") {
+    initReceptionWorkspace();
+    renderReceptionWorkspace();
+  }
+});

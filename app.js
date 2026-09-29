@@ -142,7 +142,7 @@ function bindSyncConflictUsability() {
 
 function configurePdfWorker() {
   if (window.pdfjsLib?.GlobalWorkerOptions) {
-    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.61";
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.62";
   }
 }
 
@@ -152,7 +152,7 @@ function bindMainNavigation() {
       const tab = button.dataset.tab;
       if (!tab) return;
       setActiveTab(tab);
-      if (tab === "reception-workspace") focusPdfEstimateImport();
+      if (tab === "reception-workspace" && typeof renderReceptionWorkspace === "function") renderReceptionWorkspace();
       if (tab === "today") renderTodayWorkshop();
       if (tab === "planning") renderPlanning();
       if (tab === "technician") renderTechnicianDashboard();
@@ -407,7 +407,8 @@ function focusPdfEstimateImport() {
 function startReceptionCaseCreation() {
   resetPdfEstimateCreation();
   setActiveTab("reception-workspace");
-  focusPdfEstimateImport();
+  if (typeof showReceptionNewEntryPanel === "function") showReceptionNewEntryPanel("pdf");
+  else focusPdfEstimateImport();
 }
 
 function hidePdfEstimateCreationPreview() {
@@ -1607,7 +1608,7 @@ function registerServiceWorker() {
   });
   const registerCurrentServiceWorker = async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=23.3.61", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=23.3.62", { updateViaCache: "none" });
       const refreshRegistration = async () => {
         try {
           await registration.update?.();

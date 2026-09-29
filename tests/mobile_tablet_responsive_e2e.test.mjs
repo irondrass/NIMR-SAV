@@ -25,6 +25,10 @@ const { result, errors } = await runMobileCdpTest({
           await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 40)));
         };
         await visit("reception-workspace");
+        // KHA-43: navigation lands on the cockpit; PDF import is reached through New Entry.
+        document.querySelector("#reception-new-entry-btn")?.click();
+        document.querySelector('#reception-new-entry-dialog [data-reception-entry="pdf"]')?.click();
+        await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 40)));
         const importVisible = Boolean(document.querySelector("#quick-estimate-file-input")?.getBoundingClientRect().width);
         await visit("dossiers");
         document.querySelector('[data-case="case-mobile-current"]')?.click();

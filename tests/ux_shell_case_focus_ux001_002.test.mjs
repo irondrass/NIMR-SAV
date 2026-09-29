@@ -147,7 +147,8 @@ check("C PDF import is presented as the New dossier action instead of a destinat
 
   assert.match(
     indexSource,
-    /data-tab="reception-workspace"[\s\S]{0,700}Nouveau dossier/u,
+    // KHA-43: the navigation opens the Reception Today cockpit; PDF import stays a secondary New Entry action.
+    /data-tab="reception-workspace"[\s\S]{0,700}Réception[\s\S]*id="reception-new-entry-btn"[\s\S]*data-reception-entry="pdf"/u,
   );
 });
 

@@ -32,43 +32,45 @@
 // QC-PRO-001 Gate 0: atomic QC booking completion and safe existing-case cutover v23.3.59.
 // PLANNING-UX-001 R2.1: booking side panel and productive duration release v23.3.60.
 // PLANNING-UX-001 R2.2: week view release v23.3.61.
-const CACHE_NAME = "nimr-sav-v23.3.61";
+// RECEPTION-UX-001A (KHA-43): read-only Reception RDV cockpit and injected Teamdev snapshot integration release v23.3.62.
+const CACHE_NAME = "nimr-sav-v23.3.62";
 const ASSETS = [
   "./",
   "./index.html",
   "./offline.html",
   "./rescue.html",
-  "./styles.css?v=23.3.61",
-  "./app.js?v=23.3.61",
+  "./styles.css?v=23.3.62",
+  "./app.js?v=23.3.62",
   "./manifest.webmanifest",
-  "./js/version.js?v=23.3.61",
+  "./js/version.js?v=23.3.62",
   "./supabase-schema.sql",
   "./assets/icon.svg",
   "./assets/icon-192.png",
   "./assets/icon-512.png",
   "./assets/apple-touch-icon.png",
-  "./vendor/pdf.min.js?v=23.3.61",
-  "./vendor/pdf.worker.min.js?v=23.3.61",
-  "./vendor/xlsx.mini.min.js?v=23.3.61",
-  "./js/utils.js?v=23.3.61",
-  "./js/parts-availability.js?v=23.3.61",
-  "./js/state.js?v=23.3.61",
-  "./js/ui-reception.js?v=23.3.61",
-  "./js/ui-cases.js?v=23.3.61",
-  "./js/estimate-import.js?v=23.3.61",
-  "./js/ui-planning.js?v=23.3.61",
-  "./js/photos.js?v=23.3.61",
-  "./js/storage.js?v=23.3.61",
-  "./js/parts-availability-ui.js?v=23.3.61",
-  "./js/work-hours-sync.js?v=23.3.61",
-  "./js/planning.js?v=23.3.61",
-  "./js/exports.js?v=23.3.61",
-  "./js/business-rules-v2187.js?v=23.3.61",
-  "./js/supabase-config.js?v=23.3.61",
-  "./js/supabase-client.js?v=23.3.61",
-  "./js/supabase-sync.js?v=23.3.61",
-  "./js/vn-part-client.js?v=23.3.61",
-  "./js/vn-part-ui.js?v=23.3.61",
+  "./vendor/pdf.min.js?v=23.3.62",
+  "./vendor/pdf.worker.min.js?v=23.3.62",
+  "./vendor/xlsx.mini.min.js?v=23.3.62",
+  "./js/utils.js?v=23.3.62",
+  "./js/parts-availability.js?v=23.3.62",
+  "./js/state.js?v=23.3.62",
+  "./js/rdv-integration.js?v=23.3.62",
+  "./js/ui-reception.js?v=23.3.62",
+  "./js/ui-cases.js?v=23.3.62",
+  "./js/estimate-import.js?v=23.3.62",
+  "./js/ui-planning.js?v=23.3.62",
+  "./js/photos.js?v=23.3.62",
+  "./js/storage.js?v=23.3.62",
+  "./js/parts-availability-ui.js?v=23.3.62",
+  "./js/work-hours-sync.js?v=23.3.62",
+  "./js/planning.js?v=23.3.62",
+  "./js/exports.js?v=23.3.62",
+  "./js/business-rules-v2187.js?v=23.3.62",
+  "./js/supabase-config.js?v=23.3.62",
+  "./js/supabase-client.js?v=23.3.62",
+  "./js/supabase-sync.js?v=23.3.62",
+  "./js/vn-part-client.js?v=23.3.62",
+  "./js/vn-part-ui.js?v=23.3.62",
 ];
 
 async function precache() {
@@ -97,7 +99,7 @@ self.addEventListener("activate", (event) => {
 function isReleaseAsset(url) {
   try {
     const parsed = new URL(url);
-    return parsed.searchParams.get("v") === "23.3.61";
+    return parsed.searchParams.get("v") === "23.3.62";
   } catch {
     return false;
   }

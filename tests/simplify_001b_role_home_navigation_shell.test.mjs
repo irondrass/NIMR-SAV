@@ -109,8 +109,8 @@ test("9 sidebar contains all required tabs in order", () => {
   ]);
 });
 
-test("10 reception-workspace is styled as action with + Nouveau dossier", () => {
-  assert.match(index, /<button class="nav-button nav-button-action" type="button" data-tab="reception-workspace">[\s\S]*?\+\s*Nouveau dossier/u);
+test("10 reception-workspace is styled as action with the KHA-43 Réception cockpit label", () => {
+  assert.match(index, /<button class="nav-button nav-button-action" type="button" data-tab="reception-workspace">[\s\S]*?<\/svg>\s*Réception\s*<\/button>/u);
   assert.match(css, /\.sidebar-nav \.nav-button-action\s*\{/u);
 });
 

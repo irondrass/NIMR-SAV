@@ -3,6 +3,7 @@ import { createClient } from "npm:@supabase/supabase-js@2.111.0";
 const TEAMDEV_API_BASE = "https://bo.nimr.com.tn/api/1.0.0";
 const TEAMDEV_PAGE_SIZE = 100;
 const TEAMDEV_MAX_PAGES = 10;
+const TEAMDEV_GROUP_BRANDS = Object.freeze(["DONGFENG", "DFSK"]);
 const ALLOWED_ROLES = new Set(["admin_technique", "directeur", "chef_atelier", "reception"]);
 
 const CORS_HEADERS = Object.freeze({
@@ -325,31 +326,34 @@ async function loadServices(fetchFn, token, workspace) {
 async function loadAppointments(fetchFn, token, workspace, serviceIds, startDate, endDate) {
   if (!serviceIds.length) return [];
   const rows = [];
-  const brandName = cleanText(workspace.brandName, 80);
+  const workspaceBrandName = cleanText(workspace.brandName, 80);
+  const brandNames = workspaceBrandName ? [workspaceBrandName] : TEAMDEV_GROUP_BRANDS;
 
-  for (let page = 1; page <= TEAMDEV_MAX_PAGES; page += 1) {
-    const params = appendServices(
-      new URLSearchParams({
-        page: String(page),
-        pageSize: String(TEAMDEV_PAGE_SIZE),
-        order: "DESC",
-        startDate,
-        endDate,
-      }),
-      serviceIds,
-    );
-    if (brandName) params.set("brandName", brandName);
-    const payload = await fetchJson(
-      fetchFn,
-      `${TEAMDEV_API_BASE}/backoffice/interventions/appointments?${params}`,
-      { method: "GET", headers: teamdevHeaders(token) },
-      "TEAMDEV_APPOINTMENTS_FAILED",
-    );
-    const pageRows = extractArray(payload, ["result", "appointments"]);
-    rows.push(...pageRows);
-    if (pageRows.length < TEAMDEV_PAGE_SIZE) break;
-    if (page === TEAMDEV_MAX_PAGES) {
-      throw new TeamdevUpstreamError("TEAMDEV_APPOINTMENTS_LIMIT", 502);
+  for (const brandName of brandNames) {
+    for (let page = 1; page <= TEAMDEV_MAX_PAGES; page += 1) {
+      const params = appendServices(
+        new URLSearchParams({
+          page: String(page),
+          pageSize: String(TEAMDEV_PAGE_SIZE),
+          order: "DESC",
+          startDate,
+          endDate,
+          brandName,
+        }),
+        serviceIds,
+      );
+      const payload = await fetchJson(
+        fetchFn,
+        `${TEAMDEV_API_BASE}/backoffice/interventions/appointments?${params}`,
+        { method: "GET", headers: teamdevHeaders(token) },
+        "TEAMDEV_APPOINTMENTS_FAILED",
+      );
+      const pageRows = extractArray(payload, ["result", "appointments"]);
+      rows.push(...pageRows);
+      if (pageRows.length < TEAMDEV_PAGE_SIZE) break;
+      if (page === TEAMDEV_MAX_PAGES) {
+        throw new TeamdevUpstreamError("TEAMDEV_APPOINTMENTS_LIMIT", 502);
+      }
     }
   }
   return rows;

@@ -285,7 +285,7 @@ test("edge aggregates configured Teamdev workspaces using read-only upstream cal
   assert.ok(appointmentCalls.some((call) => call.search.includes("brandName=DONGFENG")));
 });
 
-test("combined DF-DFSK workspace works without a brandName filter", async () => {
+test("combined DF-DFSK workspace fans out to the Teamdev DONGFENG and DFSK brand filters", async () => {
   const edge = loadEdgeFactory();
   edge.__clientFactory = clientFactoryFor();
   const calls = [];
@@ -314,10 +314,11 @@ test("combined DF-DFSK workspace works without a brandName filter", async () => 
     body: JSON.stringify({ workshop_id: "workshop-1", start_date: "2026-09-29", end_date: "2026-09-29" }),
   }));
   assert.equal(response.status, 200);
-  const appointmentCall = calls.find((call) => call.path.endsWith("/backoffice/interventions/appointments"));
-  assert.ok(appointmentCall);
-  assert.equal(appointmentCall.search.includes("brandName="), false);
-  assert.ok(appointmentCall.search.includes("services=service-1"));
+  const appointmentCalls = calls.filter((call) => call.path.endsWith("/backoffice/interventions/appointments"));
+  assert.equal(appointmentCalls.length, 2);
+  assert.ok(appointmentCalls.every((call) => call.search.includes("services=service-1")));
+  assert.ok(appointmentCalls.some((call) => call.search.includes("brandName=DONGFENG")));
+  assert.ok(appointmentCalls.some((call) => call.search.includes("brandName=DFSK")));
 });
 
 test("browser transport invokes only the secured Edge Function", () => {

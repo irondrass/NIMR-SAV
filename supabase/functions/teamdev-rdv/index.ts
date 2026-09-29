@@ -3,7 +3,7 @@ import { createClient } from "npm:@supabase/supabase-js@2.111.0";
 const TEAMDEV_API_BASE = "https://bo.nimr.com.tn/api/1.0.0";
 const TEAMDEV_PAGE_SIZE = 100;
 const TEAMDEV_MAX_PAGES = 10;
-const ALLOWED_ROLES = new Set(["admin_technique", "directeur", "reception"]);
+const ALLOWED_ROLES = new Set(["admin_technique", "directeur", "chef_atelier", "reception"]);
 
 const CORS_HEADERS = Object.freeze({
   "Access-Control-Allow-Origin": "*",

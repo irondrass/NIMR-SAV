@@ -142,6 +142,48 @@ test("edge refuses a workshop role outside Reception scope", async () => {
   assert.equal(fetchCount, 0);
 });
 
+test("edge allows chef_atelier because the application grants Reception workspace access", async () => {
+  const edge = loadEdgeFactory();
+  edge.__clientFactory = clientFactoryFor("chef_atelier");
+  let fetchCount = 0;
+  const fetchFn = async (url) => {
+    fetchCount += 1;
+    const parsed = new URL(url);
+    if (parsed.pathname.endsWith("/backoffice/auth/signin")) {
+      return jsonResponse({ access_token: "teamdev-token" });
+    }
+    if (parsed.pathname.endsWith("/backoffice/users/me")) {
+      return jsonResponse({
+        userWorkspaces: [
+          { id: "ws-dfsk", brandId: "b1", agencyId: "a1", brandName: "DFSK" },
+          { id: "ws-dongfeng", brandId: "b2", agencyId: "a1", brandName: "DONGFENG" },
+        ],
+      });
+    }
+    if (parsed.pathname.endsWith("/backoffice/services")) {
+      return jsonResponse({ result: [] });
+    }
+    return jsonResponse({ error: "not-found" }, 404);
+  };
+  const handler = edge.__teamdevFactory({
+    environment: validEnv(),
+    fetchFn,
+  });
+  const response = await handler(new Request("http://local", {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer supabase-user-jwt",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ workshop_id: "workshop-1" }),
+  }));
+  const body = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(body.ok, true);
+  assert.equal(body.total, 0);
+  assert.ok(fetchCount >= 4);
+});
+
 test("edge aggregates configured Teamdev workspaces using read-only upstream calls", async () => {
   const edge = loadEdgeFactory();
   edge.__clientFactory = clientFactoryFor();

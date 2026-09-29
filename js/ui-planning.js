@@ -1,7 +1,33 @@
+// Local display mode only: state.planningDate remains the sole date anchor.
+let planningView = "day";
+
+function setPlanningView(view) {
+  planningView = view === "week" ? "week" : "day";
+  renderPlanning();
+}
+
+function getPlanningWeekDates(date) {
+  const monday = addDays(date, -((date.getDay() + 6) % 7));
+  return Array.from({ length: 7 }, (_, index) => addDays(monday, index));
+}
+
 function renderPlanning() {
   if (typeof getUiRuntimeIndexes === "function") getUiRuntimeIndexes();
   const date = parseDateKey(state.planningDate);
-  $("#planning-day-label").textContent = longDate(date);
+  const week = planningView === "week";
+  const dates = week ? getPlanningWeekDates(date) : [date];
+  $("#planning-day-label").textContent = week
+    ? `Semaine du ${longDate(dates[0])} au ${longDate(dates[6])}` : longDate(date);
+  $("#planning-view-day")?.setAttribute("aria-pressed", String(!week));
+  $("#planning-view-week")?.setAttribute("aria-pressed", String(week));
+  for (const [id, label] of [["prev-day", week ? "Semaine précédente" : "Jour précédent"],
+    ["next-day", week ? "Semaine suivante" : "Jour suivant"]]) {
+    $("#" + id)?.setAttribute("aria-label", label);
+    $("#" + id)?.setAttribute("title", label);
+  }
+  $("#mobile-planning-list")?.setAttribute("aria-label", week ? "Planning de la semaine en liste" : "Planning du jour en liste");
+  const printControls = $("#planning-print-details");
+  if (printControls) printControls.hidden = week;
   const dateInput = $("#planning-date");
   if (dateInput && dateInput.value !== state.planningDate) {
     dateInput.value = state.planningDate;
@@ -9,7 +35,7 @@ function renderPlanning() {
   const alert = $("#day-alert");
   const holiday = getHoliday(date);
   const intervals = getDayIntervals(date);
-  if (holiday || !intervals.length) {
+  if (!week && (holiday || !intervals.length)) {
     alert.hidden = false;
     alert.textContent = holiday ? `Jour férié: ${holiday.label}` : "Jour fermé";
   } else {
@@ -20,7 +46,6 @@ function renderPlanning() {
   syncPlanningResourceFilter(allResources);
   const filters = getPlanningDisplayFilters(allResources);
   const visibleResources = filterPlanningDisplayResources(allResources, filters);
-  const taskNumberMap = buildDailyPlanningTaskNumberMap(date, allResources);
 
   const activeCount = (filters.search ? 1 : 0) + (filters.resourceId !== "all" ? 1 : 0);
   const badge = $("#planning-filter-badge");
@@ -34,11 +59,48 @@ function renderPlanning() {
     }
   }
 
+  if (week) {
+    renderPlanningWeek(dates, allResources, visibleResources, filters);
+  } else {
+    const taskNumberMap = buildDailyPlanningTaskNumberMap(date, allResources);
+    $("#gantt").innerHTML = renderPlanningDayGantt(date, visibleResources, taskNumberMap, filters);
+    renderDailyLaborSummary(date, taskNumberMap, filters);
+    renderMobilePlanningList(date, visibleResources, taskNumberMap, filters);
+  }
+}
+
+function renderPlanningWeek(dates, allResources, visibleResources, filters) {
+  const ganttSections = [];
+  const mobileSections = [];
+  for (const date of dates) {
+    const holiday = getHoliday(date);
+    const intervals = getDayIntervals(date);
+    if (!holiday && !intervals.length) continue;
+    const heading = `<h2 class="planning-week-day-title">${escapeHtml(longDate(date))}</h2>`;
+    const wrap = (content) => `<section class="planning-week-day" data-planning-day="${todayKey(date)}">${heading}${content}</section>`;
+    if (holiday) {
+      const notice = `<div class="day-alert">Jour férié: ${escapeHtml(holiday.label)}</div>`;
+      ganttSections.push(wrap(notice));
+      mobileSections.push(wrap(notice));
+      continue;
+    }
+    const taskNumberMap = buildDailyPlanningTaskNumberMap(date, allResources);
+    ganttSections.push(wrap(renderPlanningDayGantt(date, visibleResources, taskNumberMap, filters)));
+    mobileSections.push(wrap(buildMobilePlanningListHtml(date, visibleResources, taskNumberMap, filters)));
+  }
+  const empty = '<div class="empty-inline">Aucun jour travaillé cette semaine.</div>';
+  $("#gantt").innerHTML = ganttSections.join("") || empty;
+  const mobile = $("#mobile-planning-list");
+  if (mobile) mobile.innerHTML = mobileSections.join("") || empty;
+  const labor = document.getElementById("daily-labor-summary");
+  if (labor) labor.innerHTML = '<div class="empty-inline">Détail main-d’œuvre disponible en vue Jour.</div>';
+}
+
+function renderPlanningDayGantt(date, visibleResources, taskNumberMap, filters) {
   const dailyColorMap = buildIndexedDailyVehicleColorMap(todayKey(date));
-  const gantt = $("#gantt");
   const { dayStart, dayEnd } = getGanttDayBounds(date);
   const total = diffMinutes(dayStart, dayEnd);
-  gantt.innerHTML = `
+  return `
     <div class="gantt-grid">
       <div class="gantt-header">
         <div class="gantt-corner">Ressource</div>
@@ -66,8 +128,6 @@ function renderPlanning() {
         .join("")}
     </div>
   `;
-  renderDailyLaborSummary(date, taskNumberMap, filters);
-  renderMobilePlanningList(date, visibleResources, taskNumberMap, filters);
 }
 
 function getPlanningDisplayFilters(resources = []) {
@@ -126,13 +186,13 @@ function planningBookingMatchesDisplayFilters(booking, caseItem, filters) {
 function buildIndexedDailyVehicleColorMap(dateKey) {
   const map = {};
   const bookings = typeof getIndexedDayBookings === "function" ? getIndexedDayBookings(dateKey) : (state.bookings || []);
-  reconcileVehiclePlanningColors(bookings.filter((booking) => booking?.type !== "leave").map((booking) => booking.caseId));
+  if (planningView !== "week") reconcileVehiclePlanningColors(bookings.filter((booking) => booking?.type !== "leave").map((booking) => booking.caseId));
   bookings.forEach((booking) => {
     if (!booking?.caseId || booking.type === "leave") return;
     const item = typeof getIndexedCaseById === "function"
       ? getIndexedCaseById(booking.caseId)
       : state.cases.find((caseItem) => caseItem.id === booking.caseId);
-    map[booking.caseId] = getVehiclePlanningColor(item) || booking.color || "#11415f";
+    map[booking.caseId] = getVehiclePlanningColor(planningView === "week" && item ? { ...item } : item) || booking.color || "#11415f";
   });
   return map;
 }
@@ -258,6 +318,10 @@ function renderDailyLaborSummary(date, taskNumberMap, filters = null) {
 function renderMobilePlanningList(date, resources, taskNumberMap, filters = null) {
   const target = $("#mobile-planning-list");
   if (!target) return;
+  target.innerHTML = buildMobilePlanningListHtml(date, resources, taskNumberMap, filters);
+}
+
+function buildMobilePlanningListHtml(date, resources, taskNumberMap, filters = null) {
   const day = todayKey(date);
   const { dayStart, dayEnd } = getGanttDayBounds(date);
   const rows = [];
@@ -273,7 +337,9 @@ function renderMobilePlanningList(date, resources, taskNumberMap, filters = null
     (booking.segments || []).forEach((segment) => {
       const start = new Date(segment.start);
       const end = new Date(segment.end);
-      if (todayKey(start) !== day && todayKey(end) !== day) return;
+      if (planningView === "week"
+        ? end <= dayStart || start >= dayEnd
+        : todayKey(start) !== day && todayKey(end) !== day) return;
       const status = getBookingOperationalStatus(booking);
       const actualEnd = status === "completed" && booking.actualEnd ? new Date(booking.actualEnd) : null;
       if (actualEnd && start >= actualEnd) return;
@@ -287,13 +353,12 @@ function renderMobilePlanningList(date, resources, taskNumberMap, filters = null
   rows.sort((a, b) => a.start - b.start || a.end - b.end || String(a.resource.name || "").localeCompare(String(b.resource.name || "")));
   if (!rows.length) {
     const isFiltered = filters && (filters.search || filters.resourceId !== "all");
-    target.innerHTML = isFiltered
+    return isFiltered
       ? '<div class="empty-inline">Aucune tâche ne correspond aux filtres.</div>'
       : '<div class="empty-inline">Aucune tâche atelier planifiée sur cette journée.</div>';
-    return;
   }
 
-  target.innerHTML = `
+  return `
     <div class="mobile-planning-head">
       <strong>Planning du jour</strong>
       <span>${rows.length} tâche${rows.length > 1 ? "s" : ""}</span>
@@ -381,7 +446,9 @@ function renderResourceBookings(resource, date, dayStart, dayEnd, total, dailyCo
     booking.segments.forEach((segment) => {
       const start = new Date(segment.start);
       const end = new Date(segment.end);
-      if (todayKey(start) !== day && todayKey(end) !== day) return;
+      if (planningView === "week"
+        ? end <= dayStart || start >= dayEnd
+        : todayKey(start) !== day && todayKey(end) !== day) return;
       const status = booking.type === "leave" ? "" : getBookingOperationalStatus(booking);
       const actualEnd = status === "completed" && booking.actualEnd ? new Date(booking.actualEnd) : null;
       if (actualEnd && start >= actualEnd) return;
@@ -415,7 +482,8 @@ function renderResourceBookings(resource, date, dayStart, dayEnd, total, dailyCo
       const availableChars = Math.max(6, Math.floor(width * 1.35));
       const numberOnly = Boolean(taskNumber) && !isLeave && (width < 14 || maxTextLength > availableChars);
       const compactClass = `${blocked ? " blocked-booking" : ""}${!isLeave ? ` task-status-${escapeAttr(getBookingOperationalStatus(booking))}` : ""}${numberOnly ? " number-only-booking" : width < 8 ? " compact-booking" : ""}`;
-      const color = getBookingPlanningColor(booking, dailyColorMap);
+      const color = planningView === "week" && !isLeave && status !== "completed" && dailyColorMap?.[booking.caseId]
+        ? dailyColorMap[booking.caseId] : getBookingPlanningColor(booking, dailyColorMap);
       items.push(`
         <div class="booking ${isLeave ? 'leave-booking' : ''}${compactClass}" style="left:${left}%;width:${width}%;background:${color}" title="${escapeAttr(bookingTitle)}" aria-label="${escapeAttr(bookingTitle)}" data-booking-id="${escapeAttr(String(booking.id || ''))}" data-case-id="${escapeAttr(String(booking.caseId || ''))}" role="button" tabindex="0">
           ${taskNumber ? `<span class="booking-number">${escapeHtml(String(taskNumber))}</span>` : ""}
@@ -442,7 +510,9 @@ function buildDailyPlanningTaskNumberMap(date, resources) {
     booking.segments.forEach((segment) => {
       const start = new Date(segment.start);
       const end = new Date(segment.end);
-      if (todayKey(start) !== day && todayKey(end) !== day) return;
+      if (planningView === "week"
+        ? end <= dayStart || start >= dayEnd
+        : todayKey(start) !== day && todayKey(end) !== day) return;
       const status = getBookingOperationalStatus(booking);
       const actualEnd = status === "completed" && booking.actualEnd ? new Date(booking.actualEnd) : null;
       if (actualEnd && start >= actualEnd) return;

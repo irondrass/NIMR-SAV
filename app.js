@@ -142,7 +142,7 @@ function bindSyncConflictUsability() {
 
 function configurePdfWorker() {
   if (window.pdfjsLib?.GlobalWorkerOptions) {
-    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.60";
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js?v=23.3.61";
   }
 }
 
@@ -946,6 +946,8 @@ function resetDossierFilters() {
 }
 
 function bindPlanningToolbar() {
+  $("#planning-view-day")?.addEventListener("click", () => setPlanningView("day"));
+  $("#planning-view-week")?.addEventListener("click", () => setPlanningView("week"));
   $("#print-day-gantt")?.addEventListener("click", () => printDailyPlanningGantt(state.planningDate));
   $("#print-day-planning")?.addEventListener("click", () => printDailyPlanning(state.planningDate));
   $("#prev-day")?.addEventListener("click", () => changePlanningDay(-1));
@@ -996,7 +998,7 @@ function resetPlanningDisplayFilters() {
 }
 
 function changePlanningDay(delta) {
-  state.planningDate = todayKey(addDays(parseDateKey(state.planningDate), delta));
+  state.planningDate = todayKey(addDays(parseDateKey(state.planningDate), delta * (planningView === "week" ? 7 : 1)));
   saveState();
   renderPlanning();
   renderMetrics();
@@ -1605,7 +1607,7 @@ function registerServiceWorker() {
   });
   const registerCurrentServiceWorker = async () => {
     try {
-      const registration = await navigator.serviceWorker.register("sw.js?v=23.3.60", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("sw.js?v=23.3.61", { updateViaCache: "none" });
       const refreshRegistration = async () => {
         try {
           await registration.update?.();

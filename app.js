@@ -946,6 +946,8 @@ function resetDossierFilters() {
 }
 
 function bindPlanningToolbar() {
+  $("#planning-view-day")?.addEventListener("click", () => setPlanningView("day"));
+  $("#planning-view-week")?.addEventListener("click", () => setPlanningView("week"));
   $("#print-day-gantt")?.addEventListener("click", () => printDailyPlanningGantt(state.planningDate));
   $("#print-day-planning")?.addEventListener("click", () => printDailyPlanning(state.planningDate));
   $("#prev-day")?.addEventListener("click", () => changePlanningDay(-1));
@@ -996,7 +998,7 @@ function resetPlanningDisplayFilters() {
 }
 
 function changePlanningDay(delta) {
-  state.planningDate = todayKey(addDays(parseDateKey(state.planningDate), delta));
+  state.planningDate = todayKey(addDays(parseDateKey(state.planningDate), delta * (planningView === "week" ? 7 : 1)));
   saveState();
   renderPlanning();
   renderMetrics();

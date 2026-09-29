@@ -10676,3 +10676,31 @@ button.is-pending[aria-busy="true"]::before {
 @media print {
   .booking-side-panel { display: none !important; }
 }
+
+/* R2.2: stacked daily planning, sharing the existing Gantt and mobile cards. */
+.planning-view-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.planning-view-switch [aria-pressed="true"] {
+  background: var(--primary, #11415f);
+  color: #fff;
+}
+.planning-view-switch button:focus-visible {
+  outline: 2px solid #11415f;
+  outline-offset: 3px;
+}
+.planning-week-day + .planning-week-day {
+  margin-top: 20px;
+  border-top: 1px solid var(--line);
+}
+.planning-week-day-title {
+  margin: 0;
+  padding: 12px;
+  font-size: 1rem;
+  background: #f8fafb;
+}
+.planning-print-details[hidden] {
+  display: none;
+}

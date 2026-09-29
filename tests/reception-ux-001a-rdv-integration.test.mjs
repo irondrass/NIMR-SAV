@@ -16,6 +16,11 @@ test('whitelisted DTO and optional metadata survive normalization; quote is neve
   assert.equal(run('normalizeCase({}).rdvIntegration'), undefined);
   assert.equal(run('normalizeRdvIntegration({provider: "other"})'), null);
 });
+test('company client falls back to Teamdev socialReason when first and last names are empty', () => {
+  assert.equal(run(`normalizeTeamdevAppointment({...payload, intervention: {...payload.intervention, vehicle: {...payload.intervention.vehicle, client: {...payload.intervention.vehicle.client, firstName: '', lastName: '', socialReason: 'STE NIMR TEST'}}}}).clientName`), 'STE NIMR TEST');
+  assert.equal(run(`normalizeTeamdevAppointment({...payload, intervention: {...payload.intervention, vehicle: {...payload.intervention.vehicle, client: {...payload.intervention.vehicle.client, firstName: 'Ali', lastName: 'Ben', socialReason: 'STE SHOULD NOT REPLACE'}}}}).clientName`), 'Ali Ben');
+});
+
 test('planning clear and replan preserve external snapshot', () => {
   run(`var item = normalizeCase({ id: 'local', rdvIntegration: row.rdvIntegration, appointment: {start: payload.date} }); var snapshot = JSON.stringify(item.rdvIntegration); state.bookings = []; clearCasePlanning(item); item.appointment = {start: '2026-10-01T09:00:00Z'}; item = normalizeCase(item);`);
   assert.equal(run('JSON.stringify(item.rdvIntegration) === snapshot'), true);

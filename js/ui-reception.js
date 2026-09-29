@@ -7,6 +7,64 @@ let isReceptionCreationMode = false;
 // Ephemeral snapshots: setting or rendering these rows never writes cases.
 let receptionUpstreamRows = [];
 let receptionLateThresholdMinutes = 15;
+let receptionUpstreamRefreshPromise = null;
+let receptionUpstreamLastAttemptAt = 0;
+let receptionUpstreamLastSuccessDay = "";
+let receptionUpstreamRefreshTimer = null;
+const RECEPTION_RDV_REFRESH_TTL_MS = 180000;
+
+function clearReceptionUpstreamAppointments() {
+  receptionUpstreamRows = [];
+  receptionUpstreamLastAttemptAt = 0;
+  receptionUpstreamLastSuccessDay = "";
+  renderReceptionWorkspace();
+}
+
+async function refreshReceptionUpstreamFromTeamdev(now = new Date(), options = {}) {
+  const dateKey = rdvLocalDateKey(now);
+  const transport = typeof window !== "undefined" ? window.invokeTeamdevRdv : null;
+  if (!dateKey || typeof transport !== "function") {
+    return { enabled: false, rows: receptionUpstreamRows };
+  }
+
+  const currentTime = Date.now();
+  if (!options.force && receptionUpstreamRefreshPromise) return receptionUpstreamRefreshPromise;
+  if (!options.force
+    && receptionUpstreamLastSuccessDay === dateKey
+    && currentTime - receptionUpstreamLastAttemptAt < RECEPTION_RDV_REFRESH_TTL_MS) {
+    return { enabled: true, rows: receptionUpstreamRows };
+  }
+  if (!options.force
+    && receptionUpstreamLastAttemptAt
+    && currentTime - receptionUpstreamLastAttemptAt < RECEPTION_RDV_REFRESH_TTL_MS) {
+    return { enabled: false, rows: receptionUpstreamRows };
+  }
+
+  receptionUpstreamLastAttemptAt = currentTime;
+  receptionUpstreamRefreshPromise = refreshReceptionRdvSnapshots(transport, now)
+    .then((result) => {
+      if (result.enabled) {
+        receptionUpstreamRows = result.rows;
+        receptionUpstreamLastSuccessDay = dateKey;
+        renderReceptionWorkspace();
+      }
+      return result;
+    })
+    .catch((error) => {
+      const code = String(error?.code || "");
+      if (["UNAUTHENTICATED", "NO_CLIENT", "NOT_A_MEMBER", "INVALID_MEMBERSHIP", "FORBIDDEN_RDV_READ"].includes(code)) {
+        receptionUpstreamRows = [];
+        receptionUpstreamLastSuccessDay = "";
+        renderReceptionWorkspace();
+      }
+      console.warn("Chargement RDV Teamdev indisponible", code || error?.message || error);
+      return { enabled: false, rows: receptionUpstreamRows, errorCode: code || "TEAMDEV_RDV_FAILED" };
+    })
+    .finally(() => {
+      receptionUpstreamRefreshPromise = null;
+    });
+  return receptionUpstreamRefreshPromise;
+}
 
 function setReceptionUpstreamAppointments(payload, options = {}) {
   receptionUpstreamRows = normalizeTeamdevAppointments(payload);
@@ -211,6 +269,18 @@ function initReceptionWorkspace() {
   if (view.dataset.receptionInitialized === "true") return;
   view.dataset.receptionInitialized = "true";
 
+  if (!receptionUpstreamRefreshTimer
+    && typeof window !== "undefined"
+    && typeof window.setInterval === "function") {
+    receptionUpstreamRefreshTimer = window.setInterval(() => {
+      const cockpit = document.getElementById("reception-today-cockpit");
+      const currentView = document.getElementById("view-reception-workspace");
+      if (!cockpit || cockpit.dataset.rdvCockpit !== "true" || currentView?.hidden) return;
+      if (document.visibilityState === "hidden") return;
+      void refreshReceptionUpstreamFromTeamdev(new Date(), { force: true });
+    }, RECEPTION_RDV_REFRESH_TTL_MS);
+  }
+
   // Search input
   const searchInput = document.getElementById("reception-case-search");
   if (searchInput) {
@@ -303,6 +373,7 @@ function renderReceptionWorkspace() {
   const searchInput = document.getElementById("reception-case-search");
   const query = String(searchInput?.value || "").trim();
   if (document.getElementById("reception-today-cockpit")?.dataset.rdvCockpit === "true") {
+    void refreshReceptionUpstreamFromTeamdev();
     renderReceptionTodayCockpit(query);
     return;
   }
@@ -2274,6 +2345,8 @@ if (typeof window !== "undefined") {
   window.initReceptionWorkspace = initReceptionWorkspace;
   window.renderReceptionWorkspace = renderReceptionWorkspace;
   window.setReceptionUpstreamAppointments = setReceptionUpstreamAppointments;
+  window.clearReceptionUpstreamAppointments = clearReceptionUpstreamAppointments;
+  window.refreshReceptionUpstreamFromTeamdev = refreshReceptionUpstreamFromTeamdev;
   window.openReceptionNewEntryDialog = openReceptionNewEntryDialog;
   window.showReceptionNewEntryPanel = showReceptionNewEntryPanel;
   window.verifyDeliveryClaimsBlock = verifyDeliveryClaimsBlock;

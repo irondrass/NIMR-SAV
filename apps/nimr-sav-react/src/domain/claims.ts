@@ -119,7 +119,7 @@ export function getBlockingClaimsReasons(claims: Claim[] | undefined, overridden
       if (!claim.clientApproved) {
         reasons.push(`Accord client manquant pour "${claim.label}".`);
       }
-    } else if (claim.claimType === 'warranty' || claim.claimType === 'internal') {
+    } else if (claim.claimType === 'warranty' || claim.claimType === 'internal' || claim.claimType === 'mixed') {
       if (claim.status !== 'approved') {
         reasons.push(`Validation interne manquante pour "${claim.label}".`);
       }

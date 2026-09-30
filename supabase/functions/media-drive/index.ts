@@ -52,6 +52,7 @@ const ACTIONS = new Set([
   "read_metadata",
   "read_content",
   "delete_media",
+  "lifecycle_policy",
 ]);
 const VEHICLE_CONTEXTS = new Set(["reception", "diagnostic", "repair", "qc", "delivery"]);
 const WARRANTY_SECTIONS = new Set(["photos", "videos", "diagnostic", "documents"]);
@@ -238,7 +239,7 @@ async function refreshGoogleAccessToken(fetchFn, config) {
 
 function actionAllowed(role, action) {
   if (action === "bootstrap_root") return ROOT_ADMIN_ROLES.has(role);
-  if (action === "read_metadata" || action === "read_content" || action === "capabilities") return MEDIA_READ_ROLES.has(role);
+  if (action === "read_metadata" || action === "read_content" || action === "capabilities" || action === "lifecycle_policy") return MEDIA_READ_ROLES.has(role);
   if (action === "delete_media") return MEDIA_WRITE_ROLES.has(role);
   return MEDIA_WRITE_ROLES.has(role);
 }
@@ -293,7 +294,7 @@ async function loadRepairOrder(client, workshopId, repairOrderId) {
   if (!isUuid(repairOrderId)) throw new MediaDriveError("INVALID_REPAIR_ORDER", 400);
   const { data, error } = await client
     .from("repair_orders")
-    .select("id, workshop_id, local_id, order_number, vehicle_id")
+    .select("id, workshop_id, local_id, order_number, vehicle_id, closed_at, archived_at")
     .eq("id", repairOrderId)
     .eq("workshop_id", workshopId)
     .is("deleted_at", null)
@@ -328,12 +329,69 @@ async function loadClaim(client, workshopId, claimId) {
   return data;
 }
 
+function orderLifecycleState(order) {
+  if (order?.archived_at) return "archived";
+  if (order?.closed_at) return "closed";
+  return "open";
+}
+
+function assertMediaLifecycleWriteAllowed(order) {
+  const state = orderLifecycleState(order);
+  if (state !== "open") throw new MediaDriveError("MEDIA_EVIDENCE_FROZEN", 409);
+}
+
+async function loadMediaRecordByDriveFile(client, workshopId, driveFileId) {
+  const id = cleanText(driveFileId, 256);
+  if (!id) throw new MediaDriveError("DRIVE_FILE_ID_REQUIRED", 400);
+  const { data, error } = await client
+    .from("photos")
+    .select("id, workshop_id, repair_order_id, claim_id, business_context, drive_file_id, deleted_at")
+    .eq("workshop_id", workshopId)
+    .eq("drive_file_id", id)
+    .is("deleted_at", null)
+    .maybeSingle();
+  if (error || !data) throw new MediaDriveError("MEDIA_RECORD_NOT_FOUND", 404);
+  return data;
+}
+
+async function assertMediaLifecycleDeleteAllowed(client, workshopId, scope, context, driveFileId) {
+  const media = await loadMediaRecordByDriveFile(client, workshopId, driveFileId);
+  const databaseContext = cleanToken(media.business_context, 40);
+  if (databaseContext && context && databaseContext !== context) {
+    throw new MediaDriveError("MEDIA_CONTEXT_MISMATCH", 409);
+  }
+  if (scope === "warranty" || context === "warranty" || databaseContext === "warranty" || media.claim_id) {
+    throw new MediaDriveError("MEDIA_RETENTION_EXCEPTION", 409);
+  }
+  const repairOrderId = cleanText(media.repair_order_id, 80);
+  if (!repairOrderId) throw new MediaDriveError("MEDIA_REPAIR_ORDER_REQUIRED", 409);
+  const order = await loadRepairOrder(client, workshopId, repairOrderId);
+  const state = orderLifecycleState(order);
+  if (state !== "open") throw new MediaDriveError("MEDIA_EVIDENCE_FROZEN", 409);
+  return { media, order };
+}
+
+function lifecyclePolicyResponse() {
+  return {
+    ok: true,
+    action: "lifecycle_policy",
+    policy_version: "MEDIA-LIFECYCLE-001",
+    retention_days: null,
+    automatic_purge_enabled: false,
+    purge_status: "disabled_pending_nimr_policy",
+    freeze_states: ["closed", "archived"],
+    retention_exceptions: ["warranty", "complaint", "litigation", "audit"],
+    reopen_behavior: "preserve_existing_evidence",
+  };
+}
+
 async function buildBusinessFolderSpec(client, workshopId, payload) {
   const scope = cleanToken(payload.scope, 40);
   if (scope === "vehicle") {
     const context = cleanToken(payload.business_context, 40);
     if (!VEHICLE_CONTEXTS.has(context)) throw new MediaDriveError("INVALID_BUSINESS_CONTEXT", 400);
     const order = await loadRepairOrder(client, workshopId, cleanText(payload.repair_order_id, 80));
+    assertMediaLifecycleWriteAllowed(order);
     const vehicle = await loadVehicle(client, workshopId, order.vehicle_id);
     const vin = safeDriveSegment(String(vehicle.vin || "").toUpperCase(), "VIN");
     const orderLabel = safeDriveSegment(order.order_number || order.local_id || order.id, "OR");
@@ -352,9 +410,10 @@ async function buildBusinessFolderSpec(client, workshopId, payload) {
     const section = cleanToken(payload.warranty_section, 40);
     if (!WARRANTY_SECTIONS.has(section)) throw new MediaDriveError("INVALID_WARRANTY_SECTION", 400);
     const claim = await loadClaim(client, workshopId, cleanText(payload.claim_id, 80));
-    const repairOrderId = cleanText(payload.repair_order_id, 80);
+    const repairOrderId = cleanText(payload.repair_order_id, 80) || cleanText(claim.repair_order_id, 80);
     if (repairOrderId) {
       const order = await loadRepairOrder(client, workshopId, repairOrderId);
+      assertMediaLifecycleWriteAllowed(order);
       if (String(claim.repair_order_id || "") !== String(order.id)) {
         throw new MediaDriveError("CLAIM_REPAIR_ORDER_MISMATCH", 409);
       }
@@ -737,6 +796,18 @@ export function createMediaDriveHandler(overrides = {}) {
     );
     if (!caller.ok) return caller.response;
 
+    if (action === "lifecycle_policy") {
+      try {
+        await writeAuditAttempt(caller.client, String(caller.user.id), workshopId, action, payload);
+        return response(lifecyclePolicyResponse());
+      } catch (error) {
+        if (error instanceof MediaDriveError) {
+          return failure(error.code, "Journalisation média indisponible.", error.status);
+        }
+        return failure("MEDIA_DRIVE_CONNECTOR_FAILED", "Service média indisponible.", 502);
+      }
+    }
+
     const googleConfig = readGoogleConfig(environment);
     if (action === "capabilities") {
       return response({
@@ -763,7 +834,7 @@ export function createMediaDriveHandler(overrides = {}) {
       let finalizeLocalHash = "";
       let finalizeContentSha256 = "";
 
-      if (!["bootstrap_root", "read_metadata", "read_content", "delete_media"].includes(action)) {
+      if (!["bootstrap_root", "read_metadata", "read_content", "delete_media", "lifecycle_policy"].includes(action)) {
         spec = await buildBusinessFolderSpec(caller.client, workshopId, payload);
         assertMediaContextAllowed(caller.role, spec.scope, spec.businessContext, "write");
         if (action === "begin_upload") {
@@ -801,6 +872,7 @@ export function createMediaDriveHandler(overrides = {}) {
         await assertNoPublicPermissions(fetchFn, accessToken, payload.drive_file_id);
         if (action === "read_metadata") return response({ ok: true, action, file: sanitizeDriveMetadata(file) });
         if (action === "delete_media") {
+          await assertMediaLifecycleDeleteAllowed(caller.client, workshopId, scope, context, payload.drive_file_id);
           await trashManagedMedia(fetchFn, accessToken, payload.drive_file_id);
           return response({ ok: true, action, drive_file_id: cleanText(payload.drive_file_id, 256), deleted: true });
         }

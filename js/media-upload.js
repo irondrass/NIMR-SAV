@@ -379,6 +379,7 @@ async function uploadMediaNow(item, media) {
       claim_id: meta.claimId || undefined,
       warranty_section: meta.businessContext === "warranty" ? (media.warrantySection || "photos") : undefined,
       local_id: media.id,
+      checksum_sha256: media.checksumSha256,
       drive_file_id: media.driveFileId,
     });
     if (!finalized?.ok) throw Object.assign(new Error(finalized?.message || finalized?.code || "Finalisation impossible."), finalized);
@@ -406,6 +407,7 @@ async function uploadMediaNow(item, media) {
     filename: media.name,
     mime_type: media.type,
     size_bytes: Number(media.size || record.blob.size || 0),
+    checksum_sha256: media.checksumSha256,
   });
   if (!begin?.ok) {
     throw Object.assign(new Error(begin?.message || begin?.code || "Session upload impossible."), begin || {});
@@ -434,6 +436,7 @@ async function uploadMediaNow(item, media) {
     claim_id: meta.claimId || undefined,
     warranty_section: meta.businessContext === "warranty" ? (media.warrantySection || "photos") : undefined,
     local_id: media.id,
+    checksum_sha256: media.checksumSha256,
     drive_file_id: driveFileId,
   });
   if (!finalized?.ok) {

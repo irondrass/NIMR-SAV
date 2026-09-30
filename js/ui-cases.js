@@ -6683,10 +6683,11 @@ function renderPhotos(root, item) {
   $$("[data-retry-media]", photos).forEach((button) => {
     button.addEventListener("click", async () => {
       const media = item.photos[Number(button.dataset.retryMedia)];
-      if (!media || typeof retryMediaUpload !== "function") return;
+      if (!media || typeof enqueueMediaOfflineUpload !== "function" || typeof drainMediaOfflineQueue !== "function") return;
       button.disabled = true;
-      const result = await retryMediaUpload(item, media);
-      if (!result?.ok) notifyUser(result?.message || "Envoi cloud impossible.", "error");
+      await enqueueMediaOfflineUpload(item, media);
+      await drainMediaOfflineQueue("manual-retry");
+      if (media.uploadStatus !== "uploaded") notifyUser(media.lastUploadError || "Envoi cloud impossible.", "error");
       else quietNotify("Média envoyé dans Google Drive.", "success");
       renderCaseDetail();
     });
@@ -6702,6 +6703,7 @@ function renderPhotos(root, item) {
       }
       const [removed] = item.photos.splice(index, 1);
       if (removed?.id) {
+        if (typeof cancelMediaOfflineUpload === "function") await cancelMediaOfflineUpload(removed.id);
         await deletePhotoRecord(removed.id);
         revokePhotoUrl(removed.id);
       }

@@ -5,6 +5,84 @@ const MEDIA_UPLOAD_EVIDENCE = new Set([
 ]);
 const MEDIA_UPLOAD_STATUSES = new Set(["pending", "uploading", "uploaded", "failed"]);
 const MEDIA_DRIVE_CAPABILITY_TTL_MS = 60 * 1000;
+const MEDIA_OFFLINE_ENTITY_TYPE = "media_upload";
+const MEDIA_OFFLINE_MAX_RETRIES = 10;
+const MEDIA_OFFLINE_BASE_DELAY_MS = 5000;
+const MEDIA_OFFLINE_MAX_DELAY_MS = 15 * 60 * 1000;
+const MEDIA_OFFLINE_PROCESSING_LEASE_MS = 2 * 60 * 1000;
+let mediaOfflineDrainPromise = null;
+let mediaOfflineDrainTimer = null;
+function findMediaOfflineTarget(mediaId, caseId = "") {
+  const cases = Array.isArray(state?.cases) ? state.cases : [];
+  const item = caseId ? cases.find((candidate) => String(candidate?.id || "") === String(caseId)) : cases.find((candidate) => (candidate?.photos || []).some((media) => String(media?.id || "") === String(mediaId)));
+  if (!item) return null;
+  const media = (item.photos || []).find((candidate) => String(candidate?.id || "") === String(mediaId));
+  return media ? { item, media } : null;
+}
+function mediaOfflineBackoffMs(retryCount = 0) {
+  const attempt = Math.max(1, Number(retryCount || 0));
+  const exponential = Math.min(MEDIA_OFFLINE_MAX_DELAY_MS, MEDIA_OFFLINE_BASE_DELAY_MS * (2 ** Math.min(8, attempt - 1)));
+  return Math.min(MEDIA_OFFLINE_MAX_DELAY_MS, exponential + Math.floor(exponential * 0.2 * Math.random()));
+}
+function isMediaOfflineRetryable(result = {}) { return !["LOCAL_MEDIA_MISSING", "MEDIA_CONTEXT_REQUIRED", "CLAIM_REQUIRED", "UPLOAD_REJECTED"].includes(String(result?.code || "")); }
+async function enqueueMediaOfflineUpload(item, media, options = {}) {
+  if (!item?.id || !media?.id || typeof enqueueDurableOutboxOperation !== "function") return null;
+  const workshopId = String(typeof getSupabaseWorkshopId === "function" ? getSupabaseWorkshopId() || "" : "").trim() || "local-workshop";
+  const existing = typeof loadDurableOutboxOperations === "function" ? (await loadDurableOutboxOperations()).find((entry) => entry.entityType === MEDIA_OFFLINE_ENTITY_TYPE && entry.workshopId === workshopId && entry.entityId === String(media.id) && ["pending", "processing", "failed"].includes(entry.syncStatus)) : null;
+  if (existing) return existing;
+  const operationId = "media-upload:" + workshopId + ":" + media.id;
+  const operation = await enqueueDurableOutboxOperation({ operationId, idempotencyKey: operationId, workshopId, entityType: MEDIA_OFFLINE_ENTITY_TYPE, entityId: String(media.id), action: "upload", payload: { caseId: String(item.id), mediaId: String(media.id) }, syncStatus: "pending", retryCount: 0, nextAttemptAt: options.nextAttemptAt || new Date().toISOString(), description: "Média " + (media.name || media.id) + " à envoyer" });
+  if (media.uploadStatus !== "uploaded") { media.uploadStatus = "pending"; await persistLocalMediaMeta(item, media); }
+  scheduleMediaOfflineDrain(0); return operation;
+}
+async function updateMediaOfflineOperation(operation, changes = {}) { return typeof updateDurableOutboxOperation === "function" ? updateDurableOutboxOperation(operation.operationId, changes) : null; }
+async function cancelMediaOfflineUpload(mediaId) {
+  if (!mediaId || typeof loadDurableOutboxOperations !== "function" || typeof deleteDurableOutboxOperation !== "function") return false;
+  const records = await loadDurableOutboxOperations();
+  const matches = records.filter((entry) => entry.entityType === MEDIA_OFFLINE_ENTITY_TYPE && entry.entityId === String(mediaId));
+  for (const operation of matches) await deleteDurableOutboxOperation(operation.operationId);
+  return matches.length > 0;
+}
+async function processMediaOfflineOperation(operation) {
+  const target = findMediaOfflineTarget(operation.entityId, operation.payload?.caseId);
+  if (!target) { await updateMediaOfflineOperation(operation, { syncStatus: "failed", retryCount: MEDIA_OFFLINE_MAX_RETRIES, lastError: "Média local introuvable.", nextAttemptAt: null }); return { ok: false, terminal: true, code: "LOCAL_MEDIA_MISSING" }; }
+  const { item, media } = target;
+  if (media.uploadStatus === "uploaded" && media.driveFileId) { await acknowledgeDurableOutboxOperation(operation.operationId); return { ok: true, deduplicated: true }; }
+  await updateMediaOfflineOperation(operation, { syncStatus: "processing", processingStartedAt: new Date().toISOString(), lastError: "" });
+  const result = await retryMediaUpload(item, media);
+  if (result?.ok) { await acknowledgeDurableOutboxOperation(operation.operationId); return result; }
+  const retryCount = Math.min(MEDIA_OFFLINE_MAX_RETRIES, Number(operation.retryCount || 0) + 1);
+  const retryable = isMediaOfflineRetryable(result) && retryCount < MEDIA_OFFLINE_MAX_RETRIES;
+  await updateMediaOfflineOperation(operation, { syncStatus: "failed", retryCount, lastError: String(result?.message || result?.code || "Upload média impossible."), nextAttemptAt: retryable ? new Date(Date.now() + mediaOfflineBackoffMs(retryCount)).toISOString() : null, processingStartedAt: null });
+  return { ...result, retryable, terminal: !retryable };
+}
+async function drainMediaOfflineQueue(reason = "foreground") {
+  if (mediaOfflineDrainPromise) return mediaOfflineDrainPromise;
+  if (navigator.onLine === false || typeof loadDurableOutboxOperations !== "function") return { processed: 0, reason: "offline" };
+  const run = (async () => {
+    const now = Date.now(); const records = await loadDurableOutboxOperations(); const mediaOps = records.filter((entry) => entry.entityType === MEDIA_OFFLINE_ENTITY_TYPE); let processed = 0;
+    for (const operation of mediaOps) {
+      if (operation.retryCount >= MEDIA_OFFLINE_MAX_RETRIES) continue;
+      const processingAt = Date.parse(operation.processingStartedAt || operation.updatedAt || "");
+      const staleProcessing = operation.syncStatus === "processing" && (!Number.isFinite(processingAt) || now - processingAt >= MEDIA_OFFLINE_PROCESSING_LEASE_MS);
+      const nextAt = Date.parse(operation.nextAttemptAt || ""); const due = !Number.isFinite(nextAt) || nextAt <= now;
+      if (!(operation.syncStatus === "pending" || operation.syncStatus === "failed" || staleProcessing) || !due) continue;
+      processed += 1; await processMediaOfflineOperation(operation);
+    }
+    const remaining = (await loadDurableOutboxOperations()).filter((entry) => entry.entityType === MEDIA_OFFLINE_ENTITY_TYPE && entry.retryCount < MEDIA_OFFLINE_MAX_RETRIES && ["pending", "failed", "processing"].includes(entry.syncStatus));
+    const nextTimes = remaining.map((entry) => Date.parse(entry.nextAttemptAt || "")).filter(Number.isFinite);
+    if (nextTimes.length) scheduleMediaOfflineDrain(Math.max(1000, Math.min(...nextTimes) - Date.now()));
+    return { processed, remaining: remaining.length, reason };
+  })();
+  mediaOfflineDrainPromise = run; try { return await run; } finally { if (mediaOfflineDrainPromise === run) mediaOfflineDrainPromise = null; }
+}
+function scheduleMediaOfflineDrain(delayMs = 0) { if (mediaOfflineDrainTimer) clearTimeout(mediaOfflineDrainTimer); mediaOfflineDrainTimer = setTimeout(() => { mediaOfflineDrainTimer = null; void drainMediaOfflineQueue("scheduled"); }, Math.max(0, Number(delayMs || 0))); }
+function bindMediaOfflineRecovery() {
+  const resume = () => { if (navigator.onLine !== false) scheduleMediaOfflineDrain(250); };
+  window.addEventListener("online", () => scheduleMediaOfflineDrain(0)); window.addEventListener("focus", resume); window.addEventListener("pageshow", resume);
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") resume(); }); resume();
+}
+
 let mediaDriveCapabilityCache = null;
 
 function mediaUploadCleanText(value, limit = 512) {
@@ -387,7 +465,9 @@ async function tryAutoUploadMedia(item, media) {
     if (!capabilities?.ok || !capabilities.oauth_configured || !capabilities.root_configured) {
       return { ok: false, code: "MEDIA_DRIVE_NOT_READY" };
     }
-    return await retryMediaUpload(item, media);
+    const queued = await enqueueMediaOfflineUpload(item, media);
+    if (navigator.onLine === false) return { ok: false, code: "OFFLINE_QUEUED", queued: Boolean(queued) };
+    return await drainMediaOfflineQueue("auto-upload");
   } catch {
     return { ok: false, code: "MEDIA_DRIVE_NOT_READY" };
   }
@@ -403,6 +483,10 @@ function mediaUploadStatusLabel(media) {
   }[status] || "En attente cloud";
 }
 
+window.enqueueMediaOfflineUpload = enqueueMediaOfflineUpload;
+window.drainMediaOfflineQueue = drainMediaOfflineQueue;
+window.cancelMediaOfflineUpload = cancelMediaOfflineUpload;
+window.bindMediaOfflineRecovery = bindMediaOfflineRecovery;
 window.invokeMediaDrive = invokeMediaDrive;
 window.getMediaDriveCapabilities = getMediaDriveCapabilities;
 window.tryAutoUploadMedia = tryAutoUploadMedia;

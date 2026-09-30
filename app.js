@@ -37,6 +37,7 @@ async function initApp() {
     if (typeof bindUserSessionIdleEvents === "function") bindUserSessionIdleEvents();
     if (typeof bindLocalSecurityControls === "function") bindLocalSecurityControls();
     bindOfflineStatus();
+    if (typeof bindMediaOfflineRecovery === "function") bindMediaOfflineRecovery();
     bindSyncConflictUsability();
     if (typeof bindSupabaseActions === "function") bindSupabaseActions();
     bindVehicleLookup();

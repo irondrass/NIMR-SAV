@@ -1112,14 +1112,14 @@ test("KHA-50 delete_media is controlled and QC deletion is director/admin only",
     const edge = loadEdgeFactory(); edge.__clientFactory = clientFactoryFor("chef_atelier");
     const drive = makeDriveMock({ metadataById: { "qc-del": file } });
     const handler = edge.__mediaDriveFactory({ environment: environment(), fetchFn: drive.fetchFn });
-    const response = await invoke(handler, { action: "delete_media", workshop_id: WORKSHOP_ID, drive_file_id: "qc-del" });
+    const response = await invoke(handler, { action: "delete_media", workshop_id: WORKSHOP_ID, repair_order_id: ORDER_ID, drive_file_id: "qc-del" });
     assert.equal(response.status, 403);
   }
   {
     const edge = loadEdgeFactory(); const auditSink = []; edge.__clientFactory = clientFactoryFor("directeur", {}, { auditSink });
     const drive = makeDriveMock({ metadataById: { "qc-del": file } });
     const handler = edge.__mediaDriveFactory({ environment: environment(), fetchFn: drive.fetchFn });
-    const response = await invoke(handler, { action: "delete_media", workshop_id: WORKSHOP_ID, drive_file_id: "qc-del" });
+    const response = await invoke(handler, { action: "delete_media", workshop_id: WORKSHOP_ID, repair_order_id: ORDER_ID, drive_file_id: "qc-del" });
     assert.equal(response.status, 200);
     assert.equal((await response.json()).deleted, true);
     assert.equal(auditSink[0].action, "media_drive.delete_media");
@@ -1151,4 +1151,86 @@ test("KHA-50 finalize rejects a Drive native SHA-256 that differs from the brows
   });
   assert.equal(response.status, 409);
   assert.equal((await response.json()).code, "MEDIA_FILE_CONTENT_CHECKSUM_MISMATCH");
+});
+
+test("KHA-51 lifecycle policy declares no invented retention duration and keeps purge disabled", async () => {
+  const edge = loadEdgeFactory();
+  edge.__clientFactory = clientFactoryFor("lecture_seule");
+  const drive = makeDriveMock();
+  const handler = edge.__mediaDriveFactory({ environment: environment(), fetchFn: drive.fetchFn });
+  const response = await invoke(handler, { action: "lifecycle_policy", workshop_id: WORKSHOP_ID });
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.retention_days, null);
+  assert.equal(body.automatic_purge_enabled, false);
+  assert.equal(body.purge_status, "disabled_pending_nimr_policy");
+  assert.deepEqual(body.freeze_states, ["closed", "archived"]);
+  assert.ok(body.retention_exceptions.includes("warranty"));
+  assert.equal(drive.calls.length, 0, "policy read must not contact Google");
+});
+
+test("KHA-51 closed or archived repair orders freeze new evidence before Google access", async () => {
+  for (const [field, value] of [["closed_at", "2026-09-30T06:00:00Z"], ["archived_at", "2026-09-30T07:00:00Z"]]) {
+    const edge = loadEdgeFactory();
+    edge.__clientFactory = clientFactoryFor("reception", { repair_orders: {
+      id: ORDER_ID, workshop_id: WORKSHOP_ID, local_id: "case-001", order_number: "OR/2026/001",
+      vehicle_id: VEHICLE_ID, [field]: value,
+    }});
+    const drive = makeDriveMock();
+    const handler = edge.__mediaDriveFactory({ environment: environment(), fetchFn: drive.fetchFn });
+    const response = await invoke(handler, {
+      action: "resolve_folder", workshop_id: WORKSHOP_ID, scope: "vehicle",
+      repair_order_id: ORDER_ID, business_context: "reception",
+    });
+    assert.equal(response.status, 409);
+    assert.equal((await response.json()).code, "MEDIA_EVIDENCE_FROZEN");
+    assert.equal(drive.calls.length, 0);
+  }
+});
+
+test("KHA-51 closed repair orders freeze controlled deletion and preserve existing evidence", async () => {
+  const edge = loadEdgeFactory();
+  edge.__clientFactory = clientFactoryFor("directeur", { repair_orders: {
+    id: ORDER_ID, workshop_id: WORKSHOP_ID, local_id: "case-001", order_number: "OR/2026/001",
+    vehicle_id: VEHICLE_ID, closed_at: "2026-09-30T06:00:00Z",
+  }});
+  const file = { id: "closed-proof", name: "proof.jpg", mimeType: "image/jpeg", size: "10", parents: ["p"],
+    appProperties: { nimr_managed: "true", nimr_workshop: WORKSHOP_ID, nimr_scope: "vehicle", nimr_context: "reception" }, trashed: false };
+  const drive = makeDriveMock({ metadataById: { "closed-proof": file } });
+  const handler = edge.__mediaDriveFactory({ environment: environment(), fetchFn: drive.fetchFn });
+  const response = await invoke(handler, {
+    action: "delete_media", workshop_id: WORKSHOP_ID, repair_order_id: ORDER_ID, drive_file_id: "closed-proof",
+  });
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).code, "MEDIA_EVIDENCE_FROZEN");
+  assert.equal(drive.calls.filter((call) => call.method === "PATCH").length, 0);
+});
+
+test("KHA-51 warranty evidence is a retention exception and cannot be deleted even by director", async () => {
+  const edge = loadEdgeFactory();
+  edge.__clientFactory = clientFactoryFor("directeur");
+  const file = { id: "warranty-proof", name: "proof.jpg", mimeType: "image/jpeg", size: "10", parents: ["p"],
+    appProperties: { nimr_managed: "true", nimr_workshop: WORKSHOP_ID, nimr_scope: "warranty", nimr_context: "warranty" }, trashed: false };
+  const drive = makeDriveMock({ metadataById: { "warranty-proof": file } });
+  const handler = edge.__mediaDriveFactory({ environment: environment(), fetchFn: drive.fetchFn });
+  const response = await invoke(handler, {
+    action: "delete_media", workshop_id: WORKSHOP_ID, repair_order_id: ORDER_ID, claim_id: CLAIM_ID, drive_file_id: "warranty-proof",
+  });
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).code, "MEDIA_RETENTION_EXCEPTION");
+  assert.equal(drive.calls.filter((call) => call.method === "PATCH").length, 0);
+});
+
+test("KHA-51 reopening preserves evidence: an open canonical order permits the controlled lifecycle path", async () => {
+  const edge = loadEdgeFactory();
+  edge.__clientFactory = clientFactoryFor("directeur");
+  const file = { id: "reopened-proof", name: "proof.jpg", mimeType: "image/jpeg", size: "10", parents: ["p"],
+    appProperties: { nimr_managed: "true", nimr_workshop: WORKSHOP_ID, nimr_scope: "vehicle", nimr_context: "reception" }, trashed: false };
+  const drive = makeDriveMock({ metadataById: { "reopened-proof": file } });
+  const handler = edge.__mediaDriveFactory({ environment: environment(), fetchFn: drive.fetchFn });
+  const response = await invoke(handler, {
+    action: "delete_media", workshop_id: WORKSHOP_ID, repair_order_id: ORDER_ID, drive_file_id: "reopened-proof",
+  });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).deleted, true);
 });

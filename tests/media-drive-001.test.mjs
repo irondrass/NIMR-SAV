@@ -884,7 +884,7 @@ test("finalize_upload accepts only the managed file resolved into the canonical 
           nimr_scope: "vehicle",
           nimr_context: "reception",
         },
-        sha256Checksum: "sha256-ok",
+        sha256Checksum: "a".repeat(64),
         trashed: false,
       },
     },
@@ -908,7 +908,7 @@ test("finalize_upload accepts only the managed file resolved into the canonical 
   assert.equal(body.ok, true);
   assert.equal(body.file.id, "file-ok");
   assert.equal(body.file.parent_id, "folder-4");
-  assert.equal(body.file.sha256_checksum, "sha256-ok");
+  assert.equal(body.file.sha256_checksum, "a".repeat(64));
   assert.equal(JSON.stringify(body).includes("nimr_workshop"), false);
 });
 
@@ -930,6 +930,7 @@ test("finalize_upload collapses concurrent duplicate files to the oldest canonic
     size: "2048",
     parents: ["folder-4"],
     appProperties: commonProps,
+    sha256Checksum: "a".repeat(64),
     createdTime: "2026-09-29T20:00:00Z",
     trashed: false,
   };
@@ -1124,4 +1125,30 @@ test("KHA-50 delete_media is controlled and QC deletion is director/admin only",
     assert.equal(auditSink[0].action, "media_drive.delete_media");
     assert.ok(drive.calls.some((call) => call.method === "PATCH" && String(call.body).includes('"trashed":true')));
   }
+});
+
+test("KHA-50 finalize rejects a Drive native SHA-256 that differs from the browser checksum", async () => {
+  const edge = loadEdgeFactory();
+  edge.__clientFactory = clientFactoryFor("reception");
+  const drive = makeDriveMock({
+    metadataById: {
+      "tampered-file": {
+        id: "tampered-file", name: "preuve.jpg", mimeType: "image/jpeg", size: "2048", parents: ["folder-4"],
+        appProperties: {
+          nimr_managed: "true", nimr_workshop: WORKSHOP_ID,
+          nimr_local_hash: localHash("media-tampered"), nimr_content_sha256: "a".repeat(64),
+          nimr_scope: "vehicle", nimr_context: "reception",
+        },
+        sha256Checksum: "b".repeat(64), trashed: false,
+      },
+    },
+  });
+  const handler = edge.__mediaDriveFactory({ environment: environment(), fetchFn: drive.fetchFn });
+  const response = await invoke(handler, {
+    action: "finalize_upload", workshop_id: WORKSHOP_ID, scope: "vehicle",
+    repair_order_id: ORDER_ID, business_context: "reception",
+    local_id: "media-tampered", checksum_sha256: "a".repeat(64), drive_file_id: "tampered-file",
+  });
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).code, "MEDIA_FILE_CONTENT_CHECKSUM_MISMATCH");
 });

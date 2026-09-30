@@ -642,8 +642,16 @@ function assertManagedFile(file, workshopId, expected = {}) {
   if (expected.localHash && String(props.nimr_local_hash || "") !== String(expected.localHash)) {
     throw new MediaDriveError("MEDIA_FILE_IDEMPOTENCY_MISMATCH", 409);
   }
-  if (expected.contentSha256 && String(props.nimr_content_sha256 || "") !== String(expected.contentSha256)) {
-    throw new MediaDriveError("MEDIA_FILE_INTEGRITY_MISMATCH", 409);
+  if (expected.contentSha256) {
+    const expectedChecksum = String(expected.contentSha256).toLowerCase();
+    const declaredChecksum = String(props.nimr_content_sha256 || "").toLowerCase();
+    const driveChecksum = cleanText(file.sha256Checksum, 128).toLowerCase();
+    if (declaredChecksum !== expectedChecksum) {
+      throw new MediaDriveError("MEDIA_FILE_INTEGRITY_MISMATCH", 409);
+    }
+    if (!/^[a-f0-9]{64}$/u.test(driveChecksum) || driveChecksum !== expectedChecksum) {
+      throw new MediaDriveError("MEDIA_FILE_CONTENT_CHECKSUM_MISMATCH", 409);
+    }
   }
 }
 

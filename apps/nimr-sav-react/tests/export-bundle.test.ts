@@ -8,6 +8,7 @@ import {
   getExportWarnings,
   calculateExportBundleSize,
   buildCompleteCaseBundle,
+  base64ToUint8Array,
   ExportBundleFile,
 } from '../src/domain/export-bundle';
 import { SavCase } from '../src/domain/sav-case';
@@ -63,6 +64,21 @@ const caseWithClaims: SavCase = {
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe('Export Bundle Domain Tests (v24.0.0-alpha.20)', () => {
+  describe('browser-safe base64 decoder', () => {
+    it('decodes photo bytes using the browser Web API without Node Buffer', () => {
+      expect(Array.from(base64ToUint8Array('/9j/4AAQSkZJRgAB')))
+        .toEqual([255, 216, 255, 224, 0, 16, 74, 70, 73, 70, 0, 1]);
+    });
+
+    it('preserves zero, high-bit and binary bytes', () => {
+      expect(Array.from(base64ToUint8Array('AAECA/8='))).toEqual([0, 1, 2, 3, 255]);
+    });
+
+    it('rejects malformed base64 rather than producing corrupt export data', () => {
+      expect(() => base64ToUint8Array('%%%')).toThrow();
+    });
+  });
+
   describe('sanitizeExportFileName', () => {
     it('replaces accents with ASCII equivalents', () => {
       const result = sanitizeExportFileName('éàçü');

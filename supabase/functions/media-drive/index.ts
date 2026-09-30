@@ -340,16 +340,35 @@ function assertMediaLifecycleWriteAllowed(order) {
   if (state !== "open") throw new MediaDriveError("MEDIA_EVIDENCE_FROZEN", 409);
 }
 
-async function assertMediaLifecycleDeleteAllowed(client, workshopId, scope, context, payload) {
-  if (scope === "warranty" || context === "warranty") {
+async function loadMediaRecordByDriveFile(client, workshopId, driveFileId) {
+  const id = cleanText(driveFileId, 256);
+  if (!id) throw new MediaDriveError("DRIVE_FILE_ID_REQUIRED", 400);
+  const { data, error } = await client
+    .from("photos")
+    .select("id, workshop_id, repair_order_id, claim_id, business_context, drive_file_id, deleted_at")
+    .eq("workshop_id", workshopId)
+    .eq("drive_file_id", id)
+    .is("deleted_at", null)
+    .maybeSingle();
+  if (error || !data) throw new MediaDriveError("MEDIA_RECORD_NOT_FOUND", 404);
+  return data;
+}
+
+async function assertMediaLifecycleDeleteAllowed(client, workshopId, scope, context, driveFileId) {
+  const media = await loadMediaRecordByDriveFile(client, workshopId, driveFileId);
+  const databaseContext = cleanToken(media.business_context, 40);
+  if (databaseContext && context && databaseContext !== context) {
+    throw new MediaDriveError("MEDIA_CONTEXT_MISMATCH", 409);
+  }
+  if (scope === "warranty" || context === "warranty" || databaseContext === "warranty" || media.claim_id) {
     throw new MediaDriveError("MEDIA_RETENTION_EXCEPTION", 409);
   }
-  const repairOrderId = cleanText(payload.repair_order_id, 80);
-  if (!repairOrderId) throw new MediaDriveError("REPAIR_ORDER_REQUIRED_FOR_DELETE", 400);
+  const repairOrderId = cleanText(media.repair_order_id, 80);
+  if (!repairOrderId) throw new MediaDriveError("MEDIA_REPAIR_ORDER_REQUIRED", 409);
   const order = await loadRepairOrder(client, workshopId, repairOrderId);
   const state = orderLifecycleState(order);
   if (state !== "open") throw new MediaDriveError("MEDIA_EVIDENCE_FROZEN", 409);
-  return order;
+  return { media, order };
 }
 
 function lifecyclePolicyResponse() {
@@ -853,7 +872,7 @@ export function createMediaDriveHandler(overrides = {}) {
         await assertNoPublicPermissions(fetchFn, accessToken, payload.drive_file_id);
         if (action === "read_metadata") return response({ ok: true, action, file: sanitizeDriveMetadata(file) });
         if (action === "delete_media") {
-          await assertMediaLifecycleDeleteAllowed(caller.client, workshopId, scope, context, payload);
+          await assertMediaLifecycleDeleteAllowed(caller.client, workshopId, scope, context, payload.drive_file_id);
           await trashManagedMedia(fetchFn, accessToken, payload.drive_file_id);
           return response({ ok: true, action, drive_file_id: cleanText(payload.drive_file_id, 256), deleted: true });
         }

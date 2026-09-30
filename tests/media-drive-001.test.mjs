@@ -88,6 +88,15 @@ function createSupabaseClient(role = "reception", records = {}, options = {}) {
       local_id: "GAR-001",
       repair_order_id: ORDER_ID,
     },
+    photos: {
+      id: "photo-default",
+      workshop_id: WORKSHOP_ID,
+      repair_order_id: ORDER_ID,
+      claim_id: null,
+      business_context: "qc",
+      drive_file_id: "qc-del",
+      deleted_at: null,
+    },
     ...records,
   };
   return {
@@ -1193,6 +1202,9 @@ test("KHA-51 closed repair orders freeze controlled deletion and preserve existi
   edge.__clientFactory = clientFactoryFor("directeur", { repair_orders: {
     id: ORDER_ID, workshop_id: WORKSHOP_ID, local_id: "case-001", order_number: "OR/2026/001",
     vehicle_id: VEHICLE_ID, closed_at: "2026-09-30T06:00:00Z",
+  }, photos: {
+    id: "photo-closed", workshop_id: WORKSHOP_ID, repair_order_id: ORDER_ID, claim_id: null,
+    business_context: "reception", drive_file_id: "closed-proof", deleted_at: null,
   }});
   const file = { id: "closed-proof", name: "proof.jpg", mimeType: "image/jpeg", size: "10", parents: ["p"],
     appProperties: { nimr_managed: "true", nimr_workshop: WORKSHOP_ID, nimr_scope: "vehicle", nimr_context: "reception" }, trashed: false };
@@ -1208,7 +1220,10 @@ test("KHA-51 closed repair orders freeze controlled deletion and preserve existi
 
 test("KHA-51 warranty evidence is a retention exception and cannot be deleted even by director", async () => {
   const edge = loadEdgeFactory();
-  edge.__clientFactory = clientFactoryFor("directeur");
+  edge.__clientFactory = clientFactoryFor("directeur", { photos: {
+    id: "photo-warranty", workshop_id: WORKSHOP_ID, repair_order_id: ORDER_ID, claim_id: CLAIM_ID,
+    business_context: "warranty", drive_file_id: "warranty-proof", deleted_at: null,
+  }});
   const file = { id: "warranty-proof", name: "proof.jpg", mimeType: "image/jpeg", size: "10", parents: ["p"],
     appProperties: { nimr_managed: "true", nimr_workshop: WORKSHOP_ID, nimr_scope: "warranty", nimr_context: "warranty" }, trashed: false };
   const drive = makeDriveMock({ metadataById: { "warranty-proof": file } });
@@ -1223,7 +1238,10 @@ test("KHA-51 warranty evidence is a retention exception and cannot be deleted ev
 
 test("KHA-51 reopening preserves evidence: an open canonical order permits the controlled lifecycle path", async () => {
   const edge = loadEdgeFactory();
-  edge.__clientFactory = clientFactoryFor("directeur");
+  edge.__clientFactory = clientFactoryFor("directeur", { photos: {
+    id: "photo-reopened", workshop_id: WORKSHOP_ID, repair_order_id: ORDER_ID, claim_id: null,
+    business_context: "reception", drive_file_id: "reopened-proof", deleted_at: null,
+  }});
   const file = { id: "reopened-proof", name: "proof.jpg", mimeType: "image/jpeg", size: "10", parents: ["p"],
     appProperties: { nimr_managed: "true", nimr_workshop: WORKSHOP_ID, nimr_scope: "vehicle", nimr_context: "reception" }, trashed: false };
   const drive = makeDriveMock({ metadataById: { "reopened-proof": file } });
@@ -1233,4 +1251,29 @@ test("KHA-51 reopening preserves evidence: an open canonical order permits the c
   });
   assert.equal(response.status, 200);
   assert.equal((await response.json()).deleted, true);
+});
+
+test("KHA-51 REVIEW blocks OR substitution when deleting evidence from a closed canonical OR", async () => {
+  const OTHER_OPEN_ORDER = "55555555-5555-4555-8555-555555555555";
+  const edge = loadEdgeFactory();
+  edge.__clientFactory = clientFactoryFor("directeur", {
+    repair_orders: {
+      id: ORDER_ID, workshop_id: WORKSHOP_ID, local_id: "case-closed", order_number: "OR/CLOSED",
+      vehicle_id: VEHICLE_ID, closed_at: "2026-09-30T06:00:00Z",
+    },
+    photos: {
+      id: "photo-bypass", workshop_id: WORKSHOP_ID, repair_order_id: ORDER_ID, claim_id: null,
+      business_context: "reception", drive_file_id: "closed-bypass-proof", deleted_at: null,
+    },
+  });
+  const file = { id: "closed-bypass-proof", name: "proof.jpg", mimeType: "image/jpeg", size: "10", parents: ["p"],
+    appProperties: { nimr_managed: "true", nimr_workshop: WORKSHOP_ID, nimr_scope: "vehicle", nimr_context: "reception" }, trashed: false };
+  const drive = makeDriveMock({ metadataById: { "closed-bypass-proof": file } });
+  const handler = edge.__mediaDriveFactory({ environment: environment(), fetchFn: drive.fetchFn });
+  const response = await invoke(handler, {
+    action: "delete_media", workshop_id: WORKSHOP_ID, repair_order_id: OTHER_OPEN_ORDER, drive_file_id: "closed-bypass-proof",
+  });
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).code, "MEDIA_EVIDENCE_FROZEN");
+  assert.equal(drive.calls.filter((call) => call.method === "PATCH").length, 0);
 });

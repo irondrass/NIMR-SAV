@@ -5202,6 +5202,7 @@ async function autoBackupToSupabase(reason = "autosave", options = {}) {
     const pending = records
       // A processing envelope can survive a workstation crash. Replaying its
       // immutable operationId is safe and required for restart recovery.
+      .filter((entry) => entry.entityType !== "media_upload")
       .filter((entry) => ["pending", "processing", "settling", "failed"].includes(entry.syncStatus))
       .slice(0, GRANULAR_OUTBOX_BATCH_SIZE);
     const results = await processGranularOutboxBatch(client, user, pending);

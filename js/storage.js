@@ -1306,6 +1306,8 @@ function normalizeDurableOutboxOperation(input = {}) {
     resolvedConflictIds: Array.isArray(input.resolvedConflictIds) ? input.resolvedConflictIds.map(String) : [],
     equivalentConflictId: String(input.equivalentConflictId || ""),
     description: String(input.description || "Mise à jour des données"),
+    nextAttemptAt: input.nextAttemptAt || null,
+    processingStartedAt: input.processingStartedAt || null,
   };
 }
 
@@ -1337,6 +1339,8 @@ function publishDurableOutboxMirror(records = []) {
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
     syncStatus: record.syncStatus,
+    nextAttemptAt: record.nextAttemptAt || null,
+    processingStartedAt: record.processingStartedAt || null,
   }));
   durableOutboxEntityBaseVersions.clear();
   compact.forEach((entry) => {

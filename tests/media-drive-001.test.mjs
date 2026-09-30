@@ -148,7 +148,11 @@ function tokenResponse(accessToken = "google-access-token") {
   });
 }
 
-function makeDriveMock({ metadataById = {}, uploadLocation = "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&upload_id=session-123" } = {}) {
+function makeDriveMock({
+  metadataById = {},
+  existingMedia = [],
+  uploadLocation = "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&upload_id=session-123",
+} = {}) {
   const folders = [];
   const calls = [];
   let sequence = 0;
@@ -169,6 +173,17 @@ function makeDriveMock({ metadataById = {}, uploadLocation = "https://www.google
       && method === "GET") {
       const q = parsed.searchParams.get("q") || "";
       const parentId = queryValue(q, /'([^']+)' in parents/u);
+      const localMediaHash = queryValue(q, /key='nimr_local_hash' and value='([^']+)'/u);
+      if (localMediaHash) {
+        return jsonResponse({
+          files: existingMedia.filter((file) =>
+            file.parents?.includes(parentId)
+            && file.appProperties?.nimr_local_hash === localMediaHash
+            && file.appProperties?.nimr_workshop === WORKSHOP_ID
+            && file.trashed !== true
+          ),
+        });
+      }
       const logicalKey = queryValue(q, /key='nimr_key' and value='([^']+)'/u);
       return jsonResponse({
         files: folders.filter((folder) =>
@@ -540,6 +555,40 @@ test("warranty folder uses canonical claim data and section whitelist", async ()
   );
 });
 
+test("warranty media rejects a claim that belongs to another repair order", async () => {
+  const edge = loadEdgeFactory();
+  edge.__clientFactory = clientFactoryFor("responsable_garantie_support", {
+    repair_claims: {
+      id: CLAIM_ID,
+      workshop_id: WORKSHOP_ID,
+      local_id: "GAR-001",
+      repair_order_id: "99999999-0000-4000-8000-000000000999",
+    },
+  });
+  let fetchCalls = 0;
+  const handler = edge.__mediaDriveFactory({
+    environment: environment(),
+    fetchFn: async () => { fetchCalls += 1; throw new Error("unexpected"); },
+  });
+  const response = await invoke(handler, {
+    action: "begin_upload",
+    workshop_id: WORKSHOP_ID,
+    scope: "warranty",
+    repair_order_id: ORDER_ID,
+    claim_id: CLAIM_ID,
+    warranty_section: "photos",
+    business_context: "warranty",
+    local_id: "warranty-media-1",
+    filename: "cause.jpg",
+    mime_type: "image/jpeg",
+    size_bytes: 1024,
+  });
+  const body = await response.json();
+  assert.equal(response.status, 409);
+  assert.equal(body.code, "CLAIM_REPAIR_ORDER_MISMATCH");
+  assert.equal(fetchCalls, 0);
+});
+
 test("begin_upload creates a resumable session only after validating MIME and size", async () => {
   const edge = loadEdgeFactory();
   const auditSink = [];
@@ -589,6 +638,88 @@ test("begin_upload creates a resumable session only after validating MIME and si
   assert.equal(auditSink[0].after_data.status, "attempted");
   assert.equal(JSON.stringify(auditSink[0]).includes("upload_id="), false);
   assert.equal(JSON.stringify(auditSink[0]).includes("google-refresh-token"), false);
+});
+
+test("begin_upload reuses a completed managed file with the same local id instead of creating a duplicate", async () => {
+  const edge = loadEdgeFactory();
+  edge.__clientFactory = clientFactoryFor("technicien");
+  const drive = makeDriveMock({
+    existingMedia: [{
+      id: "file-existing",
+      name: "photo défaut avant.jpg",
+      mimeType: "image/jpeg",
+      size: "2500000",
+      parents: ["folder-4"],
+      appProperties: {
+        nimr_managed: "true",
+        nimr_workshop: WORKSHOP_ID,
+        nimr_local_hash: localHash("media-local-001"),
+        nimr_scope: "vehicle",
+        nimr_context: "repair",
+      },
+      createdTime: "2026-09-29T20:00:00Z",
+      modifiedTime: "2026-09-29T20:01:00Z",
+      trashed: false,
+    }],
+  });
+  const handler = edge.__mediaDriveFactory({ environment: environment(), fetchFn: drive.fetchFn });
+  const response = await invoke(handler, {
+    action: "begin_upload",
+    workshop_id: WORKSHOP_ID,
+    scope: "vehicle",
+    repair_order_id: ORDER_ID,
+    business_context: "repair",
+    local_id: "media-local-001",
+    filename: "photo défaut avant.jpg",
+    mime_type: "image/jpeg",
+    size_bytes: 2500000,
+  });
+  const body = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(body.already_uploaded, true);
+  assert.equal(body.drive_file_id, "file-existing");
+  assert.equal(body.upload_url, undefined);
+  assert.equal(drive.calls.some((call) =>
+    call.method === "POST" && new URL(call.url).pathname === "/upload/drive/v3/files"
+  ), false);
+});
+
+test("begin_upload refuses same local id when Drive content metadata differs", async () => {
+  const edge = loadEdgeFactory();
+  edge.__clientFactory = clientFactoryFor("technicien");
+  const drive = makeDriveMock({
+    existingMedia: [{
+      id: "file-conflict",
+      name: "wrong.mp4",
+      mimeType: "video/mp4",
+      size: "2500000",
+      parents: ["folder-4"],
+      appProperties: {
+        nimr_managed: "true",
+        nimr_workshop: WORKSHOP_ID,
+        nimr_local_hash: localHash("media-local-001"),
+        nimr_scope: "vehicle",
+        nimr_context: "repair",
+      },
+      createdTime: "2026-09-29T20:00:00Z",
+      trashed: false,
+    }],
+  });
+  const handler = edge.__mediaDriveFactory({ environment: environment(), fetchFn: drive.fetchFn });
+  const response = await invoke(handler, {
+    action: "begin_upload",
+    workshop_id: WORKSHOP_ID,
+    scope: "vehicle",
+    repair_order_id: ORDER_ID,
+    business_context: "repair",
+    local_id: "media-local-001",
+    filename: "photo défaut avant.jpg",
+    mime_type: "image/jpeg",
+    size_bytes: 2500000,
+  });
+  const body = await response.json();
+  assert.equal(response.status, 409);
+  assert.equal(body.code, "MEDIA_IDEMPOTENCY_CONTENT_MISMATCH");
 });
 
 test("invalid upload type fails before Drive folder creation", async () => {
@@ -754,6 +885,59 @@ test("finalize_upload accepts only the managed file resolved into the canonical 
   assert.equal(body.file.parent_id, "folder-4");
   assert.equal(body.file.sha256_checksum, "sha256-ok");
   assert.equal(JSON.stringify(body).includes("nimr_workshop"), false);
+});
+
+test("finalize_upload collapses concurrent duplicate files to the oldest canonical media", async () => {
+  const edge = loadEdgeFactory();
+  edge.__clientFactory = clientFactoryFor("reception");
+  const commonProps = {
+    nimr_managed: "true",
+    nimr_workshop: WORKSHOP_ID,
+    nimr_local_hash: localHash("media-race"),
+    nimr_scope: "vehicle",
+    nimr_context: "reception",
+  };
+  const oldFile = {
+    id: "file-old",
+    name: "preuve.jpg",
+    mimeType: "image/jpeg",
+    size: "2048",
+    parents: ["folder-4"],
+    appProperties: commonProps,
+    createdTime: "2026-09-29T20:00:00Z",
+    trashed: false,
+  };
+  const newFile = {
+    ...oldFile,
+    id: "file-new",
+    createdTime: "2026-09-29T20:00:01Z",
+  };
+  const drive = makeDriveMock({
+    metadataById: { "file-new": newFile },
+    existingMedia: [newFile, oldFile],
+  });
+  const handler = edge.__mediaDriveFactory({
+    environment: environment(),
+    fetchFn: drive.fetchFn,
+  });
+  const response = await invoke(handler, {
+    action: "finalize_upload",
+    workshop_id: WORKSHOP_ID,
+    scope: "vehicle",
+    repair_order_id: ORDER_ID,
+    business_context: "reception",
+    local_id: "media-race",
+    drive_file_id: "file-new",
+  });
+  const body = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(body.file.id, "file-old");
+  assert.ok(drive.calls.some((call) =>
+    call.method === "PATCH" && new URL(call.url).pathname.endsWith("/file-new")
+  ));
+  assert.equal(drive.calls.some((call) =>
+    call.method === "PATCH" && new URL(call.url).pathname.endsWith("/file-old")
+  ), false);
 });
 
 test("finalize_upload fails closed when the file belongs to another workshop", async () => {

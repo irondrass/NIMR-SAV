@@ -7,13 +7,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const repositoryRoot = path.resolve(__dirname, "../..");
 
 // Deterministic release fingerprint: SHA-256 over sorted release-owned runtime source files.
-// Exactly 26 files whose byte content determines actual application runtime behavior.
+// Exactly 27 files whose byte content determines actual application runtime behavior.
 export const RELEASE_OWNED_RUNTIME_FILES = Object.freeze([
   "app.js",
   "index.html",
   "js/business-rules-v2187.js",
   "js/estimate-import.js",
   "js/exports.js",
+  "js/media-upload.js",
   "js/photos.js",
   "js/planning.js",
   "js/state.js",
@@ -121,6 +122,7 @@ export const FINGERPRINT_SCHEMES = Object.freeze({
   "v23.3.64": "canonical-lf-v2",
   "v23.3.65": "canonical-lf-v2",
   "v23.3.66": "canonical-lf-v2",
+  "v23.3.67": "canonical-lf-v2",
 });
 
 export const CURRENT_FINGERPRINT_SCHEME = "canonical-lf-v2";
@@ -184,6 +186,7 @@ export const SEALED_RELEASE_FINGERPRINTS = Object.freeze({
   "v23.3.64": "fdd846909806d960f50f4f3ecaceded1e4963b4bbe3ffa72d0614fd0da77de10",
   "v23.3.65": "b8c709e1c7c02760c21088aa2358a5db9fe93e5e2c4597122fa648da645d9bbf",
   "v23.3.66": "cba5a4931dab43e2199cec97fa19d501cecc2a53d2863197de27f31078c18b76",
+  "v23.3.67": "ef78b44967d3dffd1b8619d04a33b159a4b858aecb6c4cf3c112a8fe3e743ad1",
 });
 
 /**

@@ -3875,22 +3875,35 @@ async function handleTechnicianTaskAction(action, bookingId, technicianId) {
 async function addTechnicianTaskPhotoFromInput(item, bookingId, technicianId) {
   const input = document.createElement("input");
   input.type = "file";
-  input.accept = ALLOWED_PHOTO_TYPES.join(",");
+  input.accept = ALLOWED_MEDIA_TYPES.join(",");
   input.addEventListener("change", async () => {
     const file = input.files?.[0];
     if (!file) return;
     try {
-      const prepared = await preparePhotoForStorage(file);
+      const prepared = await prepareMediaForStorage(file);
       const photo = {
         id: uid("photo"),
         name: prepared.name,
-        type: prepared.blob.type || file.type || "image/jpeg",
+        type: prepared.blob.type || file.type || "application/octet-stream",
         size: prepared.blob.size,
         category: "during",
+        mediaType: prepared.blob.type.startsWith("video/") ? "video" : "photo",
+        businessContext: "repair",
+        evidenceKind: "general",
+        caption: "",
+        uploadStatus: "pending",
+        driveFileId: "",
+        driveFolderId: "",
+        checksumSha256: "",
+        uploadedAt: "",
+        lastUploadError: "",
+        uploadAttempts: 0,
+        sourceTaskId: bookingId,
         createdAt: new Date().toISOString(),
       };
       await savePhotoRecord(item.id, photo, prepared.blob);
       item.photos.push(photo);
+      if (typeof tryAutoUploadMedia === "function") void tryAutoUploadMedia(item, photo);
       const result = attachTechnicianTaskPhoto(item, bookingId, technicianId, photo.id);
       saveState({ changedCase: item, flushCloud: true, cloudReason: "technician-photo" });
       quietNotify(result.message || "Photo ajoutée à la tâche.", "success");
@@ -5446,7 +5459,11 @@ function renderCaseDetail() {
   renderCaseSummary(detail, item);
   renderRoleBasedCaseNotes(detail, item);
 
-  $("#photo-input", detail).addEventListener("change", (event) => handlePhotos(event, item, $("#photo-category", detail)?.value));
+  $("#photo-input", detail).addEventListener("change", (event) => handlePhotos(event, item, $("#photo-category", detail)?.value, {
+    businessContext: $("#media-business-context", detail)?.value || "reception",
+    evidenceKind: $("#media-evidence-kind", detail)?.value || "general",
+    caption: $("#media-caption", detail)?.value || "",
+  }));
   $("#claim-form", detail)?.addEventListener("submit", (event) => handleClaimSubmit(event, item));
   const supplementForm = $("#supplement-form", detail);
   if (supplementForm) {
@@ -6634,32 +6651,61 @@ function missingSchedulingRoles(item) {
 function renderPhotos(root, item) {
   const photos = $("[data-field='photos']", root);
   photos.innerHTML = item.photos.length
-    ? item.photos
-        .map(
-          (photo, index) => `
-            <figure class="photo-tile" data-open-photo="${index}" title="Cliquer pour agrandir la photo">
-              <img data-photo-img="${escapeAttr(photo.id)}" alt="${escapeHtml(photo.name)}" />
-              <figcaption>${escapeHtml(getPhotoCategoryLabel(photo.category))}</figcaption>
-              <button type="button" title="Supprimer la photo" aria-label="Supprimer la photo" data-remove-photo="${index}">×</button>
-            </figure>
-          `,
-        )
-        .join("")
-    : `<div class="empty-inline">Aucune photo ajoutée.</div>`;
+    ? item.photos.map((photo, index) => {
+        const isVideo = photo.mediaType === "video" || String(photo.type || "").startsWith("video/");
+        const status = typeof mediaUploadStatusLabel === "function"
+          ? mediaUploadStatusLabel(photo)
+          : (photo.uploadStatus || "pending");
+        const preview = isVideo
+          ? `<video data-photo-video="${escapeAttr(photo.id)}" muted preload="metadata" playsinline></video>`
+          : `<img data-photo-img="${escapeAttr(photo.id)}" alt="${escapeHtml(photo.name)}" />`;
+        const canRetry = (photo.uploadStatus || "pending") === "failed" || (photo.uploadStatus || "pending") === "pending";
+        return `
+          <figure class="photo-tile media-tile" data-open-photo="${index}" title="Cliquer pour prévisualiser le média">
+            ${preview}
+            <figcaption>
+              <span>${escapeHtml(getPhotoCategoryLabel(photo.category))} · ${isVideo ? "Vidéo" : "Photo"}</span>
+              <small class="media-upload-status status-${escapeAttr(photo.uploadStatus || "pending")}">${escapeHtml(status)}</small>
+            </figcaption>
+            ${canRetry ? `<button type="button" class="media-retry-button" title="Relancer l'envoi cloud" aria-label="Relancer l'envoi cloud" data-retry-media="${index}">↻</button>` : ""}
+            <button type="button" title="Supprimer le média" aria-label="Supprimer le média" data-remove-photo="${index}">×</button>
+          </figure>
+        `;
+      }).join("")
+    : `<div class="empty-inline">Aucun média ajouté.</div>`;
+
   $$("[data-open-photo]", photos).forEach((tile) => {
     tile.addEventListener("click", (event) => {
       if (event.target.closest("button")) return;
       openPhotoPreview(item, Number(tile.dataset.openPhoto));
     });
   });
+  $$("[data-retry-media]", photos).forEach((button) => {
+    button.addEventListener("click", async () => {
+      const media = item.photos[Number(button.dataset.retryMedia)];
+      if (!media || typeof retryMediaUpload !== "function") return;
+      button.disabled = true;
+      const result = await retryMediaUpload(item, media);
+      if (!result?.ok) notifyUser(result?.message || "Envoi cloud impossible.", "error");
+      else quietNotify("Média envoyé dans Google Drive.", "success");
+      renderCaseDetail();
+    });
+  });
   $$("[data-remove-photo]", photos).forEach((button) => {
     button.addEventListener("click", async () => {
-      const [removed] = item.photos.splice(Number(button.dataset.removePhoto), 1);
+      const index = Number(button.dataset.removePhoto);
+      const candidate = item.photos[index];
+      const cloudStatus = candidate?.uploadStatus || "pending";
+      if (candidate?.driveFileId || cloudStatus === "uploaded" || cloudStatus === "uploading") {
+        notifyUser("Ce média existe déjà dans le cloud. La suppression locale est bloquée tant que la suppression Drive sécurisée n'est pas disponible.", "warn");
+        return;
+      }
+      const [removed] = item.photos.splice(index, 1);
       if (removed?.id) {
         await deletePhotoRecord(removed.id);
         revokePhotoUrl(removed.id);
       }
-      if (removed) addHistory(item, "photo.removed", `Photo supprimée: ${removed.name || "Photo"}`);
+      if (removed) addHistory(item, "photo.removed", `Média supprimé: ${removed.name || "Média"}`);
       saveState({ changedCase: item });
       renderCaseDetail();
     });
@@ -6674,10 +6720,10 @@ async function openPhotoPreview(item, index) {
   try {
     record = await getPhotoRecord(photo.id);
   } catch (error) {
-    console.error("Prévisualisation photo impossible", error);
+    console.error("Prévisualisation média impossible", error);
   }
   if (!record?.blob) {
-    notifyUser("Photo indisponible dans le stockage local.", "error");
+    notifyUser("Média indisponible dans le stockage local.", "error");
     return;
   }
   const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -6686,18 +6732,22 @@ async function openPhotoPreview(item, index) {
   if (appShell) appShell.setAttribute("inert", "");
 
   const url = URL.createObjectURL(record.blob);
+  const isVideo = photo.mediaType === "video" || String(photo.type || "").startsWith("video/");
   const modal = document.createElement("div");
   modal.className = "photo-preview-modal";
   modal.setAttribute("role", "dialog");
   modal.setAttribute("aria-modal", "true");
-  modal.setAttribute("aria-label", `Aperçu de la photo : ${photo.name || "Photo dossier"}`);
+  modal.setAttribute("aria-label", `Aperçu du média : ${photo.name || "Média dossier"}`);
+  const preview = isVideo
+    ? `<video src="${url}" controls autoplay playsinline></video>`
+    : `<img src="${url}" alt="${escapeAttr(photo.name || "Média dossier")}" />`;
   modal.innerHTML = `
     <div class="photo-preview-dialog">
       <div class="photo-preview-header">
-        <span>${escapeHtml(getPhotoCategoryLabel(photo.category))} · ${escapeHtml(photo.name || "Photo")}</span>
-        <button type="button" aria-label="Fermer la photo" data-close-photo-preview>×</button>
+        <span>${escapeHtml(getPhotoCategoryLabel(photo.category))} · ${escapeHtml(photo.name || "Média")}</span>
+        <button type="button" aria-label="Fermer le média" data-close-photo-preview>×</button>
       </div>
-      <img src="${url}" alt="${escapeAttr(photo.name || "Photo dossier")}" />
+      ${preview}
     </div>
   `;
   let isCleanedUp = false;

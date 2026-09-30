@@ -26,8 +26,11 @@ function isQualityChecklistComplete(item) {
   return DEFAULT_QUALITY_CHECKS.every((label) => Boolean(item.qualityChecklist[label]));
 }
 
-async function handlePhotos(event, item, category = "before") {
+async function handlePhotos(event, item, category = "before", options = {}) {
   category = normalizePhotoCategory(category);
+  const businessContext = String(options.businessContext || "reception").trim().toLowerCase();
+  const evidenceKind = String(options.evidenceKind || "general").trim().toLowerCase();
+  const caption = String(options.caption || "").trim().slice(0, 500);
   const files = [...event.target.files].slice(0, 8);
   if (!files.length) return;
 
@@ -51,13 +54,25 @@ async function handlePhotos(event, item, category = "before") {
   let quotaExceeded = false;
   for (const file of files) {
     try {
-      const prepared = await preparePhotoForStorage(file);
+      const prepared = await prepareMediaForStorage(file);
+      const mediaType = prepared.blob.type.startsWith("video/") ? "video" : "photo";
       const photo = {
         id: uid("photo"),
         name: prepared.name,
-        type: prepared.blob.type || "image/jpeg",
+        type: prepared.blob.type || file.type || "application/octet-stream",
         size: prepared.blob.size,
         category,
+        mediaType,
+        businessContext,
+        evidenceKind,
+        caption,
+        uploadStatus: "pending",
+        driveFileId: "",
+        driveFolderId: "",
+        checksumSha256: "",
+        uploadedAt: "",
+        lastUploadError: "",
+        uploadAttempts: 0,
         createdAt: new Date().toISOString(),
       };
       await savePhotoRecord(item.id, photo, prepared.blob);
@@ -77,11 +92,25 @@ async function handlePhotos(event, item, category = "before") {
   }
   if (loaded.length) {
     item.photos.push(...loaded);
-    addHistory(item, "photos.added", `${loaded.length} photo${loaded.length > 1 ? "s" : ""} ajoutée${loaded.length > 1 ? "s" : ""}`, getPhotoCategoryLabel(category));
+    addHistory(item, "photos.added", `${loaded.length} média${loaded.length > 1 ? "s" : ""} ajouté${loaded.length > 1 ? "s" : ""}`, getPhotoCategoryLabel(category));
   }
   saveState(loaded.length ? { changedCase: item } : {});
   renderCaseDetail();
+  loaded.forEach((media) => {
+    if (typeof tryAutoUploadMedia === "function") void tryAutoUploadMedia(item, media);
+  });
   event.target.value = "";
+}
+
+async function prepareMediaForStorage(file) {
+  if (!file || !ALLOWED_MEDIA_TYPES.includes(file.type)) {
+    throw new Error("Format média non supporté");
+  }
+  if (file.type.startsWith("video/")) {
+    if (file.size > MAX_VIDEO_SIZE) throw new Error("Vidéo trop volumineuse");
+    return { blob: file, name: file.name || "video" };
+  }
+  return preparePhotoForStorage(file);
 }
 
 async function preparePhotoForStorage(file) {
@@ -147,28 +176,29 @@ function replacePhotoExtension(name, extension) {
 async function hydratePhotoImages(container, item) {
   await Promise.all(
     item.photos.map(async (photo) => {
-      const img = container.querySelector(`[data-photo-img="${photo.id}"]`);
-      if (!img) return;
+      const media = container.querySelector(`[data-photo-img="${photo.id}"], [data-photo-video="${photo.id}"]`);
+      if (!media) return;
       let record = null;
       try {
         record = await getPhotoRecord(photo.id);
       } catch (error) {
-        console.error("Lecture photo IndexedDB impossible", error);
+        console.error("Lecture média IndexedDB impossible", error);
       }
       if (!record?.blob) {
-        img.removeAttribute("src");
-        img.closest(".photo-tile")?.classList.add("missing-photo");
+        media.removeAttribute("src");
+        media.closest(".photo-tile")?.classList.add("missing-photo");
         return;
       }
       revokePhotoUrl(photo.id);
       const url = URL.createObjectURL(record.blob);
       photoObjectUrls.set(photo.id, url);
-      img.onerror = () => {
+      media.onerror = () => {
         revokePhotoUrl(photo.id);
-        img.removeAttribute("src");
-        img.closest(".photo-tile")?.classList.add("missing-photo");
+        media.removeAttribute("src");
+        media.closest(".photo-tile")?.classList.add("missing-photo");
       };
-      img.src = url;
+      media.src = url;
+      if (media.tagName === "VIDEO") media.load();
     }),
   );
 }

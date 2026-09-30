@@ -10711,6 +10711,54 @@ button.is-pending[aria-busy="true"]::before {
 .reception-today-search { display: grid; gap: 6px; margin: 16px 0; }
 .reception-today-search input { width: 100%; min-width: 0; min-height: 44px; }
 .reception-today-cockpit .filter-pill { min-height: 44px; }
+
+/* KHA-45 : le suivi reste lisible dans la carte comme dans la fenêtre OR. */
+.reception-followup-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 14px;
+  width: 100%;
+  margin-block: 10px;
+  text-align: left;
+}
+.reception-followup-facts > span:not(.reception-followup-warning):not(.reception-followup-ready) {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+.reception-followup-facts small { font-size: .77rem; opacity: .78; }
+.reception-followup-facts b, .reception-followup-facts strong {
+  font-size: .88rem;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+.reception-followup-warning, .reception-followup-ready {
+  grid-column: 1 / -1;
+  font-size: .85rem;
+  font-weight: 650;
+}
+.reception-followup-warning { color: var(--danger-color, #9e2f30); }
+.reception-followup-ready { color: var(--success-color, #216748); }
+.reception-followup-next {
+  display: block;
+  width: 100%;
+  margin: 8px 0;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+.reception-followup-ready-card { border-inline-start: 3px solid var(--success-color, #216748); }
+.reception-followup-overview .reception-followup-facts {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+@media (max-width: 740px) {
+  .reception-followup-overview .reception-followup-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 480px) {
+  .reception-followup-facts, .reception-followup-overview .reception-followup-facts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 .reception-today-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
 .reception-today-card { min-width: 0; width: 100%; overflow-wrap: anywhere; text-align: left; padding: 16px; gap: 8px; }
 .reception-today-late { border-inline-start: 4px solid var(--danger, #b42318); }

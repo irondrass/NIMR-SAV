@@ -21,7 +21,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v23.3.67";
+const APP_VERSION = "v23.3.69";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const CURRENT_DATA_SCHEMA_VERSION = 2;
@@ -780,6 +780,8 @@ function normalizeClientCommitment(value = {}) {
     promisedAt: normalizeNullableDate(value.promisedAt),
     nextContactAt: normalizeNullableDate(value.nextContactAt),
     lastContactAt: normalizeNullableDate(value.lastContactAt),
+    // Explicit evidence that the client was informed of readiness, not any generic call.
+    readyInformedAt: normalizeNullableDate(value.readyInformedAt),
     note: String(value.note || ""),
     updatedAt: normalizeNullableDate(value.updatedAt),
     updatedBy: String(value.updatedBy || ""),
@@ -793,9 +795,18 @@ function recordClientCommitment(item, changes) {
   for (const key of ["promisedAt", "nextContactAt", "lastContactAt"]) {
     if (changes[key] && !Number.isFinite(new Date(changes[key]).getTime())) return { ok: false, message: "Date invalide." };
   }
+  // A generic client contact must never become evidence of the ready-for-delivery call.
+  if (changes.readyInformedAt && (!isCaseReadyForDelivery(item)
+    || !Number.isFinite(Date.parse(item.receptionWorkflow?.readyForDeliveryAt || "")))) {
+    return { ok: false, message: "La disponibilité ne peut être annoncée sans QC validé et horodatage de mise à disposition." };
+  }
+  const now = new Date().toISOString();
+  const recorded = changes.readyInformedAt
+    ? { ...changes, readyInformedAt: now, lastContactAt: now }
+    : changes;
   noteCaseRevisionCandidate(item);
-  item.clientCommitment = normalizeClientCommitment({ ...item.clientCommitment, ...changes, updatedAt: new Date().toISOString(), updatedBy: getCurrentActor().userId });
-  addHistory(item, "client.commitment", "Engagement / contact client", [changes.promisedAt ? `Promesse : ${changes.promisedAt}` : "", changes.nextContactAt ? `Prochain contact : ${changes.nextContactAt}` : "", changes.lastContactAt ? "Client informé" : "", changes.note || ""].filter(Boolean).join(" · "));
+  item.clientCommitment = normalizeClientCommitment({ ...item.clientCommitment, ...recorded, updatedAt: now, updatedBy: getCurrentActor().userId });
+  addHistory(item, "client.commitment", "Engagement / contact client", [changes.promisedAt ? `Promesse : ${changes.promisedAt}` : "", changes.nextContactAt ? `Prochain contact : ${changes.nextContactAt}` : "", changes.readyInformedAt ? "Client informé : véhicule prêt (contact manuel)" : changes.lastContactAt ? "Client informé (suivi dossier)" : "", changes.note || ""].filter(Boolean).join(" · "));
   return { ok: true, message: "Suivi client enregistré." };
 }
 

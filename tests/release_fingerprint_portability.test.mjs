@@ -174,12 +174,13 @@ test("H. Scheme versioning: legacy releases are worktree-raw-v1 and current is c
 });
 
 // -------------------------------------------------------------
-// EXACT 26 RUNTIME-FILE INVENTORY
+// EXACT 28 RUNTIME-FILE INVENTORY
 // -------------------------------------------------------------
-test("I. Runtime files inventory: exactly 26 sorted release files declared", () => {
-  assert.equal(RELEASE_OWNED_RUNTIME_FILES.length, 26);
+test("I. Runtime files inventory: exactly 28 sorted release files declared", () => {
+  assert.equal(RELEASE_OWNED_RUNTIME_FILES.length, 28);
   const sortedCopy = [...RELEASE_OWNED_RUNTIME_FILES].sort();
   assert.deepEqual(RELEASE_OWNED_RUNTIME_FILES, sortedCopy, "File list must be pre-sorted");
+  assert.equal(RELEASE_OWNED_RUNTIME_FILES.includes("js/ui-reception.js"), true);
   assert.equal(RELEASE_OWNED_RUNTIME_FILES.includes("js/vn-part-client.js"), true);
   assert.equal(RELEASE_OWNED_RUNTIME_FILES.includes("js/vn-part-ui.js"), true);
   assert.equal(RELEASE_OWNED_RUNTIME_FILES.includes("vendor/xlsx.mini.min.js"), true);

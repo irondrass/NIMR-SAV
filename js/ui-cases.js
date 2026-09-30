@@ -2879,6 +2879,8 @@ function openOperationalCasePanel(caseId) {
     </div>
   </section>
 
+  ${typeof renderReceptionFollowupOverview === "function" ? renderReceptionFollowupOverview(item) : ""}
+
   <!-- SECTION 2 — ACTION RECEPTION -->
   <section class="operational-case-section section-action-reception" aria-label="Action réception">
     <div data-context-decisions></div>
@@ -2892,7 +2894,7 @@ function openOperationalCasePanel(caseId) {
         <label>Heure promise au client<input type="datetime-local" name="promisedAt" value="${escapeAttr(toLocalInputDate(c.promisedAt))}" /></label>
         <label>Prochain contact<input type="datetime-local" name="nextContactAt" value="${escapeAttr(toLocalInputDate(c.nextContactAt))}" /></label>
         <label class="wide">Compte rendu de l’échange<textarea name="note" placeholder="Note d'échange client ou point d'accord">${escapeHtml(c.note || "")}</textarea></label>
-        <label class="checkbox-label"><input type="checkbox" name="contacted" ${draft.contacted ? "checked" : ""} /> Client informé maintenant</label>
+        <label class="checkbox-label"><input type="checkbox" name="contacted" ${draft.contacted ? "checked" : ""} /> ${isCaseReadyForDelivery(item) && Number.isFinite(Date.parse(item.receptionWorkflow?.readyForDeliveryAt || "")) ? "Client informé maintenant : véhicule prêt (contact manuel)" : "Client informé maintenant : suivi du dossier"}</label>
         <label>Responsable de la décision atelier<select name="ownerId"><option value="">Responsable métier habituel</option>${(state.users || []).filter(u => u.active !== false && ["admin", "chef_atelier", "reception", "directeur_sav"].includes(toRuntimeUserRole(u.role))).map(u => `<option value="${escapeAttr(u.id)}" ${u.id === (f.ownerId || "") ? "selected" : ""}>${escapeHtml(getUserPresentationLabel(u))}</option>`).join("")}</select></label>
         <label>Échéance de la décision atelier<input type="datetime-local" name="dueAt" value="${escapeAttr(toLocalInputDate(f.dueAt))}" /></label>
         <button class="primary-button" type="submit">Enregistrer le suivi</button>
@@ -2962,7 +2964,12 @@ function openOperationalCasePanel(caseId) {
       const data = new FormData(form);
       const dateValue = key => data.get(key) ? new Date(data.get(key)).toISOString() : "";
       const changes = { promisedAt: dateValue("promisedAt"), nextContactAt: dateValue("nextContactAt"), note: data.get("note") };
-      if (data.get("contacted")) { changes.lastContactAt = new Date().toISOString(); if (changes.nextContactAt && new Date(changes.nextContactAt) <= new Date()) changes.nextContactAt = ""; }
+      if (data.get("contacted")) {
+        changes.lastContactAt = new Date().toISOString();
+        if (isCaseReadyForDelivery(item) && Number.isFinite(Date.parse(item.receptionWorkflow?.readyForDeliveryAt || "")))
+          changes.readyInformedAt = changes.lastContactAt;
+        if (changes.nextContactAt && new Date(changes.nextContactAt) <= new Date()) changes.nextContactAt = "";
+      }
       const result = recordClientCommitment(item, changes);
       if (!result.ok) { notifyUser(result.message, "error"); return; }
       item.exceptionFollowup = { ownerId: String(data.get("ownerId") || ""), dueAt: dateValue("dueAt"), note: changes.note };

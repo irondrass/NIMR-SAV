@@ -74,8 +74,72 @@ function setReceptionUpstreamAppointments(payload, options = {}) {
   renderReceptionWorkspace();
 }
 
+// KHA-45 — Lecture seule des sources métier de l'OR, du planning et du QC.
+function getReceptionFollowupSnapshot(item, now = new Date()) {
+  if (!item) return null;
+  const phase = getCaseOperationalPhase(item);
+  const commitment = item.clientCommitment || {};
+  const date = value => {
+    const parsed = value ? new Date(value) : null;
+    return parsed && Number.isFinite(parsed.getTime()) ? parsed : null;
+  };
+  const promise = date(commitment.promisedAt);
+  const nextContact = date(commitment.nextContactAt);
+  const lastContact = date(commitment.lastContactAt);
+  const readyInformedAt = date(commitment.readyInformedAt);
+  const readyAt = date(item.receptionWorkflow?.readyForDeliveryAt);
+  const eta = typeof getWorkshopProgressEta === "function" ? getWorkshopProgressEta(item) : null;
+  const ready = phase.key === "ready";
+  const readyUncollected = ready && !item.flags?.delivered;
+  // Le dernier appel générique n'est pas une preuve de SMS envoyé.
+  const readyContactConfirmed = Boolean(readyUncollected && readyAt && readyInformedAt
+    && readyInformedAt >= readyAt && readyInformedAt <= now);
+  const readyContactDue = readyUncollected && !readyContactConfirmed;
+  const promiseLate = Boolean(promise && now > promise && !ready);
+  // Match the canonical operational exception: an unknown ETA is a promise risk.
+  const promiseRisk = Boolean(promise && !ready && !promiseLate && (!eta || eta > promise));
+  const contactDue = Boolean(nextContact && nextContact <= now);
+  const partsBlocked = ["waiting_parts", "blocked_parts"].includes(
+    typeof normalizePartsStatus === "function" ? normalizePartsStatus(item.partsStatus) : String(item.partsStatus || "").toLowerCase()
+  ) || item.blockerReason === "waiting_parts";
+  const bookings = typeof getWorkshopProgressBookings === "function" ? getWorkshopProgressBookings(item) : [];
+  const blockedTask = bookings.find(booking => typeof isWorkshopProgressBookingBlocked === "function"
+    ? isWorkshopProgressBookingBlocked(booking)
+    : Boolean(booking.blockReason || booking.blockedAt));
+  const blocked = (typeof isCaseBlocked === "function" && isCaseBlocked(item)) || partsBlocked || Boolean(blockedTask);
+  const blockerLabel = partsBlocked ? "Blocage pièces" : blockedTask
+    ? `Opération bloquée : ${typeof getWorkshopProgressBookingLabel === "function" ? getWorkshopProgressBookingLabel(blockedTask) : blockedTask.title || "Atelier"}`
+    : blocked && typeof getCaseBlockerLabel === "function" ? getCaseBlockerLabel(item) || "Blocage atelier" : "";
+  const current = typeof getWorkshopProgressCurrentStep === "function"
+    ? getWorkshopProgressCurrentStep(item, now)?.label || "À confirmer"
+    : phase.label;
+  const progress = typeof getWorkshopProgressTaskProgress === "function"
+    ? getWorkshopProgressTaskProgress(bookings).label
+    : "À consulter dans le dossier";
+  const estimatedDelayMinutes = promise && eta && eta > promise ? Math.ceil((eta - promise) / 60000) : 0;
+  let nextAction = "Consulter le dossier";
+  if (typeof isCaseReadonlyArchive === "function" && isCaseReadonlyArchive(item) && !item.flags?.delivered)
+    nextAction = "Faire vérifier l'archive sans remise physique par la Direction";
+  else if (readyUncollected && !readyAt) nextAction = "Vérifier la trace QC de mise à disposition avec le responsable";
+  else if (readyContactDue) nextAction = "Informer le client : véhicule prêt";
+  else if (readyUncollected) nextAction = "Préparer la restitution";
+  else if (contactDue || promiseLate || promiseRisk) nextAction = "Contacter le client et confirmer le délai";
+  else if (blocked) nextAction = partsBlocked ? "Suivre le blocage pièces avec le chef" : "Faire lever le blocage atelier";
+  else if (item.flags?.workCompleted && !ready) nextAction = "Attendre la validation QC et la préparation";
+  else if (item.flags?.received) nextAction = "Suivre les travaux et la promesse";
+  else nextAction = "Accueillir le véhicule";
+  return { phase, promise, eta, nextContact, lastContact, readyAt, readyInformedAt, readyUncollected,
+    readyContactConfirmed, readyContactDue, promiseLate, promiseRisk, contactDue, partsBlocked,
+    blocked, blockerLabel, current, progress, estimatedDelayMinutes, nextAction,
+    qcValidated: isCaseQualityValidated(item), followUp: Boolean(item.flags?.received && !item.flags?.delivered),
+    inform: Boolean(readyContactDue || contactDue || promiseLate || promiseRisk),
+  };
+}
+
 function isReceptionLocalCaseRelevantToday(item, now = new Date()) {
   if (!item) return false;
+  // Suivre aussi les véhicules reçus les jours précédents jusqu'à leur restitution.
+  if (item.flags?.received && !item.flags?.delivered) return true;
   if (isSameBusinessDay(item.createdAt, now)) return true;
   if (isSameBusinessDay(item.appointment?.start, now) || isSameBusinessDay(item.appointment?.delivery, now)) return true;
   if (isSameBusinessDay(item.rdvIntegration?.appointmentDate, now)) return true;
@@ -88,7 +152,9 @@ function isReceptionLocalCaseRelevantToday(item, now = new Date()) {
 }
 
 function getReceptionTodayRows(now = new Date()) {
-  const cases = (state.cases || []).filter(item => !item.deletedAt && !item.flags?.delivered && !item.flags?.invoiced && !item.closedAt && !item.archivedAt);
+  // Une facture ou clôture administrative ne prouve pas la restitution physique.
+  const cases = (state.cases || []).filter(item => !item.deletedAt && !item.flags?.delivered
+    && (item.flags?.received || (!item.flags?.invoiced && !item.closedAt && !item.archivedAt)));
   const rows = cases
     .filter(item => isReceptionLocalCaseRelevantToday(item, now))
     .map(item => ({ item, upstream: null, upstreamIndex: null }));
@@ -111,13 +177,17 @@ function getReceptionTodayRows(now = new Date()) {
     const item = row.item;
     const snapshot = row.upstream || { rdvIntegration: item?.rdvIntegration };
     const date = snapshot.rdvIntegration?.appointmentDate || item?.appointment?.start;
-    const closed = item?.flags?.delivered || item?.flags?.invoiced || item?.closedAt || item?.archivedAt;
+    const closed = Boolean(item?.flags?.delivered
+      || (item && !item.flags?.received && (item.flags?.invoiced || item.closedAt || item.archivedAt)));
     const awaiting = !closed && !item?.flags?.received && !isRdvCanceled(snapshot) && isSameBusinessDay(date, now);
     const late = awaiting && isRdvLate({ rdvIntegration: { ...snapshot.rdvIntegration, appointmentDate: date } }, now, receptionLateThresholdMinutes);
-    const contactAt = Date.parse(item?.clientCommitment?.nextContactAt || "");
-    return { ...row, expected: awaiting && !late, late,
-      inform: !closed && Number.isFinite(contactAt) && contactAt <= now.getTime(),
-      "ready-deliver": !closed && Boolean(item && isCaseReadyForDelivery(item)),
+    const followup = item ? getReceptionFollowupSnapshot(item, now) : null;
+    return { ...row, followup, expected: awaiting && !late,
+      late: late || Boolean(followup?.promiseLate),
+      inform: !closed && Boolean(followup?.inform),
+      "follow-up": !closed && Boolean(followup?.followUp),
+      "ready-deliver": !closed && Boolean(followup?.readyUncollected),
+      "ready-uncollected": !closed && Boolean(followup?.readyUncollected),
     };
   });
 }
@@ -162,10 +232,12 @@ function openReceptionUpstreamAppointment(index) {
 
 function renderReceptionTodayCockpit(query, now = new Date()) {
   const rows = getReceptionTodayRows(now);
-  const filters = [["expected", "À recevoir"], ["late", "En retard"], ["inform", "À informer"], ["ready-deliver", "Prêts à livrer"]];
+  const filters = [["expected", "À recevoir"], ["late", "En retard"],
+    ["inform", "À informer"], ["ready-deliver", "Prêts non retirés"]];
   const counters = document.getElementById("reception-today-counters");
   if (counters) counters.innerHTML = filters.map(([key, label]) => `<button type="button" class="filter-pill reception-today-counter${activeReceptionFilter === key ? " active" : ""}" data-filter="${key}" aria-pressed="${activeReceptionFilter === key}"><strong>${rows.filter(row => row[key]).length}</strong><span>${label}</span></button>`).join("");
-  const filtered = filterReceptionTodayRows(rows, activeReceptionFilter, query);
+  const filtered = filterReceptionTodayRows(rows, activeReceptionFilter, query)
+    .sort((a, b) => Number(b.inform) - Number(a.inform) || Number(b["ready-deliver"]) - Number(a["ready-deliver"]));
   const count = document.getElementById("reception-cases-count");
   if (count) count.textContent = `${filtered.length} dossier(s) / RDV`;
   const list = document.getElementById("reception-case-list");
@@ -173,14 +245,55 @@ function renderReceptionTodayCockpit(query, now = new Date()) {
     const item = row.item || row.upstream;
     const action = row.upstream ? `data-rdv-index="${row.upstreamIndex}"` : `data-case="${escapeAttr(item.id)}"`;
     const date = row.upstream?.rdvIntegration.appointmentDate || item.rdvIntegration?.appointmentDate;
-    return `<button type="button" class="case-card reception-today-card${row.late ? " reception-today-late" : ""}" ${action}>
+    const s = row.followup;
+    const facts = s?.followUp ? `<span class="reception-followup-facts">
+      <span><small>Promesse</small><b>${s.promise ? escapeHtml(formatDateTime(s.promise)) : "À confirmer"}</b></span>
+      <span><small>Atelier</small><b>${escapeHtml(s.current)}</b></span>
+      <span><small>Disponibilité estimée</small><b>${s.eta ? escapeHtml(formatDateTime(s.eta)) : "À confirmer"}</b></span>
+      <span><small>QC / avancement</small><b>${s.qcValidated ? "QC validé" : "QC non validé"} · ${escapeHtml(s.progress)}</b></span>
+      <span><small>Contact client</small><b>${s.lastContact ? escapeHtml(formatDateTime(s.lastContact)) : "Non renseigné"}</b></span>
+      <span><small>Prochain contact</small><b>${s.nextContact ? escapeHtml(formatDateTime(s.nextContact)) : "Non fixé"}</b></span>
+      ${s.blocked ? `<span class="reception-followup-warning">${escapeHtml(s.blockerLabel)}</span>` : ""}
+      ${s.estimatedDelayMinutes ? `<span class="reception-followup-warning">Écart estimé : +${s.estimatedDelayMinutes} min</span>` : ""}
+      ${s.readyUncollected ? `<span class="reception-followup-ready">Prêt à livrer · ${s.readyContactConfirmed ? "contact post-QC enregistré" : "client à informer"}</span>` : ""}
+    </span><span class="reception-followup-next">Action suivante : ${escapeHtml(s.nextAction)}</span>` : "";
+    return `<button type="button" class="case-card reception-today-card${row.late ? " reception-today-late" : ""}${s?.readyUncollected ? " reception-followup-ready-card" : ""}" ${action}>
       <strong>${escapeHtml(item.clientName || "Client à compléter")}</strong>
       <span>${escapeHtml(item.vehicle || "Véhicule à compléter")} · ${escapeHtml(item.plate || item.vin || "Identité à compléter")}</span>
       <span>${escapeHtml(item.phone || "")}${item.orNavNumber ? ` · OR ${escapeHtml(item.orNavNumber)}` : ""}</span>
       <span class="case-meta">${date ? escapeHtml(formatDateTime(date)) : "Dossier NIMR"}${row.late ? " · En retard" : ""}${isRdvCanceled(row.upstream || item) ? " · RDV annulé" : ""}</span>
+      ${facts}
       <small>${row.ambiguous ? "Identité ambiguë — vérification requise" : row.item ? "Ouvrir le suivi réception" : "Lier / créer le dossier"}</small>
     </button>`;
   }).join("") || `<p class="empty-inline">Aucun dossier ou RDV pour ce filtre.</p>`;
+}
+
+function renderReceptionFollowupOverview(item, now = new Date()) {
+  const s = getReceptionFollowupSnapshot(item, now);
+  if (!s || !item.flags?.received) return "";
+  const value = (label, content) => `<span><small>${label}</small><strong>${escapeHtml(content)}</strong></span>`;
+  const fmt = date => date ? formatDateTime(date) : "Non renseigné";
+  const status = s.readyUncollected
+    ? !s.readyAt ? "Trace QC à vérifier" : s.readyContactConfirmed ? "Information disponibilité enregistrée" : "Informer le client : véhicule prêt"
+    : item.flags?.workCompleted ? "En attente du QC et de la préparation" : "Travaux en cours";
+  return `<section class="operational-case-section reception-followup-overview" aria-label="Suivi client et restitution">
+    <div class="section-heading"><h3>Suivi client et restitution</h3><span>${escapeHtml(s.phase.label)}</span></div>
+    <div class="reception-followup-facts">
+      ${value("Promesse client", fmt(s.promise))}
+      ${value("État atelier", s.current)}
+      ${value("Avancement", s.progress)}
+      ${value("Disponibilité estimée", s.eta ? fmt(s.eta) : "À confirmer")}
+      ${value("Dernier contact", fmt(s.lastContact))}
+      ${value("Prochain contact", fmt(s.nextContact))}
+      ${value("Qualité", s.qcValidated ? "QC validé" : "QC non validé")}
+      ${value("Blocage", s.blocked ? s.blockerLabel : "Aucun blocage signalé")}
+      ${value("Remise", item.flags?.delivered ? "Livré" : s.readyUncollected ? "Prêt, non retiré" : "Non prêt")}
+      ${value("Contact disponibilité", s.readyContactConfirmed ? fmt(s.readyInformedAt) : status)}
+    </div>
+    ${s.estimatedDelayMinutes ? `<p class="reception-followup-warning">Écart estimé sur la promesse : +${s.estimatedDelayMinutes} min</p>` : ""}
+    <p class="reception-followup-next">Action suivante : ${escapeHtml(s.nextAction)}.</p>
+    <p class="muted">Le contact saisi est distinct d'une notification SMS automatique ; aucun envoi n'est présumé.</p>
+  </section>`;
 }
 
 function hideReceptionNewEntryPanel() {

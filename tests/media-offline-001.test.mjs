@@ -39,4 +39,10 @@ test("KHA-49 preserves immediate local-first UX", () => {
   assert.match(media, /OFFLINE_QUEUED/);
   assert.match(media, /media\.uploadStatus = "pending"/);
   assert.match(media, /scheduleMediaOfflineDrain\(0\)/);
+  assert.match(media, /options\.force === true/);
+  assert.match(media, /nextAttemptAt: new Date\(\)\.toISOString\(\)/);
+  assert.match(fs.readFileSync(new URL("../js/ui-cases.js", import.meta.url), "utf8"), /enqueueMediaOfflineUpload\(item, media, \{ force: true \}\)/);
+  const autoUpload = media.slice(media.indexOf("async function tryAutoUploadMedia"), media.indexOf("function mediaUploadStatusLabel"));
+  assert.ok(autoUpload.indexOf("navigator.onLine === false") < autoUpload.indexOf("getMediaDriveCapabilities()"), "offline capture must enqueue before any server capability call");
+  assert.ok(autoUpload.indexOf("enqueueMediaOfflineUpload(item, media)") < autoUpload.indexOf("getMediaDriveCapabilities()"), "offline enqueue must precede capability lookup");
 });

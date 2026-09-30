@@ -29,7 +29,12 @@ async function enqueueMediaOfflineUpload(item, media, options = {}) {
   if (!item?.id || !media?.id || typeof enqueueDurableOutboxOperation !== "function") return null;
   const workshopId = String(typeof getSupabaseWorkshopId === "function" ? getSupabaseWorkshopId() || "" : "").trim() || "local-workshop";
   const existing = typeof loadDurableOutboxOperations === "function" ? (await loadDurableOutboxOperations()).find((entry) => entry.entityType === MEDIA_OFFLINE_ENTITY_TYPE && entry.workshopId === workshopId && entry.entityId === String(media.id) && ["pending", "processing", "failed"].includes(entry.syncStatus)) : null;
-  if (existing) return existing;
+  if (existing) {
+    if (options.force === true && existing.retryCount < MEDIA_OFFLINE_MAX_RETRIES) {
+      return updateDurableOutboxOperation(existing.operationId, { syncStatus: "pending", nextAttemptAt: new Date().toISOString(), processingStartedAt: null, lastError: "" });
+    }
+    return existing;
+  }
   const operationId = "media-upload:" + workshopId + ":" + media.id;
   const operation = await enqueueDurableOutboxOperation({ operationId, idempotencyKey: operationId, workshopId, entityType: MEDIA_OFFLINE_ENTITY_TYPE, entityId: String(media.id), action: "upload", payload: { caseId: String(item.id), mediaId: String(media.id) }, syncStatus: "pending", retryCount: 0, nextAttemptAt: options.nextAttemptAt || new Date().toISOString(), description: "Média " + (media.name || media.id) + " à envoyer" });
   if (media.uploadStatus !== "uploaded") { media.uploadStatus = "pending"; await persistLocalMediaMeta(item, media); }
@@ -461,12 +466,15 @@ async function retryMediaUpload(item, media) {
 
 async function tryAutoUploadMedia(item, media) {
   try {
+    if (navigator.onLine === false) {
+      const queued = await enqueueMediaOfflineUpload(item, media);
+      return { ok: false, code: "OFFLINE_QUEUED", queued: Boolean(queued) };
+    }
     const capabilities = await getMediaDriveCapabilities();
     if (!capabilities?.ok || !capabilities.oauth_configured || !capabilities.root_configured) {
       return { ok: false, code: "MEDIA_DRIVE_NOT_READY" };
     }
-    const queued = await enqueueMediaOfflineUpload(item, media);
-    if (navigator.onLine === false) return { ok: false, code: "OFFLINE_QUEUED", queued: Boolean(queued) };
+    await enqueueMediaOfflineUpload(item, media);
     return await drainMediaOfflineQueue("auto-upload");
   } catch {
     return { ok: false, code: "MEDIA_DRIVE_NOT_READY" };

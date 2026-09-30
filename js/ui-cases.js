@@ -6685,7 +6685,7 @@ function renderPhotos(root, item) {
       const media = item.photos[Number(button.dataset.retryMedia)];
       if (!media || typeof enqueueMediaOfflineUpload !== "function" || typeof drainMediaOfflineQueue !== "function") return;
       button.disabled = true;
-      await enqueueMediaOfflineUpload(item, media);
+      await enqueueMediaOfflineUpload(item, media, { force: true });
       await drainMediaOfflineQueue("manual-retry");
       if (media.uploadStatus !== "uploaded") notifyUser(media.lastUploadError || "Envoi cloud impossible.", "error");
       else quietNotify("Média envoyé dans Google Drive.", "success");

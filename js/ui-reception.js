@@ -86,28 +86,41 @@ function getReceptionFollowupSnapshot(item, now = new Date()) {
   const promise = date(commitment.promisedAt);
   const nextContact = date(commitment.nextContactAt);
   const lastContact = date(commitment.lastContactAt);
+  const readyInformedAt = date(commitment.readyInformedAt);
   const readyAt = date(item.receptionWorkflow?.readyForDeliveryAt);
   const eta = typeof getWorkshopProgressEta === "function" ? getWorkshopProgressEta(item) : null;
   const ready = phase.key === "ready";
   const readyUncollected = ready && !item.flags?.delivered;
   // Le dernier appel générique n'est pas une preuve de SMS envoyé.
-  const readyContactConfirmed = Boolean(readyUncollected && readyAt && lastContact && lastContact >= readyAt);
+  const readyContactConfirmed = Boolean(readyUncollected && readyAt && readyInformedAt
+    && readyInformedAt >= readyAt && readyInformedAt <= now);
   const readyContactDue = readyUncollected && !readyContactConfirmed;
   const promiseLate = Boolean(promise && now > promise && !ready);
-  const promiseRisk = Boolean(promise && eta && eta > promise && !ready);
+  // Match the canonical operational exception: an unknown ETA is a promise risk.
+  const promiseRisk = Boolean(promise && !ready && !promiseLate && (!eta || eta > promise));
   const contactDue = Boolean(nextContact && nextContact <= now);
-  const partsBlocked = ["waiting_parts", "blocked_parts"].includes(String(item.partsStatus || "").toLowerCase());
-  const blocked = (typeof isCaseBlocked === "function" && isCaseBlocked(item)) || partsBlocked;
+  const partsBlocked = ["waiting_parts", "blocked_parts"].includes(
+    typeof normalizePartsStatus === "function" ? normalizePartsStatus(item.partsStatus) : String(item.partsStatus || "").toLowerCase()
+  ) || item.blockerReason === "waiting_parts";
+  const bookings = typeof getWorkshopProgressBookings === "function" ? getWorkshopProgressBookings(item) : [];
+  const blockedTask = bookings.find(booking => typeof isWorkshopProgressBookingBlocked === "function"
+    ? isWorkshopProgressBookingBlocked(booking)
+    : Boolean(booking.blockReason || booking.blockedAt));
+  const blocked = (typeof isCaseBlocked === "function" && isCaseBlocked(item)) || partsBlocked || Boolean(blockedTask);
+  const blockerLabel = partsBlocked ? "Blocage pièces" : blockedTask
+    ? `Opération bloquée : ${typeof getWorkshopProgressBookingLabel === "function" ? getWorkshopProgressBookingLabel(blockedTask) : blockedTask.title || "Atelier"}`
+    : blocked && typeof getCaseBlockerLabel === "function" ? getCaseBlockerLabel(item) || "Blocage atelier" : "";
   const current = typeof getWorkshopProgressCurrentStep === "function"
     ? getWorkshopProgressCurrentStep(item, now)?.label || "À confirmer"
     : phase.label;
-  const progress = typeof getWorkshopProgressTaskProgress === "function" && typeof getWorkshopProgressBookings === "function"
-    ? getWorkshopProgressTaskProgress(getWorkshopProgressBookings(item)).label
+  const progress = typeof getWorkshopProgressTaskProgress === "function"
+    ? getWorkshopProgressTaskProgress(bookings).label
     : "À consulter dans le dossier";
   const estimatedDelayMinutes = promise && eta && eta > promise ? Math.ceil((eta - promise) / 60000) : 0;
   let nextAction = "Consulter le dossier";
   if (typeof isCaseReadonlyArchive === "function" && isCaseReadonlyArchive(item) && !item.flags?.delivered)
     nextAction = "Faire vérifier l'archive sans remise physique par la Direction";
+  else if (readyUncollected && !readyAt) nextAction = "Vérifier la trace QC de mise à disposition avec le responsable";
   else if (readyContactDue) nextAction = "Informer le client : véhicule prêt";
   else if (readyUncollected) nextAction = "Préparer la restitution";
   else if (contactDue || promiseLate || promiseRisk) nextAction = "Contacter le client et confirmer le délai";
@@ -115,9 +128,9 @@ function getReceptionFollowupSnapshot(item, now = new Date()) {
   else if (item.flags?.workCompleted && !ready) nextAction = "Attendre la validation QC et la préparation";
   else if (item.flags?.received) nextAction = "Suivre les travaux et la promesse";
   else nextAction = "Accueillir le véhicule";
-  return { phase, promise, eta, nextContact, lastContact, readyAt, readyUncollected,
+  return { phase, promise, eta, nextContact, lastContact, readyAt, readyInformedAt, readyUncollected,
     readyContactConfirmed, readyContactDue, promiseLate, promiseRisk, contactDue, partsBlocked,
-    blocked, current, progress, estimatedDelayMinutes, nextAction,
+    blocked, blockerLabel, current, progress, estimatedDelayMinutes, nextAction,
     qcValidated: isCaseQualityValidated(item), followUp: Boolean(item.flags?.received && !item.flags?.delivered),
     inform: Boolean(readyContactDue || contactDue || promiseLate || promiseRisk),
   };
@@ -240,7 +253,7 @@ function renderReceptionTodayCockpit(query, now = new Date()) {
       <span><small>QC / avancement</small><b>${s.qcValidated ? "QC validé" : "QC non validé"} · ${escapeHtml(s.progress)}</b></span>
       <span><small>Contact client</small><b>${s.lastContact ? escapeHtml(formatDateTime(s.lastContact)) : "Non renseigné"}</b></span>
       <span><small>Prochain contact</small><b>${s.nextContact ? escapeHtml(formatDateTime(s.nextContact)) : "Non fixé"}</b></span>
-      ${s.blocked ? `<span class="reception-followup-warning">${escapeHtml(s.partsBlocked ? "Blocage pièces" : "Blocage atelier")}</span>` : ""}
+      ${s.blocked ? `<span class="reception-followup-warning">${escapeHtml(s.blockerLabel)}</span>` : ""}
       ${s.estimatedDelayMinutes ? `<span class="reception-followup-warning">Écart estimé : +${s.estimatedDelayMinutes} min</span>` : ""}
       ${s.readyUncollected ? `<span class="reception-followup-ready">Prêt à livrer · ${s.readyContactConfirmed ? "contact post-QC enregistré" : "client à informer"}</span>` : ""}
     </span><span class="reception-followup-next">Action suivante : ${escapeHtml(s.nextAction)}</span>` : "";
@@ -260,7 +273,8 @@ function renderReceptionFollowupOverview(item, now = new Date()) {
   if (!s || !item.flags?.received) return "";
   const value = (label, content) => `<span><small>${label}</small><strong>${escapeHtml(content)}</strong></span>`;
   const fmt = date => date ? formatDateTime(date) : "Non renseigné";
-  const status = s.readyUncollected ? (s.readyContactConfirmed ? "Contact post-QC enregistré" : "Informer le client : véhicule prêt")
+  const status = s.readyUncollected
+    ? !s.readyAt ? "Trace QC à vérifier" : s.readyContactConfirmed ? "Information disponibilité enregistrée" : "Informer le client : véhicule prêt"
     : item.flags?.workCompleted ? "En attente du QC et de la préparation" : "Travaux en cours";
   return `<section class="operational-case-section reception-followup-overview" aria-label="Suivi client et restitution">
     <div class="section-heading"><h3>Suivi client et restitution</h3><span>${escapeHtml(s.phase.label)}</span></div>
@@ -272,9 +286,9 @@ function renderReceptionFollowupOverview(item, now = new Date()) {
       ${value("Dernier contact", fmt(s.lastContact))}
       ${value("Prochain contact", fmt(s.nextContact))}
       ${value("Qualité", s.qcValidated ? "QC validé" : "QC non validé")}
-      ${value("Blocage", s.blocked ? s.partsBlocked ? "Pièces" : "Atelier" : "Aucun blocage signalé")}
+      ${value("Blocage", s.blocked ? s.blockerLabel : "Aucun blocage signalé")}
       ${value("Remise", item.flags?.delivered ? "Livré" : s.readyUncollected ? "Prêt, non retiré" : "Non prêt")}
-      ${value("Information véhicule prêt", status)}
+      ${value("Contact disponibilité", s.readyContactConfirmed ? fmt(s.readyInformedAt) : status)}
     </div>
     ${s.estimatedDelayMinutes ? `<p class="reception-followup-warning">Écart estimé sur la promesse : +${s.estimatedDelayMinutes} min</p>` : ""}
     <p class="reception-followup-next">Action suivante : ${escapeHtml(s.nextAction)}.</p>

@@ -313,9 +313,7 @@ function crc32(data: Uint8Array): number {
 }
 
 export function base64ToUint8Array(base64: string): Uint8Array {
-  if (typeof Buffer !== 'undefined') {
-    return new Uint8Array(Buffer.from(base64, 'base64'));
-  }
+  // Use the Web Platform API: this module also runs in browsers without Node.js Buffer.
   const binaryString = atob(base64);
   const len = binaryString.length;
   const bytes = new Uint8Array(len);

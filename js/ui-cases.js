@@ -2879,6 +2879,8 @@ function openOperationalCasePanel(caseId) {
     </div>
   </section>
 
+  ${typeof renderReceptionFollowupOverview === "function" ? renderReceptionFollowupOverview(item) : ""}
+
   <!-- SECTION 2 — ACTION RECEPTION -->
   <section class="operational-case-section section-action-reception" aria-label="Action réception">
     <div data-context-decisions></div>

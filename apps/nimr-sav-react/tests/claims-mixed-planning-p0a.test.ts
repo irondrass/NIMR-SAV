@@ -84,7 +84,10 @@ describe('KHA-76 P0a — mixed claim planning blocker', () => {
     expect(res.success).toBe(true);
     expect(res.updatedCase?.status).toBe('diagnosis');
 
-    savCaseStore.addClaim(caseId, { label: 'Sinistre mixte', claimType: 'mixed', status: 'approved' }, reception);
+    savCaseStore.addClaim(caseId, { label: 'Sinistre mixte', claimType: 'mixed' }, reception);
+    const storedClaim = savCaseStore.getCases().find((x) => x.id === caseId)?.claims?.[0];
+    expect(storedClaim).toBeDefined();
+    savCaseStore.approveClaimInternal(caseId, storedClaim!.id, reception);
     expect(() => {
       savCaseStore.planWorkshopTask(caseId, {
         bay: 'Baie 1',

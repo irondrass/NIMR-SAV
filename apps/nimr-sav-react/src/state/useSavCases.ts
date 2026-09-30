@@ -87,6 +87,8 @@ export function useSavCases() {
       savCaseStore.approveClaimExpert(caseId, claimId, expertName, actor),
     approveClaimClient: (caseId: string, claimId: string, reference: string, actor: { id: string; role: Role }) =>
       savCaseStore.approveClaimClient(caseId, claimId, reference, actor),
+    approveClaimInternal: (caseId: string, claimId: string, actor: { id: string; role: Role }) =>
+      savCaseStore.approveClaimInternal(caseId, claimId, actor),
     rejectClaim: (caseId: string, claimId: string, reason: string, actor: { id: string; role: Role }) =>
       savCaseStore.rejectClaim(caseId, claimId, reason, actor),
     cancelClaim: (caseId: string, claimId: string, actor: { id: string; role: Role }) =>

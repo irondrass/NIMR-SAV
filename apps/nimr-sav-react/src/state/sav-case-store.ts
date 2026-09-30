@@ -9,7 +9,7 @@ import { CaseStatus } from '../domain/case-status';
 import { hasPermission } from '../domain/action-permissions';
 import { transitionCase } from '../domain/workflow-engine';
 import { DEMO_TECHNICIANS } from '../constants/demo-technicians';
-import { getBlockingClaimsReasons, normalizeClaim, approveClaimExpert, approveClaimClient, rejectClaim, cancelClaim } from '../domain/claims';
+import { getBlockingClaimsReasons, normalizeClaim, approveClaimExpert, approveClaimClient, approveClaimInternal, assertNoProtectedClaimMutation, rejectClaim, cancelClaim } from '../domain/claims';
 import { parseEstimateText, parseEstimateHtml } from '../domain/estimate-parser';
 import { generateWorkshopTasksFromEstimate, calculateLaborSummaryByPole } from '../domain/labor-allocator';
 import {
@@ -972,7 +972,13 @@ export const savCaseStore = {
     if (!hasPermission(actor.role, 'manage_claims')) {
       throw new Error(`Role ${actor.role} is not permitted to manage claims.`);
     }
-    const normalized = normalizeClaim(claim);
+    assertNoProtectedClaimMutation(claim, 'addClaim');
+    const initialStatus: Claim['status'] = claim.claimType === 'insurance'
+      ? 'expert_pending'
+      : claim.claimType === 'customer'
+        ? 'client_pending'
+        : 'draft';
+    const normalized = normalizeClaim({ ...claim, status: initialStatus });
     const existingClaims = caseObj.claims || [];
     const updatedCase: SavCase = {
       ...caseObj,
@@ -999,6 +1005,7 @@ export const savCaseStore = {
     if (!hasPermission(actor.role, 'manage_claims')) {
       throw new Error(`Role ${actor.role} is not permitted to manage claims.`);
     }
+    assertNoProtectedClaimMutation(updatedFields, 'updateClaim');
     const existingClaims = caseObj.claims || [];
     const updatedClaims = existingClaims.map((claim) => {
       if (claim.id === claimId) {
@@ -1085,6 +1092,38 @@ export const savCaseStore = {
       caseObj.status,
       caseObj.status,
       `Accord client validé (Réf: ${reference}) pour le sinistre "${claimId}".`
+    );
+    this.addLog(log);
+  },
+
+  approveClaimInternal(caseId: string, claimId: string, actor: { id: string; role: Role }) {
+    const caseObj = cases.find((c) => c.id === caseId);
+    if (!caseObj) throw new Error(`Case ${caseId} not found.`);
+    if (!hasPermission(actor.role, 'approve_claim_internal')) {
+      throw new Error(`Role ${actor.role} is not permitted to approve claims internally.`);
+    }
+    const existingClaims = caseObj.claims || [];
+    const targetClaim = existingClaims.find((claim) => claim.id === claimId);
+    if (!targetClaim) throw new Error(`Claim ${claimId} not found.`);
+
+    const updatedClaims = existingClaims.map((claim) =>
+      claim.id === claimId ? approveClaimInternal(claim) : claim
+    );
+    const updatedCase: SavCase = {
+      ...caseObj,
+      claims: updatedClaims,
+      updatedAt: new Date().toISOString(),
+    };
+    this.addCase(updatedCase);
+
+    const log = createAuditLog(
+      caseId,
+      actor.id,
+      actor.role,
+      'approve_claim_internal',
+      caseObj.status,
+      caseObj.status,
+      `Validation interne accordée pour le sinistre "${claimId}".`
     );
     this.addLog(log);
   },

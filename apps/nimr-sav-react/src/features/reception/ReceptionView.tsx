@@ -37,9 +37,9 @@ export const ReceptionView: React.FC<ReceptionViewProps> = ({ user }) => {
     addCase,
     addLog,
     addClaim,
-    updateClaim,
     approveClaimExpert,
     approveClaimClient,
+    approveClaimInternal,
     rejectClaim,
     cancelClaim,
     importEstimateForClaim,
@@ -377,12 +377,8 @@ export const ReceptionView: React.FC<ReceptionViewProps> = ({ user }) => {
       label: claimLabel.trim(),
       claimType,
       payerType,
-      status: claimType === 'insurance' ? 'expert_pending' : claimType === 'customer' ? 'client_pending' : 'approved',
       description: claimDescription.trim(),
       estimatedAmount: claimAmount === '' ? 0 : Number(claimAmount),
-      expertApproved: false,
-      clientApproved: false,
-      requiredApprovals: claimType === 'insurance' ? ['expert', 'client'] : claimType === 'customer' ? ['client'] : ['internal'],
     };
 
     try {
@@ -1096,14 +1092,12 @@ export const ReceptionView: React.FC<ReceptionViewProps> = ({ user }) => {
                                 Valider Accord Client
                               </Button>
                             )}
-                            {claim.claimType === 'warranty' && (
+                            {(['warranty', 'internal', 'mixed'] as const).includes(claim.claimType as 'warranty' | 'internal' | 'mixed') && (
                               <Button
                                 size="sm"
-                                onClick={() => {
-                                  updateClaim(selectedCase.id, claim.id, { status: 'approved' }, user);
-                                }}
+                                onClick={() => approveClaimInternal(selectedCase.id, claim.id, user)}
                               >
-                                Valider Garantie
+                                {claim.claimType === 'warranty' ? 'Valider Garantie' : 'Valider Interne'}
                               </Button>
                             )}
                             <Button

@@ -46,6 +46,7 @@ export type Action =
   | 'manage_claims'
   | 'approve_claim_expert'
   | 'approve_claim_client'
+  | 'approve_claim_internal'
   | 'override_claims'
   | 'print_reception_sheet'
   | 'print_workshop_sheet'
@@ -157,6 +158,7 @@ export function hasPermission(role: Role, action: Action): boolean {
 
     case 'approve_claim_expert':
     case 'approve_claim_client':
+    case 'approve_claim_internal':
       return role === 'reception';
 
     case 'override_claims':

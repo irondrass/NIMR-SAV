@@ -1,5 +1,34 @@
 import { Claim } from './sav-case';
 
+export const PROTECTED_CLAIM_MUTATION_FIELDS = [
+  'status',
+  'expertApproved',
+  'clientApproved',
+  'expertApprovalAt',
+  'clientApprovalAt',
+  'expertName',
+  'clientApprovalReference',
+  'requiredApprovals',
+] as const satisfies readonly (keyof Claim)[];
+
+export function getProtectedClaimMutationFields(input: Partial<Claim> | Record<string, unknown>): string[] {
+  return PROTECTED_CLAIM_MUTATION_FIELDS.filter((field) =>
+    Object.prototype.hasOwnProperty.call(input, field)
+  );
+}
+
+export function assertNoProtectedClaimMutation(
+  input: Partial<Claim> | Record<string, unknown>,
+  operation: string
+): void {
+  const protectedFields = getProtectedClaimMutationFields(input);
+  if (protectedFields.length > 0) {
+    throw new Error(
+      `Mutation générique refusée (${operation}) : champ(s) protégé(s) ${protectedFields.join(', ')}. Utiliser une commande spécialisée.`
+    );
+  }
+}
+
 export function createDefaultClaim(): Claim {
   const now = new Date().toISOString();
   return {
@@ -188,6 +217,20 @@ export function approveClaimClient(claim: Claim, reference: string): Claim {
     clientApprovalReference: reference,
     clientApprovalAt: now,
   });
+}
+
+export function approveClaimInternal(claim: Claim): Claim {
+  if (!['warranty', 'internal', 'mixed'].includes(claim.claimType)) {
+    throw new Error(`Le sinistre ${claim.id} ne relève pas d'une validation interne.`);
+  }
+  if (claim.status === 'rejected' || claim.status === 'cancelled') {
+    throw new Error(`Le sinistre ${claim.id} au statut ${claim.status} ne peut pas être validé.`);
+  }
+  return {
+    ...claim,
+    status: 'approved',
+    updatedAt: new Date().toISOString(),
+  };
 }
 
 export function rejectClaim(claim: Claim, reason: string): Claim {

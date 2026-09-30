@@ -1,4 +1,5 @@
 import { SavCase, Claim, CasePhoto, QcChecklistItem } from './sav-case';
+import { getProtectedClaimMutationFields } from './claims';
 import { Action, hasPermission } from './action-permissions';
 import { isOfficialRole } from './role-governance';
 import { validateAllowedCaseStatus } from './status-hardening';
@@ -145,6 +146,13 @@ function validateOfflineActionPayload(type: OfflineActionType, payload: unknown)
       if (!isRecord(payload) || !isRecord(payload.claim)) {
         return { valid: false, reason: 'Payload sinistre invalide.' };
       }
+      const protectedFields = getProtectedClaimMutationFields(payload.claim);
+      if (protectedFields.length > 0) {
+        return {
+          valid: false,
+          reason: `Payload sinistre refusé : champ(s) protégé(s) ${protectedFields.join(', ')}.`,
+        };
+      }
       return { valid: true };
     }
     case 'update_claim': {
@@ -152,6 +160,13 @@ function validateOfflineActionPayload(type: OfflineActionType, payload: unknown)
       if (!base.valid) return base;
       if (!isRecord(payload) || !hasString(payload, 'claimId') || !isRecord(payload.updatedFields)) {
         return { valid: false, reason: 'Payload mise à jour sinistre invalide.' };
+      }
+      const protectedFields = getProtectedClaimMutationFields(payload.updatedFields);
+      if (protectedFields.length > 0) {
+        return {
+          valid: false,
+          reason: `Mise à jour sinistre refusée : champ(s) protégé(s) ${protectedFields.join(', ')}.`,
+        };
       }
       return { valid: true };
     }

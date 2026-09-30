@@ -27,6 +27,14 @@ const CONTEXT_WRITE_ROLES = Object.freeze({
   delivery: new Set(["admin_technique", "directeur", "chef_atelier", "reception"]),
   warranty: new Set(["admin_technique", "directeur", "chef_atelier", "responsable_garantie_support"]),
 });
+const CONTEXT_DELETE_ROLES = Object.freeze({
+  reception: new Set(["admin_technique", "directeur", "chef_atelier"]),
+  diagnostic: new Set(["admin_technique", "directeur", "chef_atelier"]),
+  repair: new Set(["admin_technique", "directeur", "chef_atelier"]),
+  qc: new Set(["admin_technique", "directeur"]),
+  delivery: new Set(["admin_technique", "directeur", "chef_atelier"]),
+  warranty: new Set(["admin_technique", "directeur"]),
+});
 const CONTEXT_READ_ROLES = Object.freeze({
   reception: new Set([...CONTEXT_WRITE_ROLES.reception, "lecture_seule"]),
   diagnostic: new Set([...CONTEXT_WRITE_ROLES.diagnostic, "lecture_seule"]),
@@ -42,6 +50,8 @@ const ACTIONS = new Set([
   "begin_upload",
   "finalize_upload",
   "read_metadata",
+  "read_content",
+  "delete_media",
 ]);
 const VEHICLE_CONTEXTS = new Set(["reception", "diagnostic", "repair", "qc", "delivery"]);
 const WARRANTY_SECTIONS = new Set(["photos", "videos", "diagnostic", "documents"]);
@@ -228,7 +238,8 @@ async function refreshGoogleAccessToken(fetchFn, config) {
 
 function actionAllowed(role, action) {
   if (action === "bootstrap_root") return ROOT_ADMIN_ROLES.has(role);
-  if (action === "read_metadata" || action === "capabilities") return MEDIA_READ_ROLES.has(role);
+  if (action === "read_metadata" || action === "read_content" || action === "capabilities") return MEDIA_READ_ROLES.has(role);
+  if (action === "delete_media") return MEDIA_WRITE_ROLES.has(role);
   return MEDIA_WRITE_ROLES.has(role);
 }
 
@@ -238,7 +249,11 @@ function mediaContextKey(scope, businessContext) {
 
 function assertMediaContextAllowed(role, scope, businessContext, mode = "write") {
   const key = mediaContextKey(scope, businessContext);
-  const matrix = mode === "read" ? CONTEXT_READ_ROLES : CONTEXT_WRITE_ROLES;
+  const matrix = mode === "read"
+    ? CONTEXT_READ_ROLES
+    : mode === "delete"
+      ? CONTEXT_DELETE_ROLES
+      : CONTEXT_WRITE_ROLES;
   if (!key || !matrix[key]?.has(role)) {
     throw new MediaDriveError("FORBIDDEN_MEDIA_CONTEXT", 403);
   }
@@ -510,13 +525,15 @@ function validateUploadInput(payload, maxUploadBytes) {
   const fileName = safeFileName(rawFileName);
   const mimeType = cleanText(payload.mime_type, 120).toLowerCase();
   const sizeBytes = Number(payload.size_bytes);
+  const checksumSha256 = cleanText(payload.checksum_sha256, 128).toLowerCase();
   if (!localId) throw new MediaDriveError("LOCAL_ID_REQUIRED", 400);
   if (!rawFileName || !fileName) throw new MediaDriveError("FILENAME_REQUIRED", 400);
   if (!UPLOAD_MIME_TYPES.has(mimeType)) throw new MediaDriveError("UNSUPPORTED_MEDIA_TYPE", 415);
   if (!Number.isSafeInteger(sizeBytes) || sizeBytes <= 0 || sizeBytes > maxUploadBytes) {
     throw new MediaDriveError("INVALID_MEDIA_SIZE", 413);
   }
-  return { localId, fileName, mimeType, sizeBytes };
+  if (!/^[a-f0-9]{64}$/u.test(checksumSha256)) throw new MediaDriveError("INVALID_MEDIA_CHECKSUM", 400);
+  return { localId, fileName, mimeType, sizeBytes, checksumSha256 };
 }
 
 async function beginResumableUpload(fetchFn, accessToken, folderId, workshopId, spec, input) {
@@ -538,6 +555,7 @@ async function beginResumableUpload(fetchFn, accessToken, folderId, workshopId, 
           nimr_managed: "true",
           nimr_workshop: workshopId,
           nimr_local_hash: localHash,
+          nimr_content_sha256: input.checksumSha256,
           nimr_scope: spec.scope,
           nimr_context: spec.businessContext,
         },
@@ -553,6 +571,33 @@ async function beginResumableUpload(fetchFn, accessToken, folderId, workshopId, 
   return uploadUrl;
 }
 
+async function assertNoPublicPermissions(fetchFn, accessToken, fileId) {
+  const id = cleanText(fileId, 256);
+  const params = new URLSearchParams({ fields: "permissions(id,type,role,allowFileDiscovery)", supportsAllDrives: "true" });
+  const payload = await fetchJson(
+    fetchFn,
+    `${GOOGLE_DRIVE_API}/files/${encodeURIComponent(id)}/permissions?${params}`,
+    { method: "GET", headers: driveHeaders(accessToken) },
+    "GOOGLE_DRIVE_PERMISSION_READ_FAILED",
+  );
+  const permissions = Array.isArray(payload?.permissions) ? payload.permissions : [];
+  if (permissions.some((permission) => ["anyone", "domain"].includes(cleanToken(permission?.type, 40)))) {
+    throw new MediaDriveError("MEDIA_PUBLIC_PERMISSION_DETECTED", 409);
+  }
+}
+async function readDriveFileContent(fetchFn, accessToken, fileId) {
+  const id = cleanText(fileId, 256);
+  const result = await fetchWithTimeout(fetchFn, `${GOOGLE_DRIVE_API}/files/${encodeURIComponent(id)}?alt=media&supportsAllDrives=true`, { method: "GET", headers: driveHeaders(accessToken) }, 30000);
+  if (!result?.ok) throw new MediaDriveError("GOOGLE_DRIVE_CONTENT_READ_FAILED", 502);
+  return result;
+}
+async function trashManagedMedia(fetchFn, accessToken, fileId) {
+  const id = cleanText(fileId, 256);
+  const result = await fetchWithTimeout(fetchFn, `${GOOGLE_DRIVE_API}/files/${encodeURIComponent(id)}?supportsAllDrives=true`, {
+    method: "PATCH", headers: driveHeaders(accessToken, { "Content-Type": "application/json; charset=UTF-8" }), body: JSON.stringify({ trashed: true }),
+  });
+  if (!result?.ok) throw new MediaDriveError("GOOGLE_DRIVE_MEDIA_DELETE_FAILED", 502);
+}
 async function getDriveFileMetadata(fetchFn, accessToken, fileId) {
   const id = cleanText(fileId, 256);
   if (!id) throw new MediaDriveError("DRIVE_FILE_ID_REQUIRED", 400);
@@ -597,6 +642,17 @@ function assertManagedFile(file, workshopId, expected = {}) {
   if (expected.localHash && String(props.nimr_local_hash || "") !== String(expected.localHash)) {
     throw new MediaDriveError("MEDIA_FILE_IDEMPOTENCY_MISMATCH", 409);
   }
+  if (expected.contentSha256) {
+    const expectedChecksum = String(expected.contentSha256).toLowerCase();
+    const declaredChecksum = String(props.nimr_content_sha256 || "").toLowerCase();
+    const driveChecksum = cleanText(file.sha256Checksum, 128).toLowerCase();
+    if (declaredChecksum !== expectedChecksum) {
+      throw new MediaDriveError("MEDIA_FILE_INTEGRITY_MISMATCH", 409);
+    }
+    if (!/^[a-f0-9]{64}$/u.test(driveChecksum) || driveChecksum !== expectedChecksum) {
+      throw new MediaDriveError("MEDIA_FILE_CONTENT_CHECKSUM_MISMATCH", 409);
+    }
+  }
 }
 
 function googleConfigReady(config) {
@@ -622,6 +678,7 @@ function auditDescriptor(payload, action) {
       entity_id: claimId || repairOrderId || null,
       after_data: {
         status: "attempted",
+        drive_file_id: cleanText(payload.drive_file_id, 256) || null,
         scope,
         business_context: businessContext,
         warranty_section: warrantySection,
@@ -704,8 +761,9 @@ export function createMediaDriveHandler(overrides = {}) {
       let spec = null;
       let uploadInput = null;
       let finalizeLocalHash = "";
+      let finalizeContentSha256 = "";
 
-      if (action !== "bootstrap_root" && action !== "read_metadata") {
+      if (!["bootstrap_root", "read_metadata", "read_content", "delete_media"].includes(action)) {
         spec = await buildBusinessFolderSpec(caller.client, workshopId, payload);
         assertMediaContextAllowed(caller.role, spec.scope, spec.businessContext, "write");
         if (action === "begin_upload") {
@@ -715,6 +773,8 @@ export function createMediaDriveHandler(overrides = {}) {
           const finalizeLocalId = cleanText(payload.local_id, 160);
           if (!finalizeLocalId) throw new MediaDriveError("LOCAL_ID_REQUIRED", 400);
           finalizeLocalHash = await sha256Hex(finalizeLocalId);
+          finalizeContentSha256 = cleanText(payload.checksum_sha256, 128).toLowerCase();
+          if (!/^[a-f0-9]{64}$/u.test(finalizeContentSha256)) throw new MediaDriveError("INVALID_MEDIA_CHECKSUM", 400);
         }
       }
 
@@ -731,19 +791,28 @@ export function createMediaDriveHandler(overrides = {}) {
         });
       }
 
-      if (action === "read_metadata") {
+      if (["read_metadata", "read_content", "delete_media"].includes(action)) {
         const file = await getDriveFileMetadata(fetchFn, accessToken, payload.drive_file_id);
         assertManagedFile(file, workshopId);
-        const props = file.appProperties && typeof file.appProperties === "object"
-          ? file.appProperties
-          : {};
-        assertMediaContextAllowed(
-          caller.role,
-          cleanToken(props.nimr_scope, 40),
-          cleanToken(props.nimr_context, 40),
-          "read",
-        );
-        return response({ ok: true, action, file: sanitizeDriveMetadata(file) });
+        const props = file.appProperties && typeof file.appProperties === "object" ? file.appProperties : {};
+        const scope = cleanToken(props.nimr_scope, 40);
+        const context = cleanToken(props.nimr_context, 40);
+        assertMediaContextAllowed(caller.role, scope, context, action === "delete_media" ? "delete" : "read");
+        await assertNoPublicPermissions(fetchFn, accessToken, payload.drive_file_id);
+        if (action === "read_metadata") return response({ ok: true, action, file: sanitizeDriveMetadata(file) });
+        if (action === "delete_media") {
+          await trashManagedMedia(fetchFn, accessToken, payload.drive_file_id);
+          return response({ ok: true, action, drive_file_id: cleanText(payload.drive_file_id, 256), deleted: true });
+        }
+        const content = await readDriveFileContent(fetchFn, accessToken, payload.drive_file_id);
+        const headers = new Headers({
+          "Content-Type": cleanText(file.mimeType, 160) || "application/octet-stream",
+          "Content-Disposition": `inline; filename="${safeFileName(file.name || "media")}"`,
+          "Cache-Control": "private, no-store",
+          "Pragma": "no-cache",
+          "X-Content-Type-Options": "nosniff",
+        });
+        return new Response(content.body, { status: 200, headers });
       }
 
       const folder = await ensureBusinessFolder(
@@ -820,6 +889,7 @@ export function createMediaDriveHandler(overrides = {}) {
       assertManagedFile(file, workshopId, {
         parentId: folder.folderId,
         localHash: finalizeLocalHash,
+        contentSha256: finalizeContentSha256,
       });
 
       const matchingFiles = await listManagedMediaByLocalHash(
@@ -833,6 +903,7 @@ export function createMediaDriveHandler(overrides = {}) {
         assertManagedFile(candidate, workshopId, {
           parentId: folder.folderId,
           localHash: finalizeLocalHash,
+          contentSha256: finalizeContentSha256,
         });
         if (String(candidate.mimeType || "") !== String(file.mimeType || "")
           || Number(candidate.size) !== Number(file.size)) {

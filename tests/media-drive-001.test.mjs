@@ -152,6 +152,8 @@ function makeDriveMock({
   metadataById = {},
   existingMedia = [],
   uploadLocation = "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&upload_id=session-123",
+  permissionsById = {},
+  contentById = {},
 } = {}) {
   const folders = [];
   const calls = [];
@@ -210,6 +212,21 @@ function makeDriveMock({
       };
       folders.push(folder);
       return jsonResponse(folder);
+    }
+
+    if (parsed.origin === "https://www.googleapis.com"
+      && parsed.pathname.endsWith("/permissions")
+      && method === "GET") {
+      const id = decodeURIComponent(parsed.pathname.split("/").at(-2));
+      return jsonResponse({ permissions: permissionsById[id] || [{ id: "owner", type: "user", role: "owner" }] });
+    }
+
+    if (parsed.origin === "https://www.googleapis.com"
+      && parsed.pathname.startsWith("/drive/v3/files/")
+      && parsed.searchParams.get("alt") === "media"
+      && method === "GET") {
+      const id = decodeURIComponent(parsed.pathname.split("/").pop());
+      return new Response(contentById[id] || "binary-media", { status: 200, headers: { "Content-Type": metadataById[id]?.mimeType || "application/octet-stream" } });
     }
 
     if (parsed.origin === "https://www.googleapis.com"
@@ -605,6 +622,7 @@ test("begin_upload creates a resumable session only after validating MIME and si
     repair_order_id: ORDER_ID,
     business_context: "repair",
     local_id: "media-local-001",
+    checksum_sha256: "a".repeat(64),
     filename: "photo défaut avant.jpg",
     mime_type: "image/jpeg",
     size_bytes: 2500000,
@@ -654,6 +672,7 @@ test("begin_upload reuses a completed managed file with the same local id instea
         nimr_managed: "true",
         nimr_workshop: WORKSHOP_ID,
         nimr_local_hash: localHash("media-local-001"),
+        nimr_content_sha256: "a".repeat(64),
         nimr_scope: "vehicle",
         nimr_context: "repair",
       },
@@ -670,6 +689,7 @@ test("begin_upload reuses a completed managed file with the same local id instea
     repair_order_id: ORDER_ID,
     business_context: "repair",
     local_id: "media-local-001",
+    checksum_sha256: "a".repeat(64),
     filename: "photo défaut avant.jpg",
     mime_type: "image/jpeg",
     size_bytes: 2500000,
@@ -698,6 +718,7 @@ test("begin_upload refuses same local id when Drive content metadata differs", a
         nimr_managed: "true",
         nimr_workshop: WORKSHOP_ID,
         nimr_local_hash: localHash("media-local-001"),
+        nimr_content_sha256: "a".repeat(64),
         nimr_scope: "vehicle",
         nimr_context: "repair",
       },
@@ -713,6 +734,7 @@ test("begin_upload refuses same local id when Drive content metadata differs", a
     repair_order_id: ORDER_ID,
     business_context: "repair",
     local_id: "media-local-001",
+    checksum_sha256: "a".repeat(64),
     filename: "photo défaut avant.jpg",
     mime_type: "image/jpeg",
     size_bytes: 2500000,
@@ -737,6 +759,7 @@ test("invalid upload type fails before Drive folder creation", async () => {
     repair_order_id: ORDER_ID,
     business_context: "repair",
     local_id: "media-local-002",
+    checksum_sha256: "a".repeat(64),
     filename: "payload.exe",
     mime_type: "application/x-msdownload",
     size_bytes: 1000,
@@ -857,10 +880,11 @@ test("finalize_upload accepts only the managed file resolved into the canonical 
           nimr_managed: "true",
           nimr_workshop: WORKSHOP_ID,
           nimr_local_hash: localHash("media-local-ok"),
+        nimr_content_sha256: "a".repeat(64),
           nimr_scope: "vehicle",
           nimr_context: "reception",
         },
-        sha256Checksum: "sha256-ok",
+        sha256Checksum: "a".repeat(64),
         trashed: false,
       },
     },
@@ -876,6 +900,7 @@ test("finalize_upload accepts only the managed file resolved into the canonical 
     repair_order_id: ORDER_ID,
     business_context: "reception",
     local_id: "media-local-ok",
+    checksum_sha256: "a".repeat(64),
     drive_file_id: "file-ok",
   });
   const body = await response.json();
@@ -883,7 +908,7 @@ test("finalize_upload accepts only the managed file resolved into the canonical 
   assert.equal(body.ok, true);
   assert.equal(body.file.id, "file-ok");
   assert.equal(body.file.parent_id, "folder-4");
-  assert.equal(body.file.sha256_checksum, "sha256-ok");
+  assert.equal(body.file.sha256_checksum, "a".repeat(64));
   assert.equal(JSON.stringify(body).includes("nimr_workshop"), false);
 });
 
@@ -894,6 +919,7 @@ test("finalize_upload collapses concurrent duplicate files to the oldest canonic
     nimr_managed: "true",
     nimr_workshop: WORKSHOP_ID,
     nimr_local_hash: localHash("media-race"),
+        nimr_content_sha256: "a".repeat(64),
     nimr_scope: "vehicle",
     nimr_context: "reception",
   };
@@ -904,6 +930,7 @@ test("finalize_upload collapses concurrent duplicate files to the oldest canonic
     size: "2048",
     parents: ["folder-4"],
     appProperties: commonProps,
+    sha256Checksum: "a".repeat(64),
     createdTime: "2026-09-29T20:00:00Z",
     trashed: false,
   };
@@ -927,6 +954,7 @@ test("finalize_upload collapses concurrent duplicate files to the oldest canonic
     repair_order_id: ORDER_ID,
     business_context: "reception",
     local_id: "media-race",
+    checksum_sha256: "a".repeat(64),
     drive_file_id: "file-new",
   });
   const body = await response.json();
@@ -955,6 +983,7 @@ test("finalize_upload fails closed when the file belongs to another workshop", a
           nimr_managed: "true",
           nimr_workshop: "99999999-9999-4999-8999-999999999999",
           nimr_local_hash: localHash("media-local-003"),
+        nimr_content_sha256: "a".repeat(64),
         },
         trashed: false,
       },
@@ -971,6 +1000,7 @@ test("finalize_upload fails closed when the file belongs to another workshop", a
     repair_order_id: ORDER_ID,
     business_context: "reception",
     local_id: "media-local-003",
+    checksum_sha256: "a".repeat(64),
     drive_file_id: "file-wrong-workshop",
   });
   const body = await response.json();
@@ -1035,4 +1065,90 @@ test("source has no console token logging and never consumes a free-form Drive p
   assert.match(source, /nimr_local_hash/u);
   assert.doesNotMatch(source, /appProperties[\s\S]{0,300}nimr_local_id/u);
   assert.match(source, /appProperties/u);
+});
+
+test("KHA-50 blocks public Drive permissions before returning managed metadata", async () => {
+  const edge = loadEdgeFactory();
+  edge.__clientFactory = clientFactoryFor("lecture_seule");
+  const drive = makeDriveMock({
+    metadataById: { "public-1": { id: "public-1", name: "preuve.jpg", mimeType: "image/jpeg", size: "10", parents: ["p"], appProperties: { nimr_managed: "true", nimr_workshop: WORKSHOP_ID, nimr_scope: "vehicle", nimr_context: "repair" }, trashed: false } },
+    permissionsById: { "public-1": [{ id: "any", type: "anyone", role: "reader" }] },
+  });
+  const handler = edge.__mediaDriveFactory({ environment: environment(), fetchFn: drive.fetchFn });
+  const response = await invoke(handler, { action: "read_metadata", workshop_id: WORKSHOP_ID, drive_file_id: "public-1" });
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).code, "MEDIA_PUBLIC_PERMISSION_DETECTED");
+});
+
+test("KHA-50 read_content streams only authorized private managed media with no-store headers", async () => {
+  const edge = loadEdgeFactory();
+  const auditSink = [];
+  edge.__clientFactory = clientFactoryFor("lecture_seule", {}, { auditSink });
+  const file = { id: "private-1", name: "preuve.jpg", mimeType: "image/jpeg", size: "12", parents: ["p"], appProperties: { nimr_managed: "true", nimr_workshop: WORKSHOP_ID, nimr_scope: "vehicle", nimr_context: "repair" }, trashed: false };
+  const drive = makeDriveMock({ metadataById: { "private-1": file }, contentById: { "private-1": "hello-media" } });
+  const handler = edge.__mediaDriveFactory({ environment: environment(), fetchFn: drive.fetchFn });
+  const response = await invoke(handler, { action: "read_content", workshop_id: WORKSHOP_ID, drive_file_id: "private-1" });
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), "hello-media");
+  assert.equal(response.headers.get("cache-control"), "private, no-store");
+  assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(auditSink[0].action, "media_drive.read_content");
+});
+
+test("KHA-50 QC and Warranty proofs cannot be read by lecture_seule", async () => {
+  for (const [id, scope, context] of [["qc-1", "vehicle", "qc"], ["war-1", "warranty", "warranty"]]) {
+    const edge = loadEdgeFactory(); edge.__clientFactory = clientFactoryFor("lecture_seule");
+    const drive = makeDriveMock({ metadataById: { [id]: { id, name: "proof.jpg", mimeType: "image/jpeg", size: "10", parents: ["p"], appProperties: { nimr_managed: "true", nimr_workshop: WORKSHOP_ID, nimr_scope: scope, nimr_context: context }, trashed: false } } });
+    const handler = edge.__mediaDriveFactory({ environment: environment(), fetchFn: drive.fetchFn });
+    const response = await invoke(handler, { action: "read_metadata", workshop_id: WORKSHOP_ID, drive_file_id: id });
+    assert.equal(response.status, 403);
+    assert.equal((await response.json()).code, "FORBIDDEN_MEDIA_CONTEXT");
+  }
+});
+
+test("KHA-50 delete_media is controlled and QC deletion is director/admin only", async () => {
+  const file = { id: "qc-del", name: "qc.jpg", mimeType: "image/jpeg", size: "10", parents: ["p"], appProperties: { nimr_managed: "true", nimr_workshop: WORKSHOP_ID, nimr_scope: "vehicle", nimr_context: "qc" }, trashed: false };
+  {
+    const edge = loadEdgeFactory(); edge.__clientFactory = clientFactoryFor("chef_atelier");
+    const drive = makeDriveMock({ metadataById: { "qc-del": file } });
+    const handler = edge.__mediaDriveFactory({ environment: environment(), fetchFn: drive.fetchFn });
+    const response = await invoke(handler, { action: "delete_media", workshop_id: WORKSHOP_ID, drive_file_id: "qc-del" });
+    assert.equal(response.status, 403);
+  }
+  {
+    const edge = loadEdgeFactory(); const auditSink = []; edge.__clientFactory = clientFactoryFor("directeur", {}, { auditSink });
+    const drive = makeDriveMock({ metadataById: { "qc-del": file } });
+    const handler = edge.__mediaDriveFactory({ environment: environment(), fetchFn: drive.fetchFn });
+    const response = await invoke(handler, { action: "delete_media", workshop_id: WORKSHOP_ID, drive_file_id: "qc-del" });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).deleted, true);
+    assert.equal(auditSink[0].action, "media_drive.delete_media");
+    assert.ok(drive.calls.some((call) => call.method === "PATCH" && String(call.body).includes('"trashed":true')));
+  }
+});
+
+test("KHA-50 finalize rejects a Drive native SHA-256 that differs from the browser checksum", async () => {
+  const edge = loadEdgeFactory();
+  edge.__clientFactory = clientFactoryFor("reception");
+  const drive = makeDriveMock({
+    metadataById: {
+      "tampered-file": {
+        id: "tampered-file", name: "preuve.jpg", mimeType: "image/jpeg", size: "2048", parents: ["folder-4"],
+        appProperties: {
+          nimr_managed: "true", nimr_workshop: WORKSHOP_ID,
+          nimr_local_hash: localHash("media-tampered"), nimr_content_sha256: "a".repeat(64),
+          nimr_scope: "vehicle", nimr_context: "reception",
+        },
+        sha256Checksum: "b".repeat(64), trashed: false,
+      },
+    },
+  });
+  const handler = edge.__mediaDriveFactory({ environment: environment(), fetchFn: drive.fetchFn });
+  const response = await invoke(handler, {
+    action: "finalize_upload", workshop_id: WORKSHOP_ID, scope: "vehicle",
+    repair_order_id: ORDER_ID, business_context: "reception",
+    local_id: "media-tampered", checksum_sha256: "a".repeat(64), drive_file_id: "tampered-file",
+  });
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).code, "MEDIA_FILE_CONTENT_CHECKSUM_MISMATCH");
 });

@@ -175,9 +175,17 @@ export async function withBrowserPage(root, task, options = {}) {
     await send("Runtime.enable", {}, sessionId);
     await send("Log.enable", {}, sessionId);
     await send("Page.enable", {}, sessionId);
+    if (options.preloadScript) {
+      await send("Page.addScriptToEvaluateOnNewDocument", { source: String(options.preloadScript) }, sessionId);
+    }
     const url = `http://127.0.0.1:${appPort}/${options.path || ""}`;
     await send("Page.navigate", { url }, sessionId);
-    await waitForExpression(send, sessionId, "window.__nimrAppReady === true", options.startupTimeoutMs || 25_000);
+    await waitForExpression(
+      send,
+      sessionId,
+      options.readyExpression || "window.__nimrAppReady === true",
+      options.startupTimeoutMs || 25_000,
+    );
     return await task({ send, sessionId, targetId, url, findings, evaluate: (expression) => evaluate(send, sessionId, expression), waitFor: (expression, timeout) => waitForExpression(send, sessionId, expression, timeout) });
   } finally {
     if (send && targetId) await send("Target.closeTarget", { targetId }).catch(() => null);

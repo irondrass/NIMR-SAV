@@ -372,6 +372,29 @@ async function upsertAndMap(client, table, rows) {
   return makeMapByLocalId(data);
 }
 
+async function upsertLegacyRepairClaims(client, rows) {
+  const cleanRows = uniqueByLocalId(rows).filter((row) => row.local_id);
+  if (!cleanRows.length) return new Map();
+
+  const { data, error } = await client.rpc("nimr_upsert_legacy_repair_claims", {
+    p_workshop_id: getSupabaseWorkshopId(),
+    p_rows: cleanRows,
+  });
+
+  if (error) {
+    const message = String(error?.message || error || "");
+    if (/schema cache|Could not find the function|nimr_upsert_legacy_repair_claims/i.test(message)) {
+      throw new Error(`repair_claims: RPC P0c.3 indisponible. ${SUPABASE_SCHEMA_HINT}`);
+    }
+    throw new Error(`repair_claims: ${message}`);
+  }
+
+  const resultRows = Array.isArray(data?.rows)
+    ? data.rows
+    : (Array.isArray(data) ? data : []);
+  return makeMapByLocalId(resultRows);
+}
+
 
 const AUDIT_LOGS_SYNC_BATCH_SIZE = 200;
 
@@ -716,7 +739,7 @@ async function syncBusinessTablesToSupabase(payload, user) {
   });
   let claimMap = new Map();
   let claimsSkipped = false;
-  const claimSync = await safeBusinessSyncStep("repair_claims", () => upsertAndMap(client, "repair_claims", claimRows));
+  const claimSync = await safeBusinessSyncStep("repair_claims", () => upsertLegacyRepairClaims(client, claimRows));
   if (claimSync.skipped) {
     claimsSkipped = true;
   } else {

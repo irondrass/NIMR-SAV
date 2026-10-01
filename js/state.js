@@ -21,7 +21,7 @@ const DOCUMENT_STORE = "documents";
 const VEHICLE_DATA_URL = "data/vehicles.json";
 const STEP_MINUTES = 15;
 const FAST_LANE_DEFAULT_HOURS = 4;
-const APP_VERSION = "v23.3.69";
+const APP_VERSION = "v23.3.70";
 const BACKUP_APP_ID = "nimr-carrosserie";
 const BACKUP_FORMAT_VERSION = 2;
 const CURRENT_DATA_SCHEMA_VERSION = 2;
@@ -813,6 +813,7 @@ function recordClientCommitment(item, changes) {
 function hasWorkAuthorizationEvidence(claim) {
   return Boolean(
     claim &&
+    !getLegacyClaimCompatibilityIssue(claim) &&
     claim.status !== "refused" &&
     claim.clientApproved === true &&
     String(claim.authorizationReference || "").trim()
@@ -839,8 +840,13 @@ function getWorkAuthorizationIssues(item, booking = null) {
   ].filter(Boolean));
   const scoped = sourceIds.size ? claims.filter((claim) => sourceIds.has(claim.id)) : claims;
   if (sourceIds.size && scoped.length !== sourceIds.size) return ["Le périmètre autorisé de cette opération doit être vérifié."];
-  return scoped.filter((claim) => !hasWorkAuthorizationEvidence(claim))
-    .map((claim) => `Accord client / interne à confirmer : ${getClaimLabel(claim)}.`);
+  return scoped.flatMap((claim) => {
+    const compatibilityIssue = getLegacyClaimCompatibilityIssue(claim);
+    if (compatibilityIssue) return [`Sinistre incompatible : ${compatibilityIssue}`];
+    return hasWorkAuthorizationEvidence(claim)
+      ? []
+      : [`Accord client / interne à confirmer : ${getClaimLabel(claim)}.`];
+  });
 }
 
 function getCaseFinalizationIssues(item, delivery = false) {
@@ -866,6 +872,8 @@ function recordWorkAuthorization(item, claimId, reference) {
   const claim = item?.claims?.find((entry) => entry.id === claimId);
   const proof = String(reference || "").trim();
   if (!claim || claim.status === "refused") return { ok: false, message: "Ordre absent ou refusé : vérifier le périmètre des travaux." };
+  const compatibilityIssue = getLegacyClaimCompatibilityIssue(claim);
+  if (compatibilityIssue) return { ok: false, message: `Sinistre incompatible : ${compatibilityIssue}` };
   if (!proof) return { ok: false, message: "Indiquer la référence de l'accord ou le contact ayant autorisé les travaux." };
   noteCaseRevisionCandidate(item);
   const actor = getCurrentActor();
@@ -3899,18 +3907,94 @@ function getClientQualityHours(totalProductiveHours) {
   return Number(totalProductiveHours || 0) <= FAST_LANE_DEFAULT_HOURS ? 0.25 : 1;
 }
 
+const LEGACY_CLAIM_TYPE_VALUES = new Set([
+  "assurance", "client", "vidange", "mechanical_client", "electrical_client", "diagnostic", "garantie",
+]);
+const MODERN_CLAIM_TYPE_TO_LEGACY = Object.freeze({
+  insurance: "assurance",
+  customer: "client",
+  warranty: "garantie",
+});
+const MODERN_CLAIM_STATUS_TO_LEGACY = Object.freeze({
+  rejected: "refused",
+});
+
+function getLegacyClaimCompatibility(claim = {}) {
+  claim = claim && typeof claim === "object" ? claim : {};
+  const previous = claim.legacyCompatibility && typeof claim.legacyCompatibility === "object"
+    ? claim.legacyCompatibility
+    : {};
+  const preserveBlockedSource = previous.blocked === true;
+  const previousSourceType = preserveBlockedSource ? String(previous.sourceType || "").trim() : "";
+  const previousSourceStatus = preserveBlockedSource ? String(previous.sourceStatus || "").trim() : "";
+  const rawType = previousSourceType || String(claim.type || "assurance").trim();
+  const rawStatus = previousSourceStatus || String(claim.status || "draft").trim();
+  const reasons = [];
+  let type = rawType || "assurance";
+  let status = rawStatus || "draft";
+  let sourceType = previousSourceType;
+  let sourceStatus = previousSourceStatus;
+
+  if (LEGACY_CLAIM_TYPE_VALUES.has(rawType)) {
+    type = rawType;
+  } else if (MODERN_CLAIM_TYPE_TO_LEGACY[rawType]) {
+    type = MODERN_CLAIM_TYPE_TO_LEGACY[rawType];
+    sourceType = rawType;
+  } else {
+    sourceType = rawType;
+    reasons.push(`Type de sinistre "${rawType}" incompatible avec la PWA v23.`);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(CLAIM_STATUS_LABELS, rawStatus)) {
+    status = rawStatus;
+  } else if (MODERN_CLAIM_STATUS_TO_LEGACY[rawStatus]) {
+    status = MODERN_CLAIM_STATUS_TO_LEGACY[rawStatus];
+    sourceStatus = rawStatus;
+  } else if (!rawStatus) {
+    status = "draft";
+  } else {
+    status = "draft";
+    sourceStatus = rawStatus;
+    reasons.push(`Statut de sinistre "${rawStatus}" non pris en charge par la PWA v23.`);
+  }
+
+  const legacyCompatibility = (sourceType || sourceStatus || reasons.length)
+    ? {
+        blocked: reasons.length > 0,
+        ...(sourceType ? { sourceType } : {}),
+        ...(sourceStatus ? { sourceStatus } : {}),
+        reason: reasons.join(" "),
+      }
+    : undefined;
+
+  return { type, status, legacyCompatibility };
+}
+
+function getLegacyClaimCompatibilityIssue(claim) {
+  const compatibility = claim?.legacyCompatibility;
+  return compatibility?.blocked ? String(compatibility.reason || "Sinistre incompatible avec la PWA v23.") : "";
+}
+
+function assertLegacyClaimSyncCompatible(claim) {
+  const issue = getLegacyClaimCompatibilityIssue(claim);
+  if (issue) throw new Error(`Synchronisation claim refusée : ${issue}`);
+  return true;
+}
+
 function normalizeRepairClaim(claim, index = 0) {
   claim = claim && typeof claim === "object" ? claim : {};
   const createdAt = claim.createdAt || new Date().toISOString();
+  const compatibility = getLegacyClaimCompatibility(claim);
   return {
     id: claim.id || uid("claim"),
     number: claim.number || `OT-${String(index + 1).padStart(3, "0")}`,
     title: claim.title || claim.label || `Intervention ${index + 1}`,
     vehicleArea: claim.vehicleArea || claim.area || "",
-    type: claim.type || "assurance",
+    type: compatibility.type,
     durationMode: claim.durationMode === "investigation" ? "investigation" : "estimated",
     diagnosticConclusion: String(claim.diagnosticConclusion || "").trim(),
-    status: normalizeClaimStatus(claim.status),
+    status: compatibility.status,
+    ...(compatibility.legacyCompatibility ? { legacyCompatibility: compatibility.legacyCompatibility } : {}),
     includeInPlanning: claim.includeInPlanning !== false,
     expertApproved: Boolean(claim.expertApproved),
     clientApproved: Boolean(claim.clientApproved),
@@ -3928,6 +4012,7 @@ function normalizeRepairClaim(claim, index = 0) {
 
 function normalizeClaimStatus(status) {
   const allowed = new Set(Object.keys(CLAIM_STATUS_LABELS));
+  if (MODERN_CLAIM_STATUS_TO_LEGACY[status]) return MODERN_CLAIM_STATUS_TO_LEGACY[status];
   return allowed.has(status) ? status : "draft";
 }
 

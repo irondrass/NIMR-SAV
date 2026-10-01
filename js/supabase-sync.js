@@ -678,6 +678,9 @@ async function syncBusinessTablesToSupabase(payload, user) {
     const orderId = orderMap.get(caseSyncLocalId(item));
     if (!orderId) return;
     (item.claims || []).forEach((claim, index) => {
+      if (typeof assertLegacyClaimSyncCompatible === "function") {
+        assertLegacyClaimSyncCompatible(claim);
+      }
       const claimLocalId = `${caseSyncLocalId(item)}:${claim.id || claim.number || index}`;
       claimRows.push({
         local_id: claimLocalId,

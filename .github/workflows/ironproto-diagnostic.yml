@@ -1,0 +1,25 @@
+
+name: IronProto - PowerShell Diagnostic
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostic:
+    runs-on: [self-hosted, Windows, X64, nimr-sav]
+    timeout-minutes: 5
+
+    steps:
+      - name: Verify IronProto
+        shell: powershell
+        run: |
+          Write-Host "=== NIMR-SAV IRONPROTO ==="
+          hostname
+          whoami
+          Get-Date
+          git --version
+          node --version
+          Write-Host "=== RUNNER READY ==="

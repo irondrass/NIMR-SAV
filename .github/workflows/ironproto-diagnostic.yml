@@ -16,18 +16,22 @@ jobs:
       - name: Verify IronProto
         shell: powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File {0}
         run: |
-          Write-Host "=== NIMR-SAV IRONPROTO ==="
+          $ErrorActionPreference = "Stop"
+
+          Write-Host "=== IRONPROTO ==="
           hostname
           whoami
 
           Write-Host "=== GIT ==="
           git --version
 
-          Write-Host "=== NODE ==="
+          Write-Host "=== NODE.JS ==="
           $nodeDir = "C:\tools\node-runner"
           $env:PATH = "$nodeDir;$env:PATH"
 
           node --version
-          npm --version
+
+          Write-Host "=== NPM ==="
+          & "$nodeDir\npm.cmd" --version
 
           Write-Host "=== RUNNER READY ==="

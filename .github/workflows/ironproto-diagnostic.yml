@@ -19,24 +19,15 @@ jobs:
           Write-Host "=== NIMR-SAV IRONPROTO ==="
           hostname
           whoami
-          Get-Date
 
           Write-Host "=== GIT ==="
           git --version
 
-          Write-Host "=== NODE NVM ==="
-          $nodeDir = "C:\nvm4w\nodejs"
-          $nodeExe = Join-Path $nodeDir "node.exe"
-
-          if (-not (Test-Path $nodeExe)) {
-              throw "Node.js inaccessible: $nodeExe"
-          }
-
-          & $nodeExe --version
-
+          Write-Host "=== NODE ==="
+          $nodeDir = "C:\tools\node-runner"
           $env:PATH = "$nodeDir;$env:PATH"
 
-          Write-Host "=== NODE VIA PATH ==="
           node --version
+          npm --version
 
-          Write-Host "=== DIAGNOSTIC COMPLETE ==="
+          Write-Host "=== RUNNER READY ==="

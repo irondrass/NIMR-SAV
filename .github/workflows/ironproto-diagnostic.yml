@@ -20,6 +20,23 @@ jobs:
           hostname
           whoami
           Get-Date
+
+          Write-Host "=== GIT ==="
           git --version
+
+          Write-Host "=== NODE NVM ==="
+          $nodeDir = "C:\nvm4w\nodejs"
+          $nodeExe = Join-Path $nodeDir "node.exe"
+
+          if (-not (Test-Path $nodeExe)) {
+              throw "Node.js inaccessible: $nodeExe"
+          }
+
+          & $nodeExe --version
+
+          $env:PATH = "$nodeDir;$env:PATH"
+
+          Write-Host "=== NODE VIA PATH ==="
           node --version
-          Write-Host "=== RUNNER READY ==="
+
+          Write-Host "=== DIAGNOSTIC COMPLETE ==="
